@@ -1,0 +1,288 @@
+!-----------------------------------------------------------------------
+! nuopc.input — Arquivo de configuração do sistema de acoplamento
+!               NUOPC-MPAS-Integrado (MONAN-A 2.0 / ESMF 8.9.1)
+!
+! Versão 12.0 — INPE / CGCT / DIMNT — GT Acoplamento MONAN — Maio 2026
+!
+! Histórico:
+!   v10.0 (13/05/2026):
+!   v12.0 (Maio 2026):
+!     [N-B1] Sprint B.1: docn_ice_init_only adicionado a &nuopc_mode.
+!       OISST inicializa Si_ifrac apenas em t=0; a partir de t≥1 o
+!       proxy sigmoide f(T_surf do MOM6) é usado — Si_ifrac evolui
+!       com a dinâmica oceânica. Requer use_docn_ice=.true..
+!
+!   v11.0 (Maio 2026):
+!     [N1] BUG CORRIGIDO: use_med_to_mpas ausente de &nuopc_mode.
+!          O parâmetro é declarado no Fortran (namelist /nuopc_mode/)
+!          mas estava faltando neste arquivo, defaultando para .false.
+!          (Fase 1: OCN direto para ATM) mesmo com use_docn=.false.
+!          (MOM6 ativo). Adicionado com valor .true. para ativar o
+!          caminho Fase 2 (MED→MPAS) correto para modo MOM6+SIS2.
+!     [N2] Comentário de write_import_diag corrigido:
+!          'docn_import_*.nc' → 'mom6_import_*.nc' (alinhado com
+!          run_esmApp.jaci v10.0). Adicionada nota que &nuopc_docn é
+!          lido INCONDICIONALMENTE pelo Fortran — write_import_diag é
+!          ativo tanto em modo DOCN quanto em modo MOM6+SIS2.
+!     [N3] Comentário de dt_coupling simplificado: removida tag
+!          'Migração v7.0' (ruído histórico; 3600 s é a produção atual).
+!     [N4] Seção &nuopc_mode aprimorada: adicionada documentação de
+!          use_med_to_mpas; tabela de combinações expandida com fases.
+!     [N5] Comentário de mesh_ocn esclarecido: distingue ocean_hgrid.nc
+!          (grade bruta FRE-NCtools) do arquivo ESMF_FILEFORMAT_ESMFMESH.
+!     [N6] Comentário de docn_epoch_* esclarecido: epoch refere-se ao
+!          primeiro registro do arquivo usado, não ao epoch do produto.
+!     [N7] Comentário de docn_cur_u/v_varname: esclarece que o default
+!          Fortran é 'uo'/'vo'; OSCAR NRT v2.0 requer 'u'/'v'.
+!     [N8] Cabeçalho atualizado: data Abril → Maio 2026.
+!
+! Uso:
+!   Copiar para o diretório de execução antes de submeter.
+!   Variável de ambiente NUOPC_INPUT pode apontar para caminho alternativo.
+!   Qualquer grupo omitido → defaults do módulo mpas_cap_config_mod.
+!
+! Formato: namelists Fortran padrão (! para comentários).
+! Datas: formato ISO 8601 'YYYY-MM-DD' (entre aspas simples).
+!-----------------------------------------------------------------------
+
+!-----------------------------------------------------------------------
+! Grupo 1: Parâmetros do driver NUOPC
+!
+!   start_date   Data de início da simulação [YYYY-MM-DD]
+!   stop_date    Data de término da simulação [YYYY-MM-DD]
+!   dt_coupling  Intervalo de acoplamento ATM-OCN [s]
+!                Deve ser múltiplo de dt_atm.
+!                Default Fortran: 1800 s.
+!                3600 s recomendado para MOM6 global: passos de maré e
+!                modo barotrópico do MOM6 são sub-ciclos internos
+!                independentes de dt_coupling.
+!   dt_atm       Passo de tempo interno do MONAN-A [s]
+!                Deve corresponder a config_dt em namelist.atmosphere.
+!   log_dir      Diretório de logs ESMF e stdout
+!-----------------------------------------------------------------------
+&nuopc_driver
+  start_date  = '2026-03-29'
+  stop_date   = '2026-03-30'
+  dt_coupling = 3600  ! [N3] 3600 s recomendado MOM6 global (default Fortran: 1800)
+  dt_atm      = 60
+  log_dir     = 'logs'
+/
+
+!-----------------------------------------------------------------------
+! Grupo 1b: Modos de operação ATM e OCN  (&nuopc_mode)
+!
+!   use_datm  .true.  → DATM (JRA55 sintético) como componente ATM
+!             .false. → MPAS-A real como componente ATM  (PRODUÇÃO)
+!
+!   use_docn  .true.  → DOCN (SST/gelo por dados) como componente OCN
+!             .false. → MOM6+SIS2 dinâmico como componente OCN  (PRODUÇÃO)
+!
+!   use_med_to_mpas
+!     .true.  → Fase 2 (MOM6): mediador roteia OCN→MED→ATM.
+!               RouteOcnToAtm envia So_t, So_u, So_v, Si_ifrac via MED.
+!               Necessário quando use_docn=.false. (MOM6 ativo).
+!     .false. → Fase 1 (DOCN/stub): OCN exporta campos direto para ATM.
+!               Default Fortran: .false. — INADEQUADO para modo MOM6.
+!
+! [N1] ATENÇÃO: use_med_to_mpas deve ser .true. quando use_docn=.false.
+!      (MOM6 ativo). Omitir este parâmetro causa acoplamento incorreto:
+!      o MPAS recebe SST/gelo pelo caminho Fase 1 (OCN direto), mas o
+!      MOM6 não expõe os campos nesse caminho.
+!
+! COMBINAÇÕES ATM x OCN:
+!   use_datm=F  use_docn=F  use_med=T → MPAS  + MOM6  (PRODUÇÃO / Fase 2)
+!   use_datm=F  use_docn=T  use_med=F → MPAS  + DOCN  (Fase 1)
+!   use_datm=T  use_docn=F  use_med=T → DATM  + MOM6  (teste MOM6 isolado)
+!   use_datm=T  use_docn=T  use_med=F → DATM  + DOCN  (teste mediador)
+!
+! NOTA: &nuopc_docn é lido INCONDICIONALMENTE pelo Fortran independente
+!       de use_docn. Em particular, write_import_diag em &nuopc_docn
+!       controla a escrita de mom6_import_*.nc nos dois modos OCN.
+!-----------------------------------------------------------------------
+&nuopc_mode
+  use_datm        = .false.   ! .true. → DATM JRA55 | .false. → MPAS-A real
+  use_docn        = .false.   ! .true. → DOCN SST   | .false. → MOM6+SIS2
+  use_med_to_mpas = .true.    ! [N1] Fase 2 MOM6: .true. obrigatório se use_docn=F
+  use_docn_ice    = .true.    ! Alternativa 1: Si_ifrac do arquivo OISST
+                              !   .false. → proxy sigmoide Sprint A.5
+  !
+  ! [N-B1] Sprint B.1 — docn_ice_init_only (Maio 2026)
+  !   .true.  → OISST lido APENAS no passo t=0 (InitializeDataComplete).
+  !             A partir de t=1 (ModelAdvance), Si_ifrac é calculado pelo
+  !             proxy sigmoide f(T_surf) do MOM6 dinâmico — campo evolui.
+  !             Requer use_docn_ice=.true. (validado em config_read).
+  !   .false. → comportamento original: OISST prescrito a cada passo
+  !             (campo congelado; recomendado apenas para diagnóstico).
+  docn_ice_init_only = .true.   ! [N-B1] Sprint B.1: evolução dinâmica
+/
+
+!-----------------------------------------------------------------------
+! Grupo 2: Parâmetros do cap atmosférico (mpas_cap_mod)
+!
+!   mesh_atm     Arquivo de malha ESMF do MONAN-A.
+!                Gerado por ESMF_Scrip2Unstruct a partir do init.nc.
+!                Formato: ESMF_FILEFORMAT_ESMFMESH.
+!   config_dir   Diretório dos arquivos de configuração do MONAN-A
+!                (namelist.atmosphere, streams.atmosphere, etc.)
+!   write_diag   Ativa diagnóstico de campos via DumpFields no log ESMF.
+!                Útil para depuração; aumenta volume de log.
+!-----------------------------------------------------------------------
+&nuopc_atm
+  mesh_atm     = 'mpas_mesh.nc'
+  config_dir   = './'
+  write_diag   = .false.
+/
+
+!-----------------------------------------------------------------------
+! Grupo 3: Saída NetCDF dos campos exportados (mpas_cap_netcdf_mod)
+!
+!   write_netcdf Ativa (.true.) ou desativa (.false.) a escrita dos
+!                campos exportados em diag_export/monan_export_*.nc.
+!                Padrão Fortran: .true.
+!                Desativar reduz I/O (~1.7 MB/passo) quando o diagnóstico
+!                de exportação do cap não for necessário.
+!
+!   output_dir   Diretório de saída dos arquivos monan_export_*.nc.
+!                Criado automaticamente se não existir.
+!
+!   grid_res_deg Resolução da grade lat/lon de saída [graus].
+!                Valores válidos: 0.25, 0.5, 1.0, 2.0
+!                NLON = round(360 / grid_res_deg)
+!                NLAT = round(180 / grid_res_deg) + 1
+!-----------------------------------------------------------------------
+&nuopc_netcdf
+  write_netcdf = .true.
+  output_dir   = 'diag_export'
+  grid_res_deg = 1.0
+/
+
+!-----------------------------------------------------------------------
+! Grupo 4: Defaults de condição de contorno (mpas_atm_model_mod)
+!
+!   Valores usados quando o campo correspondente não está disponível
+!   no importState ESMF. Ativos apenas em modo standalone (sem mediador)
+!   ou nos primeiros passos antes da primeira atualização OCN→ATM.
+!
+!   sst_default          SST padrão [K]         (típico: 298.0)
+!   ice_fraction_default Fração de gelo [0–1]   (típico: 0.0)
+!   zorl_default         Rugosidade sup. [m]    (típico: 0.01)
+!-----------------------------------------------------------------------
+&nuopc_atm_bnd
+  sst_default          = 298.0
+  ice_fraction_default = 0.0
+  zorl_default         = 0.01
+/
+
+!-----------------------------------------------------------------------
+! Grupo 5: Componente oceânico por dados (DOCN_cap)
+!
+! ATIVO como componente OCN quando use_docn=.true. em &nuopc_mode.
+! INATIVO (substituído por MOM6+SIS2) quando use_docn=.false.
+!
+! [N2] IMPORTANTE: este grupo é lido INCONDICIONALMENTE pelo Fortran
+! (mpas_cap_config_mod::config_read, linha ~275) independente de
+! use_docn. Em particular:
+!   write_import_diag: grava diag_import/mom6_import_*.nc em modo DOCN
+!                      E em modo MOM6+SIS2 (mediador escreve o arquivo).
+!
+!   docn_mode    Modo do componente oceânico por dados:
+!                    'stub'   — SST sintética constante (= sst_default)
+!                    'netcdf' — lê SST/gelo de arquivo NetCDF com interp.
+!                Usado apenas quando use_docn=.true.
+!
+!   docn_nx/ny   Dimensões da grade do dado oceânico:
+!                    1440 × 720  = OISST 0.25°  (padrão)
+!                     360 × 180  = grade de 1°
+!
+!   docn_dt_data Intervalo entre snapshots no arquivo NetCDF [s]:
+!                    86400 = diário (OISST v2.1)
+!
+!   docn_epoch_* Data do PRIMEIRO REGISTRO no arquivo NetCDF usado.
+!                [N6] Atenção: epoch refere-se ao arquivo em uso, NÃO ao
+!                produto. Default Fortran: 1981-09-01 (epoch do produto
+!                OISST v2.1 completo). Para arquivo anual de 2026,
+!                epoch = 2026-01-01 → tidx(2026-03-29) = 88 (base 0).
+!
+!   docn_sst_file Arquivo de SST  (obrigatório em modo 'netcdf')
+!   docn_ice_file Arquivo de gelo (obrigatório em modo 'netcdf')
+!   docn_cur_file Arquivo de correntes (opcional; "" desativa)
+!
+!   docn_sst_varname / docn_ice_varname — nomes das variáveis:
+!       OISST v2.1 : sst_varname='sst'   ice_varname='icec'
+!       ERSSTv5    : sst_varname='sst'   ice_varname='sic'
+!
+!   docn_cur_u/v_varname — variáveis de corrente no arquivo NetCDF:
+!       [N7] Default Fortran: 'uo' / 'vo' (convenção CMIP6/CF).
+!            OSCAR NRT v2.0 usa 'u' / 'v' — overrideado abaixo.
+!            Verificar: ncdump -h INPUT/OISST_cur.nc | grep ' u\b\| v\b\|uo\|vo'
+!
+!   docn_ice_pct  Unidade do campo de gelo no arquivo fonte:
+!                    .false. → fração [0,1]  ← OISST (default seguro)
+!                    .true.  → percentagem (0–100), divide por 100 no cap
+!                    Verificar: ncdump -h INPUT/OISST_ice.nc | grep 'units'
+!
+!   write_import_diag  Escreve diag_import/mom6_import_*.nc por passo.
+!                      [N2] Ativo nos modos DOCN e MOM6+SIS2.
+!                      Validar: python3 postproc_mom6_import.py --stats --check --plot
+!                      Desativar em produção longa (I/O extra ~1.7 MB/passo;
+!                      24h × dt=3600 s = 24 arquivos ≈ 41 MB/dia).
+!-----------------------------------------------------------------------
+&nuopc_docn
+  docn_mode        = 'netcdf'
+  docn_nx          = 1440
+  docn_ny          = 720
+  docn_dt_data     = 86400   ! diário (OISST v2.1)
+  ! [N6] epoch = primeiro registro DO ARQUIVO (não do produto).
+  ! Default Fortran: 1981-09-01 (produto OISST v2.1 completo).
+  docn_epoch_year  = 2026
+  docn_epoch_month = 1
+  docn_epoch_day   = 1
+  docn_sst_file    = 'INPUT/OISST_sst.nc'
+  docn_ice_file    = 'INPUT/OISST_ice.nc'
+  ! [N7] OSCAR NRT v2.0 (2025-06-22) — substituir por arquivo de março 2026.
+  ! Preparado por prepare_cur_file.sh (eixos: time, lat, lon; grade 1440×720).
+  docn_cur_file    = 'INPUT/OISST_cur.nc'
+  docn_sst_varname   = 'sst'
+  docn_ice_varname   = 'icec'
+  docn_cur_u_varname = 'u'    ! [N7] OSCAR: 'u'/'v' (default Fortran: 'uo'/'vo')
+  docn_cur_v_varname = 'v'    ! [N7] OSCAR: 'u'/'v' (default Fortran: 'uo'/'vo')
+  docn_ice_pct       = .false.   ! OISST: fração [0,1] (não percentagem)
+  ! [N2] Arquivo: diag_import/mom6_import_YYYYMMDD_HHMMSS.nc
+  write_import_diag    = .true.
+  import_diag_dir      = 'diag_import'
+/
+
+!-----------------------------------------------------------------------
+! Grupo 6: Componente oceânico MOM6+SIS2 (mom_cap_MONAN.F90)
+!
+! ATIVO quando use_docn=.false. em &nuopc_mode (padrão de produção).
+! Requer também use_med_to_mpas=.true. para acoplamento Fase 2 correto.
+!
+!   mesh_ocn      Arquivo de grade para o componente MOM6.
+!                 [N5] Atenção: o valor abaixo aponta para ocean_hgrid.nc
+!                 (supergrid FRE-NCtools). Verificar se mom_cap_MONAN.F90
+!                 espera este arquivo ou um ESMF mesh pré-gerado. Se o cap
+!                 exigir formato ESMF_FILEFORMAT_ESMFMESH, gerar com:
+!                   ESMF_RegridWeightGen --source ocean_hgrid.nc \
+!                     --destination ocean_esmf_mesh.nc \
+!                     --src_type SCRIP --dst_type ESMFMESH
+!                 e atualizar para: mesh_ocn = 'INPUT/ocean_esmf_mesh.nc'
+!
+!   use_mommesh   .true.  → MOM6 usa ESMF_Mesh tripolar (produção)
+!                 .false. → MOM6 usa ESMF_Grid simplificado (testes)
+!                 Default Fortran: .false. — deve ser .true. em produção.
+!
+!   restart_n     Número do restart a carregar:
+!                   0 → sem restart; MOM6 parte do estado inicial
+!                  >0 → carrega MOM6_input/restart.nc número N
+!
+! ATENÇÃO: stop_ymd e stop_tod NÃO são definidos aqui.
+!   Calculados automaticamente por esm_MONAN.F90 a partir do
+!   stopTime do relógio ESMF — passados ao MOM6 via
+!   NUOPC_CompAttributeSet para o FMS time manager.
+!-----------------------------------------------------------------------
+&nuopc_ocn
+  mesh_ocn       = 'INPUT/ocean_hgrid.nc'  ! [N5] ver nota sobre ESMF mesh acima
+  use_mommesh    = .true.                   ! default Fortran: .false.
+  restart_n      = 0
+/

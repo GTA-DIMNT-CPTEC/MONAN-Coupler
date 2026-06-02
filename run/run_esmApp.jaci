@@ -1,0 +1,624 @@
+#!/bin/bash
+# =============================================================================
+# run_esmApp.jaci  —  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1
+# INPE / CGCT / DIMNT  —  GT Acoplamento de Modelos  —  Versão 12.0 / Maio 2026
+#
+# DOIS MODOS DE OPERAÇÃO (detecção automática via PBS_O_WORKDIR):
+#
+#   Interativo (login node):
+#     1. Parse de argumentos e compilação opcional (--compile)
+#     2. Verificação de pré-requisitos (inclui OISST se use_docn=T)
+#     3. Geração de esmApp-integrado.pbs e qsub
+#     4. Polling qstat + relatório final
+#
+#   PBS (dentro do job — PBS_O_WORKDIR definido pelo daemon):
+#     Carrega módulos, faz source setenv-gnu.bash e executa mpirun.
+#
+# USO:
+#   bash run_esmApp.jaci                      # 4 PETs, fila pesqextra, 1h
+#   bash run_esmApp.jaci -n 128               # 128 PETs (nó Turin XD 2000)
+#   bash run_esmApp.jaci -n 512 -w 02:00:00
+#   bash run_esmApp.jaci --compile -n 4       # compila e submete
+#   bash run_esmApp.jaci --check              # valida pré-requisitos sem submeter
+#
+# MODOS ATM/OCN (nuopc.input &nuopc_mode):
+#   use_datm=F  use_docn=F  →  MPAS-A real  + MOM6+SIS2 dinâmico  (PRODUÇÃO)
+#   use_datm=F  use_docn=T  →  MPAS-A real  + DOCN SST dados       (Fase 1)
+#   use_datm=T  use_docn=F  →  DATM JRA55   + MOM6+SIS2 dinâmico   (teste MOM6)
+#   use_datm=T  use_docn=T  →  DATM JRA55   + DOCN SST dados        (teste MED)
+#
+# SAÍDAS:
+#   esmApp-integrado.pbs                          script PBS gerado
+#   logs/esmApp_run.log                           stdout/stderr do mpirun
+#   logs/PET*.esmApp.log                          logs ESMF por PET
+#   log.atmosphere.0000.d0001.out                 log interno MONAN-A
+#   diag_export/monan_export_YYYYMMDD_HHMMSS.nc   campos exportados (1/dt_coupling)
+#   diag_import/mom6_import_YYYYMMDD_HHMMSS.nc    fluxos ATM→OCN (se ativo)
+# =============================================================================
+
+# ─── Constantes do projeto ────────────────────────────────────────────────────
+readonly EXECUTABLE="bin/esmApp"
+readonly PBS_SCRIPT="esmApp-integrado.pbs"
+readonly LOG_RUN="logs/esmApp_run.log"
+readonly LOG_ATM="log.atmosphere.0000.d0001.out"
+readonly CONFIG_FILE="nuopc.input"
+readonly SETENV_SCRIPT="setenv-gnu.bash"
+
+# Lê campo simples do nuopc.input (ignora comentários ! e aspas).
+_nuopc_get() {
+  grep -i "^\s*${1}\s*=" "${CONFIG_FILE}" 2>/dev/null \
+    | head -1 | sed "s/.*=\s*//; s/['\",]//g; s/\s*!.*//; s/[[:space:]]*$//"
+}
+
+# Retorna 0 (verdadeiro) se o valor Fortran for .true. ou true.
+_is_true() { echo "$1" | grep -qi '\.true\.\|^true$'; }
+
+# =============================================================================
+# MODO PBS  —  execução dentro do job submetido pelo daemon
+# =============================================================================
+if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
+
+  # Cada etapa crítica usa verificação explícita (set -e não é usado aqui
+  # para evitar saída silenciosa antes do banner de erro).
+  cd "${PBS_O_WORKDIR}" || { echo "ERRO: cd ${PBS_O_WORKDIR} falhou"; exit 1; }
+
+  # ── Módulos ────────────────────────────────────────────────────────────────
+  module purge
+  module load PrgEnv-gnu
+  module load craype-x86-turin
+  module load cray-hdf5/1.14.3.3
+  module load cray-netcdf/4.9.0.15
+  module load cray-parallel-netcdf/1.12.3.15
+  module load xpmem/0.2.119-1.3_gef379be13330
+  module load cray-pals
+  module load METIS/5.1.0
+
+  # ── Ambiente MONAN-A 2.0 ───────────────────────────────────────────────────
+  # Exporta: ESMFMKFILE, MPAS_DIR, MPAS_MOD_DIR,
+  #          LD_LIBRARY_PATH (MONAN + ESMF + MOM6/FMS/MOAB),
+  #          GFORTRAN_CONVERT_UNIT.
+  # shellcheck source=setenv-gnu.bash
+  source "${PBS_O_WORKDIR}/${SETENV_SCRIPT}" \
+    || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
+
+  export ESMF_RUNTIME_COMPLIANCECHECK=OFF
+  export OMP_NUM_THREADS=1
+
+  NPES="${MPAS_NPES:-4}"
+
+  # ── Detecção de modo ATM/OCN ────────────────────────────────────────────────
+  USE_DATM=$(_nuopc_get use_datm)
+  USE_DOCN=$(_nuopc_get use_docn)
+  DOCN_MODE=$(_nuopc_get docn_mode)
+  DOCN_MODE="${DOCN_MODE:-stub}"
+  WRITE_DIAG=$(_nuopc_get write_import_diag)
+
+  if _is_true "${USE_DATM}"; then ATM_LABEL="DATM(JRA55)"
+  else                             ATM_LABEL="MPAS-A(real)"
+  fi
+
+  if _is_true "${USE_DOCN}"; then
+    if [[ "${DOCN_MODE}" == "netcdf" ]]; then
+      OCN_LABEL="DOCN(OISST)"
+      SST_FILE=$(_nuopc_get docn_sst_file)
+      SST_FILE="${SST_FILE:-INPUT/OISST_sst.nc}"
+    else
+      OCN_LABEL="DOCN(stub)"
+      SST_FILE="SST=290 K constante"
+    fi
+  else
+    OCN_LABEL="MOM6+SIS2"
+    SST_FILE="dinâmico"
+  fi
+
+  # ── Período de integração (para o banner) ───────────────────────────────────
+  START_DATE=$(_nuopc_get start_date)
+  STOP_DATE=$(_nuopc_get  stop_date)
+  DT_COUP=$(_nuopc_get    dt_coupling)
+  DT_ATM=$(_nuopc_get     dt_atm)
+
+  if [[ -n "${START_DATE}" && -n "${STOP_DATE}" && -n "${DT_COUP}" ]]; then
+    T0=$(date -d "${START_DATE//\'}" +%s 2>/dev/null || echo 0)
+    T1=$(date -d "${STOP_DATE//\'}"  +%s 2>/dev/null || echo 0)
+    if [[ "${T0}" -gt 0 && "${T1}" -gt "${T0}" ]]; then
+      NSTEPS=$(( (T1 - T0) / DT_COUP ))
+    else
+      NSTEPS="?"
+    fi
+  else
+    NSTEPS="?"
+  fi
+
+  # ── Banner ─────────────────────────────────────────────────────────────────
+  echo "======================================================================"
+  echo "  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2"
+  echo "  ESMF/NUOPC 8.9.1 | Mediador MED_cap ativo"
+  echo "======================================================================"
+  printf "  %-15s = %s\n"    "Data"          "$(date '+%Y-%m-%d %H:%M:%S')"
+  printf "  %-15s = %s\n"    "Diretório"     "${PBS_O_WORKDIR}"
+  printf "  %-15s = %s\n"    "Nó(s)"         "$(sort -u "${PBS_NODEFILE}" | tr '\n' ' ')"
+  printf "  %-15s = %s\n"    "PETs"          "${NPES}"
+  printf "  %-15s = %s\n"    "Início"        "${START_DATE:-?}"
+  printf "  %-15s = %s\n"    "Fim"           "${STOP_DATE:-?}"
+  printf "  %-15s = %4s s\n" "dt_coupling"   "${DT_COUP:-?}"
+  printf "  %-15s = %4s s\n" "dt_atm"        "${DT_ATM:-?}"
+  printf "  %-15s = %4s\n"   "Passos (est.)" "${NSTEPS}"
+  printf "  %-15s = %s\n"    "OCN"           "${OCN_LABEL}  (${SST_FILE})"
+  _is_true "${WRITE_DIAG}" && \
+    printf "  %-15s = %s\n"  "Diag. import"  "ATIVO → diag_import/mom6_import_*.nc"
+  echo "----------------------------------------------------------------------"
+  echo "  ATM: ${ATM_LABEL}   MED: bulk NCAR   OCN: ${OCN_LABEL}"
+  echo "  Conectores: ATM→MED  OCN→MED  MED→OCN  MED→ATM"
+  echo "======================================================================"
+  echo ""
+
+  mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
+
+  # ── Execução ────────────────────────────────────────────────────────────────
+  echo "Iniciando mpirun -np ${NPES} ${EXECUTABLE} ..."
+  echo ""
+  mpirun -np "${NPES}" "${EXECUTABLE}" 2>&1 | tee "${LOG_RUN}"
+  STATUS=${PIPESTATUS[0]}
+
+  # O ESMF cria PET*.esmApp.log no CWD do processo (raiz do experimento).
+  # Move para logs/ após a execução para manter o diretório organizado.
+  shopt -s nullglob
+  pet_logs=( PET*.esmApp.log )
+  [[ ${#pet_logs[@]} -gt 0 ]] && mv "${pet_logs[@]}" logs/ && \
+    echo "[logs] ${#pet_logs[@]} arquivo(s) PET*.esmApp.log → logs/"
+  shopt -u nullglob
+  echo ""
+
+  # ── Diagnóstico de erro (invocada apenas se STATUS ≠ 0) ────────────────────
+  _exit_diagnostics() {
+    local status="$1" sig reason hint_mem=""
+
+    [[ "${status}" -gt 128 ]] && sig=$(( status - 128 )) || sig=0
+
+    case "${status}" in
+      1)   reason="erro de aplicação (ESMF/MPI/MOM6 — ver logs abaixo)" ;;
+      127) reason="comando não encontrado — verificar LD_LIBRARY_PATH e módulos" ;;
+      137) reason="SIGKILL (OOM killer) — memória física insuficiente para ${NPES} PETs"
+           hint_mem=1 ;;
+      143) reason="SIGTERM — PBS encerrou o job (walltime, memória ou qdel)"
+           hint_mem=1 ;;
+      *)   reason="sinal ${sig} (exit=${status})" ;;
+    esac
+
+    local n_exp n_imp
+    n_exp=$(printf '%d' "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
+    n_imp=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+
+    echo "======================================================================"
+    echo " ERRO: mpirun encerrado — exit=${status}"
+    echo " Causa : ${reason}"
+    echo ""
+    if [[ "${n_exp}" -gt 0 ]]; then
+      printf " Progresso: %s passo(s) de acoplamento concluído(s)" "${n_exp}"
+      [[ "${NSTEPS}" != "?" ]] && printf " (de %s)" "${NSTEPS}"
+      echo ""
+      [[ "${n_imp}" -gt 0 ]] && \
+        printf "            %s arquivo(s) de diagnóstico de importação\n" "${n_imp}"
+    else
+      echo " Progresso: nenhum passo concluído (falha no boot ou cold-start)."
+    fi
+    echo ""
+
+    echo " ── Diagnóstico automático ──────────────────────────────────────────"
+    if [[ -f "${LOG_RUN}" ]]; then
+      local last_errors
+      last_errors=$(grep -iE 'error|fatal|abort|killed|signal|segfault|out of memory|oom' \
+        "${LOG_RUN}" 2>/dev/null | tail -5)
+      [[ -n "${last_errors}" ]] && \
+        { echo " Linhas de erro em ${LOG_RUN}:"; echo "${last_errors}" | sed 's/^/   /'; echo ""; }
+      echo " Últimas 15 linhas de ${LOG_RUN}:"
+      tail -15 "${LOG_RUN}" | sed 's/^/   /'
+    else
+      echo " AVISO: ${LOG_RUN} não encontrado."
+    fi
+
+    if [[ -f "logs/PET0.esmApp.log" ]]; then
+      local pet0_errors
+      pet0_errors=$(grep -iE 'error|fatal|ESMF_LOGERR' \
+        "logs/PET0.esmApp.log" 2>/dev/null | tail -3)
+      [[ -n "${pet0_errors}" ]] && \
+        { echo ""; echo " Últimos erros em logs/PET0.esmApp.log:"; \
+          echo "${pet0_errors}" | sed 's/^/   /'; }
+    fi
+    echo ""
+
+    echo " ── Verificar (em ordem) ─────────────────────────────────────────────"
+    echo "   1. ${LOG_RUN}"
+    echo "   2. logs/PET0.esmApp.log"
+    echo "   3. ${LOG_ATM}"
+    echo "   4. grep -iE 'error|fatal|oom|killed' ${LOG_RUN}"
+
+    if [[ -n "${hint_mem}" ]]; then
+      echo ""
+      echo " ── Dicas para kill por sinal (exit=${status}) ───────────────────────"
+      echo "   MOM6 global 1° com 4 PETs exige ~4–8 GB por PET."
+      echo "   a) Aumentar PETs: run_esmApp.jaci -n 32"
+      echo "   b) Adicionar memória no .pbs: -l select=1:ncpus=4:mem=32gb:mpiprocs=4"
+      echo "   c) Reduzir domínio MOM6 (MOM_input: NIGLOBAL, NJGLOBAL)"
+      echo "   d) Desativar diagnósticos: write_import_diag=.false."
+      echo "   Verificar: qstat -x -f <JOBID> | grep -E 'resources_used.mem|comment'"
+    fi
+    echo "======================================================================"
+  }
+
+  # ── Relatório final (modo PBS) ──────────────────────────────────────────────
+  if [[ "${STATUS}" -eq 0 ]]; then
+    N_NC=$(printf '%d'   "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
+    N_DIAG=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+    echo "======================================================================"
+    echo " EXECUÇÃO CONCLUÍDA COM SUCESSO"
+    echo ""
+    echo " Logs ESMF     : logs/PET*.esmApp.log"
+    echo " Log de run    : ${LOG_RUN}"
+    echo " MONAN-A       : ${LOG_ATM}"
+    printf " NetCDF (ATM)  : %s arquivo(s) em diag_export/\n" "${N_NC}"
+    [[ "${N_DIAG}" -gt 0 ]] && \
+      printf " Diag. import  : %s arquivo(s) em diag_import/\n" "${N_DIAG}"
+    echo ""
+    echo " Pós-processamento:"
+    echo "   python3 postproc_monan2_export.py --all"
+    echo "   python3 postproc_monan2_standalone.py --compare"
+    [[ "${N_DIAG}" -gt 0 ]] && \
+      echo "   python3 postproc_mom6_import.py --stats --check --plot"
+    echo "======================================================================"
+  else
+    _exit_diagnostics "${STATUS}"
+  fi
+
+  exit "${STATUS}"
+fi
+
+# =============================================================================
+# MODO INTERATIVO  —  login node
+# =============================================================================
+set -euo pipefail
+
+# ── Defaults ─────────────────────────────────────────────────────────────────
+NPES=4
+QUEUE="pesqextra"
+WALLTIME="01:00:00"
+CHECK_ONLY=0
+COMPILE_FIRST=0
+
+# ── Parse de argumentos ──────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -n|--npes)     NPES="$2";       shift 2 ;;
+    -q|--queue)    QUEUE="$2";      shift 2 ;;
+    -w|--walltime) WALLTIME="$2";   shift 2 ;;
+    --check)       CHECK_ONLY=1;    shift   ;;
+    --compile)     COMPILE_FIRST=1; shift   ;;
+    -h|--help)
+      cat << 'HELP'
+Uso: bash run_esmApp.jaci [opções]
+
+  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF-NUOPC 8.9.1
+  INPE / CGCT / DIMNT — GT Acoplamento de Modelos
+  Escalabilidade validada: 4 / 64 / 128 / 512 PETs
+
+Opções:
+  -n, --npes N             Número de PETs MPI    (padrão: 4)
+  -q, --queue FILA         Fila PBS              (padrão: pesqextra)
+  -w, --walltime HH:MM:SS  Walltime do job       (padrão: 01:00:00)
+  --compile                make rebuild antes de submeter
+  --check                  Valida pré-requisitos sem submeter
+  -h, --help               Esta mensagem
+
+Exemplos:
+  bash run_esmApp.jaci                       # 4 PETs, pesqextra, 1h
+  bash run_esmApp.jaci -n 128               # 128 PETs (nó Turin completo)
+  bash run_esmApp.jaci -n 512 -w 02:00:00   # 512 PETs
+  bash run_esmApp.jaci --compile -n 4        # compila e submete
+  bash run_esmApp.jaci --check               # verifica sem submeter
+  bash run_esmApp.jaci -q pesqmini -w 00:30:00
+
+Modos ATM/OCN (nuopc.input &nuopc_mode):
+  use_datm=F  use_docn=F  →  MPAS-A real  + MOM6+SIS2 dinâmico  (PRODUÇÃO)
+  use_datm=F  use_docn=T  →  MPAS-A real  + DOCN SST dados       (Fase 1)
+  use_datm=T  use_docn=F  →  DATM JRA55   + MOM6+SIS2 dinâmico   (teste MOM6)
+  use_datm=T  use_docn=T  →  DATM JRA55   + DOCN SST dados        (teste MED)
+
+Saídas:
+  esmApp-integrado.pbs                          script PBS gerado
+  logs/esmApp_run.log                           stdout/stderr do mpirun
+  logs/PET*.esmApp.log                          logs ESMF por PET
+  log.atmosphere.0000.d0001.out                 log interno MONAN-A
+  diag_export/monan_export_YYYYMMDD_HHMMSS.nc   campos exportados
+  diag_import/mom6_import_YYYYMMDD_HHMMSS.nc    fluxos ATM→OCN (se ativo)
+HELP
+      exit 0
+      ;;
+    *) echo "Argumento desconhecido: '$1'  (use -h para ajuda)"; exit 1 ;;
+  esac
+done
+
+# ── Compilação opcional ───────────────────────────────────────────────────────
+if [[ "${COMPILE_FIRST}" -eq 1 ]]; then
+  echo "=== Compilando sistema acoplado ==="
+  [[ ! -f "${SETENV_SCRIPT}" ]] && \
+    { echo "ERRO: ${SETENV_SCRIPT} não encontrado."; exit 1; }
+  source "${SETENV_SCRIPT}"
+  make rebuild
+  echo "=== Compilação concluída: ${EXECUTABLE} ==="
+  echo ""
+fi
+
+# ── Verificação de pré-requisitos ─────────────────────────────────────────────
+echo "Verificando pré-requisitos (NPES=${NPES}, fila=${QUEUE})..."
+echo ""
+MISSING=0
+
+# Verifica arquivo único obrigatório.
+_req() {
+  local f="$1" label="${2:-$1}"
+  if [[ -f "$f" ]]; then printf "  %-8s: %s\n" "OK"       "${label}"
+  else                    printf "  %-8s: %s\n" "FALTANDO" "${label}"; ((MISSING++))
+  fi
+}
+
+# Verifica glob obrigatório (ao menos um arquivo deve bater o padrão).
+_glob_req() {
+  local pattern="$1" label="${2:-$1}" hint="${3:-}"
+  if compgen -G "${pattern}" > /dev/null 2>&1; then
+    local first; first=$(compgen -G "${pattern}" | head -1)
+    printf "  %-8s: %s  (%s)\n" "OK" "${label}" "${first}"
+  else
+    printf "  %-8s: %s\n" "FALTANDO" "${label}"
+    [[ -n "${hint}" ]] && echo "             ${hint}"
+    ((MISSING++))
+  fi
+}
+
+# Verifica arquivo ou glob opcional (exibe aviso, não incrementa MISSING).
+_opt() {
+  local f="$1" label="${2:-$1}"
+  if [[ -f "${f}" ]] || compgen -G "${f}" > /dev/null 2>&1; then
+    printf "  %-8s: %s\n" "OK"    "${label}"
+  else
+    printf "  %-8s: %s  (opcional)\n" "AVISO" "${label}"
+  fi
+}
+
+# ── Detecção de modo ATM/OCN ─────────────────────────────────────────────────
+USE_DATM=$(_nuopc_get use_datm)
+USE_DOCN=$(_nuopc_get use_docn)
+DOCN_MODE=$(_nuopc_get docn_mode)
+DOCN_MODE="${DOCN_MODE:-stub}"
+
+if _is_true "${USE_DATM}"; then ATM_MODE_LABEL="datm/jra55"
+else                             ATM_MODE_LABEL="mpas-a"
+fi
+
+if _is_true "${USE_DOCN}"; then OCN_MODE_LABEL="docn/${DOCN_MODE}"
+else                             OCN_MODE_LABEL="mom6+sis2"
+fi
+
+echo "--- Executável ---"
+_req "${EXECUTABLE}"
+echo ""
+
+echo "--- Configuração do acoplamento ---"
+_req "${CONFIG_FILE}"
+printf "  %-8s: ATM = %s   OCN = %s\n" "INFO" "${ATM_MODE_LABEL}" "${OCN_MODE_LABEL}"
+
+# Verificar arquivos OISST apenas no modo DOCN com leitura de NetCDF.
+if _is_true "${USE_DOCN}" && [[ "${DOCN_MODE}" == "netcdf" ]]; then
+  SST_FILE=$(_nuopc_get docn_sst_file); SST_FILE="${SST_FILE:-INPUT/OISST_sst.nc}"
+  ICE_FILE=$(_nuopc_get docn_ice_file); ICE_FILE="${ICE_FILE:-INPUT/OISST_ice.nc}"
+  echo "--- Arquivos OISST (use_docn=T, docn_mode=netcdf) ---"
+  _req "${SST_FILE}" "SST: ${SST_FILE}"
+  _req "${ICE_FILE}" "Gelo: ${ICE_FILE}"
+  _opt "INPUT/OISST_cur.nc" "Correntes: INPUT/OISST_cur.nc"
+fi
+echo ""
+
+echo "--- Configuração MPAS-A ---"
+_req "namelist.atmosphere"
+_req "streams.atmosphere"
+_req "stream_list.atmosphere.output"
+_req "stream_list.atmosphere.diagnostics"
+_req "stream_list.atmosphere.surface"
+echo ""
+
+echo "--- Grade e decomposição ---"
+_req "mpas_mesh.nc"
+_glob_req "x1.*.init.nc" "x1.*.init.nc"
+_glob_req "x1.*.graph.info.part.${NPES}" \
+          "x1.*.graph.info.part.${NPES}" \
+          "Gerar com: gpmetis x1.NNNNN.graph.info ${NPES}"
+echo ""
+
+echo "--- Radiação RRTMG (big-endian) ---"
+_req "RRTMG_SW_DATA.DBL"
+_req "RRTMG_LW_DATA.DBL"
+echo ""
+
+echo "--- Radiação CAM ---"
+_req "CAM_ABS_DATA.DBL"
+_req "CAM_AEROPT_DATA.DBL"
+echo ""
+
+echo "--- Tabelas Noah LSM ---"
+_req "LANDUSE.TBL"
+_req "VEGPARM.TBL"
+_req "SOILPARM.TBL"
+_req "GENPARM.TBL"
+echo ""
+
+echo "--- Opcionais ---"
+_opt "GF_ConvPar_nml"     "GF_ConvPar_nml     (namelist GF-MONAN)"
+_opt "x1.*.sfc_update.nc" "x1.*.sfc_update.nc  (stream superfície)"
+echo ""
+
+if [[ "${MISSING}" -gt 0 ]]; then
+  echo "ERRO: ${MISSING} arquivo(s) obrigatório(s) ausente(s). Corrija antes de submeter."
+  echo ""
+  echo "Dicas:"
+  printf "  %-38s  %s\n" "${EXECUTABLE}"            "make rebuild"
+  printf "  %-38s  %s\n" "mpas_mesh.nc"             "ln -sf x1.NNNNN.esmf_mesh.nc mpas_mesh.nc"
+  printf "  %-38s  %s\n" "x1.*.graph.info.part.${NPES}" "gpmetis x1.NNNNN.graph.info ${NPES}"
+  printf "  %-38s  %s\n" "Tabelas radiação/LSM"     \
+    "cp \$MPAS_DIR/src/core_atmosphere/physics/physics_wrf/files/* ."
+  exit 1
+fi
+
+echo "Todos os pré-requisitos presentes."
+[[ "${CHECK_ONLY}" -eq 1 ]] && { echo "Modo --check concluído."; exit 0; }
+
+# ── Lê parâmetros de tempo do nuopc.input para exibir no .pbs ─────────────────
+START_DATE=$(_nuopc_get start_date)
+STOP_DATE=$(_nuopc_get  stop_date)
+DT_COUP=$(_nuopc_get    dt_coupling)
+
+# ── Prepara diretórios ────────────────────────────────────────────────────────
+# logs/ deve existir antes do qsub (a diretiva PBS -o exige o path no submit).
+WORKDIR="$(pwd)"
+mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
+
+# ── Gera esmApp-integrado.pbs ─────────────────────────────────────────────────
+# O .pbs delega a execução ao run_esmApp.jaci em MODO PBS.
+cat > "${PBS_SCRIPT}" << HEREDOC
+#!/bin/bash
+#PBS -N GTA-MONAN2xMOM6
+#PBS -q ${QUEUE}
+#PBS -l select=1:ncpus=${NPES}:mpiprocs=${NPES}
+#PBS -l walltime=${WALLTIME}
+#PBS -j oe
+#PBS -o ${WORKDIR}/logs/esmApp_run.log
+#PBS -v MPAS_NPES=${NPES}
+
+# Gerado por run_esmApp.jaci em $(date '+%Y-%m-%d %H:%M:%S')
+# NPES=${NPES}  fila=${QUEUE}  walltime=${WALLTIME}
+# ATM=${ATM_MODE_LABEL}  OCN=${OCN_MODE_LABEL}
+# Início=${START_DATE:-?}  Fim=${STOP_DATE:-?}  dt_coupling=${DT_COUP:-?}s
+# Diretório: ${WORKDIR}
+exec bash "${WORKDIR}/run_esmApp.jaci"
+HEREDOC
+
+echo ""
+echo "PBS gerado : ${PBS_SCRIPT}"
+printf "  %-12s: %s\n" "Executável" "${EXECUTABLE}"
+printf "  %-12s: %s\n" "NPES"       "${NPES}"
+printf "  %-12s: %s\n" "Fila"       "${QUEUE}"
+printf "  %-12s: %s\n" "Walltime"   "${WALLTIME}"
+printf "  %-12s: %s\n" "ATM"        "${ATM_MODE_LABEL}"
+printf "  %-12s: %s\n" "OCN"        "${OCN_MODE_LABEL}"
+[[ -n "${START_DATE}" ]] && \
+  printf "  %-12s: %s → %s  (dt=%ss)\n" "Período" "${START_DATE}" "${STOP_DATE}" "${DT_COUP}"
+
+# ── Submete e aguarda ─────────────────────────────────────────────────────────
+echo ""
+echo "Submetendo ${PBS_SCRIPT} ..."
+JOBID=$(qsub "${PBS_SCRIPT}")
+echo "Job submetido : ${JOBID}"
+echo ""
+echo "Aguardando conclusão (polling qstat a cada 30 s) ..."
+echo "Acompanhar : qstat -u ${USER}  |  tail -f ${LOG_RUN}"
+echo ""
+
+while true; do
+  sleep 30
+  STATE=$(qstat -x -f "${JOBID}" 2>/dev/null \
+    | awk -F'= ' '/job_state/{gsub(/[[:space:]]/,"",$2); print $2}')
+  case "${STATE}" in
+    F|E|"") break ;;
+    *)      printf "  [%s]  estado: %s\n" "$(date '+%H:%M:%S')" "${STATE}" ;;
+  esac
+done
+
+# ── Relatório final (modo interativo) ─────────────────────────────────────────
+EXIT_CODE=$(qstat -x -f "${JOBID}" 2>/dev/null \
+  | awk -F'= ' '/Exit_status/{gsub(/[[:space:]]/,"",$2); print $2}')
+
+if [[ -z "${EXIT_CODE}" ]]; then
+  echo "AVISO: exit_status não disponível via qstat (job expirou do histórico?)."
+  echo "  Verificar manualmente: ls diag_export/monan_export_*.nc | wc -l"
+  EXIT_CODE=1
+fi
+
+echo ""
+if [[ "${EXIT_CODE}" -eq 0 ]] 2>/dev/null; then
+  N_NC=$(printf '%d'   "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
+  N_DIAG=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+  echo "======================================================================"
+  echo " JOB CONCLUÍDO COM SUCESSO  (${JOBID})"
+  echo ""
+  echo " Logs ESMF     : logs/PET*.esmApp.log"
+  echo " Log de run    : ${LOG_RUN}"
+  echo " MONAN-A       : ${LOG_ATM}"
+  printf " NetCDF (ATM)  : %s arquivo(s) em diag_export/\n" "${N_NC}"
+  [[ "${N_DIAG}" -gt 0 ]] && \
+    printf " Diag. import  : %s arquivo(s) em diag_import/\n" "${N_DIAG}"
+  echo " PBS gerado    : ${PBS_SCRIPT}"
+  echo ""
+  echo " Pós-processamento:"
+  echo "   python3 postproc_monan2_export.py --all"
+  echo "   python3 postproc_monan2_standalone.py --compare"
+  [[ "${N_DIAG}" -gt 0 ]] && \
+    echo "   python3 postproc_mom6_import.py --stats --check --plot"
+  echo "======================================================================"
+else
+  echo "======================================================================"
+  case "${EXIT_CODE}" in
+    143) exit_reason="SIGTERM — PBS encerrou o job (walltime, memória ou qdel)" ;;
+    137) exit_reason="SIGKILL (OOM killer) — memória insuficiente no nó" ;;
+    1)   exit_reason="erro de aplicação (ESMF/MPI/MOM6)" ;;
+    127) exit_reason="comando não encontrado (módulos ou LD_LIBRARY_PATH)" ;;
+    *)   exit_reason="sinal $((EXIT_CODE - 128)) (exit=${EXIT_CODE})" ;;
+  esac
+
+  echo " JOB ENCERRADO COM ERRO  (exit=${EXIT_CODE}, job=${JOBID})"
+  echo " Causa : ${exit_reason}"
+  echo ""
+
+  n_exp=$(printf '%d' "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
+  n_imp=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+  if [[ "${n_exp}" -gt 0 ]]; then
+    printf " Progresso  : %s passo(s) de acoplamento concluído(s)\n" "${n_exp}"
+    [[ "${n_imp}" -gt 0 ]] && \
+      printf "               %s arquivo(s) de diagnóstico de importação\n" "${n_imp}"
+  else
+    echo " Progresso  : nenhum passo concluído (falha no boot ou cold-start)."
+  fi
+  echo ""
+
+  pbs_comment=$(qstat -x -f "${JOBID}" 2>/dev/null | grep -i comment | head -1 | sed 's/.*= //')
+  pbs_mem=$(qstat -x -f "${JOBID}" 2>/dev/null | grep 'resources_used.mem' | head -1 | sed 's/.*= //')
+  [[ -n "${pbs_comment}" ]] && echo " PBS comment: ${pbs_comment}"
+  [[ -n "${pbs_mem}"    ]] && echo " Memória usada (PBS): ${pbs_mem}"
+  echo ""
+
+  if [[ -f "${LOG_RUN}" ]]; then
+    last_errors=$(grep -iE 'error|fatal|abort|killed|out of memory' \
+      "${LOG_RUN}" 2>/dev/null | tail -3)
+    [[ -n "${last_errors}" ]] && \
+      { echo " Linhas de erro em ${LOG_RUN}:"; echo "${last_errors}" | sed 's/^/   /'; echo ""; }
+    echo " Últimas 10 linhas de ${LOG_RUN}:"
+    tail -10 "${LOG_RUN}" | sed 's/^/   /'
+    echo ""
+  fi
+
+  echo " Verificar (em ordem):"
+  echo "   1. ${LOG_RUN}"
+  echo "   2. logs/PET0.esmApp.log"
+  echo "   3. ${LOG_ATM}"
+  echo "   4. grep -iE 'error|fatal|oom|killed' ${LOG_RUN}"
+  echo "   5. qstat -x -f ${JOBID}"
+
+  if [[ "${EXIT_CODE}" -eq 143 || "${EXIT_CODE}" -eq 137 ]]; then
+    echo ""
+    echo " Dicas para kill por sinal:"
+    echo "   MOM6 global 1° com 4 PETs exige ~4–8 GB/PET."
+    echo "   a) Aumentar PETs: run_esmApp.jaci -n 32"
+    echo "   b) Adicionar memória no .pbs: -l select=1:ncpus=4:mem=32gb:mpiprocs=4"
+    echo "   c) Verificar: qstat -x -f ${JOBID} | grep -E 'mem|comment'"
+  fi
+  echo "======================================================================"
+fi
+
+exit "${EXIT_CODE}"
