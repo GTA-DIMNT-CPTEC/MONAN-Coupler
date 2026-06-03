@@ -15,6 +15,10 @@ use ESMF,                      only: ESMF_GEOMTYPE_FLAG, ESMF_GEOMTYPE_GRID, ESM
 use ESMF,                      only: ESMF_RC_VAL_OUTOFRANGE, ESMF_INDEX_DELOCAL, ESMF_MESHLOC_ELEMENT
 use ESMF,                      only: ESMF_TYPEKIND_R8, ESMF_FIELDSTATUS_COMPLETE
 use ESMF,                      only: ESMF_FieldStatus_Flag, ESMF_LOGMSG_ERROR, ESMF_FAILURE, ESMF_MAXSTR
+! Símbolos usados por WriteMOM6ImportDiag (diagnóstico NetCDF do importState):
+use ESMF,                      only: ESMF_FieldBundle, ESMF_FieldBundleCreate, ESMF_FieldBundleAdd
+use ESMF,                      only: ESMF_FieldBundleDestroy, ESMF_FieldBundleWrite
+use ESMF,                      only: ESMF_LOGMSG_WARNING, ESMF_STATEITEM_FIELD
 use ESMF,                      only: operator(/=), operator(==)
 use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type
 use MOM_surface_forcing_nuopc, only: ice_ocean_boundary_type
