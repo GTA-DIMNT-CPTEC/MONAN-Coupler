@@ -64,7 +64,7 @@ export ESMFMKFILE=${ESMF_LIBDIR}/esmf.mk
 # Compilado com gfortran-xd2000 + SMIOL + PIO externo.
 # Nota: lib/ contém symlinks quebrados — as bibliotecas reais estão em src/.
 # =============================================================================
-export MPAS_DIR=/p/projetos/monan_adm/daniel.massaru/Acopladores/MONAN-Model-Coupler
+export MPAS_DIR=/p/projetos/monan_adm/daniel.massaru/Acopladores/system_coupler/MONAN-Coupler/MONAN-Model
 
 # Detecta automaticamente o diretório de módulos (.mod) do MONAN-A:
 #   build Makefile → src/framework/         (alvo gfortran-xd2000)
@@ -89,7 +89,7 @@ export GFORTRAN_CONVERT_UNIT='big_endian:101'
 # Todas as variáveis derivam de MOM6_ROOT — para mover a instalação, basta
 # redefinir MOM6_ROOT antes de executar o source.
 # =============================================================================
-export MOM6_ROOT="${MOM6_ROOT:-/p/projetos/monan_atm/paulo.kubota/coupler/coupling_0.0.0/models/mom6+sis2}"
+export MOM6_ROOT="${MOM6_ROOT:-/p/projetos/monan_adm/daniel.massaru/Acopladores/mom6+sis2}"
 
 export MOM6_LIBDIR="${MOM6_LIBDIR:-${MOM6_ROOT}/lib/mom6}"
 export MOM6_MODDIR="${MOM6_MODDIR:-${MOM6_ROOT}/mod/mom6}"
@@ -102,6 +102,37 @@ export NUOPC_MODDIR="${NUOPC_MODDIR:-${MOM6_ROOT}/mod/nuopc}"
 
 export MOAB_DIR="${MOAB_DIR:-/p/projetos/monan_adm/paulo.kubota/home/lib/lib_gnucray/libmoab}"
 export PNETCDF_DIR="${PNETCDF_DIR:-/opt/cray/pe/parallel-netcdf/1.12.3.15/GNU/12.3}"
+
+# -----------------------------------------------------------------------------
+# Cabeçalhos C-preprocessor exigidos pela RECOMPILAÇÃO dos caps upstream MOM6
+# (src/caps/ocean/upstream/). Os fontes fazem:
+#     #include <MOM_memory.h>        -> macros de memória (dynamic_symmetric)
+#     #include "version_variable.h"  -> string de versão (FMS)
+# Esses .h NÃO estão em include/mom6; ficam na árvore de FONTES do MOM6.
+# MOM6_SRC aponta para essa raiz (padrão: ${MOM6_ROOT}/src). Redefina antes
+# do source se a árvore estiver em outro local.
+# -----------------------------------------------------------------------------
+export MOM6_SRC="${MOM6_SRC:-${MOM6_ROOT}/src}"
+
+if [[ -z "${MOM6_HDR_INC:-}" ]]; then
+  _roots="${MOM6_SRC} ${MOM6_ROOT}"
+  _mommem=$(find ${_roots} -name MOM_memory.h 2>/dev/null | grep -m1 dynamic_symmetric)
+  [[ -z "${_mommem}" ]] && _mommem=$(find ${_roots} -name MOM_memory.h 2>/dev/null | head -1)
+  _vervar=$(find ${_roots} -name version_variable.h 2>/dev/null | head -1)
+  MOM6_HDR_INC=""
+  [[ -n "${_mommem}" ]] && MOM6_HDR_INC="-I$(dirname "${_mommem}")"
+  [[ -n "${_vervar}" ]] && MOM6_HDR_INC="${MOM6_HDR_INC} -I$(dirname "${_vervar}")"
+  export MOM6_HDR_INC
+  unset _roots _mommem _vervar
+fi
+
+if [[ -z "${MOM6_HDR_INC}" ]]; then
+  echo "  AVISO: MOM_memory.h / version_variable.h NAO encontrados."
+  echo "         Defina MOM6_SRC (raiz dos fontes MOM6) e refaca o source,"
+  echo "         ou exporte manualmente: MOM6_HDR_INC=\"-I<dir1> -I<dir2>\""
+else
+  echo "  MOM6_HDR_INC = ${MOM6_HDR_INC}"
+fi
 
 # =============================================================================
 # LD_LIBRARY_PATH
