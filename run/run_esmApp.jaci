@@ -1,7 +1,12 @@
 #!/bin/bash
 # =============================================================================
 # run_esmApp.jaci  —  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1
-# INPE / CGCT / DIMNT  —  GT Acoplamento de Modelos  —  Versão 12.0 / Maio 2026
+# INPE / CGCT / DIMNT  —  GT Acoplamento de Modelos  —  Versão 12.1 / Junho 2026
+#
+# v12.1 — Robustez: incremento de MISSING em _req/_glob_req trocado de
+#   '((MISSING++))' para 'MISSING=$(( MISSING + 1 ))'. Sob 'set -euo pipefail'
+#   o pós-incremento retorna != 0 quando o valor é 0, abortando a verificação
+#   no PRIMEIRO arquivo ausente, antes do resumo e das dicas de correção.
 #
 # DOIS MODOS DE OPERAÇÃO (detecção automática via PBS_O_WORKDIR):
 #
@@ -357,7 +362,7 @@ MISSING=0
 _req() {
   local f="$1" label="${2:-$1}"
   if [[ -f "$f" ]]; then printf "  %-8s: %s\n" "OK"       "${label}"
-  else                    printf "  %-8s: %s\n" "FALTANDO" "${label}"; ((MISSING++))
+  else                    printf "  %-8s: %s\n" "FALTANDO" "${label}"; MISSING=$(( MISSING + 1 ))
   fi
 }
 
@@ -370,7 +375,7 @@ _glob_req() {
   else
     printf "  %-8s: %s\n" "FALTANDO" "${label}"
     [[ -n "${hint}" ]] && echo "             ${hint}"
-    ((MISSING++))
+    MISSING=$(( MISSING + 1 ))
   fi
 }
 

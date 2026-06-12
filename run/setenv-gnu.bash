@@ -1,11 +1,26 @@
 #!/bin/bash
 # =============================================================================
 # setenv-gnu.bash — Ambiente de compilação: MONAN-A 2.0 × MOM6+SIS2
-# NUOPC-ESMF 8.9.1 | INPE / CGCT / DIMNT — GT Acoplamento de Modelos
-# Versão 11.0 — Maio 2026
+# NUOPC/ESMF 8.9.1 | INPE / CGCT / DIMNT — GT Acoplamento de Modelos
+# Versão 13.1 — Junho 2026
 #
-# USO  (deve ser sourced, não executado):
-#   source setenv-gnu.bash   ou   . setenv-gnu.bash
+# v13.1 — Desacoplamento do MOAB do diretório pessoal de P. Kubota. O ESMF
+#   8.9.1 do projeto usa ESMF_MOAB=internal (MOAB embutido em libesmf.so);
+#   MOAB externo passa a ser opcional via USE_EXTERNAL_MOAB (default 'no'),
+#   espelhando a variável homônima do Makefile. Sem o toggle, MOAB_DIR não
+#   é definido, checado nem adicionado ao LD_LIBRARY_PATH.
+# v13.0 — Colorização da saída de verificação (verde/amarelo/vermelho);
+#   exibição da versão do ESMF extraída de esmf.mk; MOM6_HDR_INC com
+#   quoting seguro nos paths (suporta caminhos com espaços); limpeza
+#   de variáveis auxiliares ao final; melhorias de legibilidade geral.
+# v12.1 — MPAS_DIR, MONAN2_MODDIR e MONAN2_LIBDIR derivados da localização
+#   do próprio script (run/ → ..), eliminando o caminho fixo e tornando
+#   a árvore relocável.
+# v12.0 — Layout consolidado do instalador 1-install-monan.bash:
+#   .mod em mod/monan2; libs .a em lib/monan2.
+#
+# USO (deve ser sourced, não executado):
+#   source run/setenv-gnu.bash   ou   . run/setenv-gnu.bash
 #
 # MODOS OCN — configuráveis em nuopc.input (&nuopc_mode):
 #   use_datm=F  use_docn=F  →  MPAS real  + MOM6 dinâmico  (produção)
@@ -14,218 +29,273 @@
 #   use_datm=T  use_docn=T  →  DATM JRA55 + DOCN SST dados  (teste MED)
 #
 # COMPILAÇÃO E EXECUÇÃO:
-#   make                          → compila bin/esmApp
-#   make clean                    → remove build/ bin/ logs/
-#   make distclean                → clean + remove diag_export/ diag_import/
-#   make rebuild                  → make clean + make all
+#   make                             → compila bin/esmApp
+#   make clean                       → remove build/ bin/
+#   make distclean                   → clean + *.pbs + libs instaladas (lib/ mod/)
+#   make rebuild                     → make clean + make all
 #   bash run/run_esmApp.jaci -n 128  → submete via PBS (128 PETs)
 # =============================================================================
 
-# Impede execução direta — o script precisa ser sourced para exportar variáveis.
+# --- Guarda: impede execução direta ------------------------------------------
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  echo "ERRO: execute com 'source setenv-gnu.bash', não diretamente."
+  echo "ERRO: execute com 'source run/setenv-gnu.bash', não diretamente."
   exit 1
 fi
 
 # =============================================================================
-# Funções auxiliares de verificação (removidas ao final do script)
+# Colorização inline (independente da _lib_install.bash, pois este script
+# é sourced e pode ser chamado antes dos instaladores)
 # =============================================================================
-_OK=0
-_MISS=0
+if [[ -t 1 ]] && command -v tput &>/dev/null && tput colors &>/dev/null 2>&1; then
+  _CV_VD=$(tput setaf 2)    # verde   — OK
+  _CV_AM=$(tput setaf 3)    # amarelo — ausente / aviso
+  _CV_VM=$(tput setaf 1)    # vermelho — erro
+  _CV_AZ=$(tput setaf 6)    # ciano   — informação
+  _CV_BD=$(tput bold)       # negrito
+  _CV_RS=$(tput sgr0)       # reset
+else
+  _CV_VD="" ; _CV_AM="" ; _CV_VM="" ; _CV_AZ="" ; _CV_BD="" ; _CV_RS=""
+fi
 
-_check_file() {
+# =============================================================================
+# Funções de verificação (removidas ao final do script via unset -f)
+# =============================================================================
+_OK=0 ; _MISS=0
+
+_chk_file() {
   if [[ -f "$1" ]]; then
-    printf "  %-6s: %s\n" "OK"   "$1"; ((_OK++))
+    printf "  ${_CV_VD}OK    ${_CV_RS}%s\n" "$1"
+    _OK=$(( _OK + 1 ))
   else
-    printf "  %-6s: %s  <-- FALTANDO\n" "MISS" "$1"; ((_MISS++))
+    printf "  ${_CV_AM}FALTA ${_CV_RS}%s\n" "$1"
+    _MISS=$(( _MISS + 1 ))
   fi
 }
 
-_check_dir() {
+_chk_dir() {
   if [[ -d "$1" ]]; then
-    printf "  %-6s: %s\n" "OK"   "$1"; ((_OK++))
+    printf "  ${_CV_VD}OK    ${_CV_RS}%s\n" "$1"
+    _OK=$(( _OK + 1 ))
   else
-    printf "  %-6s: %s  <-- FALTANDO\n" "MISS" "$1"; ((_MISS++))
+    printf "  ${_CV_AM}FALTA ${_CV_RS}%s\n" "$1"
+    _MISS=$(( _MISS + 1 ))
   fi
 }
 
 # =============================================================================
-# ESMF 8.9.1
-# esmf.mk define: ESMF_F90COMPILER, ESMF_F90COMPILEPATHS, ESMF_F90LINKPATHS,
-#                 ESMF_F90ESMFLIBS, etc. — incluído automaticamente pelo Makefile.
+# [1] ESMF 8.9.1
+# esmf.mk define: ESMF_F90COMPILER, ESMF_F90COMPILEPATHS,
+#                 ESMF_F90LINKPATHS, ESMF_F90ESMFLIBS, etc.
+# Incluído automaticamente pelo Makefile do acoplador.
 # =============================================================================
 export ESMF_ROOT=/p/projetos/monan_adm/daniel.massaru/Acopladores/esmf-8.9.1
-export ESMF_MOD=${ESMF_ROOT}/mod/modO/Linux.gfortran.64.mpich2.default
-export ESMF_LIBDIR=${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default
-export ESMFMKFILE=${ESMF_LIBDIR}/esmf.mk
+export ESMF_MOD="${ESMF_ROOT}/mod/modO/Linux.gfortran.64.mpich2.default"
+export ESMF_LIBDIR="${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default"
+export ESMFMKFILE="${ESMF_LIBDIR}/esmf.mk"
 
-# =============================================================================
-# MONAN-A 2.0 (MPAS-A 8.3)
-# Compilado com gfortran-xd2000 + SMIOL + PIO externo.
-# Nota: lib/ contém symlinks quebrados — as bibliotecas reais estão em src/.
-# =============================================================================
-export MPAS_DIR=/p/projetos/monan_adm/daniel.massaru/Acopladores/system_coupler/MONAN-Coupler/MONAN-Model
-
-# Detecta automaticamente o diretório de módulos (.mod) do MONAN-A:
-#   build Makefile → src/framework/         (alvo gfortran-xd2000)
-#   build cmake    → build/src/framework/
-_MODFILE=$(find "${MPAS_DIR}" -name "mpas_kind_types.mod" 2>/dev/null | head -1)
-if [[ -n "${_MODFILE}" ]]; then
-  export MPAS_MOD_DIR="$(dirname "${_MODFILE}")"
+# Extrai a versão do ESMF diretamente do esmf.mk (linha ESMF_VERSION_STRING)
+if [[ -f "${ESMFMKFILE}" ]]; then
+  _esmf_ver=$(grep -m1 'ESMF_VERSION_STRING' "${ESMFMKFILE}" \
+              | sed 's/.*= *//' | tr -d '[:space:]' 2>/dev/null || echo "?")
 else
-  export MPAS_MOD_DIR="${MPAS_DIR}/src/framework"   # fallback: build Makefile
+  _esmf_ver="(esmf.mk não encontrado)"
 fi
-unset _MODFILE
 
 # =============================================================================
-# GFORTRAN_CONVERT_UNIT — leitura de RRTMG_SW_DATA.DBL (big-endian)
-# O alvo gfortran-xd2000 compila com -fconvert=big-endian. Sem esta variável,
-# o RRTMG aborta: "error reading RRTMG_SW_DATA on unit 101".
+# [2] MONAN-A 2.0 (MPAS-A 8.3.1)
+#
+# O instalador 1-install-monan.bash consolida TODOS os artefatos em dois
+# diretórios únicos, irmãos de MONAN-Model:
+#   <raiz>/mod/monan2   → módulos (.mod)
+#   <raiz>/lib/monan2   → bibliotecas estáticas (.a)
+#
+# A raiz é derivada da localização deste script (run/ → ..), tornando a
+# árvore relocável. Para usar um caminho alternativo, defina as variáveis
+# abaixo ANTES de executar o source:
+#   export MPAS_DIR=/outro/caminho/MONAN-Model
+#   export MONAN2_MODDIR=/outro/caminho/mod/monan2
+#   export MONAN2_LIBDIR=/outro/caminho/lib/monan2
+# =============================================================================
+_COUPLER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export MPAS_DIR="${MPAS_DIR:-${_COUPLER_ROOT}/MONAN-Model}"
+export MONAN2_MODDIR="${MONAN2_MODDIR:-${_COUPLER_ROOT}/mod/monan2}"
+export MONAN2_LIBDIR="${MONAN2_LIBDIR:-${_COUPLER_ROOT}/lib/monan2}"
+
+# MPAS_MOD_DIR: alias para compatibilidade com scripts legados
+export MPAS_MOD_DIR="${MONAN2_MODDIR}"
+
+# =============================================================================
+# [3] GFORTRAN_CONVERT_UNIT — leitura de RRTMG_SW_DATA.DBL (big-endian)
+#
+# O alvo gfortran-xd2000 compila o MPAS com -fconvert=big-endian. Sem esta
+# variável, o RRTMG aborta: "error reading RRTMG_SW_DATA on unit 101".
 # =============================================================================
 export GFORTRAN_CONVERT_UNIT='big_endian:101'
 
 # =============================================================================
-# MOM6+SIS2
-# Todas as variáveis derivam de MOM6_ROOT — para mover a instalação, basta
-# redefinir MOM6_ROOT antes de executar o source.
+# [4] MOM6+SIS2
+#
+# Todas as variáveis derivam de MOM6_ROOT. Para mover a instalação, basta
+# redefinir MOM6_ROOT antes do source; os demais caminhos se ajustam.
 # =============================================================================
 export MOM6_ROOT="${MOM6_ROOT:-/p/projetos/monan_adm/daniel.massaru/Acopladores/mom6+sis2}"
 
 export MOM6_LIBDIR="${MOM6_LIBDIR:-${MOM6_ROOT}/lib/mom6}"
 export MOM6_MODDIR="${MOM6_MODDIR:-${MOM6_ROOT}/mod/mom6}"
 
-export FMS_LIBDIR="${FMS_LIBDIR:-${MOM6_ROOT}/lib/fms}"     # Flexible Modeling System
+export FMS_LIBDIR="${FMS_LIBDIR:-${MOM6_ROOT}/lib/fms}"      # Flexible Modeling System
 export FMS_MODDIR="${FMS_MODDIR:-${MOM6_ROOT}/mod/fms}"
 
 export NUOPC_LIBDIR="${NUOPC_LIBDIR:-${MOM6_ROOT}/lib/nuopc}"
 export NUOPC_MODDIR="${NUOPC_MODDIR:-${MOM6_ROOT}/mod/nuopc}"
 
-export MOAB_DIR="${MOAB_DIR:-/p/projetos/monan_adm/paulo.kubota/home/lib/lib_gnucray/libmoab}"
+# MOAB — backend de malha do ESMF_Mesh. O ESMF 8.9.1 do projeto foi construído
+# com ESMF_MOAB=internal (MOAB embutido em libesmf.so); os símbolos resolvem-se
+# a partir do próprio libesmf, já incluído no LD_LIBRARY_PATH via ESMF_LIBDIR.
+# Logo, nenhum MOAB externo é necessário. Defina USE_EXTERNAL_MOAB=yes (e
+# MOAB_DIR) apenas se trocar por um ESMF com MOAB externo — deve casar com a
+# variável homônima do Makefile.
+export USE_EXTERNAL_MOAB="${USE_EXTERNAL_MOAB:-no}"
+if [[ "${USE_EXTERNAL_MOAB}" == "yes" && -z "${MOAB_DIR:-}" ]]; then
+  printf "  ${_CV_AM}AVISO${_CV_RS}: USE_EXTERNAL_MOAB=yes mas MOAB_DIR não definido.\n"
+fi
+
 export PNETCDF_DIR="${PNETCDF_DIR:-/opt/cray/pe/parallel-netcdf/1.12.3.15/GNU/12.3}"
 
-# -----------------------------------------------------------------------------
-# Cabeçalhos C-preprocessor exigidos pela RECOMPILAÇÃO dos caps upstream MOM6
-# (src/caps/ocean/upstream/). Os fontes fazem:
-#     #include <MOM_memory.h>        -> macros de memória (dynamic_symmetric)
-#     #include "version_variable.h"  -> string de versão (FMS)
-# Esses .h NÃO estão em include/mom6; ficam na árvore de FONTES do MOM6.
-# MOM6_SRC aponta para essa raiz (padrão: ${MOM6_ROOT}/src). Redefina antes
-# do source se a árvore estiver em outro local.
-# -----------------------------------------------------------------------------
+# =============================================================================
+# [5] MOM6_HDR_INC — cabeçalhos para recompilação dos caps upstream MOM6
+#
+# Os fontes em src/caps/ocean/upstream/ incluem:
+#   #include <MOM_memory.h>       → macros de memória (dynamic_symmetric)
+#   #include "version_variable.h" → string de versão (FMS)
+#
+# Esses .h NÃO estão em include/mom6; ficam na árvore de fontes do MOM6.
+# MOM6_SRC aponta para a raiz dos fontes. Redefina antes do source se a
+# árvore de fontes estiver em local diferente de ${MOM6_ROOT}/src.
+# =============================================================================
 export MOM6_SRC="${MOM6_SRC:-${MOM6_ROOT}/src}"
 
 if [[ -z "${MOM6_HDR_INC:-}" ]]; then
-  _roots="${MOM6_SRC} ${MOM6_ROOT}"
-  _mommem=$(find ${_roots} -name MOM_memory.h 2>/dev/null | grep -m1 dynamic_symmetric)
-  [[ -z "${_mommem}" ]] && _mommem=$(find ${_roots} -name MOM_memory.h 2>/dev/null | head -1)
-  _vervar=$(find ${_roots} -name version_variable.h 2>/dev/null | head -1)
+  # Busca com quoting correto nos caminhos (suporta espaços)
+  _mommem=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name MOM_memory.h 2>/dev/null \
+            | grep -m1 dynamic_symmetric || true)
+  [[ -z "${_mommem}" ]] && \
+    _mommem=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name MOM_memory.h 2>/dev/null \
+              | head -1)
+  _vervar=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name version_variable.h 2>/dev/null \
+            | head -1)
   MOM6_HDR_INC=""
   [[ -n "${_mommem}" ]] && MOM6_HDR_INC="-I$(dirname "${_mommem}")"
   [[ -n "${_vervar}" ]] && MOM6_HDR_INC="${MOM6_HDR_INC} -I$(dirname "${_vervar}")"
   export MOM6_HDR_INC
-  unset _roots _mommem _vervar
-fi
-
-if [[ -z "${MOM6_HDR_INC}" ]]; then
-  echo "  AVISO: MOM_memory.h / version_variable.h NAO encontrados."
-  echo "         Defina MOM6_SRC (raiz dos fontes MOM6) e refaca o source,"
-  echo "         ou exporte manualmente: MOM6_HDR_INC=\"-I<dir1> -I<dir2>\""
-else
-  echo "  MOM6_HDR_INC = ${MOM6_HDR_INC}"
+  unset _mommem _vervar
 fi
 
 # =============================================================================
-# LD_LIBRARY_PATH
-# Idioma "${NOVO}${VAR:+:${VAR}}": insere ':paths_anteriores' apenas se VAR
-# não está vazio, evitando trailing colon (que inclui '.' no search path).
+# [6] LD_LIBRARY_PATH
 #
-# Ordem de resolução resultante (primeiro → último):
-#   NUOPC → MOM6 → FMS → MOAB → MPAS (src/) → ESMF
+# Idioma "${NOVO}${VAR:+:${VAR}}": insere ':paths_anteriores' somente se
+# VAR não está vazio, evitando trailing colon (que inclui '.' no search).
+#
+# As libs do MONAN-A são estáticas (.a) — lib/monan2 é incluído por
+# coerência, mas não é exigido em tempo de execução. O MOAB só entra
+# quando USE_EXTERNAL_MOAB=yes (por padrão é interno ao libesmf). Ordem
+# (→ prioridade): NUOPC → MOM6 → FMS → [MOAB] → MONAN-A → ESMF
 # =============================================================================
 export LD_LIBRARY_PATH=\
-${MPAS_DIR}/src/framework:\
-${MPAS_DIR}/src/core_atmosphere:\
-${MPAS_DIR}/src/core_atmosphere/physics:\
-${MPAS_DIR}/src/operators:\
-${MPAS_DIR}/src/external/SMIOL:\
+${MONAN2_LIBDIR}:\
 ${ESMF_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
-[[ -d "${MOAB_DIR}/lib"  ]] && export LD_LIBRARY_PATH="${MOAB_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+[[ "${USE_EXTERNAL_MOAB}" == "yes" && -d "${MOAB_DIR:-}/lib" ]] && \
+  export LD_LIBRARY_PATH="${MOAB_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 [[ -d "${FMS_LIBDIR}"    ]] && export LD_LIBRARY_PATH="${FMS_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 [[ -d "${MOM6_LIBDIR}"   ]] && export LD_LIBRARY_PATH="${MOM6_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 [[ -d "${NUOPC_LIBDIR}"  ]] && export LD_LIBRARY_PATH="${NUOPC_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # =============================================================================
-# Verificação do ambiente (4 seções)
+# Verificação do ambiente (5 seções)
 # =============================================================================
 echo ""
-echo "======================================================================"
-echo "  Ambiente: MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1  |  setenv v11.0"
-echo "  INPE / CGCT / DIMNT — GT Acoplamento de Modelos"
-echo "======================================================================"
-echo ""
-echo "  ESMFMKFILE            : ${ESMFMKFILE}"
-echo "  MPAS_DIR              : ${MPAS_DIR}"
-echo "  MPAS_MOD_DIR          : ${MPAS_MOD_DIR}"
-echo "  ESMF_LIBDIR           : ${ESMF_LIBDIR}"
-echo "  GFORTRAN_CONVERT_UNIT : ${GFORTRAN_CONVERT_UNIT}"
-echo "  MOM6_ROOT             : ${MOM6_ROOT}"
+printf "${_CV_BD}%s${_CV_RS}\n" \
+  "======================================================================"
+printf "${_CV_BD}  Ambiente: MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1  |  setenv v13.1${_CV_RS}\n"
+printf "${_CV_BD}  INPE / CGCT / DIMNT — GT Acoplamento de Modelos${_CV_RS}\n"
+printf "${_CV_BD}%s${_CV_RS}\n" \
+  "======================================================================"
 echo ""
 
-# ── [1/4] ESMF ───────────────────────────────────────────────────────────────
-echo "  [1/4] ESMF:"
-_check_file "${ESMFMKFILE}"
-_check_file "${ESMF_LIBDIR}/libesmf.so"
+printf "  %-26s: %s\n" "ESMFMKFILE"            "${ESMFMKFILE}"
+printf "  %-26s: %s\n" "ESMF versão"           "${_esmf_ver}"
+printf "  %-26s: %s\n" "MPAS_DIR"              "${MPAS_DIR}"
+printf "  %-26s: %s\n" "MONAN2_MODDIR"         "${MONAN2_MODDIR}"
+printf "  %-26s: %s\n" "MONAN2_LIBDIR"         "${MONAN2_LIBDIR}"
+printf "  %-26s: %s\n" "GFORTRAN_CONVERT_UNIT" "${GFORTRAN_CONVERT_UNIT}"
+printf "  %-26s: %s\n" "MOM6_ROOT"             "${MOM6_ROOT}"
+
+if [[ -z "${MOM6_HDR_INC:-}" ]]; then
+  printf "  %-26s: ${_CV_AM}%s${_CV_RS}\n" "MOM6_HDR_INC" \
+    "NÃO ENCONTRADO — caps upstream não compilarão"
+else
+  printf "  %-26s: %s\n" "MOM6_HDR_INC" "${MOM6_HDR_INC}"
+fi
 echo ""
 
-# ── [2/4] MONAN-A 2.0 — 6 bibliotecas estáticas ──────────────────────────────
-echo "  [2/4] MONAN-A 2.0 (6 libs):"
-for _lib in \
-  src/framework/libframework.a          \
-  src/core_atmosphere/libdycore.a       \
-  src/core_atmosphere/physics/libphys.a \
-  src/operators/libops.a                \
-  src/external/SMIOL/libsmiolf.a        \
-  src/external/SMIOL/libsmiol.a; do
-  _check_file "${MPAS_DIR}/${_lib}"
+# ── [1/5] ESMF ───────────────────────────────────────────────────────────────
+echo "  [1/5] ESMF:"
+_chk_file "${ESMFMKFILE}"
+_chk_file "${ESMF_LIBDIR}/libesmf.so"
+echo ""
+
+# ── [2/5] MONAN-A 2.0 — 6 bibliotecas estáticas (lib/monan2) ─────────────────
+echo "  [2/5] MONAN-A 2.0 (6 libs em lib/monan2):"
+for _lib in libframework.a libdycore.a libphys.a libops.a libsmiolf.a libsmiol.a; do
+  _chk_file "${MONAN2_LIBDIR}/${_lib}"
 done
 unset _lib
+_chk_dir "${MONAN2_MODDIR}"
 echo ""
 
-# ── [3/4] Caps de dados sintéticos ───────────────────────────────────────────
-# _WORKDIR sobe um nível a partir do diretório do script (run/ → raiz do projeto)
-echo "  [3/4] Caps de dados sintéticos:"
+# ── [3/5] Caps de dados sintéticos ───────────────────────────────────────────
+echo "  [3/5] Caps de dados sintéticos (DATM/DOCN):"
 _WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-_check_file "${_WORKDIR}/src/caps/ocean/DOCN_cap.F90"
-_check_file "${_WORKDIR}/src/caps/atmos/DATM_cap.F90"
+_chk_file "${_WORKDIR}/src/caps/ocean/DOCN_cap.F90"
+_chk_file "${_WORKDIR}/src/caps/atmos/DATM_cap.F90"
 unset _WORKDIR
 echo ""
 
-# ── [4/4] MOM6+SIS2 — diretórios de bibliotecas e módulos ────────────────────
-echo "  [4/4] MOM6+SIS2 (diretórios):"
-_check_dir "${MOM6_LIBDIR}"
-_check_dir "${MOM6_MODDIR}"
-_check_dir "${FMS_LIBDIR}"
-_check_dir "${FMS_MODDIR}"
-_check_dir "${NUOPC_LIBDIR}"
-_check_dir "${NUOPC_MODDIR}"
-_check_dir "${MOAB_DIR}/lib"
-_check_dir "${PNETCDF_DIR}/include"
+# ── [4/5] MOM6+SIS2 — diretórios de bibliotecas e módulos ────────────────────
+echo "  [4/5] MOM6+SIS2 (diretórios de libs e módulos):"
+_chk_dir "${MOM6_LIBDIR}"
+_chk_dir "${MOM6_MODDIR}"
+_chk_dir "${FMS_LIBDIR}"
+_chk_dir "${FMS_MODDIR}"
+_chk_dir "${NUOPC_LIBDIR}"
+_chk_dir "${NUOPC_MODDIR}"
+echo ""
+
+# ── [5/5] Dependências externas ───────────────────────────────────────────────
+echo "  [5/5] Dependências externas (pNetCDF):"
+if [[ "${USE_EXTERNAL_MOAB}" == "yes" ]]; then
+  _chk_dir "${MOAB_DIR}/lib"
+fi
+_chk_dir "${PNETCDF_DIR}/include"
 echo ""
 
 # ── Resumo global ─────────────────────────────────────────────────────────────
-echo "----------------------------------------------------------------------"
+printf "%s\n" "----------------------------------------------------------------------"
 if [[ "${_MISS}" -eq 0 ]]; then
-  echo "  Tudo OK (${_OK} itens verificados). Ambiente pronto para 'make'."
+  printf "  ${_CV_VD}Tudo OK${_CV_RS} (${_OK} itens verificados). Ambiente pronto para 'make'.\n"
 else
-  echo "  AVISO: ${_MISS} item(ns) faltando (${_OK} OK). Corrija antes de compilar."
+  printf "  ${_CV_VM}AVISO${_CV_RS}: ${_MISS} item(ns) faltando (${_OK} OK). Corrija antes de compilar.\n"
 fi
 echo ""
-echo "  LD_LIBRARY_PATH (primeiros 4 paths):"
+echo "  LD_LIBRARY_PATH (primeiros 4 caminhos):"
 printf '%s\n' "${LD_LIBRARY_PATH}" | tr ':' '\n' | head -4 | sed 's/^/    /'
 echo "    [...]"
 echo "======================================================================"
 echo ""
 
-unset _OK _MISS
-unset -f _check_file _check_dir
+# --- Limpeza de variáveis e funções auxiliares --------------------------------
+unset _OK _MISS _esmf_ver _COUPLER_ROOT
+unset _CV_VD _CV_AM _CV_VM _CV_AZ _CV_BD _CV_RS
+unset -f _chk_file _chk_dir
