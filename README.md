@@ -5,7 +5,7 @@
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
-**NUOPC/ESMF 8.9.1**, na supercomputadora **Jaci** (Cray XD 2000, PrgEnv-gnu).
+**NUOPC/ESMF 8.9.1**, no supercomputador **Jaci** (Cray XD 2000, PrgEnv-gnu).
 Um mediador próprio calcula fluxos turbulentos por fórmulas bulk NCAR.
 
 ---
