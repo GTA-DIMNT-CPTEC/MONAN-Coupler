@@ -2,13 +2,20 @@
 # =============================================================================
 # setenv-gnu.bash — Ambiente de compilação: MONAN-A 2.0 × MOM6+SIS2
 # NUOPC/ESMF 8.9.1 | INPE / CGCT / DIMNT — GT Acoplamento de Modelos
-# Versão 13.1 — Junho 2026
+# Versão 14.0 — Junho 2026
 #
-# v13.1 — Desacoplamento do MOAB do diretório pessoal de P. Kubota. O ESMF
-#   8.9.1 do projeto usa ESMF_MOAB=internal (MOAB embutido em libesmf.so);
-#   MOAB externo passa a ser opcional via USE_EXTERNAL_MOAB (default 'no'),
-#   espelhando a variável homônima do Makefile. Sem o toggle, MOAB_DIR não
-#   é definido, checado nem adicionado ao LD_LIBRARY_PATH.
+# v14.0 — Remoção de hardcodes e robustez:
+#   - ESMF: ESMFMKFILE como ponto único (sobrescrevível); ESMF_LIBDIR
+#     derivado do esmf.mk; ESMF_ROOT sobrescrevível; ESMF_MOD removido
+#     (não consumido pelo build).
+#   - MOM6_ROOT passa a derivar da raiz do acoplador (onde o instalador
+#     deposita lib/{mom6,fms,nuopc}), eliminando o caminho fixo.
+#   - MOAB: toggle USE_EXTERNAL_MOAB (padrão 'no', pois o MOAB é interno
+#     ao libesmf.so); caminho pessoal do Kubota removido.
+#   - pNetCDF: prefixo detectado do módulo Cray, com fallback sobrescrevível.
+#   - Robustez sob 'set -euo pipefail': 'find | head' protegidos com
+#     '|| true' (evita abort silencioso quando sourced pelos instaladores);
+#     verificações tolerantes a variáveis ausentes (set -u).
 # v13.0 — Colorização da saída de verificação (verde/amarelo/vermelho);
 #   exibição da versão do ESMF extraída de esmf.mk; MOM6_HDR_INC com
 #   quoting seguro nos paths (suporta caminhos com espaços); limpeza
@@ -31,7 +38,7 @@
 # COMPILAÇÃO E EXECUÇÃO:
 #   make                             → compila bin/esmApp
 #   make clean                       → remove build/ bin/
-#   make distclean                   → clean + *.pbs + libs instaladas (lib/ mod/)
+#   make distclean                   → clean + remove *.pbs
 #   make rebuild                     → make clean + make all
 #   bash run/run_esmApp.jaci -n 128  → submete via PBS (128 PETs)
 # =============================================================================
@@ -83,17 +90,22 @@ _chk_dir() {
 }
 
 # =============================================================================
-# [1] ESMF 8.9.1
-# esmf.mk define: ESMF_F90COMPILER, ESMF_F90COMPILEPATHS,
-#                 ESMF_F90LINKPATHS, ESMF_F90ESMFLIBS, etc.
-# Incluído automaticamente pelo Makefile do acoplador.
+# [1] ESMF 8.9.1 — ponto único de configuração: ESMFMKFILE
+#
+# O esmf.mk é incluído diretamente pelo Makefile do acoplador (fornece
+# ESMF_F90COMPILER, ESMF_F90COMPILEPATHS, ESMF_F90LINK*, etc.). Aqui basta
+# o próprio esmf.mk e o diretório de libs (para LD_LIBRARY_PATH e verificação).
+#
+# Sobrescreva antes do source para usar outra instalação:
+#   export ESMFMKFILE=/caminho/para/esmf.mk      (tem prioridade)
+#   export ESMF_ROOT=/raiz/da/instalacao/esmf    (layout padrão lib/libO/...)
 # =============================================================================
-export ESMF_ROOT=/p/projetos/monan_adm/daniel.massaru/Acopladores/esmf-8.9.1
-export ESMF_MOD="${ESMF_ROOT}/mod/modO/Linux.gfortran.64.mpich2.default"
-export ESMF_LIBDIR="${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default"
-export ESMFMKFILE="${ESMF_LIBDIR}/esmf.mk"
+export ESMF_ROOT="${ESMF_ROOT:-/p/projetos/monan_adm/daniel.massaru/Acopladores/esmf-8.9.1}"
+export ESMFMKFILE="${ESMFMKFILE:-${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default/esmf.mk}"
+# ESMF_LIBDIR é sempre o diretório do esmf.mk — robusto a override de ESMFMKFILE.
+export ESMF_LIBDIR="$(dirname "${ESMFMKFILE}")"
 
-# Extrai a versão do ESMF diretamente do esmf.mk (linha ESMF_VERSION_STRING)
+# Versão do ESMF, extraída do próprio esmf.mk (apenas informativo).
 if [[ -f "${ESMFMKFILE}" ]]; then
   _esmf_ver=$(grep -m1 'ESMF_VERSION_STRING' "${ESMFMKFILE}" \
               | sed 's/.*= *//' | tr -d '[:space:]' 2>/dev/null || echo "?")
@@ -135,10 +147,12 @@ export GFORTRAN_CONVERT_UNIT='big_endian:101'
 # =============================================================================
 # [4] MOM6+SIS2
 #
-# Todas as variáveis derivam de MOM6_ROOT. Para mover a instalação, basta
-# redefinir MOM6_ROOT antes do source; os demais caminhos se ajustam.
+# Por padrão, MOM6_ROOT é a própria raiz do acoplador — é onde o instalador
+# 2-install-mom.bash deposita lib/{mom6,fms,nuopc} e mod/{...}. Para usar uma
+# instalação MOM6 separada, redefina MOM6_ROOT antes do source; os demais
+# caminhos se ajustam automaticamente.
 # =============================================================================
-export MOM6_ROOT="${MOM6_ROOT:-/p/projetos/monan_adm/daniel.massaru/Acopladores/mom6+sis2}"
+export MOM6_ROOT="${MOM6_ROOT:-${_COUPLER_ROOT}}"
 
 export MOM6_LIBDIR="${MOM6_LIBDIR:-${MOM6_ROOT}/lib/mom6}"
 export MOM6_MODDIR="${MOM6_MODDIR:-${MOM6_ROOT}/mod/mom6}"
@@ -149,18 +163,15 @@ export FMS_MODDIR="${FMS_MODDIR:-${MOM6_ROOT}/mod/fms}"
 export NUOPC_LIBDIR="${NUOPC_LIBDIR:-${MOM6_ROOT}/lib/nuopc}"
 export NUOPC_MODDIR="${NUOPC_MODDIR:-${MOM6_ROOT}/mod/nuopc}"
 
-# MOAB — backend de malha do ESMF_Mesh. O ESMF 8.9.1 do projeto foi construído
-# com ESMF_MOAB=internal (MOAB embutido em libesmf.so); os símbolos resolvem-se
-# a partir do próprio libesmf, já incluído no LD_LIBRARY_PATH via ESMF_LIBDIR.
-# Logo, nenhum MOAB externo é necessário. Defina USE_EXTERNAL_MOAB=yes (e
-# MOAB_DIR) apenas se trocar por um ESMF com MOAB externo — deve casar com a
-# variável homônima do Makefile.
+# MOAB — interno ao libesmf.so nesta instalação (sem libMOAB.so externo).
+#   USE_EXTERNAL_MOAB=no  (padrão): não injeta MOAB externo no build.
+#   USE_EXTERNAL_MOAB=yes          : exige MOAB_DIR apontando para o MOAB externo
+#                                    (export MOAB_DIR=... antes do source).
 export USE_EXTERNAL_MOAB="${USE_EXTERNAL_MOAB:-no}"
-if [[ "${USE_EXTERNAL_MOAB}" == "yes" && -z "${MOAB_DIR:-}" ]]; then
-  printf "  ${_CV_AM}AVISO${_CV_RS}: USE_EXTERNAL_MOAB=yes mas MOAB_DIR não definido.\n"
-fi
 
-export PNETCDF_DIR="${PNETCDF_DIR:-/opt/cray/pe/parallel-netcdf/1.12.3.15/GNU/12.3}"
+# pNetCDF — prefixo detectado do módulo Cray (cray-parallel-netcdf), com
+# fallback sobrescrevível via PNETCDF_DIR.
+export PNETCDF_DIR="${PNETCDF_DIR:-${CRAY_PARALLEL_NETCDF_PREFIX:-${CRAY_PARALLEL_NETCDF_DIR:-/opt/cray/pe/parallel-netcdf/1.12.3.15/GNU/12.3}}}"
 
 # =============================================================================
 # [5] MOM6_HDR_INC — cabeçalhos para recompilação dos caps upstream MOM6
@@ -181,9 +192,9 @@ if [[ -z "${MOM6_HDR_INC:-}" ]]; then
             | grep -m1 dynamic_symmetric || true)
   [[ -z "${_mommem}" ]] && \
     _mommem=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name MOM_memory.h 2>/dev/null \
-              | head -1)
+              | head -1 || true)
   _vervar=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name version_variable.h 2>/dev/null \
-            | head -1)
+            | head -1 || true)
   MOM6_HDR_INC=""
   [[ -n "${_mommem}" ]] && MOM6_HDR_INC="-I$(dirname "${_mommem}")"
   [[ -n "${_vervar}" ]] && MOM6_HDR_INC="${MOM6_HDR_INC} -I$(dirname "${_vervar}")"
@@ -198,16 +209,16 @@ fi
 # VAR não está vazio, evitando trailing colon (que inclui '.' no search).
 #
 # As libs do MONAN-A são estáticas (.a) — lib/monan2 é incluído por
-# coerência, mas não é exigido em tempo de execução. O MOAB só entra
-# quando USE_EXTERNAL_MOAB=yes (por padrão é interno ao libesmf). Ordem
-# (→ prioridade): NUOPC → MOM6 → FMS → [MOAB] → MONAN-A → ESMF
+# coerência, mas não é exigido em tempo de execução. Ordem (→ prioridade):
+#   NUOPC → MOM6 → FMS → MOAB → MONAN-A → ESMF
 # =============================================================================
 export LD_LIBRARY_PATH=\
 ${MONAN2_LIBDIR}:\
 ${ESMF_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 
-[[ "${USE_EXTERNAL_MOAB}" == "yes" && -d "${MOAB_DIR:-}/lib" ]] && \
+if [[ "${USE_EXTERNAL_MOAB}" == "yes" && -n "${MOAB_DIR:-}" && -d "${MOAB_DIR}/lib" ]]; then
   export LD_LIBRARY_PATH="${MOAB_DIR}/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+fi
 [[ -d "${FMS_LIBDIR}"    ]] && export LD_LIBRARY_PATH="${FMS_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 [[ -d "${MOM6_LIBDIR}"   ]] && export LD_LIBRARY_PATH="${MOM6_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 [[ -d "${NUOPC_LIBDIR}"  ]] && export LD_LIBRARY_PATH="${NUOPC_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
@@ -218,7 +229,7 @@ ${ESMF_LIBDIR}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}
 echo ""
 printf "${_CV_BD}%s${_CV_RS}\n" \
   "======================================================================"
-printf "${_CV_BD}  Ambiente: MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1  |  setenv v13.1${_CV_RS}\n"
+printf "${_CV_BD}  Ambiente: MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1  |  setenv v14.0${_CV_RS}\n"
 printf "${_CV_BD}  INPE / CGCT / DIMNT — GT Acoplamento de Modelos${_CV_RS}\n"
 printf "${_CV_BD}%s${_CV_RS}\n" \
   "======================================================================"
@@ -231,6 +242,7 @@ printf "  %-26s: %s\n" "MONAN2_MODDIR"         "${MONAN2_MODDIR}"
 printf "  %-26s: %s\n" "MONAN2_LIBDIR"         "${MONAN2_LIBDIR}"
 printf "  %-26s: %s\n" "GFORTRAN_CONVERT_UNIT" "${GFORTRAN_CONVERT_UNIT}"
 printf "  %-26s: %s\n" "MOM6_ROOT"             "${MOM6_ROOT}"
+printf "  %-26s: %s\n" "USE_EXTERNAL_MOAB"     "${USE_EXTERNAL_MOAB}"
 
 if [[ -z "${MOM6_HDR_INC:-}" ]]; then
   printf "  %-26s: ${_CV_AM}%s${_CV_RS}\n" "MOM6_HDR_INC" \
@@ -274,9 +286,16 @@ _chk_dir "${NUOPC_MODDIR}"
 echo ""
 
 # ── [5/5] Dependências externas ───────────────────────────────────────────────
-echo "  [5/5] Dependências externas (pNetCDF):"
+echo "  [5/5] Dependências externas (MOAB, pNetCDF):"
 if [[ "${USE_EXTERNAL_MOAB}" == "yes" ]]; then
-  _chk_dir "${MOAB_DIR}/lib"
+  if [[ -n "${MOAB_DIR:-}" ]]; then
+    _chk_dir "${MOAB_DIR}/lib"
+  else
+    printf "  ${_CV_VM}FALTA ${_CV_RS}%s\n" "USE_EXTERNAL_MOAB=yes mas MOAB_DIR não definido"
+    _MISS=$(( _MISS + 1 ))
+  fi
+else
+  printf "  ${_CV_AZ}—     ${_CV_RS}%s\n" "MOAB externo desabilitado (interno ao libesmf.so)"
 fi
 _chk_dir "${PNETCDF_DIR}/include"
 echo ""
