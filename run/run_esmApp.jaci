@@ -1,44 +1,14 @@
 #!/bin/bash
 # =============================================================================
-# run_esmApp.jaci  —  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1
-# INPE / CGCT / DIMNT  —  GT Acoplamento de Modelos  —  Versão 12.1 / Junho 2026
+# run_esmApp.jaci — Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF 8.9.1
+# INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 #
-# v12.1 — Robustez: incremento de MISSING em _req/_glob_req trocado de
-#   '((MISSING++))' para 'MISSING=$(( MISSING + 1 ))'. Sob 'set -euo pipefail'
-#   o pós-incremento retorna != 0 quando o valor é 0, abortando a verificação
-#   no PRIMEIRO arquivo ausente, antes do resumo e das dicas de correção.
+# Dois modos, detectados automaticamente via PBS_O_WORKDIR:
+#   Interativo (login node): parse de argumentos, compilação opcional,
+#     verificação de pré-requisitos, geração do .pbs, qsub e polling.
+#   PBS (dentro do job): carrega módulos, faz source do setenv e executa mpirun.
 #
-# DOIS MODOS DE OPERAÇÃO (detecção automática via PBS_O_WORKDIR):
-#
-#   Interativo (login node):
-#     1. Parse de argumentos e compilação opcional (--compile)
-#     2. Verificação de pré-requisitos (inclui OISST se use_docn=T)
-#     3. Geração de esmApp-integrado.pbs e qsub
-#     4. Polling qstat + relatório final
-#
-#   PBS (dentro do job — PBS_O_WORKDIR definido pelo daemon):
-#     Carrega módulos, faz source setenv-gnu.bash e executa mpirun.
-#
-# USO:
-#   bash run_esmApp.jaci                      # 4 PETs, fila pesqextra, 1h
-#   bash run_esmApp.jaci -n 128               # 128 PETs (nó Turin XD 2000)
-#   bash run_esmApp.jaci -n 512 -w 02:00:00
-#   bash run_esmApp.jaci --compile -n 4       # compila e submete
-#   bash run_esmApp.jaci --check              # valida pré-requisitos sem submeter
-#
-# MODOS ATM/OCN (nuopc.input &nuopc_mode):
-#   use_datm=F  use_docn=F  →  MPAS-A real  + MOM6+SIS2 dinâmico  (PRODUÇÃO)
-#   use_datm=F  use_docn=T  →  MPAS-A real  + DOCN SST dados       (Fase 1)
-#   use_datm=T  use_docn=F  →  DATM JRA55   + MOM6+SIS2 dinâmico   (teste MOM6)
-#   use_datm=T  use_docn=T  →  DATM JRA55   + DOCN SST dados        (teste MED)
-#
-# SAÍDAS:
-#   esmApp-integrado.pbs                          script PBS gerado
-#   logs/esmApp_run.log                           stdout/stderr do mpirun
-#   logs/PET*.esmApp.log                          logs ESMF por PET
-#   log.atmosphere.0000.d0001.out                 log interno MONAN-A
-#   diag_export/monan_export_YYYYMMDD_HHMMSS.nc   campos exportados (1/dt_coupling)
-#   diag_import/mom6_import_YYYYMMDD_HHMMSS.nc    fluxos ATM→OCN (se ativo)
+# Use 'bash run_esmApp.jaci --help' para opções, modos ATM/OCN e saídas.
 # =============================================================================
 
 # ─── Constantes do projeto ────────────────────────────────────────────────────
@@ -59,15 +29,14 @@ _nuopc_get() {
 _is_true() { echo "$1" | grep -qi '\.true\.\|^true$'; }
 
 # =============================================================================
-# MODO PBS  —  execução dentro do job submetido pelo daemon
+# MODO PBS — execução dentro do job submetido pelo daemon
 # =============================================================================
 if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 
-  # Cada etapa crítica usa verificação explícita (set -e não é usado aqui
-  # para evitar saída silenciosa antes do banner de erro).
+  # set -e não é usado aqui: cada etapa crítica tem verificação explícita,
+  # evitando saída silenciosa antes do banner de erro.
   cd "${PBS_O_WORKDIR}" || { echo "ERRO: cd ${PBS_O_WORKDIR} falhou"; exit 1; }
 
-  # ── Módulos ────────────────────────────────────────────────────────────────
   module purge
   module load PrgEnv-gnu
   module load craype-x86-turin
@@ -78,11 +47,7 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   module load cray-pals
   module load METIS/5.1.0
 
-  # ── Ambiente MONAN-A 2.0 ───────────────────────────────────────────────────
-  # Exporta: ESMFMKFILE, MPAS_DIR, MPAS_MOD_DIR,
-  #          LD_LIBRARY_PATH (MONAN + ESMF + MOM6/FMS/MOAB),
-  #          GFORTRAN_CONVERT_UNIT.
-  # shellcheck source=setenv-gnu.bash
+  # Exporta ESMFMKFILE, MPAS_DIR, LD_LIBRARY_PATH, GFORTRAN_CONVERT_UNIT, etc.
   source "${PBS_O_WORKDIR}/${SETENV_SCRIPT}" \
     || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
 
@@ -134,7 +99,7 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     NSTEPS="?"
   fi
 
-  # ── Banner ─────────────────────────────────────────────────────────────────
+  # ── Banner ───────────────────────────────────────────────────────────────────
   echo "======================================================================"
   echo "  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2"
   echo "  ESMF/NUOPC 8.9.1 | Mediador MED_cap ativo"
@@ -159,14 +124,13 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 
   mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 
-  # ── Execução ────────────────────────────────────────────────────────────────
+  # ── Execução ──────────────────────────────────────────────────────────────────
   echo "Iniciando mpirun -np ${NPES} ${EXECUTABLE} ..."
   echo ""
   mpirun -np "${NPES}" "${EXECUTABLE}" 2>&1 | tee "${LOG_RUN}"
   STATUS=${PIPESTATUS[0]}
 
-  # O ESMF cria PET*.esmApp.log no CWD do processo (raiz do experimento).
-  # Move para logs/ após a execução para manter o diretório organizado.
+  # O ESMF cria PET*.esmApp.log no CWD; move para logs/ após a execução.
   shopt -s nullglob
   pet_logs=( PET*.esmApp.log )
   [[ ${#pet_logs[@]} -gt 0 ]] && mv "${pet_logs[@]}" logs/ && \
@@ -174,7 +138,7 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   shopt -u nullglob
   echo ""
 
-  # ── Diagnóstico de erro (invocada apenas se STATUS ≠ 0) ────────────────────
+  # ── Diagnóstico de erro (chamado apenas se STATUS ≠ 0) ──────────────────────
   _exit_diagnostics() {
     local status="$1" sig reason hint_mem=""
 
@@ -279,18 +243,18 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 fi
 
 # =============================================================================
-# MODO INTERATIVO  —  login node
+# MODO INTERATIVO — login node
 # =============================================================================
 set -euo pipefail
 
-# ── Defaults ─────────────────────────────────────────────────────────────────
+# ── Defaults ──────────────────────────────────────────────────────────────────
 NPES=4
 QUEUE="pesqextra"
 WALLTIME="01:00:00"
 CHECK_ONLY=0
 COMPILE_FIRST=0
 
-# ── Parse de argumentos ──────────────────────────────────────────────────────
+# ── Parse de argumentos ───────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
     -n|--npes)     NPES="$2";       shift 2 ;;
@@ -358,7 +322,7 @@ echo "Verificando pré-requisitos (NPES=${NPES}, fila=${QUEUE})..."
 echo ""
 MISSING=0
 
-# Verifica arquivo único obrigatório.
+# _req ARQUIVO [label] — arquivo único obrigatório.
 _req() {
   local f="$1" label="${2:-$1}"
   if [[ -f "$f" ]]; then printf "  %-8s: %s\n" "OK"       "${label}"
@@ -366,7 +330,7 @@ _req() {
   fi
 }
 
-# Verifica glob obrigatório (ao menos um arquivo deve bater o padrão).
+# _glob_req PADRÃO [label] [dica] — ao menos um arquivo deve bater o padrão.
 _glob_req() {
   local pattern="$1" label="${2:-$1}" hint="${3:-}"
   if compgen -G "${pattern}" > /dev/null 2>&1; then
@@ -379,7 +343,7 @@ _glob_req() {
   fi
 }
 
-# Verifica arquivo ou glob opcional (exibe aviso, não incrementa MISSING).
+# _opt ARQUIVO/PADRÃO [label] — opcional (aviso, não incrementa MISSING).
 _opt() {
   local f="$1" label="${2:-$1}"
   if [[ -f "${f}" ]] || compgen -G "${f}" > /dev/null 2>&1; then
@@ -389,7 +353,7 @@ _opt() {
   fi
 }
 
-# ── Detecção de modo ATM/OCN ─────────────────────────────────────────────────
+# ── Detecção de modo ATM/OCN ──────────────────────────────────────────────────
 USE_DATM=$(_nuopc_get use_datm)
 USE_DOCN=$(_nuopc_get use_docn)
 DOCN_MODE=$(_nuopc_get docn_mode)
@@ -411,7 +375,7 @@ echo "--- Configuração do acoplamento ---"
 _req "${CONFIG_FILE}"
 printf "  %-8s: ATM = %s   OCN = %s\n" "INFO" "${ATM_MODE_LABEL}" "${OCN_MODE_LABEL}"
 
-# Verificar arquivos OISST apenas no modo DOCN com leitura de NetCDF.
+# OISST apenas no modo DOCN com leitura de NetCDF.
 if _is_true "${USE_DOCN}" && [[ "${DOCN_MODE}" == "netcdf" ]]; then
   SST_FILE=$(_nuopc_get docn_sst_file); SST_FILE="${SST_FILE:-INPUT/OISST_sst.nc}"
   ICE_FILE=$(_nuopc_get docn_ice_file); ICE_FILE="${ICE_FILE:-INPUT/OISST_ice.nc}"
@@ -475,18 +439,16 @@ fi
 echo "Todos os pré-requisitos presentes."
 [[ "${CHECK_ONLY}" -eq 1 ]] && { echo "Modo --check concluído."; exit 0; }
 
-# ── Lê parâmetros de tempo do nuopc.input para exibir no .pbs ─────────────────
+# ── Parâmetros de tempo (para o .pbs) ─────────────────────────────────────────
 START_DATE=$(_nuopc_get start_date)
 STOP_DATE=$(_nuopc_get  stop_date)
 DT_COUP=$(_nuopc_get    dt_coupling)
 
-# ── Prepara diretórios ────────────────────────────────────────────────────────
 # logs/ deve existir antes do qsub (a diretiva PBS -o exige o path no submit).
 WORKDIR="$(pwd)"
 mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 
-# ── Gera esmApp-integrado.pbs ─────────────────────────────────────────────────
-# O .pbs delega a execução ao run_esmApp.jaci em MODO PBS.
+# ── Gera esmApp-integrado.pbs (delega a execução ao MODO PBS deste script) ────
 cat > "${PBS_SCRIPT}" << HEREDOC
 #!/bin/bash
 #PBS -N GTA-MONAN2xMOM6
