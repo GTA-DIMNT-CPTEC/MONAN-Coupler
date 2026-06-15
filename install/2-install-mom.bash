@@ -12,9 +12,10 @@
 #                  Use quando FMS e MOM6 já foram compilados anteriormente.
 #   --help         Exibe esta mensagem de ajuda e encerra.
 #
-# DOWNLOAD AUTOMÁTICO: se a árvore MOM6-examples não existir, o script a baixa
-# de https://github.com/NOAA-GFDL/MOM6-examples (com submódulos). Sobrescreva a
-# origem com a variável de ambiente MOM6_EXAMPLES_URL.
+# DOWNLOAD AUTOMÁTICO: se a árvore MOM6-examples não existir (ou estiver vazia),
+# o script a baixa de https://github.com/GTA-DIMNT-CPTEC/MOM6-examples (com
+# submódulos) e faz checkout do commit fixado (cec94e47). Sobrescreva a origem e
+# a revisão com as variáveis de ambiente MOM6_EXAMPLES_URL e MOM6_EXAMPLES_REF.
 #
 # ARTEFATOS GERADOS (sob MOM6-examples/build/gnu/):
 #   shared/repro/libfms.a              infraestrutura FMS
@@ -66,10 +67,12 @@ unset _arg
 MOM6_EXAMPLES_DIR="${COUPLER_ROOT}/MOM6-examples"
 
 # Baixa o MOM6-examples (com submódulos) do GitHub se ainda não existir.
-# URL sobrescrevível por variável de ambiente (ex.: para usar um fork pessoal):
+# Origem e revisão (commit/tag/branch) sobrescrevíveis por variáveis de ambiente:
 #   export MOM6_EXAMPLES_URL=https://github.com/MEU_USUARIO/MOM6-examples.git
-MOM6_EXAMPLES_URL="${MOM6_EXAMPLES_URL:-https://github.com/NOAA-GFDL/MOM6-examples.git}"
-clone_if_missing "${MOM6_EXAMPLES_DIR}" "${MOM6_EXAMPLES_URL}" --recursive
+#   export MOM6_EXAMPLES_REF=<commit|tag|branch>
+MOM6_EXAMPLES_URL="${MOM6_EXAMPLES_URL:-https://github.com/GTA-DIMNT-CPTEC/MOM6-examples.git}"
+MOM6_EXAMPLES_REF="${MOM6_EXAMPLES_REF:-cec94e473bfee1bc3ee9b3c64e147361123fd7fb}"
+clone_if_missing "${MOM6_EXAMPLES_DIR}" "${MOM6_EXAMPLES_URL}" "${MOM6_EXAMPLES_REF}" --recursive
 
 # =============================================================================
 # SEÇÃO DE CONFIGURAÇÃO — revise ao migrar de usuário ou máquina
