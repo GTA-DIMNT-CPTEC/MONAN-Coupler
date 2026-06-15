@@ -1,54 +1,86 @@
 #!/bin/bash
 # =============================================================================
-# 1-install-monan.bash — Compila o MONAN-A 2.0 (MPAS-A 8.3.1) e consolida
-# módulos (.mod) e bibliotecas (.a) em mod/monan2 e lib/monan2.
+# 1-install-monan.bash — Compila o MONAN-A 2.0 (MPAS-A 8.3.1) na Jaci e
+# consolida módulos (.mod) e bibliotecas (.a) em diretórios únicos usados pelo
+# Makefile do acoplador (variáveis MONAN2_MODDIR / MONAN2_LIBDIR).
 # INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 #
-# USO:
-#   bash install/1-install-monan.bash [--skip-init-atm] [--help]
-#     --skip-init-atm   Compila só o core 'atmosphere' (pula 'init_atmosphere').
+# USO (a partir de qualquer diretório):
+#   bash install/1-install-monan.bash [OPÇÕES]
 #
-# Layout resultante (irmãos de MONAN-Model):
-#   mod/monan2, lib/monan2                  core 'atmosphere'
-#   mod/init_atmosphere, lib/init_atmosphere  core 'init_atmosphere' (opcional)
+# OPÇÕES:
+#   --skip-init-atm   Compila apenas o core 'atmosphere'; pula 'init_atmosphere'
+#                     (útil em hosts que não precisam gerar condições iniciais).
+#   --help            Exibe esta mensagem de ajuda e encerra.
 #
-# Os artefatos de 'init_atmosphere' ficam SEPARADOS: ambos os cores geram
-# libdycore.a e .mod homônimos; misturá-los sobrescreveria o dycore que o
-# acoplador linka. Como AUTOCLEAN=true apaga o core anterior ao trocar CORE=,
-# a cópia do 'atmosphere' ocorre ANTES de compilar 'init_atmosphere'.
+# O script se ancora no próprio diretório (BASH_SOURCE), portanto independe
+# do diretório de invocação.
+#
+# LAYOUT RESULTANTE (irmãos de MONAN-Model):
+#   <raiz>/mod/monan2            módulos do core 'atmosphere'
+#   <raiz>/lib/monan2            bibliotecas do core 'atmosphere'
+#   <raiz>/mod/init_atmosphere   módulos do core 'init_atmosphere'  (opcional)
+#   <raiz>/lib/init_atmosphere   bibliotecas do core 'init_atmosphere' (opcional)
+#
+# NOTAS DE PROJETO
+#   1. Os artefatos de 'init_atmosphere' ficam em diretórios SEPARADOS: ambos os
+#      cores geram libdycore.a (mesmo nome) e há .mod homônimos; misturá-los em
+#      mod/monan2 e lib/monan2 sobrescreveria o dycore do 'atmosphere' — que é
+#      justamente o que o acoplador linka.
+#   2. AUTOCLEAN=true faz o MPAS limpar o core anterior ao trocar CORE=. Por
+#      isso a cópia do core 'atmosphere' ocorre ANTES de compilar
+#      'init_atmosphere'; caso contrário os artefatos seriam apagados.
+#   3. Se o diretório MONAN-Model não existir, o script o baixa automaticamente
+#      de https://github.com/GTA-DIMNT-CPTEC/MONAN-Model e faz checkout do commit
+#      fixado (01962f03). Sobrescreva a origem e a revisão com as variáveis de
+#      ambiente MONAN_MODEL_URL e MONAN_MODEL_REF.
 # =============================================================================
 set -euo pipefail
 
+# ── Âncora determinística ─────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# ── Carrega biblioteca de funções ─────────────────────────────────────────────
 source "${SCRIPT_DIR}/install-libs.bash"
 
-# ── Opções ────────────────────────────────────────────────────────────────────
+# ── Análise de opções ─────────────────────────────────────────────────────────
 SKIP_INIT_ATM=false
-_uso() { sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'; exit 0; }
+
+_uso() {
+  sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'
+  exit 0
+}
 
 for _arg in "$@"; do
   case "${_arg}" in
-    --skip-init-atm)  SKIP_INIT_ATM=true ;;
+    --skip-init-atm)  SKIP_INIT_ATM=true  ;;
     --help|-h)        _uso ;;
-    *) log_error "Opção desconhecida: ${_arg}   (use --help)"; exit 1 ;;
+    *)
+      log_error "Opção desconhecida: ${_arg}   (use --help para a lista de opções)"
+      exit 1
+      ;;
   esac
 done
 unset _arg
 
-# ── Caminhos ──────────────────────────────────────────────────────────────────
+# ── Definição de caminhos ─────────────────────────────────────────────────────
 MONAN_MODEL="${COUPLER_ROOT}/MONAN-Model"
+
 MOD_ATM="${COUPLER_ROOT}/mod/monan2"
 LIB_ATM="${COUPLER_ROOT}/lib/monan2"
 MOD_INIT="${COUPLER_ROOT}/mod/init_atmosphere"
 LIB_INIT="${COUPLER_ROOT}/lib/init_atmosphere"
 
-if [[ ! -d "${MONAN_MODEL}" ]]; then
-  log_error "Árvore de fontes não encontrada: ${MONAN_MODEL}"
-  exit 1
-fi
+# ── Pré-condição: árvore de fontes (baixa do GitHub se ausente) ───────────────
+# Origem e revisão (commit/tag/branch) sobrescrevíveis por variáveis de ambiente:
+#   export MONAN_MODEL_URL=https://github.com/MEU_USUARIO/MONAN-Model.git
+#   export MONAN_MODEL_REF=<commit|tag|branch>
+MONAN_MODEL_URL="${MONAN_MODEL_URL:-https://github.com/GTA-DIMNT-CPTEC/MONAN-Model.git}"
+MONAN_MODEL_REF="${MONAN_MODEL_REF:-01962f03d796d63e355fccf7e36010173570c31e}"
+clone_if_missing "${MONAN_MODEL}" "${MONAN_MODEL_URL}" "${MONAN_MODEL_REF}"
 
-# ── Módulos Jaci (Cray XD 2000, PrgEnv-gnu) ───────────────────────────────────
+# ── Módulos Jaci (Cray XD 2000 com PrgEnv-gnu) ────────────────────────────────
 log_sep
 log_info "Carregando módulos do ambiente Jaci..."
 module purge
@@ -75,20 +107,27 @@ export PNETCDF="${PNETCDF_DIR}"
 
 cd "${MONAN_MODEL}"
 
+# Flags de compilação — comuns aos dois cores
 MAKE_ARGS="OPENMP=true USE_PIO2=false PRECISION=double AUTOCLEAN=true"
 MAKE_JOBS=8
 
-# ── ETAPA 1 — Core 'atmosphere' (compila e copia ANTES do init_atmosphere) ────
+# ── ETAPA 1 — Core 'atmosphere' (compilação e cópia dos artefatos) ────────────
+# A cópia DEVE ocorrer ANTES da compilação do 'init_atmosphere': com
+# AUTOCLEAN=true, a troca de CORE= apaga os artefatos do core anterior.
 log_step 1 2 "Core 'atmosphere' — compilação"
 timer_start
+
 make -j "${MAKE_JOBS}" gfortran-coupler-xd2000 CORE=atmosphere ${MAKE_ARGS} 2>&1 \
   | tee make-atmosphere.log
+
 timer_step "Core 'atmosphere' compilado"
 
-log_step 1 2 "Core 'atmosphere' — cópia dos artefatos"
+log_step 1 2 "Core 'atmosphere' — cópia dos artefatos para ${MOD_ATM} / ${LIB_ATM}"
+
 mkdir -p "${MOD_ATM}" "${LIB_ATM}"
 
 # Módulos (.mod) → mod/monan2
+# cp_glob é tolerante a diretórios sem .mod; continua sem abortar.
 cp_glob "./src/core_atmosphere/*.mod"                                     "${MOD_ATM}"
 cp_glob "./src/core_atmosphere/diagnostics/*.mod"                         "${MOD_ATM}"
 cp_glob "./src/core_atmosphere/physics/*.mod"                             "${MOD_ATM}"
@@ -108,19 +147,23 @@ cp_glob "./src/framework/*.mod"                                           "${MOD
 cp_glob "./src/operators/*.mod"                                           "${MOD_ATM}"
 
 # Bibliotecas (.a) → lib/monan2
-cp_glob "./src/operators/*.a"               "${LIB_ATM}"
-cp_glob "./src/core_atmosphere/*.a"         "${LIB_ATM}"
-cp_glob "./src/core_atmosphere/physics/*.a" "${LIB_ATM}"
-cp_glob "./src/external/esmf_time_f90/*.a"  "${LIB_ATM}"
-cp_glob "./src/external/SMIOL/*.a"          "${LIB_ATM}"
-cp_glob "./src/framework/*.a"               "${LIB_ATM}"
+cp_glob "./src/operators/*.a"                   "${LIB_ATM}"
+cp_glob "./src/core_atmosphere/*.a"             "${LIB_ATM}"
+cp_glob "./src/core_atmosphere/physics/*.a"     "${LIB_ATM}"
+cp_glob "./src/external/esmf_time_f90/*.a"      "${LIB_ATM}"
+cp_glob "./src/external/SMIOL/*.a"              "${LIB_ATM}"
+cp_glob "./src/framework/*.a"                   "${LIB_ATM}"
+
 log_ok "Artefatos do 'atmosphere' copiados."
 
-# ── ETAPA 2 — Core 'init_atmosphere' (condições iniciais; opcional) ───────────
+# ── ETAPA 2 — Core 'init_atmosphere' (gerador de condições iniciais) ──────────
+# Pule com --skip-init-atm se não precisar gerar condições iniciais neste host.
 if [[ "${SKIP_INIT_ATM}" == false ]]; then
   log_step 2 2 "Core 'init_atmosphere' — compilação"
+
   make -j "${MAKE_JOBS}" gfortran-coupler-xd2000 CORE=init_atmosphere ${MAKE_ARGS} 2>&1 \
     | tee make-init_atmosphere.log
+
   timer_step "Core 'init_atmosphere' compilado"
 
   mkdir -p "${MOD_INIT}" "${LIB_INIT}"
@@ -136,10 +179,15 @@ log_sep
 echo ""
 log_info "Verificação: 6 bibliotecas do core 'atmosphere' em lib/monan2"
 echo ""
+
 _miss=0
 for _lib in libframework.a libdycore.a libphys.a libops.a libsmiolf.a libsmiol.a; do
-  if [[ -f "${LIB_ATM}/${_lib}" ]]; then log_ok "${_lib}"
-  else log_warn "${_lib}  <-- AUSENTE"; _miss=$(( _miss + 1 )); fi
+  if [[ -f "${LIB_ATM}/${_lib}" ]]; then
+    log_ok "${_lib}"
+  else
+    log_warn "${_lib}  <-- AUSENTE"
+    _miss=$(( _miss + 1 ))
+  fi
 done
 echo ""
 
