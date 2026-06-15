@@ -3,7 +3,7 @@
 # install-libs.bash — Biblioteca de funções compartilhadas
 # MONAN-A 2.0 × MOM6+SIS2 / NUOPC-ESMF 8.9.1
 # INPE / CGCT / DIMNT — GT Acoplamento de Modelos
-# Versão 1.1 — Junho 2026
+# Versão 1.2 — Junho 2026
 #
 # Deve ser carregada via 'source', nunca executada diretamente.
 # Fornece: log colorizado, cronômetro, cópia segura de globs,
@@ -113,17 +113,19 @@ cp_glob() {
   cp "${files[@]}" "${dest}"
 }
 
-# ── clone_if_missing — clona um repositório git apenas se ele ainda não existe ─
+# ── clone_if_missing — clona um repositório git se ele estiver ausente ou vazio ─
 #
 # Uso: clone_if_missing <DIR> <URL> [REF] [--recursive]
 #
-#   DIR          Diretório de destino. Se já existir, nada é feito (idempotente).
+#   DIR          Diretório de destino. Se já existir E contiver arquivos, nada é
+#                feito (idempotente). Se não existir ou estiver vazio, baixa.
 #   URL          URL do repositório git.
 #   REF          (opcional) tag ou branch para checkout após o clone.
 #   --recursive  (opcional) clona também os submódulos (--recursive).
 #
-# A ordem de REF e --recursive é livre. Retorna 0 se o diretório já existia ou
-# se o clone teve sucesso; retorna 1 se o git não estiver disponível ou falhar.
+# A ordem de REF e --recursive é livre. Retorna 0 se o diretório já estava
+# populado ou se o clone teve sucesso; retorna 1 se o git não estiver
+# disponível ou falhar.
 #
 clone_if_missing() {
   local dir="$1" url="$2"
@@ -138,10 +140,16 @@ clone_if_missing() {
     esac
   done
 
-  # Idempotência: presença do diretório basta para considerar já baixado.
-  if [[ -d "${dir}" ]]; then
+  # Idempotência: só considera "já baixado" um diretório que exista E contenha
+  # algo. Um diretório vazio (p.ex. resíduo de clone interrompido ou placeholder
+  # de submódulo) é tratado como ausente, permitindo o download.
+  if [[ -d "${dir}" ]] && \
+     [[ -n "$(find "${dir}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
     log_info "Repositório já presente (download ignorado): ${dir}"
     return 0
+  fi
+  if [[ -d "${dir}" ]]; then
+    log_warn "Diretório existe porém vazio — prosseguindo com o download: ${dir}"
   fi
 
   if ! command -v git &>/dev/null; then
