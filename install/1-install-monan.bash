@@ -30,6 +30,10 @@
 #   2. AUTOCLEAN=true faz o MPAS limpar o core anterior ao trocar CORE=. Por
 #      isso a cópia do core 'atmosphere' ocorre ANTES de compilar
 #      'init_atmosphere'; caso contrário os artefatos seriam apagados.
+#   3. Se o diretório MONAN-Model não existir, o script o baixa automaticamente
+#      de https://github.com/GTA-DIMNT-CPTEC/MONAN-Model e faz checkout do commit
+#      fixado (01962f03). Sobrescreva a origem e a revisão com as variáveis de
+#      ambiente MONAN_MODEL_URL e MONAN_MODEL_REF.
 # =============================================================================
 set -euo pipefail
 
@@ -68,11 +72,13 @@ LIB_ATM="${COUPLER_ROOT}/lib/monan2"
 MOD_INIT="${COUPLER_ROOT}/mod/init_atmosphere"
 LIB_INIT="${COUPLER_ROOT}/lib/init_atmosphere"
 
-# ── Pré-condição: árvore de fontes ────────────────────────────────────────────
-if [[ ! -d "${MONAN_MODEL}" ]]; then
-  log_error "Árvore de fontes não encontrada: ${MONAN_MODEL}"
-  exit 1
-fi
+# ── Pré-condição: árvore de fontes (baixa do GitHub se ausente) ───────────────
+# Origem e revisão (commit/tag/branch) sobrescrevíveis por variáveis de ambiente:
+#   export MONAN_MODEL_URL=https://github.com/MEU_USUARIO/MONAN-Model.git
+#   export MONAN_MODEL_REF=<commit|tag|branch>
+MONAN_MODEL_URL="${MONAN_MODEL_URL:-https://github.com/GTA-DIMNT-CPTEC/MONAN-Model.git}"
+MONAN_MODEL_REF="${MONAN_MODEL_REF:-01962f03d796d63e355fccf7e36010173570c31e}"
+clone_if_missing "${MONAN_MODEL}" "${MONAN_MODEL_URL}" "${MONAN_MODEL_REF}"
 
 # ── Módulos Jaci (Cray XD 2000 com PrgEnv-gnu) ────────────────────────────────
 log_sep

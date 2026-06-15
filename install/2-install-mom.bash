@@ -12,9 +12,9 @@
 #                  Use quando FMS e MOM6 já foram compilados anteriormente.
 #   --help         Exibe esta mensagem de ajuda e encerra.
 #
-# PRÉ-REQUISITO: árvore MOM6-examples clonada com submódulos:
-#   cd <raiz_acoplador>
-#   git clone --recursive https://github.com/NOAA-GFDL/MOM6-examples.git
+# DOWNLOAD AUTOMÁTICO: se a árvore MOM6-examples não existir, o script a baixa
+# de https://github.com/NOAA-GFDL/MOM6-examples (com submódulos). Sobrescreva a
+# origem com a variável de ambiente MOM6_EXAMPLES_URL.
 #
 # ARTEFATOS GERADOS (sob MOM6-examples/build/gnu/):
 #   shared/repro/libfms.a              infraestrutura FMS
@@ -65,13 +65,11 @@ unset _arg
 # =============================================================================
 MOM6_EXAMPLES_DIR="${COUPLER_ROOT}/MOM6-examples"
 
-if [[ ! -d "${MOM6_EXAMPLES_DIR}" ]]; then
-  log_error "Árvore MOM6-examples não encontrada: ${MOM6_EXAMPLES_DIR}"
-  log_info  "Clone com:"
-  log_info  "  cd ${COUPLER_ROOT}"
-  log_info  "  git clone --recursive https://github.com/NOAA-GFDL/MOM6-examples.git"
-  exit 1
-fi
+# Baixa o MOM6-examples (com submódulos) do GitHub se ainda não existir.
+# URL sobrescrevível por variável de ambiente (ex.: para usar um fork pessoal):
+#   export MOM6_EXAMPLES_URL=https://github.com/MEU_USUARIO/MOM6-examples.git
+MOM6_EXAMPLES_URL="${MOM6_EXAMPLES_URL:-https://github.com/NOAA-GFDL/MOM6-examples.git}"
+clone_if_missing "${MOM6_EXAMPLES_DIR}" "${MOM6_EXAMPLES_URL}" --recursive
 
 # =============================================================================
 # SEÇÃO DE CONFIGURAÇÃO — revise ao migrar de usuário ou máquina
@@ -79,6 +77,7 @@ fi
 
 # Módulos Cray XD 2000 (PrgEnv-gnu)
 module purge
+module load cray-pe-x86-turin
 module load PrgEnv-gnu/8.6.0
 module load cray-mpich/8.1.31
 module load autoconf/2.72

@@ -3,11 +3,12 @@
 # install-libs.bash — Biblioteca de funções compartilhadas
 # MONAN-A 2.0 × MOM6+SIS2 / NUOPC-ESMF 8.9.1
 # INPE / CGCT / DIMNT — GT Acoplamento de Modelos
-# Versão 1.0 — Junho 2026
+# Versão 1.1 — Junho 2026
 #
 # Deve ser carregada via 'source', nunca executada diretamente.
-# Fornece: log colorizado, cronômetro, cópia segura de globs e
-#          verificação de variáveis obrigatórias.
+# Fornece: log colorizado, cronômetro, cópia segura de globs,
+#          clone idempotente de repositórios git e verificação de
+#          variáveis de ambiente obrigatórias.
 #
 # Uso nos instaladores (SCRIPT_DIR já definido):
 #   source "${SCRIPT_DIR}/install-libs.bash"
@@ -110,6 +111,60 @@ cp_glob() {
     return 0
   fi
   cp "${files[@]}" "${dest}"
+}
+
+# ── clone_if_missing — clona um repositório git apenas se ele ainda não existe ─
+#
+# Uso: clone_if_missing <DIR> <URL> [REF] [--recursive]
+#
+#   DIR          Diretório de destino. Se já existir, nada é feito (idempotente).
+#   URL          URL do repositório git.
+#   REF          (opcional) tag ou branch para checkout após o clone.
+#   --recursive  (opcional) clona também os submódulos (--recursive).
+#
+# A ordem de REF e --recursive é livre. Retorna 0 se o diretório já existia ou
+# se o clone teve sucesso; retorna 1 se o git não estiver disponível ou falhar.
+#
+clone_if_missing() {
+  local dir="$1" url="$2"
+  shift 2
+
+  local recursive=false ref=""
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --recursive) recursive=true ;;
+      *)           ref="${arg}"   ;;
+    esac
+  done
+
+  # Idempotência: presença do diretório basta para considerar já baixado.
+  if [[ -d "${dir}" ]]; then
+    log_info "Repositório já presente (download ignorado): ${dir}"
+    return 0
+  fi
+
+  if ! command -v git &>/dev/null; then
+    log_error "git não encontrado no PATH — necessário para baixar ${url}"
+    return 1
+  fi
+
+  log_info "Baixando ${url}"
+  log_info "  → ${dir}"
+  if [[ "${recursive}" == true ]]; then
+    git clone --recursive "${url}" "${dir}" || return 1
+  else
+    git clone "${url}" "${dir}" || return 1
+  fi
+
+  if [[ -n "${ref}" ]]; then
+    log_info "Checkout da referência: ${ref}"
+    git -C "${dir}" checkout "${ref}" || return 1
+    [[ "${recursive}" == true ]] && \
+      git -C "${dir}" submodule update --init --recursive || true
+  fi
+
+  log_ok "Download concluído: ${dir}"
 }
 
 # ── check_var — verifica variáveis de ambiente obrigatórias ───────────────────

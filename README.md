@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.8 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.9 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -50,13 +50,17 @@ sem mediador.
 
 ## Início rápido
 
-Clone o repositório e a árvore MOM6-examples (com submódulos):
+Clone o repositório do acoplador:
 
 ```bash
 git clone https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git
 cd MONAN-Coupler
-git clone --recursive https://github.com/NOAA-GFDL/MOM6-examples.git
 ```
+
+As árvores de fontes **MONAN-Model** e **MOM6-examples** (esta com submódulos)
+são **baixadas automaticamente** pelos instaladores caso ainda não existam — não
+é preciso cloná-las manualmente. Para usar um fork ou outra origem, defina
+`MONAN_MODEL_URL` e/ou `MOM6_EXAMPLES_URL` antes de instalar.
 
 Pré-requisito adicional: ESMF 8.9.1 já instalado (com MOAB interno), localizado
 por `run/setenv-gnu.bash`.
@@ -89,6 +93,18 @@ Scripts em `install/` (funções comuns em `install-libs.bash`):
 | `3-install-coupler.bash` |   3   | Compila e linka `bin/esmApp`             |
 
 Opções úteis: `install-all.bash --from N` (retoma na etapa N), `1-install-monan.bash --skip-init-atm`, `2-install-mom.bash --only-nuopc`.
+
+**Download automático das fontes.** As etapas 1 e 2 baixam, respectivamente,
+o **MONAN-Model** e o **MOM6-examples** (com submódulos) do GitHub se os
+diretórios ainda não existirem — clones já presentes são preservados
+(operação idempotente). Origens sobrescrevíveis via `MONAN_MODEL_URL` e
+`MOM6_EXAMPLES_URL`:
+
+```bash
+export MONAN_MODEL_URL=https://github.com/MEU_USUARIO/MONAN-Model.git
+export MOM6_EXAMPLES_URL=https://github.com/MEU_USUARIO/MOM6-examples.git
+bash install/install-all.bash
+```
 
 **ESMF e MOAB.** O acoplador usa o ESMF 8.9.1 via `esmf.mk` (variáveis
 `ESMF_ROOT`/`ESMFMKFILE`, definidas em `run/setenv-gnu.bash`). O MOAB é **interno
@@ -311,6 +327,7 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.9   | Jun 2026 | Download automático de MONAN-Model e MOM6-examples         |
 | 14.8   | Jun 2026 | Pipeline `install-all`; ESMF via `esmf.mk`; MOAB interno   |
 | 14.7   | Jun 2026 | Layout do MONAN-A em `mod/monan2` e `lib/monan2`           |
 | 14.2   | Mai 2026 | `analisa_sst_ifrac.py`: série, anomalia e métricas         |
