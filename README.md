@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.10 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.11 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -237,17 +237,29 @@ make diagnose   # estado do build e objetos
 make check      # confere a presença dos fontes
 ```
 
+Rode o `run_esmApp.jaci` a partir da própria árvore do projeto — o diretório de
+experimento é apenas o diretório atual (onde ficam `nuopc.input`, namelists,
+malha e as saídas). Coloque `run/` no `PATH` uma vez e invoque de qualquer
+experimento, sem copiar scripts nem o binário:
+
 ```bash
-bash run/run_esmApp.jaci                     # 4 PETs, fila pesqextra, 1 h
-bash run/run_esmApp.jaci -n 128              # 128 PETs
-bash run/run_esmApp.jaci -n 512 -w 02:00:00  # 512 PETs, 2 h
-bash run/run_esmApp.jaci --compile -n 4      # make rebuild + qsub
-bash run/run_esmApp.jaci --check             # valida pré-requisitos
+export PATH="$PATH:/…/MONAN-Coupler/run"     # uma vez (ex.: no ~/.bashrc)
+
+cd /…/exp1                                    # entradas do run
+run_esmApp.jaci -n 128                         # 128 PETs
+run_esmApp.jaci -n 512 -w 02:00:00             # 512 PETs, 2 h
+run_esmApp.jaci --compile -n 4                 # make rebuild + qsub
+run_esmApp.jaci --check                        # valida pré-requisitos
 ```
 
 O `run_esmApp.jaci` detecta o ambiente via `PBS_O_WORKDIR`: no login gera o
-`.pbs` e faz `qsub`; dentro do job carrega módulos, faz `source setenv-gnu.bash`
-e executa `mpirun`. Escalabilidade validada: 4 → 512 PETs.
+`.pbs` e faz `qsub`; dentro do job carrega módulos, faz `source` do `setenv` e
+executa `mpirun`. A raiz do projeto vem de `COUPLER_ROOT`, autodeduzida da
+localização do script e propagada ao job pelo `.pbs`; ao rodar de fora da árvore,
+sobrescreva com `export COUPLER_ROOT=…`. O `setenv` e o executável
+(`${COUPLER_ROOT}/bin/esmApp`, sobrescrevível por `ESMAPP_BIN`) são resolvidos na
+árvore do projeto — o diretório de experimento guarda só as entradas e saídas.
+Escalabilidade validada: 4 → 512 PETs.
 
 ---
 
@@ -350,6 +362,7 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.11  | Jun 2026 | Execução relocável: `COUPLER_ROOT`, run via `PATH`, sem cópias |
 | 14.10  | Jun 2026 | Configuração de sítio centralizada em `site-jaci.bash`     |
 | 14.9   | Jun 2026 | Download automático de MONAN-Model e MOM6-examples         |
 | 14.8   | Jun 2026 | Pipeline `install-all`; ESMF via `esmf.mk`; MOAB interno   |
