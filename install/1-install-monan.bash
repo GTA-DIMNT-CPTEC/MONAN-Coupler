@@ -44,6 +44,15 @@ COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ── Carrega biblioteca de funções ─────────────────────────────────────────────
 source "${SCRIPT_DIR}/install-libs.bash"
 
+# ── Carrega a configuração de sítio (ESMF, módulos, paralelismo, alvos) ───────
+SITE_ENV="${SITE_ENV:-${SCRIPT_DIR}/site-jaci.bash}"
+if [[ ! -f "${SITE_ENV}" ]]; then
+  log_error "Configuração de sítio não encontrada: ${SITE_ENV}"
+  log_info  "Edite install/site-jaci.bash ou aponte SITE_ENV para outro arquivo."
+  exit 1
+fi
+source "${SITE_ENV}"
+
 # ── Análise de opções ─────────────────────────────────────────────────────────
 SKIP_INIT_ATM=false
 
@@ -84,17 +93,8 @@ clone_if_missing "${MONAN_MODEL}" "${MONAN_MODEL_URL}" "${MONAN_MODEL_REF}"
 log_sep
 log_info "Carregando módulos do ambiente Jaci..."
 module purge
-module load PrgEnv-gnu
-module load craype-x86-turin
-module load cray-hdf5/1.14.3.3
-module load cray-parallel-netcdf
-module load xpmem/0.2.119-1.3_gef379be13330
-module load grads/2.2.1.oga.1
-module load cdo/2.4.2
-module load METIS/5.1.0
-module load cray-pals
-module load cray-python
-module load ncview
+for _m in "${MODULES_MONAN[@]}"; do module load "${_m}"; done
+unset _m
 log_info "Módulos carregados:"
 module list 2>&1 | grep -E '^\s+[0-9]+\)' | sed 's/^/    /'
 
@@ -109,7 +109,6 @@ cd "${MONAN_MODEL}"
 
 # Flags de compilação — comuns aos dois cores
 MAKE_ARGS="OPENMP=true USE_PIO2=false PRECISION=double AUTOCLEAN=true"
-MAKE_JOBS=8
 
 # ── ETAPA 1 — Core 'atmosphere' (compilação e cópia dos artefatos) ────────────
 # A cópia DEVE ocorrer ANTES da compilação do 'init_atmosphere': com
@@ -117,7 +116,7 @@ MAKE_JOBS=8
 log_step 1 2 "Core 'atmosphere' — compilação"
 timer_start
 
-make -j "${MAKE_JOBS}" gfortran-coupler-xd2000 CORE=atmosphere ${MAKE_ARGS} 2>&1 \
+make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=atmosphere ${MAKE_ARGS} 2>&1 \
   | tee make-atmosphere.log
 
 timer_step "Core 'atmosphere' compilado"
@@ -127,7 +126,6 @@ log_step 1 2 "Core 'atmosphere' — cópia dos artefatos para ${MOD_ATM} / ${LIB
 mkdir -p "${MOD_ATM}" "${LIB_ATM}"
 
 # Módulos (.mod) → mod/monan2
-# cp_glob é tolerante a diretórios sem .mod; continua sem abortar.
 cp_glob "./src/core_atmosphere/*.mod"                                     "${MOD_ATM}"
 cp_glob "./src/core_atmosphere/diagnostics/*.mod"                         "${MOD_ATM}"
 cp_glob "./src/core_atmosphere/physics/*.mod"                             "${MOD_ATM}"
@@ -161,7 +159,7 @@ log_ok "Artefatos do 'atmosphere' copiados."
 if [[ "${SKIP_INIT_ATM}" == false ]]; then
   log_step 2 2 "Core 'init_atmosphere' — compilação"
 
-  make -j "${MAKE_JOBS}" gfortran-coupler-xd2000 CORE=init_atmosphere ${MAKE_ARGS} 2>&1 \
+  make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=init_atmosphere ${MAKE_ARGS} 2>&1 \
     | tee make-init_atmosphere.log
 
   timer_step "Core 'init_atmosphere' compilado"
@@ -181,7 +179,7 @@ log_info "Verificação: 6 bibliotecas do core 'atmosphere' em lib/monan2"
 echo ""
 
 _miss=0
-for _lib in libframework.a libdycore.a libphys.a libops.a libsmiolf.a libsmiol.a; do
+for _lib in "${MONAN2_LIBS[@]}"; do
   if [[ -f "${LIB_ATM}/${_lib}" ]]; then
     log_ok "${_lib}"
   else

@@ -39,6 +39,15 @@ COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # --- Carrega biblioteca de funções -------------------------------------------
 source "${SCRIPT_DIR}/install-libs.bash"
 
+# --- Carrega a configuração de sítio (ESMF, módulos, paralelismo, wrappers) ---
+SITE_ENV="${SITE_ENV:-${SCRIPT_DIR}/site-jaci.bash}"
+if [[ ! -f "${SITE_ENV}" ]]; then
+  log_error "Configuração de sítio não encontrada: ${SITE_ENV}"
+  log_info  "Edite install/site-jaci.bash ou aponte SITE_ENV para outro arquivo."
+  exit 1
+fi
+source "${SITE_ENV}"
+
 # =============================================================================
 # Análise de opções
 # =============================================================================
@@ -78,29 +87,20 @@ clone_if_missing "${MOM6_EXAMPLES_DIR}" "${MOM6_EXAMPLES_URL}" "${MOM6_EXAMPLES_
 # SEÇÃO DE CONFIGURAÇÃO — revise ao migrar de usuário ou máquina
 # =============================================================================
 
-# Módulos Cray XD 2000 (PrgEnv-gnu)
+# Módulos Cray XD 2000 (definidos em site-jaci.bash → MODULES_MOM6).
+# MOM6/FMS usam NetCDF/HDF5 seriais (cray-netcdf), não o parallel-netcdf do
+# MPAS; o wrapper 'ftn' injeta includes e libs quando o módulo está carregado.
 module purge
-module load craype-x86-turin
-module load PrgEnv-gnu/8.6.0
-module load cray-mpich/8.1.31
-module load autoconf/2.72
-module load libfabric/1.22.0
-module load cray-pals/1.6.1
-# NetCDF/HDF5 seriais para MOM6/FMS — o wrapper 'ftn' injeta includes e libs
-# automaticamente quando estes módulos estão carregados.
-# Use cray-netcdf (serial), não cray-parallel-netcdf (usado pelo MPAS/PNETCDF).
-module load cray-hdf5/1.14.3.3
-module load cray-netcdf
+for _m in "${MODULES_MOM6[@]}"; do module load "${_m}"; done
+unset _m
 log_info "Módulos carregados:"
 module list 2>&1 | grep -E '^\s+[0-9]+\)' | sed 's/^/    /'
 
-# ESMF — instalação canônica (ESMF 8.9.1), resolvida via esmf.mk. Este é o
-# único ponto de configuração do ESMF: sobrescreva com a variável de ambiente
-# ESMFMKFILE para apontar para outra instalação, sem editar o script.
-ESMFMKFILE="${ESMFMKFILE:-/p/projetos/monan_adm/daniel.massaru/Acopladores/esmf-8.9.1/lib/libO/Linux.gfortran.64.mpich2.default/esmf.mk}"
+# ESMF — esmf.mk definido em site-jaci.bash (ESMFMKFILE), sobrescrevível por
+# ambiente. É o único ponto de configuração do ESMF.
 if [[ ! -f "${ESMFMKFILE}" ]]; then
   log_error "esmf.mk não encontrado: ${ESMFMKFILE}"
-  log_info  "Defina ESMFMKFILE apontando para o esmf.mk da sua instalação ESMF."
+  log_info  "Ajuste ESMF_ROOT/ESMFMKFILE em site-jaci.bash ou exporte ESMFMKFILE."
   exit 1
 fi
 
@@ -115,10 +115,8 @@ export PATH="$(_esmf_mk ESMF_APPSDIR):${PATH}"
 export LD_LIBRARY_PATH="$(_esmf_mk ESMF_LIBDIR):${LD_LIBRARY_PATH:-}"
 log_ok "ESMF via ${ESMFMKFILE}"
 
-# Wrappers Cray — nunca usar gfortran/gcc direto
-export FC=ftn
-export CC=cc
-export LD=ftn
+# Wrappers Cray (valores definidos em site-jaci.bash; nunca gfortran/gcc direto).
+export FC CC LD
 
 # Habilita a compilação do MOM6 com gelo marinho SIS2 (recomendado).
 # Mude para false para compilar apenas oceano sem gelo (ocean_only).
@@ -157,7 +155,6 @@ if grep -q 'lib_gnucray/netcdf' "${TEMPLATE_MK}"; then
 fi
 log_ok "Template mkmf: ${TEMPLATE_MK}"
 
-MAKE_JOBS=8
 timer_start
 
 # =============================================================================

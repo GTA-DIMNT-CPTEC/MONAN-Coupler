@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.9 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.10 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -94,6 +94,28 @@ Scripts em `install/` (funções comuns em `install-libs.bash`):
 
 Opções úteis: `install-all.bash --from N` (retoma na etapa N), `1-install-monan.bash --skip-init-atm`, `2-install-mom.bash --only-nuopc`.
 
+**Configuração de sítio (`install/site-jaci.bash`).** Este é o **único arquivo a
+editar** ao trocar de usuário, máquina ou versões de módulo. Centraliza tudo que
+é específico do ambiente: caminho do ESMF, listas de módulos, alvo de CPU,
+paralelismo (`MAKE_JOBS`) e wrappers do compilador. Os instaladores e o
+`run/setenv-gnu.bash` o carregam automaticamente. Três formas de uso, da mais
+simples à mais flexível:
+
+- **Jaci (padrão):** nada a fazer — os valores já estão corretos.
+- **Ajuste pontual**, sem editar o arquivo: exporte a variável antes de instalar
+  (qualquer valor já exportado tem prioridade sobre o padrão do sítio).
+  ```bash
+  export MAKE_JOBS=16
+  export ESMF_ROOT=/meu/caminho/esmf-8.9.1
+  bash install/install-all.bash
+  ```
+- **Outra máquina:** copie o arquivo, ajuste os valores e aponte `SITE_ENV`:
+  ```bash
+  cp install/site-jaci.bash install/site-meuhost.bash   # edite os valores
+  export SITE_ENV=install/site-meuhost.bash
+  bash install/install-all.bash
+  ```
+
 **Download automático das fontes.** As etapas 1 e 2 baixam, respectivamente,
 o **MONAN-Model** e o **MOM6-examples** (com submódulos) do GitHub se os
 diretórios ainda não existirem — clones já presentes são preservados
@@ -107,9 +129,9 @@ bash install/install-all.bash
 ```
 
 **ESMF e MOAB.** O acoplador usa o ESMF 8.9.1 via `esmf.mk` (variáveis
-`ESMF_ROOT`/`ESMFMKFILE`, definidas em `run/setenv-gnu.bash`). O MOAB é **interno
-ao `libesmf`** — não há `-lMOAB` externo. Para um ESMF com MOAB externo, defina
-`USE_EXTERNAL_MOAB=yes` e `MOAB_DIR` (mesma variável no Makefile e no `setenv`).
+`ESMF_ROOT`/`ESMFMKFILE`, definidas em `install/site-jaci.bash`). O MOAB é
+**interno ao `libesmf`** — não há `-lMOAB` externo. Para um ESMF com MOAB externo,
+defina `USE_EXTERNAL_MOAB=yes` e `MOAB_DIR` (mesma variável no Makefile e no `setenv`).
 
 **Template mkmf.** O `2-install-mom.bash` usa
 `install/templates/cray-gnu-monan.mk` (versionado no repositório, livre de
@@ -125,7 +147,8 @@ MONAN-Coupler/
 ├── nuopc.input                 ← namelist de acoplamento
 ├── install/
 │   ├── install-all.bash        ← orquestra as etapas 1→2→3
-│   ├── install-libs.bash       ← funções comuns (log, timer, cópia)
+│   ├── install-libs.bash       ← funções comuns (log, timer, cópia, clone)
+│   ├── site-jaci.bash          ← configuração de sítio (ESMF, módulos, alvos)
 │   ├── 1-install-monan.bash    ← etapa 1 — MONAN-A 2.0
 │   ├── 2-install-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
 │   ├── 3-install-coupler.bash  ← etapa 3 — linka bin/esmApp
@@ -327,6 +350,7 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.10  | Jun 2026 | Configuração de sítio centralizada em `site-jaci.bash`     |
 | 14.9   | Jun 2026 | Download automático de MONAN-Model e MOM6-examples         |
 | 14.8   | Jun 2026 | Pipeline `install-all`; ESMF via `esmf.mk`; MOAB interno   |
 | 14.7   | Jun 2026 | Layout do MONAN-A em `mod/monan2` e `lib/monan2`           |
