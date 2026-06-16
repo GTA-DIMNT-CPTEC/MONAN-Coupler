@@ -39,7 +39,11 @@ _chk_dir() {
   fi
 }
 
-_COUPLER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Raiz do MONAN-Coupler (onde ficam install/, run/, lib/, mod/, src/). Por
+# padrão é derivada da localização deste script (<raiz>/run/setenv-gnu.bash).
+# Ao rodar de um diretório de experimento fora da árvore do projeto, exporte
+# COUPLER_ROOT apontando para a raiz — todos os caminhos abaixo o seguem.
+_COUPLER_ROOT="${COUPLER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 # Configuração de sítio (ESMF, módulos, alvos, lista de libs). Fonte única dos
 # padrões específicos da máquina; sobrescrevível por ambiente ou via SITE_ENV.

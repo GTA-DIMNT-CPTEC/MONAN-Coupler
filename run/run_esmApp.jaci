@@ -12,12 +12,21 @@
 # =============================================================================
 
 # ─── Constantes do projeto ────────────────────────────────────────────────────
-readonly EXECUTABLE="bin/esmApp"
 readonly PBS_SCRIPT="esmApp-integrado.pbs"
 readonly LOG_RUN="logs/esmApp_run.log"
 readonly LOG_ATM="log.atmosphere.0000.d0001.out"
 readonly CONFIG_FILE="nuopc.input"
 readonly SETENV_SCRIPT="setenv-gnu.bash"
+
+# Raiz do MONAN-Coupler (run/, install/, lib/, mod/, bin/). Por padrão é a pasta
+# que contém este script; ao executar de um diretório de experimento separado
+# da árvore do projeto, exporte COUPLER_ROOT apontando para a raiz. O valor é
+# propagado ao job PBS (ver geração do .pbs adiante).
+export COUPLER_ROOT="${COUPLER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Executável resolvido na árvore do projeto (não precisa estar no diretório de
+# experimento). Sobrescrevível por ESMAPP_BIN para usar um binário específico.
+EXECUTABLE="${ESMAPP_BIN:-${COUPLER_ROOT}/bin/esmApp}"
 
 # Lê campo simples do nuopc.input (ignora comentários ! e aspas).
 _nuopc_get() {
@@ -48,11 +57,9 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   module load cray-pals
   module load METIS/5.1.0
 
-  # ── Ambiente MONAN-A 2.0 ───────────────────────────────────────────────────
-  # Exporta ESMFMKFILE, MPAS_DIR, GFORTRAN_CONVERT_UNIT e LD_LIBRARY_PATH
-  # (MONAN + ESMF + MOM6/FMS/MOAB).
+  # ── Ambiente MONAN-A 2.0 (carregado da árvore do projeto) ──────────────────
   # shellcheck source=setenv-gnu.bash
-  source "${PBS_O_WORKDIR}/${SETENV_SCRIPT}" \
+  source "${COUPLER_ROOT}/run/${SETENV_SCRIPT}" \
     || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
 
   export ESMF_RUNTIME_COMPLIANCECHECK=OFF
@@ -314,10 +321,9 @@ done
 # ── Compilação opcional ───────────────────────────────────────────────────────
 if [[ "${COMPILE_FIRST}" -eq 1 ]]; then
   echo "=== Compilando sistema acoplado ==="
-  [[ ! -f "${SETENV_SCRIPT}" ]] && \
-    { echo "ERRO: ${SETENV_SCRIPT} não encontrado."; exit 1; }
-  source "${SETENV_SCRIPT}"
-  make rebuild
+  source "${COUPLER_ROOT}/run/${SETENV_SCRIPT}" \
+    || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
+  make -C "${COUPLER_ROOT}" rebuild
   echo "=== Compilação concluída: ${EXECUTABLE} ==="
   echo ""
 fi
@@ -471,7 +477,8 @@ cat > "${PBS_SCRIPT}" << HEREDOC
 # ATM=${ATM_MODE_LABEL}  OCN=${OCN_MODE_LABEL}
 # Início=${START_DATE:-?}  Fim=${STOP_DATE:-?}  dt_coupling=${DT_COUP:-?}s
 # Diretório: ${WORKDIR}
-exec bash "${WORKDIR}/run_esmApp.jaci"
+export COUPLER_ROOT=${COUPLER_ROOT}
+exec bash "${COUPLER_ROOT}/run/run_esmApp.jaci"
 HEREDOC
 
 echo ""
