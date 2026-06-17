@@ -37,6 +37,29 @@ _nuopc_get() {
 # Retorna 0 (verdadeiro) se o valor Fortran for .true. ou true.
 _is_true() { echo "$1" | grep -qi '\.true\.\|^true$'; }
 
+# Conta quantos arquivos casam um glob (0 se nenhum). Centraliza o antigo
+# idioma 'ls ... | wc -l' e dispensa o ajuste de espaços do wc.
+_count_files() {
+  local -a m=()
+  shopt -s nullglob
+  # shellcheck disable=SC2206  # globbing de $1 é intencional
+  m=( $1 )
+  shopt -u nullglob
+  echo "${#m[@]}"
+}
+
+# Mapeia um código de saída → causa legível. Usado pelos relatórios de erro dos
+# dois modos (PBS e interativo). Usa NPES (global) na mensagem de OOM.
+_exit_reason() {
+  case "$1" in
+    1)   echo "erro de aplicação (ESMF/MPI/MOM6 — ver logs)" ;;
+    127) echo "comando não encontrado (módulos ou LD_LIBRARY_PATH)" ;;
+    137) echo "SIGKILL (OOM killer) — memória insuficiente para ${NPES} PETs" ;;
+    143) echo "SIGTERM — PBS encerrou o job (walltime, memória ou qdel)" ;;
+    *)   echo "sinal $(( $1 - 128 )) (exit=$1)" ;;
+  esac
+}
+
 # =============================================================================
 # MODO PBS  —  execução dentro do job submetido pelo daemon
 # =============================================================================
@@ -152,23 +175,14 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 
   # ── Diagnóstico de erro (invocada apenas se STATUS ≠ 0) ────────────────────
   _exit_diagnostics() {
-    local status="$1" sig reason hint_mem=""
+    local status="$1" reason hint_mem=""
 
-    [[ "${status}" -gt 128 ]] && sig=$(( status - 128 )) || sig=0
-
-    case "${status}" in
-      1)   reason="erro de aplicação (ESMF/MPI/MOM6 — ver logs abaixo)" ;;
-      127) reason="comando não encontrado — verificar LD_LIBRARY_PATH e módulos" ;;
-      137) reason="SIGKILL (OOM killer) — memória física insuficiente para ${NPES} PETs"
-           hint_mem=1 ;;
-      143) reason="SIGTERM — PBS encerrou o job (walltime, memória ou qdel)"
-           hint_mem=1 ;;
-      *)   reason="sinal ${sig} (exit=${status})" ;;
-    esac
+    reason=$(_exit_reason "${status}")
+    [[ "${status}" -eq 137 || "${status}" -eq 143 ]] && hint_mem=1
 
     local n_exp n_imp
-    n_exp=$(printf '%d' "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
-    n_imp=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+    n_exp=$(_count_files "diag_export/monan_export_????????_??????.nc")
+    n_imp=$(_count_files "diag_import/mom6_import_????????_??????.nc")
 
     echo "======================================================================"
     echo " ERRO: mpirun encerrado — exit=${status}"
@@ -229,8 +243,8 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 
   # ── Relatório final (modo PBS) ──────────────────────────────────────────────
   if [[ "${STATUS}" -eq 0 ]]; then
-    N_NC=$(printf '%d'   "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
-    N_DIAG=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+    N_NC=$(_count_files "diag_export/monan_export_????????_??????.nc")
+    N_DIAG=$(_count_files "diag_import/mom6_import_????????_??????.nc")
     echo "======================================================================"
     echo " EXECUÇÃO CONCLUÍDA COM SUCESSO"
     echo ""
@@ -321,6 +335,7 @@ done
 # ── Compilação opcional ───────────────────────────────────────────────────────
 if [[ "${COMPILE_FIRST}" -eq 1 ]]; then
   echo "=== Compilando sistema acoplado ==="
+  # shellcheck source=setenv-gnu.bash
   source "${COUPLER_ROOT}/run/${SETENV_SCRIPT}" \
     || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
   make -C "${COUPLER_ROOT}" rebuild
@@ -524,8 +539,8 @@ fi
 
 echo ""
 if [[ "${EXIT_CODE}" -eq 0 ]] 2>/dev/null; then
-  N_NC=$(printf '%d'   "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
-  N_DIAG=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+  N_NC=$(_count_files "diag_export/monan_export_????????_??????.nc")
+  N_DIAG=$(_count_files "diag_import/mom6_import_????????_??????.nc")
   echo "======================================================================"
   echo " JOB CONCLUÍDO COM SUCESSO  (${JOBID})"
   echo ""
@@ -545,20 +560,14 @@ if [[ "${EXIT_CODE}" -eq 0 ]] 2>/dev/null; then
   echo "======================================================================"
 else
   echo "======================================================================"
-  case "${EXIT_CODE}" in
-    143) exit_reason="SIGTERM — PBS encerrou o job (walltime, memória ou qdel)" ;;
-    137) exit_reason="SIGKILL (OOM killer) — memória insuficiente no nó" ;;
-    1)   exit_reason="erro de aplicação (ESMF/MPI/MOM6)" ;;
-    127) exit_reason="comando não encontrado (módulos ou LD_LIBRARY_PATH)" ;;
-    *)   exit_reason="sinal $((EXIT_CODE - 128)) (exit=${EXIT_CODE})" ;;
-  esac
+  exit_reason=$(_exit_reason "${EXIT_CODE}")
 
   echo " JOB ENCERRADO COM ERRO  (exit=${EXIT_CODE}, job=${JOBID})"
   echo " Causa : ${exit_reason}"
   echo ""
 
-  n_exp=$(printf '%d' "$(ls diag_export/monan_export_????????_??????.nc 2>/dev/null | wc -l)")
-  n_imp=$(printf '%d' "$(ls diag_import/mom6_import_????????_??????.nc  2>/dev/null | wc -l)")
+  n_exp=$(_count_files "diag_export/monan_export_????????_??????.nc")
+  n_imp=$(_count_files "diag_import/mom6_import_????????_??????.nc")
   if [[ "${n_exp}" -gt 0 ]]; then
     printf " Progresso  : %s passo(s) de acoplamento concluído(s)\n" "${n_exp}"
     [[ "${n_imp}" -gt 0 ]] && \

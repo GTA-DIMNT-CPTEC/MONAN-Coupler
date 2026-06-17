@@ -19,16 +19,34 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# shellcheck source=install-libs.bash
 source "${SCRIPT_DIR}/install-libs.bash"
 
 # ── Opções ────────────────────────────────────────────────────────────────────
 NO_CLEAN=false
-_uso() { sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'; exit 0; }
+
+usage() {
+  cat << 'EOF'
+Uso: bash install/3-install-coupler.bash [--no-clean] [--help]
+
+  Compila e linka o acoplador no executável final bin/esmApp
+  (3ª e última etapa). Requer lib/monan2 (etapa 1) e lib/{fms,mom6,nuopc}
+  (etapa 2).
+
+Opções:
+  --no-clean   Pula 'make clean' (recompilação incremental).
+  --help, -h   Esta mensagem.
+
+ATENÇÃO: usa 'make clean' (apaga build/ e bin/), nunca 'make distclean'
+(que removeria lib/ e mod/ instalados pelas etapas 1 e 2).
+EOF
+  exit 0
+}
 
 for _arg in "$@"; do
   case "${_arg}" in
     --no-clean) NO_CLEAN=true ;;
-    --help|-h)  _uso ;;
+    --help|-h)  usage ;;
     *) log_error "Opção desconhecida: ${_arg}   (use --help)"; exit 1 ;;
   esac
 done
@@ -40,6 +58,7 @@ if [[ ! -f "${SETENV}" ]]; then
   log_error "Arquivo de ambiente não encontrado: ${SETENV}"
   exit 1
 fi
+# shellcheck source=/dev/null
 source "${SETENV}"
 
 if ! check_var ESMFMKFILE MPAS_DIR; then
@@ -69,7 +88,7 @@ echo ""
 if [[ -f "${COUPLER_ROOT}/bin/esmApp" ]]; then
   timer_total "Acoplador compilado em"
   echo ""
-  _info=$(ls -lh "${COUPLER_ROOT}/bin/esmApp" | awk '{print $5, $6, $7, $8}')
+  _info=$(stat -c '%s bytes, %y' "${COUPLER_ROOT}/bin/esmApp" | cut -d. -f1)
   log_ok "bin/esmApp  [${_info}]"
   echo ""
   log_info "Próximo passo: bash run/run_esmApp.jaci -n 128"

@@ -23,7 +23,7 @@ fi
 # ── Colorização ───────────────────────────────────────────────────────────────
 # Ativada somente quando stdout é um terminal que suporta cores; caso
 # contrário todas as variáveis ficam vazias (saída limpa em logs/arquivos).
-if [[ -t 1 ]] && command -v tput &>/dev/null && tput colors &>/dev/null 2>&1; then
+if [[ -t 1 ]] && command -v tput &>/dev/null && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   _C_VD=$(tput setaf 2)    # verde   — OK / sucesso
   _C_AM=$(tput setaf 3)    # amarelo — aviso
   _C_VM=$(tput setaf 1)    # vermelho — erro
@@ -101,8 +101,10 @@ cp_glob() {
   local pattern="$1" dest="$2"
   local -a files=()
 
-  # nullglob: o glob literal não é passado ao cp quando não há correspondência
+  # nullglob: o glob literal não é passado ao cp quando não há correspondência.
+  # A expansão de ${pattern} sem aspas é intencional (queremos o globbing).
   shopt -s nullglob
+  # shellcheck disable=SC2206  # word splitting/globbing são desejados aqui
   files=( ${pattern} )
   shopt -u nullglob
 
@@ -189,4 +191,39 @@ check_var() {
     fi
   done
   return ${rc}
+}
+
+# ── load_site_env — carrega a configuração de sítio (ESMF, módulos, alvos) ─────
+#
+# Uso: load_site_env <DIR_DO_SCRIPT>
+#
+# Procura ${SITE_ENV:-<DIR>/site-jaci.bash}, valida a existência e faz source.
+# Como arrays e exports do site são atribuições globais, propagam-se ao chamador
+# mesmo sendo sourced aqui. Aborta (exit 1) se o arquivo não existir.
+#
+load_site_env() {
+  local dir="$1"
+  SITE_ENV="${SITE_ENV:-${dir}/site-jaci.bash}"
+  if [[ ! -f "${SITE_ENV}" ]]; then
+    log_error "Configuração de sítio não encontrada: ${SITE_ENV}"
+    log_info  "Edite install/site-jaci.bash ou aponte SITE_ENV para outro arquivo."
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "${SITE_ENV}"
+}
+
+# ── load_modules — purga, carrega a lista de módulos e a exibe ────────────────
+#
+# Uso: load_modules <modulo1> <modulo2> ...   (ex.: load_modules "${MODULES_MONAN[@]}")
+#
+# Encapsula 'module purge' + 'module load' de cada item + a listagem formatada,
+# escondendo o idioma 'module list | grep | sed' dos scripts chamadores.
+#
+load_modules() {
+  local m
+  module purge
+  for m in "$@"; do module load "${m}"; done
+  log_info "Módulos carregados:"
+  module list 2>&1 | grep -E '^\s+[0-9]+\)' | sed 's/^/    /'
 }

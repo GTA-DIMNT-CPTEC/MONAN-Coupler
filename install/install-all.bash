@@ -18,20 +18,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=install-libs.bash
 source "${SCRIPT_DIR}/install-libs.bash"
 
 # ── Opções ────────────────────────────────────────────────────────────────────
 FROM_STEP=1
 ONLY_STEP=0   # 0 = todas a partir de FROM_STEP
-_uso() { sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'; exit 0; }
+
+usage() {
+  cat << 'EOF'
+Uso: bash install/install-all.bash [--from N] [--only N] [--help]
+
+  Orquestra as 3 etapas de instalação na ordem de dependência:
+    1 MONAN-A 2.0  →  2 MOM6+SIS2+cap NUOPC  →  3 acoplador (bin/esmApp)
+
+Opções:
+  --from N   Inicia na etapa N (1-3), assumindo as anteriores já prontas.
+  --only N   Executa somente a etapa N.
+  --help     Esta mensagem.
+
+Exemplos:
+  bash install/install-all.bash            # completa (1-2-3)
+  bash install/install-all.bash --from 2   # pula MONAN-A
+  bash install/install-all.bash --only 3   # (re)linka bin/esmApp
+EOF
+  exit 0
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --from) [[ $# -lt 2 ]] && { log_error "--from exige um número (1-3)"; exit 1; }
+    --from) [[ "${2:-}" =~ ^[1-3]$ ]] || { log_error "--from exige um número (1-3)"; exit 1; }
             FROM_STEP="$2"; shift 2 ;;
-    --only) [[ $# -lt 2 ]] && { log_error "--only exige um número (1-3)"; exit 1; }
+    --only) [[ "${2:-}" =~ ^[1-3]$ ]] || { log_error "--only exige um número (1-3)"; exit 1; }
             ONLY_STEP="$2"; FROM_STEP="$2"; shift 2 ;;
-    --help|-h) _uso ;;
+    --help|-h) usage ;;
     *) log_error "Opção desconhecida: $1   (use --help)"; exit 1 ;;
   esac
 done

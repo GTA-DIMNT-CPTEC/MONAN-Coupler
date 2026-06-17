@@ -42,29 +42,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ── Carrega biblioteca de funções ─────────────────────────────────────────────
+# shellcheck source=install-libs.bash
 source "${SCRIPT_DIR}/install-libs.bash"
 
 # ── Carrega a configuração de sítio (ESMF, módulos, paralelismo, alvos) ───────
-SITE_ENV="${SITE_ENV:-${SCRIPT_DIR}/site-jaci.bash}"
-if [[ ! -f "${SITE_ENV}" ]]; then
-  log_error "Configuração de sítio não encontrada: ${SITE_ENV}"
-  log_info  "Edite install/site-jaci.bash ou aponte SITE_ENV para outro arquivo."
-  exit 1
-fi
-source "${SITE_ENV}"
+load_site_env "${SCRIPT_DIR}"
 
 # ── Análise de opções ─────────────────────────────────────────────────────────
 SKIP_INIT_ATM=false
 
-_uso() {
-  sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'
+usage() {
+  cat << 'EOF'
+Uso: bash install/1-install-monan.bash [OPÇÕES]
+
+  Compila o MONAN-A 2.0 (MPAS-A 8.3.1) e consolida módulos (.mod) e
+  bibliotecas (.a) em mod/monan2 e lib/monan2 para o Makefile do acoplador.
+
+Opções:
+  --skip-init-atm   Compila apenas o core 'atmosphere' (pula 'init_atmosphere').
+  --help, -h        Esta mensagem.
+EOF
   exit 0
 }
 
 for _arg in "$@"; do
   case "${_arg}" in
     --skip-init-atm)  SKIP_INIT_ATM=true  ;;
-    --help|-h)        _uso ;;
+    --help|-h)        usage ;;
     *)
       log_error "Opção desconhecida: ${_arg}   (use --help para a lista de opções)"
       exit 1
@@ -92,11 +96,7 @@ clone_if_missing "${MONAN_MODEL}" "${MONAN_MODEL_URL}" "${MONAN_MODEL_REF}"
 # ── Módulos Jaci (Cray XD 2000 com PrgEnv-gnu) ────────────────────────────────
 log_sep
 log_info "Carregando módulos do ambiente Jaci..."
-module purge
-for _m in "${MODULES_MONAN[@]}"; do module load "${_m}"; done
-unset _m
-log_info "Módulos carregados:"
-module list 2>&1 | grep -E '^\s+[0-9]+\)' | sed 's/^/    /'
+load_modules "${MODULES_MONAN[@]}"
 
 # PNETCDF_DIR é injetado pelo módulo cray-parallel-netcdf
 if [[ -z "${PNETCDF_DIR:-}" ]]; then
@@ -105,10 +105,20 @@ if [[ -z "${PNETCDF_DIR:-}" ]]; then
 fi
 export PNETCDF="${PNETCDF_DIR}"
 
+# NETCDF_DIR é injetado pelo módulo cray-netcdf (NetCDF serial). O link do MPAS
+# referencia -lnetcdf -lnetcdff em utilitários (ex.: build_tables) e no
+# executável; sem este caminho ocorre "ld: cannot find -lnetcdf".
+if [[ -z "${NETCDF_DIR:-}" ]]; then
+  log_error "NETCDF_DIR não definido — módulo 'cray-netcdf' carregou?"
+  exit 1
+fi
+export NETCDF="${NETCDF_DIR}"
+
 cd "${MONAN_MODEL}"
 
-# Flags de compilação — comuns aos dois cores
-MAKE_ARGS="OPENMP=true USE_PIO2=false PRECISION=double AUTOCLEAN=true"
+# Flags de compilação — comuns aos dois cores (array: expansão segura, sem
+# depender de word-splitting de uma string).
+MAKE_ARGS=(OPENMP=true USE_PIO2=false PRECISION=double AUTOCLEAN=true)
 
 # ── ETAPA 1 — Core 'atmosphere' (compilação e cópia dos artefatos) ────────────
 # A cópia DEVE ocorrer ANTES da compilação do 'init_atmosphere': com
@@ -116,7 +126,7 @@ MAKE_ARGS="OPENMP=true USE_PIO2=false PRECISION=double AUTOCLEAN=true"
 log_step 1 2 "Core 'atmosphere' — compilação"
 timer_start
 
-make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=atmosphere ${MAKE_ARGS} 2>&1 \
+make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=atmosphere "${MAKE_ARGS[@]}" 2>&1 \
   | tee make-atmosphere.log
 
 timer_step "Core 'atmosphere' compilado"
@@ -159,7 +169,7 @@ log_ok "Artefatos do 'atmosphere' copiados."
 if [[ "${SKIP_INIT_ATM}" == false ]]; then
   log_step 2 2 "Core 'init_atmosphere' — compilação"
 
-  make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=init_atmosphere ${MAKE_ARGS} 2>&1 \
+  make -j "${MAKE_JOBS}" "${MONAN_TARGET}" CORE=init_atmosphere "${MAKE_ARGS[@]}" 2>&1 \
     | tee make-init_atmosphere.log
 
   timer_step "Core 'init_atmosphere' compilado"

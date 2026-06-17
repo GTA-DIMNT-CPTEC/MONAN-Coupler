@@ -19,7 +19,7 @@ fi
 
 # Colorização inline (este script é sourced, possivelmente antes dos
 # instaladores, por isso não depende da install-libs.bash).
-if [[ -t 1 ]] && command -v tput &>/dev/null && tput colors &>/dev/null 2>&1; then
+if [[ -t 1 ]] && command -v tput &>/dev/null && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   _CV_VD=$(tput setaf 2) ; _CV_AM=$(tput setaf 3) ; _CV_VM=$(tput setaf 1)
   _CV_AZ=$(tput setaf 6) ; _CV_BD=$(tput bold)    ; _CV_RS=$(tput sgr0)
 else
@@ -53,12 +53,14 @@ if [[ ! -f "${SITE_ENV}" ]]; then
   echo "      Edite install/site-jaci.bash ou exporte SITE_ENV." >&2
   return 1
 fi
+# shellcheck source=/dev/null
 source "${SITE_ENV}"
 
 # [1] ESMF 8.9.1 — ESMFMKFILE vem do site-jaci.bash (ponto único). O esmf.mk é
 # incluído pelo Makefile (fornece ESMF_F90COMPILER, *COMPILEPATHS, *LINK*).
 # ESMF_LIBDIR é o diretório do esmf.mk.
-export ESMF_LIBDIR="$(dirname "${ESMFMKFILE}")"
+ESMF_LIBDIR="$(dirname "${ESMFMKFILE}")"
+export ESMF_LIBDIR
 
 if [[ -f "${ESMFMKFILE}" ]]; then
   _esmf_ver=$(grep -m1 'ESMF_VERSION_STRING' "${ESMFMKFILE}" \

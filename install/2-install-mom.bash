@@ -30,38 +30,43 @@
 #
 # NOTA CRAY: o compilador é sempre o wrapper 'ftn' (nunca gfortran direto).
 # =============================================================================
-set -eo pipefail
+set -euo pipefail
 
 # --- Âncora determinística ---------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COUPLER_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # --- Carrega biblioteca de funções -------------------------------------------
+# shellcheck source=install-libs.bash
 source "${SCRIPT_DIR}/install-libs.bash"
 
 # --- Carrega a configuração de sítio (ESMF, módulos, paralelismo, wrappers) ---
-SITE_ENV="${SITE_ENV:-${SCRIPT_DIR}/site-jaci.bash}"
-if [[ ! -f "${SITE_ENV}" ]]; then
-  log_error "Configuração de sítio não encontrada: ${SITE_ENV}"
-  log_info  "Edite install/site-jaci.bash ou aponte SITE_ENV para outro arquivo."
-  exit 1
-fi
-source "${SITE_ENV}"
+load_site_env "${SCRIPT_DIR}"
 
 # =============================================================================
 # Análise de opções
 # =============================================================================
 ONLY_NUOPC=false
 
-_uso() {
-  sed -n '2,/^# USO/p' "${BASH_SOURCE[0]}" | grep -E '^#' | sed 's/^# \{0,1\}//'
+usage() {
+  cat << 'EOF'
+Uso: bash install/2-install-mom.bash [OPÇÕES]
+
+  Compila MOM6+SIS2 (+ FMS) com mkmf no Cray/GNU e gera a biblioteca do
+  cap NUOPC (libmom6_nuopc.a) usada pelo acoplador.
+
+Opções:
+  --only-nuopc   Pula FMS e MOM6 standalone; compila só o cap NUOPC
+                 (use quando FMS e MOM6 já foram compilados antes).
+  --help, -h     Esta mensagem.
+EOF
   exit 0
 }
 
 for _arg in "$@"; do
   case "${_arg}" in
     --only-nuopc)   ONLY_NUOPC=true  ;;
-    --help|-h)      _uso ;;
+    --help|-h)      usage ;;
     *)
       log_error "Opção desconhecida: ${_arg}   (use --help para a lista de opções)"
       exit 1
@@ -90,11 +95,7 @@ clone_if_missing "${MOM6_EXAMPLES_DIR}" "${MOM6_EXAMPLES_URL}" "${MOM6_EXAMPLES_
 # Módulos Cray XD 2000 (definidos em site-jaci.bash → MODULES_MOM6).
 # MOM6/FMS usam NetCDF/HDF5 seriais (cray-netcdf), não o parallel-netcdf do
 # MPAS; o wrapper 'ftn' injeta includes e libs quando o módulo está carregado.
-module purge
-for _m in "${MODULES_MOM6[@]}"; do module load "${_m}"; done
-unset _m
-log_info "Módulos carregados:"
-module list 2>&1 | grep -E '^\s+[0-9]+\)' | sed 's/^/    /'
+load_modules "${MODULES_MOM6[@]}"
 
 # ESMF — esmf.mk definido em site-jaci.bash (ESMFMKFILE), sobrescrevível por
 # ambiente. É o único ponto de configuração do ESMF.
@@ -111,8 +112,13 @@ _esmf_mk() {
 }
 
 # Disponibiliza apps e bibliotecas do ESMF em tempo de build/execução.
-export PATH="$(_esmf_mk ESMF_APPSDIR):${PATH}"
-export LD_LIBRARY_PATH="$(_esmf_mk ESMF_LIBDIR):${LD_LIBRARY_PATH:-}"
+# Atribui antes de exportar para não mascarar falha de _esmf_mk (SC2155); o
+# sufixo ${VAR:+:${VAR}} evita ':' inicial/final (que poria '.' no caminho).
+_esmf_appsdir="$(_esmf_mk ESMF_APPSDIR)"
+_esmf_libdir="$(_esmf_mk ESMF_LIBDIR)"
+export PATH="${_esmf_appsdir}${PATH:+:${PATH}}"
+export LD_LIBRARY_PATH="${_esmf_libdir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+unset _esmf_appsdir _esmf_libdir
 log_ok "ESMF via ${ESMFMKFILE}"
 
 # Wrappers Cray (valores definidos em site-jaci.bash; nunca gfortran/gcc direto).
