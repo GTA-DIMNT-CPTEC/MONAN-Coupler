@@ -1,6 +1,3 @@
 [submodule "models/atmos/MONAN-Model"]
 	path = models/atmos/MONAN-Model
 	url = https://github.com/GTA-DIMNT-CPTEC/MONAN-Model
-[submodule "models/ocean/MOM6-examples"]
-	path = models/ocean/MOM6-examples
-	url = https://github.com/GTA-DIMNT-CPTEC/MOM6-examples
