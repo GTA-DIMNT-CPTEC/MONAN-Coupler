@@ -15,11 +15,11 @@
 #     antes de rodar o instalador. Ex.:
 #         export MAKE_JOBS=16
 #         export ESMF_ROOT=/meu/caminho/esmf-8.9.1
-#         bash install/install-all.bash
+#         bash build.bash
 #   - Outra máquina: copie este arquivo para install/site-<host>.bash, ajuste
 #     os valores e aponte os scripts para ele:
 #         export SITE_ENV=install/site-meuhost.bash
-#         bash install/install-all.bash
+#         bash build.bash
 #
 # MECANISMO: cada parâmetro usa ':= valor' — o valor só é aplicado se a
 # variável ainda não estiver definida. Assim, qualquer 'export VAR=...' feito
