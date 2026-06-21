@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.11 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.15 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -50,28 +50,40 @@ sem mediador.
 
 ## Início rápido
 
-Clone o repositório do acoplador:
+O sistema acoplado (este repositório) traz o **MONAN-Model** e o
+**MOM6-examples** como **submódulos** (em `models/atmos/` e `models/ocean/`).
+Os **scripts de instalação ficam em repositório separado**
+(`Coupler-Install`), com um instalador único (`install.bash`): ele baixa o
+sistema com `git` recursivo e instala — tudo em um comando.
+
+**Caminho recomendado (um comando):**
 
 ```bash
-git clone https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git
-cd MONAN-Coupler
+git clone https://github.com/GTA-DIMNT-CPTEC/Coupler-Install.git
+cd Coupler-Install
+bash install.bash            # clona o sistema (recursivo, develop) e instala
 ```
 
-As árvores de fontes **MONAN-Model** e **MOM6-examples** (esta com submódulos)
-são **baixadas automaticamente** pelos instaladores caso ainda não existam — não
-é preciso cloná-las manualmente. Para usar um fork ou outra origem, defina
-`MONAN_MODEL_URL` e/ou `MOM6_EXAMPLES_URL` antes de instalar.
+O `install.bash` executa
+`git clone --recursive --branch develop …/MONAN-Coupler.git` (trazendo os dois
+modelos e os submódulos aninhados do MOM6-examples) e, em seguida, roda as três
+etapas de instalação. Opções: `--coupler-root DIR`, `--branch BRANCH`,
+`--no-install` (só baixa), `--from N`/`--only N` (repassadas ao instalador).
+
+**Clone manual (equivalente), se preferir:**
+
+```bash
+git clone --recursive --branch develop \
+    https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git
+export COUPLER_ROOT="$PWD/MONAN-Coupler"
+bash /caminho/Coupler-Install/build.bash
+```
 
 Pré-requisito adicional: ESMF 8.9.1 já instalado (com MOAB interno), localizado
 por `run/setenv-gnu.bash`.
 
-Instalação completa (orquestra as três etapas na ordem de dependência):
-
-```bash
-bash install/install-all.bash          # 1) MONAN-A  2) MOM6+SIS2  3) acoplador
-```
-
-Cada sessão de trabalho, antes de compilar/submeter:
+Cada sessão de trabalho, antes de compilar/submeter (a partir da raiz do
+sistema acoplado):
 
 ```bash
 source run/setenv-gnu.bash             # define ESMFMKFILE, MPAS_DIR, MOM6_ROOT…
@@ -83,23 +95,32 @@ bash run/run_esmApp.jaci -n 128        # submete via PBS (128 PETs)
 
 ## Instalação
 
-Scripts em `install/` (funções comuns em `install-libs.bash`):
+Os scripts de instalação residem em **repositório próprio**
+(`Coupler-Install`), separado do sistema acoplado. Funções comuns em
+`include.bash`:
 
-| Script                   | Etapa | Finalidade                               |
-|:-------------------------|:-----:|:-----------------------------------------|
-| `install-all.bash`       |   —   | Orquestra as etapas 1→2→3                |
-| `1-install-monan.bash`   |   1   | MONAN-A 2.0 → `lib/monan2`, `mod/monan2` |
-| `2-install-mom.bash`     |   2   | MOM6+SIS2+FMS → `lib/{fms,mom6,nuopc}`   |
-| `3-install-coupler.bash` |   3   | Compila e linka `bin/esmApp`             |
+| Script                   | Etapa | Finalidade                                       |
+|:-------------------------|:-----:|:-------------------------------------------------|
+| `install.bash`           |   0   | Baixa o sistema (git recursivo) **e** instala    |
+| `build.bash`             |   —   | Só as 3 etapas (assume o sistema já baixado)     |
+| `1-install-monan.bash`   |   1   | MONAN-A 2.0 → `lib/monan2`, `mod/monan2`         |
+| `2-install-mom.bash`     |   2   | MOM6+SIS2+FMS → `lib/{fms,mom6,nuopc}`           |
+| `3-install-coupler.bash` |   3   | Compila e linka `bin/esmApp`                     |
 
-Opções úteis: `install-all.bash --from N` (retoma na etapa N), `1-install-monan.bash --skip-init-atm`, `2-install-mom.bash --only-nuopc`.
+Como os scripts vivem fora da árvore do acoplador, a raiz do sistema é informada
+por **`COUPLER_ROOT`** (o `install.bash` a define e exporta automaticamente;
+ao rodar um instalador isolado, exporte-a ou use `--coupler-root`).
 
-**Configuração de sítio (`install/site-jaci.bash`).** Este é o **único arquivo a
-editar** ao trocar de usuário, máquina ou versões de módulo. Centraliza tudo que
-é específico do ambiente: caminho do ESMF, listas de módulos, alvo de CPU,
-paralelismo (`MAKE_JOBS`) e wrappers do compilador. Os instaladores e o
-`run/setenv-gnu.bash` o carregam automaticamente. Três formas de uso, da mais
-simples à mais flexível:
+Opções úteis: `install.bash --no-install` (só baixa), `build.bash --from N` (retoma na etapa N), `1-install-monan.bash --skip-init-atm`, `2-install-mom.bash --only-nuopc`.
+
+**Configuração de sítio (`sites/site-jaci.bash`, no repositório `Coupler-Install`).**
+Este é o **único arquivo a editar** ao trocar de usuário, máquina ou versões de
+módulo. Centraliza tudo que é específico do ambiente: caminho do ESMF, listas de
+módulos, alvo de CPU, paralelismo (`MAKE_JOBS`) e wrappers do compilador. Os
+instaladores o carregam automaticamente; o `install.bash` também deixa uma
+cópia em `<COUPLER_ROOT>/run/setenv-site.bash`, para que as sessões de build
+(`source run/setenv-gnu.bash`) a encontrem sem o instalador presente. Três
+formas de uso, da mais simples à mais flexível:
 
 - **Jaci (padrão):** nada a fazer — os valores já estão corretos.
 - **Ajuste pontual**, sem editar o arquivo: exporte a variável antes de instalar
@@ -107,72 +128,83 @@ simples à mais flexível:
   ```bash
   export MAKE_JOBS=16
   export ESMF_ROOT=/meu/caminho/esmf-8.9.1
-  bash install/install-all.bash
+  bash install.bash
   ```
 - **Outra máquina:** copie o arquivo, ajuste os valores e aponte `SITE_ENV`:
   ```bash
-  cp install/site-jaci.bash install/site-meuhost.bash   # edite os valores
-  export SITE_ENV=install/site-meuhost.bash
-  bash install/install-all.bash
+  cp sites/site-jaci.bash sites/site-meuhost.bash   # edite os valores
+  export SITE_ENV="$PWD/sites/site-meuhost.bash"
+  bash install.bash
   ```
 
-**Download automático das fontes.** As etapas 1 e 2 baixam, respectivamente,
-o **MONAN-Model** e o **MOM6-examples** (com submódulos) do GitHub se os
-diretórios ainda não existirem — clones já presentes são preservados
-(operação idempotente). Origens sobrescrevíveis via `MONAN_MODEL_URL` e
-`MOM6_EXAMPLES_URL`:
-
-```bash
-export MONAN_MODEL_URL=https://github.com/MEU_USUARIO/MONAN-Model.git
-export MOM6_EXAMPLES_URL=https://github.com/MEU_USUARIO/MOM6-examples.git
-bash install/install-all.bash
-```
+**Download das fontes (submódulos).** Os modelos chegam como **submódulos** no
+clone recursivo feito pelo `install.bash`: **MONAN-Model** em `models/atmos/`
+e **MOM6-examples** (com seus próprios submódulos) em `models/ocean/`. As etapas
+1 e 2 apenas confirmam a presença das árvores e, se algum submódulo não tiver
+sido inicializado, executam `git submodule update --init --recursive`. Para usar
+um fork como origem, ajuste a URL no `.gitmodules` do sistema acoplado (ou, no
+modo legado sem submódulos, exporte `MONAN_MODEL_URL`/`MOM6_EXAMPLES_URL`).
 
 **ESMF e MOAB.** O acoplador usa o ESMF 8.9.1 via `esmf.mk` (variáveis
-`ESMF_ROOT`/`ESMFMKFILE`, definidas em `install/site-jaci.bash`). O MOAB é
+`ESMF_ROOT`/`ESMFMKFILE`, definidas em `run/setenv-site.bash`). O MOAB é
 **interno ao `libesmf`** — não há `-lMOAB` externo. Para um ESMF com MOAB externo,
 defina `USE_EXTERNAL_MOAB=yes` e `MOAB_DIR` (mesma variável no Makefile e no `setenv`).
 
-**Template mkmf.** O `2-install-mom.bash` usa
-`install/templates/cray-gnu-monan.mk` (versionado no repositório, livre de
-caminhos pessoais). Para apontar outro template: `export MKMF_TEMPLATE_SRC=…`.
+**Template mkmf.** O `2-install-mom.bash` usa `templates/cray-gnu-monan.mk`
+(versionado no `Coupler-Install`, livre de caminhos pessoais). É procurado em
+vários locais (`templates/`, raiz, …); para apontar outro:
+`export MKMF_TEMPLATE_SRC=…`.
 
 ---
 
 ## Estrutura de diretórios
 
+Dois repositórios distintos. O **sistema acoplado** (com os modelos como
+submódulos):
+
 ```
-MONAN-Coupler/
-├── Makefile                    ← build do acoplador (bin/esmApp)
-├── nuopc.input                 ← namelist de acoplamento
-├── install/
-│   ├── install-all.bash        ← orquestra as etapas 1→2→3
-│   ├── install-libs.bash       ← funções comuns (log, timer, cópia, clone)
-│   ├── site-jaci.bash          ← configuração de sítio (ESMF, módulos, alvos)
-│   ├── 1-install-monan.bash    ← etapa 1 — MONAN-A 2.0
-│   ├── 2-install-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
-│   ├── 3-install-coupler.bash  ← etapa 3 — linka bin/esmApp
-│   └── templates/
-│       └── cray-gnu-monan.mk   ← template mkmf Cray/GNU
+MONAN-Coupler/                ← repositório do sistema acoplado (branch develop)
+├── README.md                 ← este arquivo
+├── .gitmodules               ← submódulos models/atmos e models/ocean
+├── Makefile                  ← build do acoplador (bin/esmApp)
+├── nuopc.input               ← namelist de acoplamento
 ├── src/
-│   ├── main/esmApp.F90         ← ponto de entrada
-│   ├── driver/esm.F90          ← driver NUOPC
-│   ├── mediator/               ← MED (bulk NCAR): MED_cap + 4 módulos
-│   ├── caps/atmos/             ← cap MONAN-A (MPAS) + DATM
-│   ├── caps/ocean/             ← cap MOM6+SIS2 + DOCN (+ upstream/)
-│   └── shared/                 ← mpi_allreduce_*, time_utils
+│   ├── main/esmApp.F90       ← ponto de entrada
+│   ├── driver/esm.F90        ← driver NUOPC
+│   ├── mediator/             ← MED (bulk NCAR): MED_cap + 4 módulos
+│   ├── caps/atmos/           ← cap MONAN-A (MPAS) + DATM
+│   ├── caps/ocean/           ← cap MOM6+SIS2 + DOCN (+ upstream/)
+│   └── shared/               ← mpi_allreduce_*, time_utils
+├── models/                   ← submódulos das fontes dos modelos
+│   ├── atmos/MONAN-Model/    ← MONAN-A 2.0 (MPAS-A 8.3.1)
+│   └── ocean/MOM6-examples/  ← MOM6+SIS2+FMS (com submódulos)
 ├── tools/
-│   ├── postproc/               ← pós-processamento (Python)
-│   └── animation/              ← animações (Python)
+│   ├── postproc/             ← pós-processamento (Python)
+│   └── animation/            ← animações (Python)
 ├── run/
-│   ├── setenv-gnu.bash         ← ambiente de compilação (Jaci/GNU)
-│   └── run_esmApp.jaci         ← submissão PBS
-├── mod/                        ← módulos .mod (monan2, init_atmosphere)
-├── lib/                        ← libs .a (monan2, fms, mom6, nuopc, …)
-├── INPUT/                      ← grades e forçantes (mesh, OISST…)
-├── diag_export/                ← monan_export_*.nc
-├── diag_import/                ← *_import_*.nc, sst_ifrac_diag/
-└── doc/README.md               ← este arquivo
+│   ├── setenv-gnu.bash       ← ambiente de compilação (Jaci/GNU)
+│   ├── setenv-site.bash      ← config de sítio (cópia do install.bash)
+│   └── run_esmApp.jaci       ← submissão PBS
+├── mod/                      ← módulos .mod (gerados na instalação)
+├── lib/                      ← libs .a (gerados na instalação)
+├── diag_export/              ← monan_export_*.nc
+└── diag_import/              ← *_import_*.nc, sst_ifrac_diag/
+```
+
+E o **repositório do instalador** (separado):
+
+```
+Coupler-Install/            ← repositório dos scripts de instalação
+├── install.bash            ← ★ baixa o sistema (git recursivo) E instala
+├── build.bash              ← só as 3 etapas (sistema já baixado)
+├── include.bash            ← funções comuns (log, timer, clone, submódulos)
+├── 1-install-monan.bash    ← etapa 1 — MONAN-A 2.0
+├── 2-install-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
+├── 3-install-coupler.bash  ← etapa 3 — linka bin/esmApp
+├── sites/
+│   └── site-jaci.bash      ← configuração de sítio (ESMF, módulos, alvos)
+└── templates/
+    └── cray-gnu-monan.mk   ← template mkmf Cray/GNU
 ```
 
 ---
@@ -362,6 +394,10 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.15  | Jun 2026 | Instalador renomeado para `Coupler-Install`; config de sítio em `run/setenv-site.bash` (remove `install/` do acoplador) |
+| 14.14  | Jun 2026 | Instalador: `bootstrap`→`install.bash`, `install-all`→`build.bash`; layout `sites/`+`templates/` |
+| 14.13  | Jun 2026 | Instalador em repo próprio; modelos como submódulos; `install.bash` (clone recursivo + install) |
+| 14.12  | Jun 2026 | Layout multi-modelo: fontes em `models/atmos` e `models/ocean` |
 | 14.11  | Jun 2026 | Execução relocável: `COUPLER_ROOT`, run via `PATH`, sem cópias |
 | 14.10  | Jun 2026 | Configuração de sítio centralizada em `site-jaci.bash`     |
 | 14.9   | Jun 2026 | Download automático de MONAN-Model e MOM6-examples         |
