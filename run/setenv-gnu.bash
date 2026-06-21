@@ -18,7 +18,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 # Colorização inline (este script é sourced, possivelmente antes dos
-# instaladores, por isso não depende da install-libs.bash).
+# instaladores, por isso não depende da include.bash).
 if [[ -t 1 ]] && command -v tput &>/dev/null && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
   _CV_VD=$(tput setaf 2) ; _CV_AM=$(tput setaf 3) ; _CV_VM=$(tput setaf 1)
   _CV_AZ=$(tput setaf 6) ; _CV_BD=$(tput bold)    ; _CV_RS=$(tput sgr0)
@@ -39,18 +39,31 @@ _chk_dir() {
   fi
 }
 
-# Raiz do MONAN-Coupler (onde ficam install/, run/, lib/, mod/, src/). Por
-# padrão é derivada da localização deste script (<raiz>/run/setenv-gnu.bash).
-# Ao rodar de um diretório de experimento fora da árvore do projeto, exporte
-# COUPLER_ROOT apontando para a raiz — todos os caminhos abaixo o seguem.
+# Raiz do MONAN-Coupler (onde ficam run/, lib/, mod/, src/). Por padrão é
+# derivada da localização deste script (<raiz>/run/setenv-gnu.bash). Ao rodar de
+# um diretório de experimento fora da árvore do projeto, exporte COUPLER_ROOT
+# apontando para a raiz — todos os caminhos abaixo o seguem.
 _COUPLER_ROOT="${COUPLER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
 # Configuração de sítio (ESMF, módulos, alvos, lista de libs). Fonte única dos
-# padrões específicos da máquina; sobrescrevível por ambiente ou via SITE_ENV.
-SITE_ENV="${SITE_ENV:-${_COUPLER_ROOT}/install/site-jaci.bash}"
-if [[ ! -f "${SITE_ENV}" ]]; then
-  echo "ERRO: configuração de sítio não encontrada: ${SITE_ENV}" >&2
-  echo "      Edite install/site-jaci.bash ou exporte SITE_ENV." >&2
+# padrões da máquina; sobrescrevível por ambiente ou via SITE_ENV. O install.bash
+# deixa uma cópia em run/setenv-site.bash (os scripts de instalação vivem em
+# repositório próprio, então NÃO há mais install/ na árvore do acoplador).
+# Busca: $SITE_ENV → run/setenv-site.bash → install/site-jaci.bash (legado).
+# Busca a config quando SITE_ENV está vazio OU aponta para arquivo inexistente.
+# A segunda condição evita herdar um SITE_ENV obsoleto deixado por um 'source'
+# anterior que falhou (ele assina SITE_ENV na sessão; um novo source o veria).
+if [[ -z "${SITE_ENV:-}" || ! -f "${SITE_ENV}" ]]; then
+  SITE_ENV=""
+  for _cand in "${_COUPLER_ROOT}/run/setenv-site.bash" \
+               "${_COUPLER_ROOT}/install/site-jaci.bash"; do
+    [[ -f "${_cand}" ]] && { SITE_ENV="${_cand}"; break; }
+  done
+fi
+if [[ -z "${SITE_ENV}" || ! -f "${SITE_ENV}" ]]; then
+  echo "ERRO: configuração de sítio não encontrada (run/setenv-site.bash)." >&2
+  echo "      Rode 'bash install.bash' para gerá-la, ou exporte um caminho válido:" >&2
+  echo "      export SITE_ENV=/caminho/para/site-jaci.bash" >&2
   return 1
 fi
 # shellcheck source=/dev/null
@@ -69,10 +82,11 @@ else
   _esmf_ver="(esmf.mk não encontrado)"
 fi
 
-# [2] MONAN-A 2.0 — o instalador 1 consolida os artefatos em mod/monan2 e
-# lib/monan2 (irmãos de MONAN-Model). Sobrescreva MPAS_DIR, MONAN2_MODDIR ou
-# MONAN2_LIBDIR antes do source para usar caminhos alternativos.
-export MPAS_DIR="${MPAS_DIR:-${_COUPLER_ROOT}/MONAN-Model}"
+# [2] MONAN-A 2.0 — a árvore de fontes fica em models/atmos/MONAN-Model. O
+# instalador 1 consolida os artefatos em mod/monan2 e lib/monan2 (na raiz do
+# acoplador). Sobrescreva MPAS_DIR, MONAN2_MODDIR ou MONAN2_LIBDIR antes do
+# source para usar caminhos alternativos.
+export MPAS_DIR="${MPAS_DIR:-${_COUPLER_ROOT}/models/atmos/MONAN-Model}"
 export MONAN2_MODDIR="${MONAN2_MODDIR:-${_COUPLER_ROOT}/mod/monan2}"
 export MONAN2_LIBDIR="${MONAN2_LIBDIR:-${_COUPLER_ROOT}/lib/monan2}"
 
@@ -100,8 +114,9 @@ export PNETCDF_DIR="${PNETCDF_DIR:-${CRAY_PARALLEL_NETCDF_PREFIX:-${CRAY_PARALLE
 
 # [5] MOM6_HDR_INC — cabeçalhos exigidos ao recompilar os caps upstream:
 # MOM_memory.h (dynamic_symmetric) e version_variable.h (FMS), que ficam na
-# árvore de fontes (MOM6_SRC), não em include/mom6.
-export MOM6_SRC="${MOM6_SRC:-${MOM6_ROOT}/src}"
+# árvore de fontes do MOM6-examples (models/ocean/), não em include/mom6.
+# O 'find' abaixo ainda varre MOM6_ROOT como rede de segurança.
+export MOM6_SRC="${MOM6_SRC:-${MOM6_ROOT}/models/ocean/MOM6-examples/src}"
 
 if [[ -z "${MOM6_HDR_INC:-}" ]]; then
   _mommem=$(find "${MOM6_SRC}" "${MOM6_ROOT}" -name MOM_memory.h 2>/dev/null \
