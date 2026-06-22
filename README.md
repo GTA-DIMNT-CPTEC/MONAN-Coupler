@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.15 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.16 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -59,7 +59,7 @@ sistema com `git` recursivo e instala — tudo em um comando.
 **Caminho recomendado (um comando):**
 
 ```bash
-git clone https://github.com/GTA-DIMNT-CPTEC/Coupler-Install.git
+git clone --branch develop https://github.com/GTA-DIMNT-CPTEC/Coupler-Install.git
 cd Coupler-Install
 bash install.bash            # clona o sistema (recursivo, develop) e instala
 ```
@@ -103,15 +103,17 @@ Os scripts de instalação residem em **repositório próprio**
 |:-------------------------|:-----:|:-------------------------------------------------|
 | `install.bash`           |   0   | Baixa o sistema (git recursivo) **e** instala    |
 | `build.bash`             |   —   | Só as 3 etapas (assume o sistema já baixado)     |
-| `1-install-monan.bash`   |   1   | MONAN-A 2.0 → `lib/monan2`, `mod/monan2`         |
-| `2-install-mom.bash`     |   2   | MOM6+SIS2+FMS → `lib/{fms,mom6,nuopc}`           |
-| `3-install-coupler.bash` |   3   | Compila e linka `bin/esmApp`                     |
+| `1-monan.bash`           |   1   | MONAN-A 2.0 → `lib/monan2`, `mod/monan2`         |
+| `2-mom.bash`             |   2   | MOM6+SIS2+FMS → `lib/{fms,mom6,nuopc}`           |
+| `3-coupler.bash`         |   3   | Compila e linka `bin/esmApp`                     |
 
 Como os scripts vivem fora da árvore do acoplador, a raiz do sistema é informada
 por **`COUPLER_ROOT`** (o `install.bash` a define e exporta automaticamente;
 ao rodar um instalador isolado, exporte-a ou use `--coupler-root`).
 
-Opções úteis: `install.bash --no-install` (só baixa), `build.bash --from N` (retoma na etapa N), `1-install-monan.bash --skip-init-atm`, `2-install-mom.bash --only-nuopc`.
+Opções úteis: `install.bash --no-install` (só baixa), `build.bash --from N` (retoma na etapa N), `1-monan.bash --skip-init-atm`, `2-mom.bash --only-nuopc`.
+
+Atalhos via `make` (no `Coupler-Install`): `make` (= baixa + instala), `make download`, `make build FROM=N`, `make check`, `make help`.
 
 **Configuração de sítio (`sites/site-jaci.bash`, no repositório `Coupler-Install`).**
 Este é o **único arquivo a editar** ao trocar de usuário, máquina ou versões de
@@ -150,7 +152,7 @@ modo legado sem submódulos, exporte `MONAN_MODEL_URL`/`MOM6_EXAMPLES_URL`).
 **interno ao `libesmf`** — não há `-lMOAB` externo. Para um ESMF com MOAB externo,
 defina `USE_EXTERNAL_MOAB=yes` e `MOAB_DIR` (mesma variável no Makefile e no `setenv`).
 
-**Template mkmf.** O `2-install-mom.bash` usa `templates/cray-gnu-monan.mk`
+**Template mkmf.** O `2-mom.bash` usa `templates/cray-gnu-monan.mk`
 (versionado no `Coupler-Install`, livre de caminhos pessoais). É procurado em
 vários locais (`templates/`, raiz, …); para apontar outro:
 `export MKMF_TEMPLATE_SRC=…`.
@@ -194,17 +196,17 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 E o **repositório do instalador** (separado):
 
 ```
-Coupler-Install/            ← repositório dos scripts de instalação
-├── install.bash            ← ★ baixa o sistema (git recursivo) E instala
-├── build.bash              ← só as 3 etapas (sistema já baixado)
-├── include.bash            ← funções comuns (log, timer, clone, submódulos)
-├── 1-install-monan.bash    ← etapa 1 — MONAN-A 2.0
-├── 2-install-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
-├── 3-install-coupler.bash  ← etapa 3 — linka bin/esmApp
-├── sites/
-│   └── site-jaci.bash      ← configuração de sítio (ESMF, módulos, alvos)
-└── templates/
-    └── cray-gnu-monan.mk   ← template mkmf Cray/GNU
+Coupler-Install/    ← repositório dos scripts de instalação
+├── Makefile        ← atalhos (make / make build / make check)
+├── install.bash    ← ★ baixa (git recursivo) e instala
+├── build.bash      ← só as 3 etapas (já baixado)
+├── include.bash    ← funções comuns (sourced)
+├── 1-monan.bash    ← etapa 1 — MONAN-A 2.0
+├── 2-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
+├── 3-coupler.bash  ← etapa 3 — linka bin/esmApp
+├── sites/          ← config por máquina (+ site-template.bash)
+├── templates/      ← cray-gnu-monan.mk (mkmf)
+└── docs/           ← CHANGELOG.md, notas de design
 ```
 
 ---
@@ -394,6 +396,7 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.16  | Jun 2026 | `Coupler-Install`: passos renomeados (`1-monan`/`2-mom`/`3-coupler`); `docs/`, `sites/site-template.bash`, `Makefile` de atalhos |
 | 14.15  | Jun 2026 | Instalador renomeado para `Coupler-Install`; config de sítio em `run/setenv-site.bash` (remove `install/` do acoplador) |
 | 14.14  | Jun 2026 | Instalador: `bootstrap`→`install.bash`, `install-all`→`build.bash`; layout `sites/`+`templates/` |
 | 14.13  | Jun 2026 | Instalador em repo próprio; modelos como submódulos; `install.bash` (clone recursivo + install) |
