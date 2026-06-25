@@ -40,6 +40,44 @@
 : "${ESMFMKFILE:=${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default/esmf.mk}"
 export ESMF_ROOT ESMFMKFILE
 
+# ── ESMF: diretórios de módulos e bibliotecas (derivados do esmf.mk) ──────────
+# ESMFMKFILE é a fonte única de verdade do ESMF. Os builds do acoplador — em
+# especial o MONAN-A com -DMPAS_EXTERNAL_ESMF_LIB — precisam de ESMF_MOD (dir do
+# esmf.mod) e ESMF_LIBDIR (dir da libesmf.a) no ambiente: o Makefile do
+# MONAN-Model injeta -I$(ESMF_MOD) (à frente do stub src/external/esmf_time_f90)
+# e -L$(ESMF_LIBDIR) -lesmf a partir delas. Derivamos aqui, na config de sítio,
+# para que tanto os instaladores quanto as sessões de build
+# (source run/setenv-gnu.bash) herdem sem recalcular. Respeita override: só
+# deriva o que ainda não estiver definido. Bloco auto-contido (não depende de
+# include.bash), pois o setenv do acoplador faz source desta config diretamente.
+if [[ -f "${ESMFMKFILE}" ]]; then
+  _esmf_mk_get() {
+    printf 'include %s\n_v:\n\t@echo $(%s)\n' "${ESMFMKFILE}" "$1" \
+      | make -s -f - _v 2>/dev/null
+  }
+  # ESMF_MOD — diretório do esmf.mod (entre os -I de ESMF_F90COMPILEPATHS).
+  if [[ -z "${ESMF_MOD:-}" ]]; then
+    for _p in $(_esmf_mk_get ESMF_F90COMPILEPATHS); do
+      _p="${_p#-I}"
+      if [[ -f "${_p}/esmf.mod" ]]; then ESMF_MOD="${_p}"; break; fi
+    done
+  fi
+  # ESMF_LIBDIR — diretório da libesmf. NÃO usamos a variável ESMF_LIBDIR do
+  # esmf.mk: ela não existe em todas as versões/builds do ESMF. Derivamos pelo
+  # -L canônico (ESMF_F90LINKPATHS, onde -lesmf resolve) e, como rede de
+  # segurança, pelo diretório do próprio esmf.mk — onde o ESMF instala as libs.
+  if [[ -z "${ESMF_LIBDIR:-}" ]]; then
+    for _p in $(_esmf_mk_get ESMF_F90LINKPATHS); do
+      _p="${_p#-L}"
+      if [[ -e "${_p}/libesmf.a" || -e "${_p}/libesmf.so" ]]; then ESMF_LIBDIR="${_p}"; break; fi
+    done
+    [[ -z "${ESMF_LIBDIR:-}" ]] && ESMF_LIBDIR="$(cd "$(dirname "${ESMFMKFILE}")" && pwd)"
+  fi
+  unset _p
+  unset -f _esmf_mk_get
+  export ESMF_LIBDIR ESMF_MOD
+fi
+
 # ── Paralelismo de compilação ────────────────────────────────────────────────
 # Jobs do 'make -j'. Padrão conservador (8) por etiqueta de nó de login
 # compartilhado. Para usar todos os núcleos: export MAKE_JOBS=$(nproc).

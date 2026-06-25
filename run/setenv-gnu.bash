@@ -69,6 +69,32 @@ fi
 # shellcheck source=/dev/null
 source "${SITE_ENV}"
 
+# [0] Ambiente de programação (módulos) — PrgEnv-gnu + libs.
+# CRÍTICO para o build: sem PrgEnv-gnu ativo, o wrapper 'ftn' aciona o
+# compilador Cray (CCE), que rejeita os flags GNU do Makefile do acoplador
+# (-mcmodel=small, -ffree-line-length-none, -fallow-argument-mismatch, …). Como
+# este é o ponto de entrada do rebuild manual (README: 'source
+# run/setenv-gnu.bash && make'), o próprio setenv carrega os módulos — não
+# depende dos instaladores, e os módulos persistem na sessão atual (ao contrário
+# das etapas, que rodam em subprocesso). A lista vem do sítio: MODULES_MONAN
+# (superconjunto PrgEnv-gnu + hdf5 + netcdf + parallel-netcdf + METIS, que cobre
+# também o link do bin/esmApp). Carregar antes de PNETCDF_DIR abaixo permite que
+# o fallback aproveite o CRAY_PARALLEL_NETCDF_PREFIX do módulo recém-carregado.
+# Para pular (ambiente já preparado à mão): export SETENV_NO_MODULES=1.
+if [[ -n "${SETENV_NO_MODULES:-}" ]]; then
+  printf "  ${_CV_AM}AVISO ${_CV_RS}%s\n" \
+    "SETENV_NO_MODULES=1 — módulos não carregados; usando o PrgEnv já ativo."
+elif type module &>/dev/null && [[ "${#MODULES_MONAN[@]}" -gt 0 ]]; then
+  module purge
+  for _m in "${MODULES_MONAN[@]}"; do module load "${_m}"; done
+  unset _m
+  printf "  ${_CV_VD}OK    ${_CV_RS}%s\n" \
+    "Módulos carregados (PrgEnv-gnu): ${MODULES_MONAN[*]}"
+else
+  printf "  ${_CV_AM}AVISO ${_CV_RS}%s\n" \
+    "Comando 'module' indisponível ou MODULES_MONAN vazio — verifique o PrgEnv-gnu."
+fi
+
 # [1] ESMF 8.9.1 — ESMFMKFILE vem do site-jaci.bash (ponto único). O esmf.mk é
 # incluído pelo Makefile (fornece ESMF_F90COMPILER, *COMPILEPATHS, *LINK*).
 # ESMF_LIBDIR é o diretório do esmf.mk.
