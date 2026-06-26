@@ -6,7 +6,7 @@
 # Dois modos, detectados automaticamente via PBS_O_WORKDIR:
 #   Interativo (login node): verifica pré-requisitos, gera o .pbs, faz qsub e
 #                            acompanha o job até o relatório final.
-#   PBS (dentro do job):     carrega módulos, faz source do setenv e roda mpirun.
+#   PBS (dentro do job):     carrega módulos, faz source do setenv e roda mpiexec (PALS).
 #
 # Opções, modos ATM/OCN e saídas:  bash run_esmApp.jaci -h
 # =============================================================================
@@ -81,6 +81,13 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   module load METIS/5.1.0
 
   # ── Ambiente MONAN-A 2.0 (carregado da árvore do projeto) ──────────────────
+  # O bloco de módulos acima já carregou o conjunto COMPLETO de runtime (inclui
+  # xpmem e cray-pals, necessários para o lançamento via mpiexec do PALS). O
+  # setenv-gnu.bash, porém, faz 'module purge' + recarrega só MODULES_MONAN
+  # (conjunto de COMPILAÇÃO, sem cray-pals/xpmem) — o que removeria o PALS e
+  # quebraria o mpiexec. Por isso pedimos ao setenv para NÃO tocar nos módulos:
+  # aqui ele serve apenas para exportar os CAMINHOS (ESMFMKFILE, MPAS_DIR, …).
+  export SETENV_NO_MODULES=1
   # shellcheck source=setenv-gnu.bash
   source "${COUPLER_ROOT}/run/${SETENV_SCRIPT}" \
     || { echo "ERRO: falha ao carregar ${SETENV_SCRIPT}"; exit 1; }
@@ -158,10 +165,28 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
 
   mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 
+  # ── Lançador: forçar o mpiexec do Cray PALS ────────────────────────────────
+  # No nó de execução há dois 'mpiexec' no PATH: o do PALS
+  # (/opt/cray/pals/<ver>/bin — compatível com cray-mpich) e o do PBS Pro
+  # (/opt/pbs/bin), que falha com "sgicheckppversion returned 0" e NÃO é
+  # compatível com cray-mpich. Dentro do job PBS o /opt/pbs/bin costuma vir antes
+  # no PATH, sombreando o do PALS. Resolvemos o do PALS por caminho explícito
+  # (robusto à versão; não depende da ordem do PATH).
+  MPIEXEC=""
+  for _c in $(which -a mpiexec 2>/dev/null); do
+    case "${_c}" in */pals/*) MPIEXEC="${_c}"; break ;; esac
+  done
+  unset _c
+  if [[ -z "${MPIEXEC}" ]]; then
+    echo " ERRO: mpiexec do Cray PALS não encontrado (módulo cray-pals carregado?)." >&2
+    echo "       'which -a mpiexec' não retornou caminho contendo /pals/." >&2
+    exit 127
+  fi
+
   # ── Execução ────────────────────────────────────────────────────────────────
-  echo "Iniciando mpirun -np ${NPES} ${EXECUTABLE} ..."
+  echo "Iniciando ${MPIEXEC} -n ${NPES} ${EXECUTABLE} ..."
   echo ""
-  mpirun -np "${NPES}" "${EXECUTABLE}" 2>&1 | tee "${LOG_RUN}"
+  "${MPIEXEC}" -n "${NPES}" "${EXECUTABLE}" 2>&1 | tee "${LOG_RUN}"
   STATUS=${PIPESTATUS[0]}
 
   # O ESMF cria PET*.esmApp.log no CWD do processo (raiz do experimento).
@@ -185,7 +210,7 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     n_imp=$(_count_files "diag_import/mom6_import_????????_??????.nc")
 
     echo "======================================================================"
-    echo " ERRO: mpirun encerrado — exit=${status}"
+    echo " ERRO: mpiexec encerrado — exit=${status}"
     echo " Causa : ${reason}"
     echo ""
     if [[ "${n_exp}" -gt 0 ]]; then
@@ -320,7 +345,7 @@ Modos ATM/OCN (nuopc.input &nuopc_mode):
 
 Saídas:
   esmApp-integrado.pbs                          script PBS gerado
-  logs/esmApp_run.log                           stdout/stderr do mpirun
+  logs/esmApp_run.log                           stdout/stderr do mpiexec
   logs/PET*.esmApp.log                          logs ESMF por PET
   log.atmosphere.0000.d0001.out                 log interno MONAN-A
   diag_export/monan_export_YYYYMMDD_HHMMSS.nc   campos exportados
