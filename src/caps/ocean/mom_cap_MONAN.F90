@@ -491,6 +491,15 @@ contains
     is%ice_ocn_bnd%p               = 0.0
     is%ice_ocn_bnd%lrunoff         = 0.0
     is%ice_ocn_bnd%frunoff         = 0.0
+    ! [FIX-ICE-NCAT] ice_ncat NÃO é inicializado por ocean_model_init neste
+    ! acoplamento; sem esta atribuição ele conteria lixo de memória. Se esse
+    ! lixo for > 0, a guarda 'if (ice_ncat > 0)' em mom_import (mom_cap_methods
+    ! .F90, linha 432) passaria e o código acessaria afracr/swnet_afracr/
+    ! swpen_ifrac_n/ifrac_n — arrays por categoria de gelo NUNCA alocados aqui —
+    ! causando SIGSEGV. O acoplamento MOM6+SIS2 usa campos AGREGADOS (ice_fraction,
+    ! t_flux, etc.), não o esquema por categoria do CICE/CESM; logo ice_ncat = 0
+    ! é o valor correto e desativa esse ramo de forma determinística.
+    is%ice_ocn_bnd%ice_ncat        = 0
     end if  ! is_ocean_pe: fim do bloco de alocacao de ice_ocn_bnd
 
     write(logmsg,'(A,4I6)') 'OCN(MOM6): domínio local isc,iec,jsc,jec=', &

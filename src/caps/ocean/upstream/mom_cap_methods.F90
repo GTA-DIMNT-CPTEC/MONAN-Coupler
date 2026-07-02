@@ -429,7 +429,13 @@ subroutine mom_import(ocean_public, ocean_grid, importState, ice_ocean_boundary,
   endif
 
   ! Fields coming from coupler per ice category
-  if (ice_ocean_boundary%ice_ncat > 0) then
+  ! [FIX-ICE-NCAT] Guarda por associated(): mesmo que ice_ncat venha com lixo
+  ! > 0 (não inicializado no cap), o acesso aos arrays por categoria só ocorre
+  ! se eles estiverem de fato alocados. No acoplamento MONAN×MOM6+SIS2 esses
+  ! arrays (afracr, swnet_afracr, swpen_ifrac_n, ifrac_n) não são alocados —
+  ! usam-se campos agregados —, então este bloco é corretamente ignorado.
+  if (ice_ocean_boundary%ice_ncat > 0 .and. &
+      associated(ice_ocean_boundary%afracr)) then
     call state_getimport(importState, 'Sf_afracr',  &
         isc, iec, jsc, jec, ice_ocean_boundary%afracr(:,:), rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &

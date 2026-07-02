@@ -364,11 +364,36 @@ contains
     ! ATM 640x320: nx_max=320, ny=ceil(N/320)
     !   N=128: ny=1 → regDecomp=(/128,1/) → 640/128=5 col ✓
     !   N=512: ny=2 → regDecomp=(/320,2/) → 640 DEs>512, 640/320=2 col, 320/2=160 lin ✓
-    nx_tiles_target = max(1, nint(sqrt(real(petCount))))
-    nx_max       = min(nx_tiles_target, nx_atm / 2)
-    ny_tiles     = (petCount + nx_max - 1) / nx_max
-    regDecomp(1) = min(nx_max, petCount)
-    regDecomp(2) = max(1, ny_tiles)
+    !
+    ! -------------------------------------------------------------------------
+    ! BUG-CALC-08-COV (fix B-58): a fórmula B-52 gera totalDEs = nx_max*ny_tiles
+    ! que só coincide com petCount quando sqrt(petCount) é inteiro. Quando
+    ! totalDEs > petCount, alguns PETs recebem localDeCount=2. O gather de
+    ! med_write_import_fields (uas_g etc., ~L1017) usa lbound/ubound(uas), que
+    ! cobrem apenas o PRIMEIRO DE local de cada PET; o segundo DE fica de fora do
+    ! tmp_local e some no Allreduce(SUM) → linhas de latitude inteiras zeradas no
+    ! campo global. O MOM6 recebe forçante com buracos e aborta com "extreme
+    ! surface values".
+    !   N=16: sqrt=4 exato → (4,4)=16 DEs = petCount → 180 linhas OK (funciona)
+    !   N=32: sqrt≈5,66→6  → (6,6)=36 DEs (4 órfãos) → ~20 linhas perdidas ✗
+    ! CORREÇÃO: fatorar petCount EXATAMENTE em (ncol,nrow), ncol*nrow = petCount
+    ! (1 DE por PET), par mais próximo de quadrado, respeitando ncol<=nx_atm/2 e
+    ! nrow<=ny_atm. Idêntico ao fix aplicado em mpas_cap_methods (grade do cap).
+    !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
+    ! -------------------------------------------------------------------------
+    nx_tiles_target = max(1, int(sqrt(real(petCount))))
+    ny_tiles = 1
+    do lde = nx_tiles_target, 1, -1
+      if (mod(petCount, lde) == 0 .and. lde <= ny_atm &
+          .and. (petCount / lde) <= nx_atm / 2) then
+        ny_tiles = lde
+        exit
+      end if
+    end do
+    nx_max       = petCount / ny_tiles
+    regDecomp(1) = nx_max          ! colunas (lon)
+    regDecomp(2) = ny_tiles        ! linhas (lat)
+    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
     ! Loops bulk usam lbound/ubound — agnósticos ao indexflag do MPAS.
     atm_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_atm, ny_atm/), &
@@ -415,11 +440,23 @@ contains
     ! largura 1 para qualquer petCount. Grade alinhada com DOCN_cap (OISST 0.25°)
     ! → conector DOCN→MED usa redistribuição (zero-copy) em vez de bilinear.
     !   N=512: ny=4 → regDecomp=(/128,4/) → 512 DEs=512 PETs, 2 col, 39 lin ✓
-    nx_tiles_target = max(1, nint(sqrt(real(petCount))))
-    nx_max       = min(nx_tiles_target, nx_ocn / 2)
-    ny_tiles     = (petCount + nx_max - 1) / nx_max
-    regDecomp(1) = min(nx_max, petCount)
-    regDecomp(2) = max(1, ny_tiles)
+    !
+    ! BUG-CALC-08-COV (fix B-58): mesma fatoração exata da grade ATM. Garante
+    ! totalDEs = petCount (1 DE por PET), evitando DEs órfãos. Respeita
+    ! ncol<=nx_ocn/2 e nrow<=ny_ocn.
+    nx_tiles_target = max(1, int(sqrt(real(petCount))))
+    ny_tiles = 1
+    do lde = nx_tiles_target, 1, -1
+      if (mod(petCount, lde) == 0 .and. lde <= ny_ocn &
+          .and. (petCount / lde) <= nx_ocn / 2) then
+        ny_tiles = lde
+        exit
+      end if
+    end do
+    nx_max       = petCount / ny_tiles
+    regDecomp(1) = nx_max          ! colunas (lon)
+    regDecomp(2) = ny_tiles        ! linhas (lat)
+    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
     ocn_grid = ESMF_GridCreateNoPeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
       regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &

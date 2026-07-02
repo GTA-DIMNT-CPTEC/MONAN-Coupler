@@ -319,15 +319,53 @@ contains
     !   N=4:   sqrt=2  → nx_max=min(2,180)=2   regDecomp=(/2,2/)=4DEs   asp 0.5:1 ✓
     !   N=128: sqrt=11 → nx_max=min(11,180)=11 regDecomp=(/11,12/)=132  asp 0.5:1 ✓
     !   N=512: sqrt=23 → nx_max=min(23,180)=23 regDecomp=(/23,23/)=529  asp 0.5:1 ✓
+    !
+    ! -------------------------------------------------------------------------
+    ! BUG-MPAS-COV-32 (fix B-58): a lógica B-57 gera totalDEs = nx_max*ny_tiles
+    ! que só coincide com petCount quando sqrt(petCount) é inteiro. Ex.:
+    !   N=16: sqrt=4 exato → (4,4)=16 DEs = petCount            ✓ (cobertura total)
+    !   N=32: sqrt≈5,66→6  → (6,6)=36 DEs ≠ 32  (4 DEs a mais)  ✗
+    ! Com totalDEs > petCount, alguns PETs recebem localDeCount=2. O
+    ! ESMF_FieldGather (voronoi_to_latlon, ~L587) reúne no PET 0 apenas UM DE por
+    ! PET na ordem padrão; os DEs excedentes ficam SEM ser escritos no buf2d, que
+    ! permanece no fill -9,99e+20 (> FILL_THR). Essas células nunca recebem dado
+    ! dinâmico → forçante atmosférica com buracos (tas_g/uas_g = 0 em ~1/6 do
+    ! globo com N=32). O MOM6 recebe forçante corrompida e aborta com
+    ! "extreme surface values". Sintoma no log: uas_g nonzero=54000/64800.
+    !
+    ! CORREÇÃO B-58: fatorar petCount EXATAMENTE em (ncol,nrow), ncol*nrow =
+    ! petCount, escolhendo o par mais próximo de quadrado (menor fator <=
+    ! sqrt(N) para as linhas; cofator para as colunas). Assim totalDEs =
+    ! petCount sempre → 1 DE por PET → FieldGather reúne o campo completo.
+    ! Mantém a intenção B-57 (tiles ~quadradas) e respeita os limites físicos
+    ! (ncol <= NLON/2, nrow <= NLAT). Casos comuns:
+    !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
+    ! Primo grande (raro) degenera para strip (N=17→17x1), aceitável e ainda
+    ! com cobertura total — melhor que o buraco silencioso do B-57.
+    ! -------------------------------------------------------------------------
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    nx_tiles_target = max(1, nint(sqrt(real(petCount))))
-    nx_max      = min(nx_tiles_target, NLON / 2)
-    ny_tiles    = (petCount + nx_max - 1) / nx_max
-    regDecomp(1) = min(nx_max, petCount)
-    regDecomp(2) = max(1, ny_tiles)
+
+    ! Fatoração exata: maior divisor de petCount que seja <= sqrt(petCount) e
+    ! caiba em NLAT dá o número de LINHAS (nrow); o cofator dá as COLUNAS (ncol).
+    ! Atribui o maior fator a lon (grade 360x180 é 2:1), aproximando tiles
+    ! quadradas. Sempre existe solução (nrow=1 no pior caso, para petCount primo).
+    nx_tiles_target = max(1, int(sqrt(real(petCount))))
+    ny_tiles = 1
+    do j = nx_tiles_target, 1, -1
+      if (mod(petCount, j) == 0) then
+        if (j <= NLAT .and. (petCount / j) <= NLON / 2) then
+          ny_tiles = j            ! linhas (lat) = menor fator
+          exit
+        end if
+      end if
+    end do
+    nx_max = petCount / ny_tiles  ! colunas (lon) = maior fator = cofator
+    regDecomp(1) = nx_max         ! lon tiles
+    regDecomp(2) = ny_tiles       ! lat tiles
+    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
 
     ! Grade regular 1 grau, periódica em lon.
     ! BUG-MPAS-LON-SHIFT (pré-condição): indexflag=ESMF_INDEX_GLOBAL garante que
