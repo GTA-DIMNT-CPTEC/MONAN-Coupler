@@ -66,6 +66,19 @@ module mpas_cap_config_mod
   integer,           public, protected :: cfg_dt_coupling  = 1800   ! [s]
   integer,           public, protected :: cfg_dt_atm       = 60     ! [s]
   character(len=256),public, protected :: cfg_log_dir      = 'logs'
+  ! cfg_log_kind  'multi'          -> ESMF_LOGKIND_MULTI (todas as mensagens,
+  !                                    inclusive INFO — necessário para
+  !                                    analisa_balanceamento_pets.py medir
+  !                                    tempo por componente/passo). Padrão —
+  !                                    use durante calibração/testes.
+  !               'multi_on_error' -> ESMF_LOGKIND_MULTI_ON_ERROR (log só é
+  !                                    materializado em caso de erro — mais
+  !                                    rápido, porém uma execução bem-sucedida
+  !                                    pode não deixar logs/PET*.esmApp.log
+  !                                    completo. Reserve para produção já
+  !                                    calibrada, sem necessidade de medir
+  !                                    tempo por passo.
+  character(len=16), public, protected :: cfg_log_kind     = 'multi'
 
   ! ══════════════════════════════════════════════════════════════════════════
   ! Grupo &nuopc_atm — parâmetros do cap atmosférico
@@ -121,6 +134,24 @@ module mpas_cap_config_mod
   logical,           public, protected :: cfg_mom6_use_mommesh = .false.
   integer,           public, protected :: cfg_mom6_restart_n   = 0
 
+  ! ══════════════════════════════════════════════════════════════════════════
+  ! Grupo &nuopc_petlayout — particionamento de PETs entre componentes (v13.0)
+  ! ══════════════════════════════════════════════════════════════════════════
+  !   cfg_coupling_mode  'sequential' → todos os componentes em todos os PETs
+  !                                      (execução serial; padrão retrocompatível)
+  !                      'concurrent' → ATM e OCN em subconjuntos DISJUNTOS de
+  !                                      PETs (ATM e OCN avançam em paralelo,
+  !                                      wall-clock). MED permanece em todos.
+  !   cfg_atm_pet_count  Nº de PETs do ATM (MPAS) no modo concurrent.
+  !                      <=0 → auto: ceil(petCount/2).
+  !   cfg_ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) no modo concurrent.
+  !                      <=0 → auto: petCount - atm_pet_count.
+  !   A validação da soma (atm+ocn == petCount) é feita em esm.F90, pois
+  !   petCount só é conhecido após ESMF_Initialize (pós-MPI_Init).
+  character(len=16), public, protected :: cfg_coupling_mode = 'sequential'
+  integer,           public, protected :: cfg_atm_pet_count = 0
+  integer,           public, protected :: cfg_ocn_pet_count = 0
+
   ! ── Grupo &nuopc_mode — seleção de componentes ────────────────────────────
   !   cfg_use_datm  .true.  → usa DATM (JRA55) como ATM
   !                 .false. → usa MPAS-A real (padrão de produção)
@@ -169,6 +200,7 @@ contains
     character(len=10)  :: start_date,   stop_date
     integer            :: dt_coupling,  dt_atm
     character(len=256) :: log_dir
+    character(len=16)  :: log_kind
     character(len=256) :: mesh_atm,     config_dir
     logical            :: write_netcdf, write_diag
     character(len=256) :: output_dir
@@ -207,7 +239,7 @@ contains
                              docn_sst_varname, docn_ice_varname, &
                              docn_cur_u_varname, docn_cur_v_varname, &
                              docn_ice_pct, write_import_diag, import_diag_dir
-    namelist /nuopc_driver/ start_date, stop_date, dt_coupling, dt_atm, log_dir
+    namelist /nuopc_driver/ start_date, stop_date, dt_coupling, dt_atm, log_dir, log_kind
     namelist /nuopc_atm/    mesh_atm, config_dir, write_diag
     namelist /nuopc_netcdf/ write_netcdf, output_dir, grid_res_deg
     namelist /nuopc_atm_bnd/sst_default, ice_fraction_default, zorl_default
@@ -222,6 +254,12 @@ contains
     namelist /nuopc_mode/ use_datm, use_docn, use_med_to_mpas, &
                           use_docn_ice, docn_ice_init_only
 
+    ! &nuopc_petlayout — particionamento de PETs entre componentes (v13.0)
+    character(len=16) :: coupling_mode = 'sequential'
+    integer           :: atm_pet_count = 0
+    integer           :: ocn_pet_count = 0
+    namelist /nuopc_petlayout/ coupling_mode, atm_pet_count, ocn_pet_count
+
     rc = 0
 
     ! ── 1. Inicializar locais com os defaults do módulo ───────────────────
@@ -230,6 +268,7 @@ contains
     dt_coupling         = cfg_dt_coupling
     dt_atm              = cfg_dt_atm
     log_dir             = cfg_log_dir
+    log_kind            = cfg_log_kind
     mesh_atm            = cfg_mesh_atm
     config_dir          = cfg_config_dir
     write_netcdf        = cfg_write_netcdf
@@ -256,6 +295,9 @@ contains
     docn_ice_pct       = cfg_docn_ice_pct
     write_import_diag    = cfg_write_import_diag
     import_diag_dir      = cfg_import_diag_dir
+    coupling_mode        = cfg_coupling_mode
+    atm_pet_count        = cfg_atm_pet_count
+    ocn_pet_count        = cfg_ocn_pet_count
 
     ! ── 2. Determinar caminho do arquivo ─────────────────────────────────
     if (present(file_path) .and. len_trim(file_path) > 0) then
@@ -286,6 +328,20 @@ contains
     read(UNITN, nml=nuopc_driver, iostat=ios)
     if (ios /= 0) write(*,'(A)') &
       '[mpas_cap_config] AVISO: grupo &nuopc_driver ausente ou com erro — usando defaults.'
+
+    call str_lower(log_kind)
+    if (trim(log_kind) /= 'multi' .and. trim(log_kind) /= 'multi_on_error') then
+      write(*,'(A,A,A)') '[mpas_cap_config] ERRO: log_kind="', &
+        trim(log_kind), '" invalido — use multi|multi_on_error.'
+      rc = 2; return
+    end if
+    if (trim(log_kind) == 'multi_on_error') then
+      write(*,'(A)') &
+        '[mpas_cap_config] AVISO: log_kind=multi_on_error — logs/PET*.esmApp.log ' // &
+        'pode ficar incompleto/ausente em execucoes bem-sucedidas (o log so e ' // &
+        'materializado em caso de erro). analisa_balanceamento_pets.py depende ' // &
+        'desses logs; use log_kind=multi durante calibracao.'
+    end if
 
     ! &nuopc_atm
     rewind(UNITN)
@@ -367,6 +423,29 @@ contains
     cfg_mom6_use_mommesh = use_mommesh
     cfg_mom6_restart_n   = restart_n
 
+    ! ── &nuopc_petlayout — particionamento de PETs (sequential|concurrent) ──
+    rewind(UNITN)
+    read(UNITN, nml=nuopc_petlayout, iostat=ios)
+    if (ios /= 0) write(*,'(A)') &
+      '[mpas_cap_config] INFO: &nuopc_petlayout ausente — ' // &
+      'coupling_mode=sequential (todos os componentes em todos os PETs).'
+
+    call str_lower(coupling_mode)
+    if (trim(coupling_mode) /= 'sequential' .and. &
+        trim(coupling_mode) /= 'concurrent') then
+      write(*,'(A,A,A)') '[mpas_cap_config] ERRO: coupling_mode="', &
+        trim(coupling_mode), '" invalido — use sequential|concurrent.'
+      rc = 2; return
+    end if
+    if (atm_pet_count < 0 .or. ocn_pet_count < 0) then
+      write(*,'(A)') '[mpas_cap_config] ERRO: atm_pet_count/ocn_pet_count ' // &
+        'nao podem ser negativos.'
+      rc = 2; return
+    end if
+    cfg_coupling_mode = trim(coupling_mode)
+    cfg_atm_pet_count = atm_pet_count
+    cfg_ocn_pet_count = ocn_pet_count
+
     ! ── Validação: Alternativa 1 — Si_ifrac via arquivo OISST ────────────
     ! cfg_use_docn_ice=.true. exige cfg_docn_ice_file configurado.
     ! O arquivo é lido por ReadOcnFieldInterp em mom_cap.F90.
@@ -412,6 +491,7 @@ contains
     cfg_dt_coupling          = dt_coupling
     cfg_dt_atm               = dt_atm
     cfg_log_dir              = trim(log_dir)
+    cfg_log_kind             = trim(log_kind)
     cfg_mesh_atm             = trim(mesh_atm)
     cfg_config_dir           = trim(config_dir)
     cfg_write_diag           = write_diag
@@ -441,6 +521,7 @@ contains
     write(*,'(2X,A,I0)') '  dt_coupling       = ', cfg_dt_coupling
     write(*,'(2X,A,I0)') '  dt_atm            = ', cfg_dt_atm
     write(*,'(2X,A,A)')  '  log_dir           = ', trim(cfg_log_dir)
+    write(*,'(2X,A,A)')  '  log_kind          = ', trim(cfg_log_kind)
     write(*,'(A)') ''
     write(*,'(A,A)') '  [nuopc_atm]'
     write(*,'(2X,A,A)')  '  mesh_atm          = ', trim(cfg_mesh_atm)
@@ -480,6 +561,10 @@ contains
     write(*,'(2X,A,L1)') 'cfg_use_med_to_mpas  = ', cfg_use_med_to_mpas
     write(*,'(2X,A,L1)') 'cfg_use_docn_ice     = ', cfg_use_docn_ice
     write(*,'(2X,A,L1)') 'cfg_docn_ice_init_only= ', cfg_docn_ice_init_only
+    write(*,'(A)') '  --- Particionamento de PETs (&nuopc_petlayout) ---'
+    write(*,'(2X,A,A)')  'cfg_coupling_mode    = ', trim(cfg_coupling_mode)
+    write(*,'(2X,A,I0)') 'cfg_atm_pet_count    = ', cfg_atm_pet_count
+    write(*,'(2X,A,I0)') 'cfg_ocn_pet_count    = ', cfg_ocn_pet_count
   end subroutine config_print
 
   !> @brief Converte string 'YYYY-MM-DD' para componentes inteiros.
@@ -506,5 +591,18 @@ contains
 
     if (mm < 1 .or. mm > 12 .or. dd < 1 .or. dd > 31) rc = 1
   end subroutine config_parse_date
+
+  !> @brief Converte uma string para minúsculas in-place (ASCII).
+  !!
+  !! Usado para tornar a leitura de coupling_mode tolerante a maiúsculas
+  !! ('Concurrent', 'SEQUENTIAL', … → 'concurrent', 'sequential').
+  subroutine str_lower(s)
+    character(len=*), intent(inout) :: s
+    integer :: i, c
+    do i = 1, len_trim(s)
+      c = iachar(s(i:i))
+      if (c >= iachar('A') .and. c <= iachar('Z')) s(i:i) = achar(c + 32)
+    end do
+  end subroutine str_lower
 
 end module mpas_cap_config_mod

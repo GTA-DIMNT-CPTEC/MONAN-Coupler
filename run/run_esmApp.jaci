@@ -29,9 +29,12 @@ export COUPLER_ROOT="${COUPLER_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." &&
 EXECUTABLE="${ESMAPP_BIN:-${COUPLER_ROOT}/bin/esmApp}"
 
 # Lê campo simples do nuopc.input (ignora comentários ! e aspas).
+# O comentário é removido ANTES da extração do valor: o 's/.*=.../' é guloso e,
+# se o comentário contiver '=' (ex.: "atm_pet_count = 4  ! (0 = auto)"), casaria
+# até o '=' errado. Remover '!...' primeiro evita isso.
 _nuopc_get() {
   grep -i "^\s*${1}\s*=" "${CONFIG_FILE}" 2>/dev/null \
-    | head -1 | sed "s/.*=\s*//; s/['\",]//g; s/\s*!.*//; s/[[:space:]]*$//"
+    | head -1 | sed "s/\s*!.*//; s/.*=\s*//; s/['\",]//g; s/[[:space:]]*$//"
 }
 
 # Retorna 0 (verdadeiro) se o valor Fortran for .true. ou true.
@@ -343,6 +346,13 @@ Modos ATM/OCN (nuopc.input &nuopc_mode):
   use_datm=T  use_docn=F  →  DATM JRA55   + MOM6+SIS2 dinâmico   (teste MOM6)
   use_datm=T  use_docn=T  →  DATM JRA55   + DOCN SST dados        (teste MED)
 
+Particionamento de PETs (nuopc.input &nuopc_petlayout):
+  sequential   MPAS/MED/OCN em todos os PETs                       (padrão)
+  concurrent   ATM e OCN em blocos disjuntos; exige
+               -n = atm_pet_count + ocn_pet_count
+               a partição METIS do MPAS (.part.atm_pet_count) é
+               gerada automaticamente no pré-check
+
 Saídas:
   esmApp-integrado.pbs                          script PBS gerado
   logs/esmApp_run.log                           stdout/stderr do mpiexec
@@ -392,6 +402,45 @@ _glob_req() {
     [[ -n "${hint}" ]] && echo "             ${hint}"
     MISSING=$(( MISSING + 1 ))
   fi
+}
+
+# Garante a partição METIS do MPAS para N tarefas. Verifica o ARQUIVO DE
+# PARTIÇÃO diretamente (glob x1.*.graph.info.part.N) — é o que o MPAS lê, e não
+# depende da presença do graph base. Se faltar, tenta gerar via
+# run/gen-metis.bash (que aí sim exige o graph base x1.*.graph.info). Só marca
+# FALTANDO se não existir e não for possível gerar. Evita 'return 1' para não
+# disparar o 'set -e' quando chamada como comando simples.
+_ensure_metis_part() {
+  local n="$1" gen="${COUPLER_ROOT}/run/gen-metis.bash" f="" graph=""
+
+  # 1) A partição já existe? (glob direto, independente do graph base)
+  if compgen -G "x1.*.graph.info.part.${n}" > /dev/null 2>&1; then
+    f=$(compgen -G "x1.*.graph.info.part.${n}" | head -1)
+    printf "  %-8s: %s  (%s)\n" "OK" "x1.*.graph.info.part.${n}" "${f}"
+    return 0
+  fi
+
+  # 2) Faltando — gerar exige o graph base (x1.*.graph.info).
+  if compgen -G "x1.*.graph.info" > /dev/null 2>&1; then
+    graph=$(compgen -G "x1.*.graph.info" | head -1)
+  fi
+  if [[ -n "${graph}" && -x "${gen}" ]]; then
+    printf "  %-8s: %s — gerando via gen-metis.bash...\n" "GERANDO" "x1.*.graph.info.part.${n}"
+    if bash "${gen}" --parts "${n}" > /dev/null 2>&1 \
+       && compgen -G "x1.*.graph.info.part.${n}" > /dev/null 2>&1; then
+      f=$(compgen -G "x1.*.graph.info.part.${n}" | head -1)
+      printf "  %-8s: %s  (%s)\n" "OK" "x1.*.graph.info.part.${n}" "${f}"
+      return 0
+    fi
+  fi
+
+  # 3) Não existe e não foi possível gerar.
+  printf "  %-8s: %s\n" "FALTANDO" "x1.*.graph.info.part.${n}"
+  [[ -z "${graph}" ]] && \
+    echo "             (graph base x1.*.graph.info ausente — necessário para gerar)"
+  echo "             Gerar com: gen-metis.bash -n ${NPES}   (ou gpmetis x1.NNNNN.graph.info ${n})"
+  MISSING=$(( MISSING + 1 ))
+  return 0
 }
 
 # Verifica arquivo ou glob opcional (exibe aviso, não incrementa MISSING).
@@ -448,9 +497,36 @@ echo ""
 echo "--- Grade e decomposição ---"
 _req "mpas_mesh.nc"
 _glob_req "x1.*.init.nc" "x1.*.init.nc"
-_glob_req "x1.*.graph.info.part.${NPES}" \
-          "x1.*.graph.info.part.${NPES}" \
-          "Gerar com: gpmetis x1.NNNNN.graph.info ${NPES}"
+
+# ── Particionamento de PETs (ciente do grupo &nuopc_petlayout) ───────────────
+# Quantas partições METIS o MPAS realmente usa depende do modo de acoplamento:
+#   sequential → NPES (o -n);   concurrent → atm_pet_count (bloco ATM).
+# O MOM6 não usa METIS. A partição que faltar é gerada automaticamente.
+COUPLING_MODE=$(_nuopc_get coupling_mode || true); COUPLING_MODE="${COUPLING_MODE:-sequential}"
+ATM_PET=$(_nuopc_get atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
+OCN_PET=$(_nuopc_get ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
+
+if [[ "${COUPLING_MODE}" == "concurrent" ]]; then
+  # Guard: em concurrent, atm_pet_count + ocn_pet_count deve ser IGUAL a NPES.
+  if [[ "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 && $(( ATM_PET + OCN_PET )) -ne "${NPES}" ]]; then
+    echo ""
+    echo "ERRO: modo concurrent inconsistente com -n."
+    printf "      atm_pet_count=%s + ocn_pet_count=%s = %s, mas -n = %s.\n" \
+      "${ATM_PET}" "${OCN_PET}" "$(( ATM_PET + OCN_PET ))" "${NPES}"
+    echo "      Em concurrent, atm_pet_count + ocn_pet_count deve ser IGUAL a -n."
+    printf "      Ajuste: run_esmApp.jaci -n %s   (ou corrija a nuopc.input).\n" "$(( ATM_PET + OCN_PET ))"
+    exit 1
+  fi
+  # Nº de partições do MPAS = atm_pet_count (auto: metade de NPES, arred. p/ cima).
+  if [[ "${ATM_PET}" -gt 0 ]]; then MPAS_NPART="${ATM_PET}"
+  else                              MPAS_NPART=$(( (NPES + 1) / 2 )); fi
+  printf "  %-8s: modo concurrent — MPAS em %s PET(s), OCN em %s PET(s)\n" \
+    "INFO" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+else
+  MPAS_NPART="${NPES}"
+fi
+
+_ensure_metis_part "${MPAS_NPART}"
 echo ""
 
 echo "--- Radiação RRTMG (big-endian) ---"
@@ -481,7 +557,7 @@ if [[ "${MISSING}" -gt 0 ]]; then
   echo "Dicas:"
   printf "  %-38s  %s\n" "${EXECUTABLE}"            "make rebuild"
   printf "  %-38s  %s\n" "mpas_mesh.nc"             "ln -sf x1.NNNNN.esmf_mesh.nc mpas_mesh.nc"
-  printf "  %-38s  %s\n" "x1.*.graph.info.part.${NPES}" "gpmetis x1.NNNNN.graph.info ${NPES}"
+  printf "  %-38s  %s\n" "x1.*.graph.info.part.${MPAS_NPART:-$NPES}" "gen-metis.bash -n ${NPES}"
   printf "  %-38s  %s\n" "Tabelas radiação/LSM"     \
     "cp \$MPAS_DIR/src/core_atmosphere/physics/physics_wrf/files/* ."
   exit 1

@@ -59,6 +59,20 @@
 !   dt_atm       Passo de tempo interno do MONAN-A [s]
 !                Deve corresponder a config_dt em namelist.atmosphere.
 !   log_dir      Diretório de logs ESMF e stdout
+!   log_kind     Nível de detalhe do log ESMF por PET (logs/PET*.esmApp.log):
+!                'multi'          -> ESMF_LOGKIND_MULTI (todas as mensagens,
+!                                    inclusive INFO). Necessário para
+!                                    test-concurrent.bash e para
+!                                    analisa_balanceamento_pets.py medirem
+!                                    tempo por componente/passo. Padrão —
+!                                    use durante calibração/testes.
+!                'multi_on_error' -> ESMF_LOGKIND_MULTI_ON_ERROR. Mais rápido
+!                                    e com logs bem menores, porém o log só é
+!                                    materializado em caso de erro: uma
+!                                    execução BEM-SUCEDIDA pode não deixar
+!                                    logs/PET*.esmApp.log completo. Reserve
+!                                    para produção já calibrada, quando não
+!                                    for mais preciso medir tempo por passo.
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'
@@ -66,6 +80,7 @@
   dt_coupling = 3600  ! [N3] 3600 s recomendado MOM6 global (default Fortran: 1800)
   dt_atm      = 60
   log_dir     = 'logs'
+  log_kind    = 'multi'  ! 'multi' (calibração) | 'multi_on_error' (produção)
 /
 
 !-----------------------------------------------------------------------
@@ -285,4 +300,51 @@
   mesh_ocn       = 'INPUT/ocean_hgrid.nc'  ! [N5] ver nota sobre ESMF mesh acima
   use_mommesh    = .true.                   ! default Fortran: .false.
   restart_n      = 0
+/
+
+!-----------------------------------------------------------------------
+! Grupo 7: Particionamento de PETs entre componentes (&nuopc_petlayout)
+!
+! Controla como os PETs (persistent execution threads = ranks MPI) são
+! distribuídos entre os componentes MPAS (ATM), MOM6/DOCN (OCN) e o
+! mediador (MED). Definido em esm_MONAN.F90::SetModelServices.
+!
+!   coupling_mode  'sequential' → MPAS, MED e OCN em TODOS os PETs, um de
+!                                  cada vez (execução serial). Padrão —
+!                                  retrocompatível com versões anteriores.
+!                                  Throughput máximo por componente; ATM e
+!                                  OCN NÃO se sobrepõem no tempo.
+!                  'concurrent' → ATM e OCN em blocos DISJUNTOS de PETs,
+!                                  avançando em paralelo (wall-clock). O MED
+!                                  permanece em todos os PETs. O tempo por
+!                                  passo passa a ser max(t_ATM, t_OCN) em
+!                                  vez de t_ATM + t_OCN.
+!                  (aceita maiúsculas: 'Concurrent', 'SEQUENTIAL', etc.)
+!
+!   atm_pet_count  Nº de PETs do ATM (MPAS) no modo concurrent.
+!                  0 → auto: ceil(petCount/2).
+!   ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) no modo concurrent.
+!                  0 → auto: petCount - atm_pet_count.
+!
+! REGRA (concurrent): atm_pet_count + ocn_pet_count deve ser igual ao total
+!   de PETs lançados (mpiexec -n N / run_esmApp.jaci -n N). Se um dos dois
+!   for 0, o outro é completado automaticamente. Partição inconsistente
+!   aborta o driver em SetModelServices com mensagem no log ESMF.
+!
+! DIMENSIONAMENTO: escolha a razão ATM:OCN pelo custo relativo de cada
+!   componente. Como o MPAS costuma dominar, um ponto de partida típico é
+!   ~2:1 a ~3:1 (ex.: 128 PETs → atm=88, ocn=40). Ajuste medindo o tempo
+!   de parede de cada componente em logs/PET*.esmApp.log e rebalanceie até
+!   que ATM e OCN terminem o passo aproximadamente juntos. Uma partição mal
+!   dimensionada pode ficar MAIS lenta que o modo sequential.
+!
+! IMPORTANTE: os grupos &nuopc_mode e &nuopc_petlayout são independentes.
+!   O modo concurrent funciona tanto na Fase 1 (DOCN) quanto na Fase 2
+!   (MOM6 dinâmico) — a RunSequence correta é selecionada automaticamente.
+!   O ganho de concorrência é maior na Fase 2, onde o OCN é caro.
+!-----------------------------------------------------------------------
+&nuopc_petlayout
+  coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
+  atm_pet_count = 0              ! concurrent: nº PETs do ATM (0 = auto: metade)
+  ocn_pet_count = 0              ! concurrent: nº PETs do OCN (0 = auto: resto)
 /

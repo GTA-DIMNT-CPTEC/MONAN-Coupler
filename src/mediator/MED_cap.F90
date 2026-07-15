@@ -649,14 +649,25 @@ contains
     call med_read_import_config()
 
     ! FIX-IMP-01: salvar informação MPI do mediador para uso em med_write_import_fields
+    !
+    ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
+    ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
+    ! med_write_import_fields. No modo concurrent o MED tem seu próprio
+    ! comunicador de componente; substituí-lo silenciosamente por
+    ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
+    ! componente causaria mismatch / deadlock. Falhar cedo é o correto —
+    ! um erro de VM é excepcional e deve abortar, não ser mascarado.
     block
       type(ESMF_VM) :: med_vm
       call ESMF_VMGetCurrent(med_vm, rc=rc)
-      if (rc == ESMF_SUCCESS) then
-        call ESMF_VMGet(med_vm, localPet=med_local_pet, petCount=med_pet_count, &
-          mpiCommunicator=med_mpi_comm, rc=rc)
-        if (rc /= ESMF_SUCCESS) med_mpi_comm = MPI_COMM_WORLD
-      end if
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg='MED: falha ESMF_VMGetCurrent em InitializeRealize', &
+        line=__LINE__, file=__FILE__)) return
+      call ESMF_VMGet(med_vm, localPet=med_local_pet, petCount=med_pet_count, &
+        mpiCommunicator=med_mpi_comm, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg='MED: falha ESMF_VMGet mpiCommunicator em InitializeRealize', &
+        line=__LINE__, file=__FILE__)) return
     end block
 
     call ESMF_LogWrite('MED: InitializeRealize concluido', ESMF_LOGMSG_INFO)

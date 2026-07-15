@@ -23,7 +23,7 @@ module docn_cap_netcdf_mod
   use ESMF, only: ESMF_KIND_R8, ESMF_KIND_I8
   use ESMF, only: ESMF_SUCCESS, ESMF_FAILURE, ESMF_LOGERR_PASSTHRU
   use ESMF, only: ESMF_LogFoundError, ESMF_LogWrite, ESMF_LOGMSG_INFO, ESMF_LOGMSG_WARNING, ESMF_LOGMSG_ERROR
-  use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGetCurrent, ESMF_VMGet, ESMF_VMBroadcast
+  use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGetCurrent, ESMF_VMGet, ESMF_VMBroadcast, ESMF_GridCompGet
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
   use netcdf
@@ -183,7 +183,15 @@ contains
 
     allocate(buf_global(nx*ny))
 
-    call ESMF_VMGetGlobal(vm, rc=rc)
+    ! FIX-DEADLOCK (modo concurrent, v13.1): usar a VM do COMPONENTE, não a
+    ! global. ESMF_VMGetGlobal retorna todos os PETs (8); o ESMF_VMBroadcast
+    ! abaixo é coletivo sobre essa VM com rootPet=0. Em concurrent o OCN roda
+    ! só nos seus PETs (ex.: 4..7): apenas eles chamariam o broadcast enquanto
+    ! os PETs do ATM (incl. o PET0 global, raiz) nunca entram nesta rotina →
+    ! deadlock. ESMF_GridCompGet(gcomp,vm) dá a VM do componente (localPet e
+    ! rootPet=0 passam a ser locais ao componente). Em sequential a VM do
+    ! componente = todos os PETs, então o comportamento é idêntico ao anterior.
+    call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)

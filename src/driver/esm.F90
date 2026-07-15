@@ -69,7 +69,9 @@ module ESM_MONAN
   use MOM_cap_MONAN_mod,   only : OCN_SetServices  => SetServices
   use DOCN_cap_mod,        only : DOCN_SetServices => SetServices
   use mpas_cap_config_mod, only : cfg_use_datm, cfg_use_docn, &
-                                   cfg_use_med_to_mpas, config_read
+                                   cfg_use_med_to_mpas, config_read, &
+                                   cfg_coupling_mode, cfg_atm_pet_count, &
+                                   cfg_ocn_pet_count
 
   implicit none
   private
@@ -125,8 +127,10 @@ contains
     type(ESMF_Clock)        :: driverClock
     type(ESMF_TimeInterval) :: driverTimeStep
     integer(ESMF_KIND_I8)   :: dt_coupling_i8
-    integer              :: petCount, i
-    integer, allocatable :: petList(:)
+    integer              :: petCount, i, nAtm, nOcn
+    integer, allocatable :: atmPetList(:), ocnPetList(:), medPetList(:)
+    logical              :: is_concurrent
+    character(len=160)   :: msg
     character(len=16)    :: dt_str
     character(len=8)     :: val_med_to_mpas
     logical              :: use_med_to_mpas
@@ -151,8 +155,58 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
-    allocate(petList(petCount))
-    petList = [(i-1, i=1,petCount)]
+    !--------------------------------------------------------------------------
+    ! Particionamento de PETs (lido de &nuopc_petlayout via config_read, que já
+    ! foi chamado em esmApp.F90 antes de ESMF_Initialize).
+    !
+    !   sequential : MPAS, MED e OCN em TODOS os PETs (execução serial).
+    !   concurrent : ATM e OCN em blocos DISJUNTOS de PETs (paralelo wall-clock);
+    !                MED permanece em todos os PETs nos dois modos.
+    !
+    ! Os 4 conectores NÃO precisam de petList: NUOPC_DriverAddComp com
+    ! src/dstCompLabel roda automaticamente na UNIÃO dos PETs de origem e
+    ! destino — válido tanto no modo sequencial quanto no concorrente.
+    !--------------------------------------------------------------------------
+    is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
+
+    allocate(medPetList(petCount))
+    medPetList = [(i-1, i=1,petCount)]
+
+    if (is_concurrent) then
+      ! Partição disjunta ATM | OCN, cobrindo todos os PETs.
+      nAtm = cfg_atm_pet_count
+      nOcn = cfg_ocn_pet_count
+      if (nAtm <= 0 .and. nOcn <= 0) then
+        nAtm = (petCount + 1) / 2          ! metade, arredondando p/ cima
+        nOcn = petCount - nAtm
+      else if (nAtm <= 0) then
+        nAtm = petCount - nOcn
+      else if (nOcn <= 0) then
+        nOcn = petCount - nAtm
+      end if
+
+      if (nAtm < 1 .or. nOcn < 1 .or. nAtm + nOcn /= petCount) then
+        write(msg,'(A,I0,A,I0,A,I0,A)') &
+          'ESM: ERRO particao concurrent invalida — nAtm=', nAtm, &
+          ' nOcn=', nOcn, ' devem somar petCount=', petCount, '.'
+        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_ERROR)
+        rc = ESMF_FAILURE; return
+      end if
+
+      allocate(atmPetList(nAtm)); atmPetList = [(i-1,      i=1,nAtm)]
+      allocate(ocnPetList(nOcn)); ocnPetList = [(nAtm+i-1, i=1,nOcn)]
+
+      write(msg,'(A,I0,A,I0,A,I0,A)') &
+        'ESM: modo CONCURRENT — ATM=PET[0..', nAtm-1, '] OCN=PET[', &
+        nAtm, '..', petCount-1, '] MED=todos'
+      call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    else
+      allocate(atmPetList(petCount)); atmPetList = medPetList
+      allocate(ocnPetList(petCount)); ocnPetList = medPetList
+      call ESMF_LogWrite( &
+        'ESM: modo SEQUENTIAL — MPAS, MED e OCN em todos os PETs', &
+        ESMF_LOGMSG_INFO)
+    end if
 
     !--------------------------------------------------------------------------
     ! Componente MPAS (MONAN-A 2.0)
@@ -160,7 +214,7 @@ contains
     call NUOPC_DriverAddComp(driver,                          &
       compLabel              = MPAS_LABEL,                    &
       compSetServicesRoutine = MPAS_SetServices,              &
-      petList                = petList,                       &
+      petList                = atmPetList,                    &
       comp                   = mpasComp,                      &
       rc                     = rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
@@ -198,7 +252,7 @@ contains
     call NUOPC_DriverAddComp(driver,                          &
       compLabel              = MED_LABEL,                     &
       compSetServicesRoutine = MED_SetServices,               &
-      petList                = petList,                       &
+      petList                = medPetList,                    &
       comp                   = medComp,                       &
       rc                     = rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
@@ -240,7 +294,7 @@ contains
       call NUOPC_DriverAddComp(driver,                            &
         compLabel              = OCN_LABEL,                       &
         compSetServicesRoutine = DOCN_SetServices,                &
-        petList                = petList,                         &
+        petList                = ocnPetList,                      &
         comp                   = ocnComp,                         &
         rc                     = rc)
       write(*,'(A)') '[ESM] OCN: DOCN OISST ativo (use_docn=T, nuopc_mode)'
@@ -248,7 +302,7 @@ contains
       call NUOPC_DriverAddComp(driver,                            &
         compLabel              = OCN_LABEL,                       &
         compSetServicesRoutine = OCN_SetServices,                 &
-        petList                = petList,                         &
+        petList                = ocnPetList,                      &
         comp                   = ocnComp,                         &
         rc                     = rc)
       write(*,'(A)') '[ESM] OCN: MOM6+SIS2 dinâmico ativo (use_docn=F)'
@@ -429,7 +483,7 @@ contains
         ESMF_LOGMSG_INFO)
     end if
 
-    deallocate(petList)
+    deallocate(atmPetList, ocnPetList, medPetList)
 
     call ESMF_LogWrite( &
       'ESM: componentes e conectores registrados (MPAS+MED+OCN, 4 conectores)', &
@@ -469,8 +523,11 @@ contains
     character(len=64)       :: msg
     character(len=8)        :: val_seq
     logical                 :: use_med_to_mpas
+    logical                 :: is_concurrent
 
     rc = ESMF_SUCCESS
+
+    is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
 
     !-- Obter o timestep do clock do driver (= dt_coupling de nuopc.input) ----
     call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
@@ -506,38 +563,79 @@ contains
 
     ! CRÍTICO: todas as strings têm exatamente 18 chars (character(len=18)).
     ! write() em character(len=18) preenche o restante com espaços.
-    if (use_med_to_mpas) then
-      ! ── Fase 2: MOM6 dinâmico — OCN e ATM exportam ao MED primeiro ─────────
-      ! O MED aplica RouteOcnToAtm (regrid conservativo) e entrega ao MPAS.
-      ! Não há conector OCN→MPAS — tudo roteia pelo mediador.
-      runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-        line1,              &  ! "@<dt_coupling>    "
-        "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-        "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-        "  MED             ", &  ! RouteOcnToAtm + bulk NCAR
-        "  MED -> MPAS     ", &  ! SST/gelo/correntes -> MPAS (regrid conserv.)
-        "  MPAS            ", &  ! dinamica + fisica ATM com SST do MED
-        "  MED -> OCN      ", &  ! 14 fluxos Foxx_*/Faxa_* -> MOM6
-        "  OCN             ", &  ! avanca MOM6 dinamico
-        "@                 " /), rc=rc)
-      call ESMF_LogWrite('ESM: RunSequence Fase 2 (MED->MPAS)', ESMF_LOGMSG_INFO)
+    !
+    ! Quatro variantes: {sequential, concurrent} × {Fase 1 DOCN, Fase 2 MOM6}.
+    !
+    ! No modo CONCORRENTE, as linhas "MPAS" e "OCN" aparecem CONSECUTIVAS e sem
+    ! conector entre elas → o driver NUOPC as executa em paralelo (cada PET só
+    ! roda o componente do qual é membro; ATM e OCN estão em PETs disjuntos).
+    ! O mediador entrega no início do passo os campos calculados ao FINAL do
+    ! passo anterior (lag de 1 dt_coupling — padrão em acoplamento concorrente,
+    ! equivalente ao "ocean lag" do CESM/UFS; inicializado por DataInitialize).
+    if (is_concurrent) then
+      if (use_med_to_mpas) then
+        ! ── Fase 2 CONCORRENTE (MOM6 dinâmico) ──────────────────────────────
+        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
+          line1,              &  ! "@<dt_coupling>    "
+          "  MED -> MPAS     ", &  ! SST/gelo/correntes (t-1) -> ATM (regrid)
+          "  MED -> OCN      ", &  ! 14 fluxos (t-1) -> MOM6
+          "  MPAS            ", &  ! ATM avanca   ┐ concorrentes (PETs disjuntos)
+          "  OCN             ", &  ! OCN avanca   ┘
+          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
+          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
+          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR (p/ proximo passo)
+          "@                 " /), rc=rc)
+        call ESMF_LogWrite('ESM: RunSequence Fase 2 CONCORRENTE (MED->MPAS)', &
+          ESMF_LOGMSG_INFO)
+      else
+        ! ── Fase 1 CONCORRENTE (DOCN) ───────────────────────────────────────
+        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
+          line1,              &  ! "@<dt_coupling>    "
+          "  OCN -> MPAS     ", &  ! SST (t-1) -> sfc_input MONAN-A (direto)
+          "  MED -> OCN      ", &  ! 14 fluxos (t-1) -> OCN (DOCN ignora)
+          "  MPAS            ", &  ! ATM avanca   ┐ concorrentes (PETs disjuntos)
+          "  OCN             ", &  ! OCN avanca   ┘
+          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
+          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
+          "  MED             ", &  ! calcula fluxos bulk NCAR (p/ proximo passo)
+          "@                 " /), rc=rc)
+        call ESMF_LogWrite('ESM: RunSequence Fase 1 CONCORRENTE (OCN->MPAS)', &
+          ESMF_LOGMSG_INFO)
+      end if
     else
-      ! ── Fase 1: DOCN — conector direto OCN→MPAS com regrid bilinear ─────────
-      ! SST com lag de 1 passo: garante que o MPAS usa So_t do passo anterior
-      ! (equivalente ao "ocean lag" do CESM — comportamento padrão em modelos
-      ! acoplados AOGCMs). Sem lag, MPAS e OCN processariam So_t simultaneamente
-      ! gerando inconsistência no first-call do sfc_input.
-      runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-        line1,              &  ! "@<dt_coupling>    "
-        "  OCN -> MPAS     ", &  ! SST lag t-1 -> sfc_input MONAN-A
-        "  MPAS            ", &  ! dinamica + fisica ATM
-        "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-        "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-        "  MED             ", &  ! calcula fluxos bulk NCAR
-        "  MED -> OCN      ", &  ! 14 fluxos -> OCN (DOCN ignora)
-        "  OCN             ", &  ! avanca DOCN (OISST netcdf)
-        "@                 " /), rc=rc)
-      call ESMF_LogWrite('ESM: RunSequence Fase 1 (OCN->MPAS direto)', ESMF_LOGMSG_INFO)
+      if (use_med_to_mpas) then
+        ! ── Fase 2: MOM6 dinâmico — OCN e ATM exportam ao MED primeiro ───────
+        ! O MED aplica RouteOcnToAtm (regrid conservativo) e entrega ao MPAS.
+        ! Não há conector OCN→MPAS — tudo roteia pelo mediador.
+        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
+          line1,              &  ! "@<dt_coupling>    "
+          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
+          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
+          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR
+          "  MED -> MPAS     ", &  ! SST/gelo/correntes -> MPAS (regrid conserv.)
+          "  MPAS            ", &  ! dinamica + fisica ATM com SST do MED
+          "  MED -> OCN      ", &  ! 14 fluxos Foxx_*/Faxa_* -> MOM6
+          "  OCN             ", &  ! avanca MOM6 dinamico
+          "@                 " /), rc=rc)
+        call ESMF_LogWrite('ESM: RunSequence Fase 2 (MED->MPAS)', ESMF_LOGMSG_INFO)
+      else
+        ! ── Fase 1: DOCN — conector direto OCN→MPAS com regrid bilinear ──────
+        ! SST com lag de 1 passo: garante que o MPAS usa So_t do passo anterior
+        ! (equivalente ao "ocean lag" do CESM — comportamento padrão em modelos
+        ! acoplados AOGCMs). Sem lag, MPAS e OCN processariam So_t simultaneamente
+        ! gerando inconsistência no first-call do sfc_input.
+        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
+          line1,              &  ! "@<dt_coupling>    "
+          "  OCN -> MPAS     ", &  ! SST lag t-1 -> sfc_input MONAN-A
+          "  MPAS            ", &  ! dinamica + fisica ATM
+          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
+          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
+          "  MED             ", &  ! calcula fluxos bulk NCAR
+          "  MED -> OCN      ", &  ! 14 fluxos -> OCN (DOCN ignora)
+          "  OCN             ", &  ! avanca DOCN (OISST netcdf)
+          "@                 " /), rc=rc)
+        call ESMF_LogWrite('ESM: RunSequence Fase 1 (OCN->MPAS direto)', ESMF_LOGMSG_INFO)
+      end if
     end if
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return

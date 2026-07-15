@@ -27,7 +27,7 @@ program esmApp
                                    config_parse_date, &
                                    CONFIG_FILE_DEFAULT, &
                                    cfg_start_date, cfg_stop_date, &
-                                   cfg_dt_coupling, cfg_log_dir
+                                   cfg_dt_coupling, cfg_log_dir, cfg_log_kind
   use mpas_cap_utils_mod,  only : ChkErr
 
   implicit none
@@ -44,6 +44,7 @@ program esmApp
   integer :: yy_stop,  mm_stop,  dd_stop
   integer :: dt_coupling_s, nSteps, total_sec
   integer :: config_rc, parse_rc, chdir_stat
+  type(ESMF_LogKind_Flag) :: esmfLogKind
 
   !---------------------------------------------------------------------------
   ! 1. Leitura do namelist nuopc.input (ou variável de ambiente NUOPC_INPUT)
@@ -77,12 +78,23 @@ program esmApp
   !      c) ESMF_Initialize             (abre os PET*.log no CWD corrente)
   !      d) chdir ..                    (retorna ao diretório de execução)
   !
-  !    Por que usar ESMF_LOGKIND_MULTI_ON_ERROR em vez de ESMF_LOGKIND_MULTI:
+  !    O nível de log é configurável via cfg_log_kind (&nuopc_driver/log_kind
+  !    em nuopc.input — ver mpas_cap_config.F90), sem precisar recompilar:
+  !
+  !      log_kind = 'multi'           -> ESMF_LOGKIND_MULTI (padrão)
+  !      log_kind = 'multi_on_error'  -> ESMF_LOGKIND_MULTI_ON_ERROR
+  !
+  !    ATENÇÃO ao escolher 'multi_on_error' (risco já validado nesta base):
   !      ESMF_LOGKIND_MULTI abre PET*.log imediatamente ao inicializar,
   !      garantindo que os arquivos sejam criados em logs/ independentemente
-  !      de erros. ESMF_LOGKIND_MULTI_ON_ERROR abre os logs lazily (só em
-  !      caso de erro), usando o CWD no momento do erro — que já foi revertido
-  !      pelo chdir('..') — resultando em logs no diretório errado ou ausentes.
+  !      de erros. ESMF_LOGKIND_MULTI_ON_ERROR só materializa o log em caso de
+  !      erro — numa execução bem-sucedida, logs/PET*.esmApp.log pode ficar
+  !      incompleto, no diretório errado (o chdir('..') já ocorreu) ou
+  !      ausente. Isso quebra a leitura de logs por `test-concurrent.bash` e
+  !      por `analisa_balanceamento_pets.py`, que dependem das marcações
+  !      "Run intro."/"extro." gravadas em nível INFO. Use 'multi' durante
+  !      calibração/testes; reserve 'multi_on_error' para produção já
+  !      calibrada, quando o tempo por passo não precisa mais ser medido.
   !
   !    Nota: defaultLogFileName deve ser apenas o basename (sem '/'), pois o
   !      ESMF constrói o caminho como "PET{N}." + defaultLogFileName. Um
@@ -94,8 +106,14 @@ program esmApp
   if (chdir_stat /= 0) &
     write(*,'(A)') 'AVISO: chdir para log_dir falhou — logs no diretorio corrente'
 
+  if (trim(cfg_log_kind) == 'multi_on_error') then
+    esmfLogKind = ESMF_LOGKIND_MULTI_ON_ERROR
+  else
+    esmfLogKind = ESMF_LOGKIND_MULTI
+  end if
+
   call ESMF_Initialize(defaultCalkind    = ESMF_CALKIND_GREGORIAN, &
-                       logKindFlag       = ESMF_LOGKIND_MULTI,      &
+                       logKindFlag       = esmfLogKind,             &
                        defaultLogFileName= 'esmApp.log',            &
                        rc                = rc)
 

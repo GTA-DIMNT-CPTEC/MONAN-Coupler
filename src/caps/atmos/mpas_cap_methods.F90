@@ -803,12 +803,25 @@ contains
           end do
 
           ! 2. Obter comunicador MPI do VM ESMF (mesmo do MPAS-A)
+          !
+          ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD.
+          ! No modo concurrent o MPAS roda em subconjunto próprio de PETs; os
+          ! dois MPI_Allreduce abaixo gatheram os tiles Voronoi disjuntos SOBRE
+          ! esse subconjunto. Usar MPI_COMM_WORLD (todos os ranks, inclusive os
+          ! PETs do OCN, que NÃO executam este código) travaria o coletivo —
+          ! deadlock. Um erro de VM é excepcional; abortar limpo (rc de saída)
+          ! é preferível a mascarar com um comunicador errado.
           call ESMF_VMGetCurrent(vm_local, rc=rc)
-          if (rc == ESMF_SUCCESS) then
-            call ESMF_VMGet(vm_local, mpiCommunicator=mpi_comm_use, rc=rc)
-            if (rc /= ESMF_SUCCESS) mpi_comm_use = MPI_COMM_WORLD
-          else
-            mpi_comm_use = MPI_COMM_WORLD
+          if (rc /= ESMF_SUCCESS) then
+            call ESMF_LogWrite(subname//': falha ESMF_VMGetCurrent no gather '// &
+              'Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+            return
+          end if
+          call ESMF_VMGet(vm_local, mpiCommunicator=mpi_comm_use, rc=rc)
+          if (rc /= ESMF_SUCCESS) then
+            call ESMF_LogWrite(subname//': falha ESMF_VMGet mpiCommunicator no '// &
+              'gather Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+            return
           end if
 
           ! 3. Allreduce SUM dos valores e contagens (tiles Voronoi disjuntos por PET)

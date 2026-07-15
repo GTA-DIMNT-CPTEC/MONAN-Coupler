@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.16 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Junho 2026
+> v14.17 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Julho 2026
 
 Acoplador atmosfera–oceano–gelo de produção: **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) via framework
@@ -186,7 +186,8 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 ├── run/
 │   ├── setenv-gnu.bash       ← ambiente de compilação (Jaci/GNU)
 │   ├── setenv-site.bash      ← config de sítio (cópia do install.bash)
-│   └── run_esmApp.jaci       ← submissão PBS
+│   ├── run_esmApp.jaci       ← submissão PBS (pré-check ciente do layout)
+│   └── gen-metis.bash        ← gera partições METIS do MPAS por modo
 ├── mod/                      ← módulos .mod (gerados na instalação)
 ├── lib/                      ← libs .a (gerados na instalação)
 ├── diag_export/              ← monan_export_*.nc
@@ -252,10 +253,76 @@ Exemplo — 24 h com MOM6 dinâmico (Fase 2):
   start_date = '2026-03-29'  stop_date = '2026-03-30'
   dt_coupling = 3600         dt_atm = 60          ! [s]
 /
+
 &nuopc_mode
   use_datm = .false.  use_docn = .false.  use_med_to_mpas = .true.
 /
 ```
+
+### Particionamento MPI dos componentes (`&nuopc_petlayout`)
+
+Grupo novo (v14.17). Controla a distribuição de ranks MPI entre os componentes
+em tempo de execução, sem recompilar:
+
+```fortran
+&nuopc_petlayout
+  coupling_mode = 'sequential'  ! 'sequential' (padrão) | 'concurrent'
+  atm_pet_count = 0             ! PETs do MPAS  (0 = auto-split: ceil(N/2))
+  ocn_pet_count = 0             ! PETs do MOM6  (0 = auto-split: N - atm)
+/
+```
+
+| `coupling_mode` | Comportamento | Quando usar |
+|:--|:--|:--|
+| `sequential` (padrão) | MPAS, MED e OCN compartilham **todos** os PETs; rodam em série | Baseline, testes de correctness, execuções menores |
+| `concurrent` | MPAS e OCN em blocos **disjuntos** de PETs; avançam em paralelo; MED em todos | Produção em escala, custo calibrado |
+
+Em modo `concurrent`, `atm_pet_count + ocn_pet_count` deve ser igual ao `-n`
+do job; o driver valida antes de inicializar o ESMF e aborta com mensagem clara
+em caso de divergência. Com `0` em ambos, a divisão é automática.
+
+> **Acoplamento defasado.** Em modo concorrente o MPAS e o MOM6 avançam
+> ao mesmo tempo, portanto cada um recebe os campos calculados pelo mediador no
+> passo **anterior** (`t − dt_coupling`). Esta defasagem de um passo é
+> intencional (mesma estratégia do CESM/*ocean lag*) e negligenciável para
+> `dt_coupling ≤ 3600 s`.
+
+Exemplo — 128 PETs com divisão 88:40:
+
+```fortran
+&nuopc_petlayout
+  coupling_mode = 'concurrent'
+  atm_pet_count = 88     ! MPAS  → PET 0..87
+  ocn_pet_count = 40     ! MOM6  → PET 88..127
+/
+```
+
+> **Ponto de partida para a razão ATM:OCN.** O MPAS-A costuma dominar o custo
+> por passo. Uma razão inicial de 2:1 a 3:1 (ATM:OCN) é razoável antes da
+> primeira calibração.
+
+### Nível de log ESMF (`log_kind` em `&nuopc_driver`)
+
+Novo parâmetro em `&nuopc_driver` (v14.17). Controla o detalhe dos arquivos
+`logs/PET*.esmApp.log` sem recompilar:
+
+```fortran
+&nuopc_driver
+  start_date = '2026-03-29'  stop_date = '2026-03-30'
+  dt_coupling = 3600         dt_atm = 60
+  log_kind    = 'multi'      ! 'multi' (padrão) | 'multi_on_error'
+/
+```
+
+| `log_kind` | Comportamento | Quando usar |
+|:--|:--|:--|
+| `multi` (padrão) | Grava todas as mensagens, inclusive INFO | Desenvolvimento e testes |
+| `multi_on_error` | Log materializado apenas em caso de erro; arquivos menores e execução mais rápida | Produção já calibrada |
+
+> **Atenção com `multi_on_error`.** Em execuções bem-sucedidas,
+> `logs/PET*.esmApp.log` pode ficar incompleto ou ausente — o ESMF abre o
+> arquivo apenas no momento do erro, quando o `chdir` de volta ao diretório do
+> experimento já ocorreu.
 
 ---
 
@@ -296,6 +363,67 @@ sobrescreva com `export COUPLER_ROOT=…`. O `setenv` e o executável
 Escalabilidade validada: 4 → 512 PETs.
 
 ---
+
+## Modos de execução e particionamento MPI
+
+### Submissão com modo concorrente
+
+O `run_esmApp.jaci` tornou-se **ciente do layout** a partir da v14.17: em modo
+`concurrent`, valida que `atm_pet_count + ocn_pet_count == -n`, gera
+automaticamente a partição METIS correta (`.part.<atm_pet_count>`) e aborta com
+mensagem clara se a soma não bater. O fluxo permanece um único comando:
+
+```bash
+# Definir concurrent em nuopc.input e submeter normalmente:
+run_esmApp.jaci -n 128          # valida, gera partição METIS e faz qsub
+```
+
+### Partições METIS do MPAS (`gen-metis.bash`)
+
+O MPAS decompõe a malha pelo METIS e lê `x1.NNNNN.graph.info.part.N`, onde
+**N é o número de tarefas MPI no comunicador do MPAS** — não o total do job.
+
+| Modo | Arquivo de partição necessário |
+|:--|:--|
+| `sequential` | `x1.NNNNN.graph.info.part.<NPES>` |
+| `concurrent` | `x1.NNNNN.graph.info.part.<atm_pet_count>` |
+
+O script `run/gen-metis.bash` gera as partições lendo malha e modo diretamente
+da `nuopc.input`. O `run_esmApp.jaci` chama-o automaticamente quando a partição
+necessária não existe.
+
+```bash
+cd /…/exp1
+gen-metis.bash -n 128                  # gera a partição para o -n informado
+gen-metis.bash --parts "128 88 64"     # gera exatamente esses valores de N
+gen-metis.bash -n 128 --dry-run        # mostra o que faria, sem executar
+```
+
+### Decomposição de domínio do MOM6/SIS2
+
+`LAYOUT = NIPROC, NJPROC` em `MOM_input` e `SIS_input` deve satisfazer
+`NIPROC × NJPROC == ocn_pet_count` — o número de PETs do **componente OCN**,
+não o total do job. O FMS aceita silenciosamente um `LAYOUT` inconsistente com
+o comunicador, mas o erro estoura quando `MASKTABLE` está ativo:
+
+```
+FATAL: MPP_DEFINE_DOMAINS2D: incorrect number of PEs assigned
+       for this layout and maskmap.
+```
+
+Referência rápida:
+
+| `ocn_pet_count` | `LAYOUT` em `MOM_input` e `SIS_input` |
+|:--:|:--|
+| 4 | `LAYOUT = 2, 2` |
+| 16 | `LAYOUT = 4, 4` |
+| 32 | `LAYOUT = 4, 8` |
+| 64 | `LAYOUT = 8, 8` |
+
+> **Atenção ao `MOM_override` / `SIS_override` no diretório do experimento**
+> (fora deste repositório): se contiverem `MASKTABLE` apontando para um arquivo
+> de outro layout, o erro acima ocorrerá. Comente o `MASKTABLE` nesses arquivos
+> toda vez que `ocn_pet_count` mudar.
 
 ## Saídas e pós-processamento
 
@@ -340,7 +468,7 @@ por este Makefile.
 | Arquivo      | Módulo       | Descrição                    |
 |:-------------|:-------------|:-----------------------------|
 | `esmApp.F90` | *(programa)* | Entrada; relógio ESMF global |
-| `esm.F90`    | `ESM_MONAN`  | Driver NUOPC; sequência      |
+| `esm.F90`    | `ESM_MONAN`  | Driver NUOPC; sequência de execução; particionamento de PETs por componente |
 
 **Cap atmosférico — `src/caps/atmos/`**
 
@@ -349,7 +477,7 @@ por este Makefile.
 | `mpas_cap_MONAN.F90`    | Cap NUOPC para MONAN-A 2.0 / MPAS   |
 | `mpas_cap_methods.F90`  | Importa/exporta campos ESMF ↔ MPAS  |
 | `mpas_cap_netcdf.F90`   | Diagnósticos NetCDF export/import   |
-| `mpas_cap_config.F90`   | Leitura do namelist `nuopc.input`   |
+| `mpas_cap_config.F90`   | Leitura do `nuopc.input` (`&nuopc_driver`, `&nuopc_petlayout`, `&nuopc_mode` e demais grupos) |
 | `mpas_cap_utils.F90`    | `ChkErr`, log ESMF, utilitários     |
 | `mpas_atm_types.F90`    | Tipos do estado atmosférico         |
 | `mpas_atm_model.F90`    | Inicializa e avança o MONAN-A       |
@@ -396,6 +524,7 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.17  | Jul 2026 | Particionamento MPI sequencial/concorrente: `&nuopc_petlayout` (`coupling_mode`, `atm_pet_count`, `ocn_pet_count`); `log_kind` em `&nuopc_driver`; `run/gen-metis.bash` (partições METIS por modo); `run_esmApp.jaci` ciente do layout (valida soma, gera `.part.<atm_pet_count>`) |
 | 14.16  | Jun 2026 | `Coupler-Install`: passos renomeados (`1-monan`/`2-mom`/`3-coupler`); `docs/`, `sites/site-template.bash`, `Makefile` de atalhos |
 | 14.15  | Jun 2026 | Instalador renomeado para `Coupler-Install`; config de sítio em `run/setenv-site.bash` (remove `install/` do acoplador) |
 | 14.14  | Jun 2026 | Instalador: `bootstrap`→`install.bash`, `install-all`→`build.bash`; layout `sites/`+`templates/` |
