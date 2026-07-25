@@ -480,7 +480,7 @@ por este Makefile.
 | `mpas_cap_config.F90`   | Leitura do `nuopc.input` (`&nuopc_driver`, `&nuopc_petlayout`, `&nuopc_mode` e demais grupos) |
 | `mpas_cap_utils.F90`    | `ChkErr`, log ESMF, utilitários     |
 | `mpas_atm_types.F90`    | Tipos do estado atmosférico         |
-| `mpas_atm_model.F90`    | Inicializa e avança o MONAN-A       |
+| `mpas_atm_model.F90`    | Inicializa e avança o MONAN-A; replica a sequência de `mpas_subdriver.F` (veja "Réplica da inicialização do MPAS") |
 | `mpas_atm_wrappers.F90` | Interface com internos do MPAS      |
 | `DATM_cap.F90`          | Cap ATM por dados (JRA55 sintético) |
 
@@ -520,10 +520,80 @@ externo aparecem no mesmo arquivo (não suprimível por `-Wno-argument-mismatch`
 
 ---
 
+## Réplica da inicialização do MPAS
+
+O cap atmosférico **não** usa o `mpas_init` de
+`models/atmos/MONAN-Model/src/driver/mpas_subdriver.F`. Aquela rotina é
+monolítica: inicializa, roda até o fim e finaliza, o que é incompatível com o
+ciclo de vida NUOPC, em que o driver controla o avanço passo a passo. Por isso o
+`mpas_atm_model.F90` **replica à mão** a sequência de inicialização:
+
+```
+phase1 → atm_setup_core → atm_setup_domain → setup_log → setup_namelist →
+phase2 → streamInfo → define_packages → setup_packages → setup_decompositions →
+setup_clock → bootstrap_phase1 → stream_mgr_init → add_stream_attributes →
+setup_immutable_streams → xml_stream_parser → bootstrap_phase2 → core_init →
+extração de ponteiros zero-copy
+```
+
+A duplicação é necessária, mas cria uma dívida: **se o `mpas_subdriver.F` mudar
+em uma versão futura do MONAN-Model, a réplica não acompanha e nada avisa**. Não
+há erro de compilação nem de execução, apenas divergência silenciosa em relação
+ao *standalone*.
+
+Já aconteceu uma vez. A chamada `add_stream_attributes` estava ausente da
+réplica, e as saídas do acoplado (`diag`, `history`, `restart`) eram gravadas
+com um único atributo global, `file_id`, sem `sphere_radius`, sem `on_a_sphere`
+e sem nenhuma opção `config_*`. Nada falhava; o sintoma só apareceu no
+pós-processamento. A correção está na v14.18, com a rotina local
+`atm_add_stream_attributes` (cópia fiel do *upstream*, com bloco de manutenção
+no cabeçalho).
+
+### Ao atualizar o submódulo `models/atmos/MONAN-Model`
+
+Confira o diff do driver antes de compilar:
+
+```bash
+cd models/atmos/MONAN-Model
+git diff <tag-anterior>..<tag-nova> -- src/driver/mpas_subdriver.F
+```
+
+Se houver mudança na sequência de `mpas_init` ou no corpo de
+`add_stream_attributes`, replique-a em `src/caps/atmos/mpas_atm_model.F90`.
+
+### Teste de regressão dos atributos globais
+
+Compare uma saída do acoplado com uma do MONAN-A *standalone* rodado com o mesmo
+namelist e a mesma malha:
+
+```bash
+ATTR() { ncdump -h "$1" | sed -n '/^\/\/ global attributes/,$p' \
+         | sed 's/^[[:space:]]*//' | sort; }
+
+diff <(ATTR <saida-standalone>/MONAN_DIAG_*.nc) \
+     <(ATTR <saida-acoplado>/MONAN_DIAG_*.nc)
+```
+
+Diferenças legítimas, e apenas estas:
+
+| Atributo    | Por que difere                                                  |
+|:------------|:-----------------------------------------------------------------|
+| `file_id`   | identificador aleatório gerado por arquivo em `mpas_io_streams.F` |
+| `history`   | no acoplado reporta `domain%dminfo%nProcs`, ou seja, os PETs do componente ATM, não o total do job |
+| `parent_id` | encadeamento do pré-processamento                                 |
+| `config_*`  | apenas os efetivamente alterados no namelist do acoplado          |
+
+Qualquer outra diferença indica divergência em relação ao *upstream*. Verificação
+rápida da contagem: `ncdump -h ... | sed -n '/global attributes/,$p' | wc -l`
+deve ficar em torno de 170, não em 3.
+
+---
+
 ## Histórico de versões
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.18  | Jul 2026 | Correção: atributos globais ausentes nas saídas do MONAN-A acoplado (`diag`/`history`/`restart` saíam só com `file_id`). `mpas_atm_model.F90` v5.2 acrescenta `atm_add_stream_attributes`, réplica de `add_stream_attributes` de `mpas_subdriver.F`, chamada entre `stream_mgr_init` e `setup_immutable_streams` |
 | 14.17  | Jul 2026 | Particionamento MPI sequencial/concorrente: `&nuopc_petlayout` (`coupling_mode`, `atm_pet_count`, `ocn_pet_count`); `log_kind` em `&nuopc_driver`; `run/gen-metis.bash` (partições METIS por modo); `run_esmApp.jaci` ciente do layout (valida soma, gera `.part.<atm_pet_count>`) |
 | 14.16  | Jun 2026 | `Coupler-Install`: passos renomeados (`1-monan`/`2-mom`/`3-coupler`); `docs/`, `sites/site-template.bash`, `Makefile` de atalhos |
 | 14.15  | Jun 2026 | Instalador renomeado para `Coupler-Install`; config de sítio em `run/setenv-site.bash` (remove `install/` do acoplador) |

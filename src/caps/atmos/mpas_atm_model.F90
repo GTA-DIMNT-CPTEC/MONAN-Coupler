@@ -1,7 +1,15 @@
 !> @file mpas_atm_model.F90
 !! @brief Interface com o modelo atmosférico MPAS-A 8.3 / MONAN-A 2.0.
 !!
-!! Versão 5.1 — Interface MONAN-A 2.0: init/run/final/resize + buffers de acoplamento.
+!! Versão 5.2 — Interface MONAN-A 2.0: init/run/final/resize + buffers de acoplamento.
+!!
+!! MUDANÇAS EM RELAÇÃO À v5.1:
+!!   Corrigida a ausência do registro de atributos globais nas saídas do
+!!   modelo. A sequência de inicialização reproduzida deste módulo omitia
+!!   a chamada add_stream_attributes de mpas_subdriver.F (linha 364), de
+!!   modo que os arquivos diag, history e restart eram gravados apenas com
+!!   o atributo file_id. Acrescentada a rotina atm_add_stream_attributes,
+!!   cópia fiel do upstream, e sua chamada no passo 11a de mpas_atm_init.
 !!   Com -DMPAS_EXTERNAL_ESMF_LIB, mpas_timekeeping.F usa 'use ESMF' (externo).
 !!   mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (g_domain%%clock),
 !!   independente do relógio ESMF do driver. Ambos são necessários.
@@ -10,8 +18,8 @@
 !!   phase1(external_comm) → atm_setup_core → atm_setup_domain → setup_log →
 !!   setup_namelist → phase2 → streamInfo → define_packages → setup_packages →
 !!   setup_decompositions → setup_clock → bootstrap_phase1 → stream_mgr_init →
-!!   setup_immutable_streams → xml_stream_parser → bootstrap_phase2 → core_init →
-!!   extração de ponteiros zero-copy.
+!!   add_stream_attributes → setup_immutable_streams → xml_stream_parser →
+!!   bootstrap_phase2 → core_init → extração de ponteiros zero-copy.
 !!
 !! Assinaturas confirmadas (probe_block_type.bash, Jaci):
 !!   core_init     : function(domain, startTimeStamp) result(ierr)  [integer]
@@ -26,8 +34,14 @@ module mpas_atm_model_mod
                                   mpas_atm_state_type,    &
                                   atm_ocean_boundary_type
 
-  use mpas_kind_types,    only : RKIND
-  use mpas_derived_types, only : domain_type, mpas_pool_type, MPAS_LOG_CRIT
+  use mpas_kind_types,    only : RKIND, StrKIND
+  use mpas_derived_types, only : domain_type, mpas_pool_type, MPAS_LOG_CRIT, &
+                                  MPAS_Pool_iterator_type,                    &
+                                  MPAS_POOL_CONFIG,                           &
+                                  MPAS_POOL_REAL,                             &
+                                  MPAS_POOL_INTEGER,                          &
+                                  MPAS_POOL_CHARACTER,                        &
+                                  MPAS_POOL_LOGICAL
 
   ! Duas fases confirmadas no probe (mpas_framework.F linhas 47/78/165)
   use mpas_timekeeping,   only : mpas_timekeeping_init,  &
@@ -38,18 +52,21 @@ module mpas_atm_model_mod
 
   use mpas_domain_routines, only : mpas_allocate_domain
 
-  use mpas_pool_routines, only : mpas_pool_get_array,    &
-                                  mpas_pool_get_dimension, &
-                                  mpas_pool_get_subpool,   &
-                                  mpas_pool_get_config
+  use mpas_pool_routines, only : mpas_pool_get_array,        &
+                                  mpas_pool_get_dimension,    &
+                                  mpas_pool_get_subpool,      &
+                                  mpas_pool_get_config,       &
+                                  mpas_pool_begin_iteration,  &
+                                  mpas_pool_get_next_member
 
   use mpas_bootstrapping, only : mpas_bootstrap_framework_phase1, &
                                   mpas_bootstrap_framework_phase2
 
   use mpas_stream_inquiry, only : MPAS_stream_inquiry_new_streaminfo
 
-  use mpas_stream_manager, only : MPAS_stream_mgr_init,            &
-                                   MPAS_stream_mgr_validate_streams
+  use mpas_stream_manager, only : MPAS_stream_mgr_init,             &
+                                   MPAS_stream_mgr_validate_streams, &
+                                   MPAS_stream_mgr_add_att
   use iso_c_binding,        only : c_loc, c_ptr, c_int, c_char
 
   use mpas_io,             only : MPAS_IO_PNETCDF
@@ -360,6 +377,29 @@ contains
     call MPAS_stream_mgr_init(g_domain%streamManager, g_domain%ioContext, &
                               g_domain%clock, g_domain%blocklist%allFields, &
                               g_domain%packages, g_domain%blocklist%allStructs)
+
+    ! ------------------------------------------------------------------
+    ! 11a. Registra os atributos globais no stream manager.
+    !      Equivale a add_stream_attributes(domain_ptr) de mpas_subdriver.F
+    !      (linha 364), passo que estava ausente nesta reimplementacao da
+    !      sequencia de inicializacao.
+    !
+    !      Sem esta chamada, as saidas do modelo (diag, history, restart)
+    !      saem apenas com file_id, gerado internamente por mpas_io_streams
+    !      e que nao passa pelo stream manager. Todos os demais atributos
+    !      sao perdidos em silencio: model_name, core_name, version,
+    !      source, Conventions, git_version, on_a_sphere, sphere_radius,
+    !      is_periodic, x_period, y_period, history, parent_id, mesh_spec
+    !      e a lista completa de config_* do namelist.
+    !
+    !      Pre-requisitos ja satisfeitos neste ponto:
+    !        domain%on_a_sphere, %sphere_radius, %is_periodic, %x_period,
+    !        %y_period, %parent_id e %mesh_spec sao preenchidos pelo
+    !        mpas_bootstrap_framework_phase1 (passo 10);
+    !        domain%streamManager e inicializado logo acima.
+    ! ------------------------------------------------------------------
+    call atm_add_stream_attributes(g_domain)
+    call mpas_log_write('mpas_atm_init: atributos globais registrados')
 
     ierr = g_domain%core%setup_immutable_streams(g_domain%streamManager)
     if (ierr /= 0) then
@@ -1219,6 +1259,104 @@ contains
   end subroutine mpas_atm_resize
 
   ! ─── auxiliares privados ───────────────────────────────────────────────────
+
+  !> @brief Registra os atributos globais das saidas no stream manager.
+  !!
+  !! Copia fiel de add_stream_attributes (mpas_subdriver.F, linha 482) da
+  !! arvore MONAN-Model 8.3.1. E chamada por mpas_atm_init no passo 11a, entre
+  !! MPAS_stream_mgr_init e setup_immutable_streams, reproduzindo a ordem do
+  !! mpas_subdriver.F.
+  !!
+  !! Registra tres grupos de atributos:
+  !!   1. Metadados do nucleo  : model_name, core_name, version, source,
+  !!                             Conventions, git_version
+  !!   2. Herdados da malha    : on_a_sphere, sphere_radius, is_periodic,
+  !!                             x_period, y_period, parent_id, mesh_spec
+  !!   3. Opcoes de namelist   : todos os config_*, por iteracao sobre o pool
+  !!                             domain%configs, com conversao por tipo
+  !!
+  !! MANUTENCAO: esta rotina duplica codigo do upstream. Ressincronizar a cada
+  !! atualizacao da versao base do MONAN-Model. A divergencia nao produz erro
+  !! de compilacao nem de execucao, apenas metadados incompletos nas saidas.
+  !!
+  !! DIFERENCA INTENCIONAL EM RELACAO AO UPSTREAM: o atributo history usa o
+  !! descritor I0 em vez da cadeia de if/else sobre nProcs. O resultado e
+  !! identico e o codigo dispensa o limite superior de seis digitos.
+  !!
+  !! NOTA SOBRE O ACOPLADO: domain%dminfo%nProcs reflete o numero de PETs do
+  !! componente ATM, nao o total do job. Em modo concorrente, o atributo
+  !! history reportara apenas a particao atmosferica.
+  !!
+  !! @param[inout] domain  Dominio MPAS, ja com blocklist e streamManager
+  !!                       inicializados
+  subroutine atm_add_stream_attributes(domain)
+    type(domain_type), intent(inout) :: domain
+
+    type(MPAS_Pool_iterator_type)    :: itr
+    integer,                 pointer :: intAtt
+    logical,                 pointer :: logAtt
+    character(len=StrKIND),  pointer :: charAtt
+    real(kind=RKIND),        pointer :: realAtt
+    character(len=StrKIND)           :: histAtt
+    integer                          :: local_ierr
+
+    write(histAtt, '(A,I0,A,A,A)') 'mpirun -n ', domain%dminfo%nProcs, &
+         ' ./', trim(domain%core%coreName), '_model'
+
+    ! ── Grupo 1: metadados do nucleo ─────────────────────────────────────────
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'model_name',    domain%core%modelName)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'core_name',     domain%core%coreName)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'version',       domain%core%modelVersion)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'source',        domain%core%source)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'Conventions',   domain%core%Conventions)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'git_version',   domain%core%git_version)
+
+    ! ── Grupo 2: atributos herdados da malha ─────────────────────────────────
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'on_a_sphere',   domain%on_a_sphere)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'sphere_radius', domain%sphere_radius)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'is_periodic',   domain%is_periodic)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'x_period',      domain%x_period)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'y_period',      domain%y_period)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'history',       histAtt)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'parent_id',     domain%parent_id)
+    call MPAS_stream_mgr_add_att(domain%streamManager, 'mesh_spec',     domain%mesh_spec)
+
+    ! ── Grupo 3: opcoes de namelist (config_*) ───────────────────────────────
+    call mpas_pool_begin_iteration(domain%configs)
+
+    do while (mpas_pool_get_next_member(domain%configs, itr))
+
+      if (itr%memberType /= MPAS_POOL_CONFIG) cycle
+
+      if (itr%dataType == MPAS_POOL_REAL) then
+        call mpas_pool_get_config(domain%configs, itr%memberName, realAtt)
+        call MPAS_stream_mgr_add_att(domain%streamManager, itr%memberName, &
+             realAtt, ierr=local_ierr)
+
+      else if (itr%dataType == MPAS_POOL_INTEGER) then
+        call mpas_pool_get_config(domain%configs, itr%memberName, intAtt)
+        call MPAS_stream_mgr_add_att(domain%streamManager, itr%memberName, &
+             intAtt, ierr=local_ierr)
+
+      else if (itr%dataType == MPAS_POOL_CHARACTER) then
+        call mpas_pool_get_config(domain%configs, itr%memberName, charAtt)
+        call MPAS_stream_mgr_add_att(domain%streamManager, itr%memberName, &
+             charAtt, ierr=local_ierr)
+
+      else if (itr%dataType == MPAS_POOL_LOGICAL) then
+        call mpas_pool_get_config(domain%configs, itr%memberName, logAtt)
+        if (logAtt) then
+          call MPAS_stream_mgr_add_att(domain%streamManager, itr%memberName, &
+               'YES', ierr=local_ierr)
+        else
+          call MPAS_stream_mgr_add_att(domain%streamManager, itr%memberName, &
+               'NO',  ierr=local_ierr)
+        end if
+      end if
+
+    end do
+
+  end subroutine atm_add_stream_attributes
 
   subroutine warn_if_null(ptr, name)
     real(MPAS_RKIND), pointer, intent(in) :: ptr(:)
