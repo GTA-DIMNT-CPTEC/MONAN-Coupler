@@ -801,13 +801,27 @@ contains
     type(atm_ocean_boundary_type), intent(in)    :: atm_bnd
     integer,                       intent(in)    :: dt_coupling
     integer,                       intent(out)   :: rc
-
+    type(mpas_pool_type), pointer   :: diag_physicsPool => null()
     type(mpas_pool_type), pointer   :: sfcInputPool => null()
+    real(MPAS_RKIND), dimension(:), pointer :: xland_field  => null()
+    real(MPAS_RKIND), dimension(:), pointer :: skintemp_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: sst_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: ice_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: zorl_field => null()
-    integer :: n, ierr
+    integer :: n, ierr, iCell
     character(len=256) :: msg
+    ! B-COLDSTART-01: na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
+    ! (lag de 1 passo, ver driver/esm.F90). Na 1a chamada de acoplamento de
+    ! um COLD START o MOM6 ainda nao rodou nenhum passo dinamico: atm_bnd%sst
+    ! chega com o fallback do mediador (bootstrap/T_FILL), nao com dado real.
+    ! Em RESTART, porem, o MOM6 ja parte de um estado real (arquivo de
+    ! restart) - a atm_bnd%sst da 1a chamada ja e valida, entao NAO se deve
+    ! pular a atribuicao nesse caso. Usamos config_do_restart (namelist do
+    ! MONAN-A) pra distinguir os dois casos.
+    logical, save :: first_coupling_call = .true.
+    logical, pointer :: config_do_restart => null()
+    logical :: is_cold_start
+
 
     rc = 0
     n  = atm_state%nCells
@@ -823,18 +837,54 @@ contains
     ! Nomes Registry.xml: sst, iceAreaCell, znt
     ! ------------------------------------------------------------------
     call mpas_pool_get_subpool(g_domain%blocklist%structs, 'sfc_input', sfcInputPool)
+   !call mpas_pool_get_subpool(block % structs, 'sfc_input', sfc_input)
+    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
-    if (associated(sfcInputPool)) then
+    call mpas_pool_get_config(g_domain%configs, 'config_do_restart', config_do_restart)
+    if (associated(config_do_restart)) then
+      is_cold_start = .not. config_do_restart
+    else
+      ! config nao encontrado - assume cold start (mais seguro: no pior caso
+      ! so atrasa 1 passo de acoplamento em vez de aplicar um fallback ruim)
+      is_cold_start = .true.
+    end if
+
+    if (associated(sfcInputPool) .and. associated(sfcInputPool)) then
+      call mpas_pool_get_array(sfcInputPool,'skintemp',skintemp_field)
+      call mpas_pool_get_array(sfcInputPool,'xland',xland_field )
+
       call mpas_pool_get_array(sfcInputPool, 'sst',         sst_field)
       call mpas_pool_get_array(sfcInputPool, 'iceAreaCell', ice_field)
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
+      !call mpas_pool_get_array(diag_physicsPool, 'znt',         zorl_field)
+      call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
 
-      if (associated(sst_field)  .and. allocated(atm_bnd%sst)) &
-           sst_field(1:n)  = atm_bnd%sst(1:n)
-      if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) &
-           ice_field(1:n)  = atm_bnd%ice_fraction(1:n)
-      if (associated(zorl_field) .and. allocated(atm_bnd%zorl)) &
-           zorl_field(1:n) = atm_bnd%zorl(1:n)
+      if (associated(xland_field)  .and. allocated(atm_bnd%sst))then
+         if (first_coupling_call .and. is_cold_start) then
+            call mpas_log_write( &
+              'mpas_atm_run: B-COLDSTART-01 - 1a chamada de acoplamento em ' // &
+              'COLD START, OCN ainda nao avancou nenhum passo - mantendo ' // &
+              'sst/skintemp/ice/zorl da condicao inicial do MONAN-A (nao ' // &
+              'aplicando atm_bnd)')
+         end if
+         DO iCell =1, atm_state%nCells
+            if( xland_field(iCell) .gt. 1.5) then
+               if (.not. (first_coupling_call .and. is_cold_start)) then
+                  if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
+                     sst_field(iCell)  = atm_bnd%sst(iCell)
+                     skintemp_field(iCell) = atm_bnd%sst(iCell)
+                  end if
+                  if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) then
+                     ice_field(iCell)  = atm_bnd%ice_fraction(iCell)
+                  end if
+                  if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
+                       zorl_field(iCell) = atm_bnd%zorl(iCell)
+                  endif
+               end if
+            endif
+         end do
+      end if
+      first_coupling_call = .false.
     else
       write(*,'(A)') 'AVISO mpas_atm_run: subpool sfc_input nao encontrado em structs'
     end if
