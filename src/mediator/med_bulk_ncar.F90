@@ -159,6 +159,23 @@ contains
     call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
+      ! BUG-CALC-06 (v14.21): pular celulas sem psl fisico, simetrico as
+      ! guardas BUG-CALC-03 (lwdn) e BUG-CALC-04 (tas).
+      !
+      ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
+      ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
+      ! pular a celula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
+      ! qsat sai cinco ordens de grandeza alto. A evaporacao entao satura no
+      ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro — e esse fluxo
+      ! saturado e' entregue ao oceano, nao fica so' no diagnostico.
+      !
+      ! Isso aparecia no passo 1 de coupling_mode='sequential': ali o mediador
+      ! roda ANTES do primeiro avanco do MPAS, e os diagnosticos de fisica da
+      ! atmosfera (radiacao, precipitacao, pressao ao nivel do mar) ainda estao
+      ! zerados. As demais guardas ja' tratavam lwdn e swdn; psl nao tinha.
+      ! Pressao ao nivel do mar nunca desce de ~870 hPa na natureza, entao
+      ! 500 hPa e' um limiar seguro para "ausencia de dado".
+      if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
         associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)

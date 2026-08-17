@@ -19,7 +19,10 @@ module mpas_cap_methods_mod
                                   MPAS_RKIND
   use mpas_cap_utils_mod, only : ChkErr
   ! Sprint C: cfg_zorl_default usado como fallback NaN-guard em mpas_import
+  ! FIX B-SST-GUARD-01 (Ago 2026): cfg_sst_default adicionado — usado como
+  ! fallback no guard de SST agora aplicado (ver abaixo).
   use mpas_cap_config_mod, only : cfg_zorl_default,          &
+                                   cfg_sst_default,           &
                                    cfg_write_import_diag,     &
                                    cfg_import_diag_dir,       &
                                    cfg_grid_res_deg
@@ -80,6 +83,67 @@ contains
     call state_get_field_1d(importState, 'So_t', nCells, atm_bnd%sst, rc, &
                             lonCell, latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    ! FIX B-SST-GUARD-01 (Ago 2026): SST era o UNICO dos 4 campos importados
+    ! aqui sem clamp fisico nem guarda de NaN — Si_ifrac, So_u, So_v e Sf_zorl
+    ! ja tinham essa protecao (ver abaixo), mas So_t nao, apesar de ser usado
+    ! DIRETAMENTE em skintemp_field/sst_field logo antes de core_run
+    ! (mpas_atm_model.F90). Qualquer celula da malha Voronoi que caia perto de
+    ! uma regiao sem mapeamento valido no regrid grade-regular->Voronoi (ex.:
+    ! extremos de latitude/polos) pode chegar aqui como NaN ou valor fisico
+    ! absurdo, alimentando core_run sem protecao — candidato direto para o
+    ! SIGSEGV recorrente em core_run observado nesta sessao. Clamp usa a mesma
+    ! faixa fisica ja adotada no mediador (MED_cap.F90: T_MIN=270, T_MAX=310).
+    ! FIX B-SST-GUARD-02 (Ago 2026): fallback agora depende da latitude — usar
+    ! cfg_sst_default (~298K, valor tropical) para QUALQUER celula invalida,
+    ! inclusive polar, introduz um vies quente artificial de ~27K exatamente
+    ! nas altas latitudes (>60°), onde a agua do mar real fica perto do ponto
+    ! de congelamento (~271.35K = -1.8°C, T_FILL_POLAR abaixo — mesmo valor
+    ! ja usado como T_FILL no mediador, MED_cap.F90).
+    ! FIX B-SST-GUARD-03 (Ago 2026): degrau abrupto em 60° trocado por
+    ! interpolacao LINEAR continua em |latitude| (graus), de T_FILL_TROPICAL
+    ! no equador (0°) ate T_FILL_POLAR no polo (90°). Mais realista que um
+    ! degrau (o perfil zonal real de SST decai suavemente, nao em bloco) e
+    ! evita uma descontinuidade artificial de temperatura logo em 60°N/S
+    ! caso o fallback seja usado numa faixa continua de celulas ali.
+    if (allocated(atm_bnd%sst)) then
+      block
+        real(MPAS_RKIND), parameter :: T_FILL_POLAR    = 271.35_MPAS_RKIND
+        real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
+          3.14159265358979_MPAS_RKIND
+        logical,          allocatable :: invalid_sst(:)
+        real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
+        real(MPAS_RKIND) :: t_fill_tropical
+        integer :: n
+        ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
+        ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
+        ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
+        ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
+        ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
+        ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
+        ! tudo a (1:nCells), consistente com o resto desta subrotina.
+        n = nCells
+        t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
+        allocate(invalid_sst(n), t_fallback(n))
+        invalid_sst = (atm_bnd%sst(1:n) < 270.0_MPAS_RKIND .or. &
+                        atm_bnd%sst(1:n) > 310.0_MPAS_RKIND .or. &
+                        atm_bnd%sst(1:n) /= atm_bnd%sst(1:n))       ! NaN guard
+        if (present(latCell)) then
+          allocate(lat_deg(n), frac(n))
+          lat_deg = abs(latCell(1:n)) * RAD2DEG                 ! 0..90
+          frac    = min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, lat_deg / 90.0_MPAS_RKIND))
+          ! frac=0 no equador (usa t_fill_tropical), frac=1 no polo (usa T_FILL_POLAR)
+          t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
+          deallocate(lat_deg, frac)
+        else
+          ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
+          ! por seguranca — nao deveria ocorrer em uso normal, ja que
+          ! lonCell/latCell sao sempre passados por quem chama.
+          t_fallback = t_fill_tropical
+        end if
+        where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
+        deallocate(invalid_sst, t_fallback)
+      end block
+    end if
 
     ! -- Fracao de gelo marinho [0-1] -------------------------------------
     ! Sprint A: agora importado do SIS2 via mediador (era cfg_ice_fraction_default

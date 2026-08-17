@@ -8,6 +8,30 @@
 #                            acompanha o job até o relatório final.
 #   PBS (dentro do job):     carrega módulos, faz source do setenv e roda mpiexec (PALS).
 #
+# >>> MULTI-NÓ (revisão 2026-07): o gerador do .pbs agora deriva a topologia de
+#     nós a partir de NPES e de PPN, emitindo
+#     'select=NNODES:ncpus=PPN:mpiprocs=PPN:mem=...' + 'place=scatter'. Antes o
+#     script fixava 'select=1', o que limitava a execução a um único nó. O MODO
+#     PBS não muda: 'mpiexec -n NPES' com o PALS lê o PBS_NODEFILE e distribui os
+#     ranks pelos nós alocados automaticamente.
+#
+#     Hardware da Jaci (confirmado via lscpu/pbsnodes/qstat): nó de cálculo
+#     cn-0001..cn-0104 = 256 CORES FÍSICOS (2 sockets × 128 Zen5) com SMT ligado
+#     (2 threads/core → 512 CPUs LÓGICOS) e ~754 GB. O 'resources_available.ncpus'
+#     do nó reporta os 512 lógicos, MAS o orçamento das filas é dimensionado em
+#     CORES FÍSICOS: pesqextra tem resources_max.ncpus=7680 para
+#     resources_max.nodes=30, ou seja 256 por nó (e os jobs em execução aparecem
+#     com ncpus/nodect = 256). Portanto o 'select' pede ncpus=mpiprocs=PPN com
+#     PPN ≤ 256, e a posse do nó inteiro vem de 'place=scatter:excl', não de
+#     ncpus=512 (que consumiria o teto da fila em dobro, limitando a 15 nós).
+#     Há também um pool de 10 nós auxiliares (aux01..aux10): 256 ncpus e ~1,5 TB,
+#     alcançados pela fila 'aux' (worktype=aux), destinados a pré e pós-processamento.
+#     PPN_MAX=256 é o teto de CORES FÍSICOS. O padrão é --ppn 256 (um rank por
+#     core físico, nó cheio, sem SMT). NÃO há modelo de memória por PET: o script
+#     não reserva 'mem' por padrão (o nó fornece sua RAM; a memória por PET é
+#     apenas RAM_do_nó ÷ PET/nó). Em caso de OOM (exit 137/143), reduza os PETs
+#     por nó com --ppn (espalha em mais nós) ou reserve memória com --mem.
+#
 # Opções, modos ATM/OCN e saídas:  bash run_esmApp.jaci -h
 # =============================================================================
 
@@ -35,6 +59,33 @@ EXECUTABLE="${ESMAPP_BIN:-${COUPLER_ROOT}/bin/esmApp}"
 _nuopc_get() {
   grep -i "^\s*${1}\s*=" "${CONFIG_FILE}" 2>/dev/null \
     | head -1 | sed "s/\s*!.*//; s/.*=\s*//; s/['\",]//g; s/[[:space:]]*$//"
+}
+
+# Lê uma chave DENTRO de um grupo namelist específico. Necessário porque a busca
+# global acima casa a PRIMEIRA ocorrência no arquivo, que pode ser de um grupo
+# antigo ou de outro grupo que use o mesmo nome de chave. Insensível a
+# maiúsculas (namelist Fortran é case-insensitive), ignora comentários '!' e
+# aceita o terminador '/' ou '&end'. Vazio quando não encontra.
+_nuopc_get_in() {   # $1 = grupo (sem '&')   $2 = chave
+  awk -v grp="$1" -v key="$2" '
+    { line = $0; sub(/!.*/, "", line)
+      low = tolower(line); gsub(/^[ \t]+|[ \t]+$/, "", low) }
+    low ~ ("^&" tolower(grp) "$")              { ingrp = 1; next }
+    ingrp && (low == "/" || low == "&end")     { ingrp = 0; next }
+    ingrp && low ~ ("^" tolower(key) "[ \t]*=") {
+        sub(/^[^=]*=[ \t]*/, "", line)
+        gsub(/[\047\",]/, "", line)
+        gsub(/^[ \t]+|[ \t]+$/, "", line)
+        print line; exit }
+  ' "${CONFIG_FILE}" 2>/dev/null
+}
+
+# Chave do grupo &nuopc_petlayout, com recuo para a busca global (compatível com
+# nuopc.input antigos, que traziam as chaves fora de um grupo).
+_nuopc_pet() {
+  local v; v="$(_nuopc_get_in nuopc_petlayout "$1")"
+  [[ -z "${v}" ]] && v="$(_nuopc_get "$1")"
+  printf '%s' "${v}"
 }
 
 # Retorna 0 (verdadeiro) se o valor Fortran for .true. ou true.
@@ -131,6 +182,16 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   DT_COUP=$(_nuopc_get    dt_coupling)
   DT_ATM=$(_nuopc_get     dt_atm)
 
+  # ── Acoplamento: eixo temporal × eixo espacial (para o banner do job) ───────
+  # Sem estas duas chaves no log do job, um tempo de parede anotado hoje é
+  # ambíguo depois: 2176 PETs podem ser shared ou split, sequential ou
+  # concurrent, e as quatro combinações têm custos bem diferentes.
+  CM_JOB=$(_nuopc_pet coupling_mode); CM_JOB="${CM_JOB:-sequential}"
+  PL_JOB=$(_nuopc_pet pet_layout)
+  if [[ -z "${PL_JOB}" ]]; then
+    if [[ "${CM_JOB,,}" == "concurrent" ]]; then PL_JOB="split"; else PL_JOB="shared"; fi
+  fi
+
   if [[ -n "${START_DATE}" && -n "${STOP_DATE}" && -n "${DT_COUP}" ]]; then
     T0=$(date -d "${START_DATE//\'}" +%s 2>/dev/null || echo 0)
     T1=$(date -d "${STOP_DATE//\'}"  +%s 2>/dev/null || echo 0)
@@ -143,6 +204,52 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     NSTEPS="?"
   fi
 
+  # ── Topologia de nós (a partir do PBS_NODEFILE, já multi-nó) ─────────────────
+  # Em execução multi-nó o PBS_NODEFILE lista uma linha por slot MPI alocado.
+  # Nº de nós = linhas únicas; PETs por nó = total de slots / nós (informativo).
+  N_NODES=$(sort -u "${PBS_NODEFILE}" 2>/dev/null | wc -l)
+  N_SLOTS=$(wc -l < "${PBS_NODEFILE}" 2>/dev/null)
+  [[ "${N_NODES}" -gt 0 ]] && PPN_EFF=$(( N_SLOTS / N_NODES )) || PPN_EFF="?"
+
+  # Regime de ocupação do core, gravado no log do job (e não apenas no resumo
+  # do nó de login, que não é capturado pela diretiva PBS -o). É o que permite
+  # ao mede_smt.py conferir, a partir do conteúdo, que cada diretório de logs
+  # corresponde à configuração que se supõe.
+  # Nó de cálculo cn-*: 256 cores físicos (2 sockets × 128 Zen5), SMT on.
+  PPN_PHYS_JOB=256
+  if [[ ! "${PPN_EFF}" =~ ^[0-9]+$ ]]; then
+    # Sem PBS_NODEFILE legível não há como afirmar o regime. Declarar
+    # "indeterminado" é essencial: o mede_smt.py então PULA a verificação, em
+    # vez de aceitar uma afirmação errada como se fosse evidência.
+    REGIME_DESC="indeterminado (PBS_NODEFILE ausente ou ilegível)"
+  elif [[ "${PPN_EFF}" -gt "${PPN_PHYS_JOB}" ]]; then
+    REGIME_DESC="SMT ATIVO - ${PPN_EFF} ranks em ${PPN_PHYS_JOB} cores físicos ($(( (PPN_EFF + PPN_PHYS_JOB - 1) / PPN_PHYS_JOB )) por core)"
+  else
+    REGIME_DESC="1 rank por core físico (SMT ocioso)"
+  fi
+
+  # ── Procedência do build ───────────────────────────────────────────────────
+  # Sem estas linhas, um tempo de parede anotado hoje não é reproduzível depois:
+  # não há como saber qual revisão do código nem qual ESMF produziram o número.
+  # Tudo é tolerante a ausência: fora de um clone git, ou sem esmf.mk, o campo
+  # vira "?" em vez de quebrar o job.
+  _git_desc() {
+    command -v git >/dev/null 2>&1 || { echo "?"; return; }
+    git -C "$1" describe --tags --always --dirty 2>/dev/null \
+      || git -C "$1" rev-parse --short HEAD 2>/dev/null \
+      || echo "?"
+  }
+  BUILD_REV="$(_git_desc "${COUPLER_ROOT:-${PBS_O_WORKDIR}}")"
+  BUILD_ESMF="?"
+  if [[ -n "${ESMFMKFILE:-}" && -r "${ESMFMKFILE}" ]]; then
+    BUILD_ESMF="$(sed -n 's/^ESMF_VERSION_STRING=//p' "${ESMFMKFILE}" | head -1)"
+    [[ -z "${BUILD_ESMF}" ]] && BUILD_ESMF="?"
+  fi
+  BUILD_EXE="?"
+  if [[ -r "${EXE:-}" ]]; then
+    BUILD_EXE="$(date -r "${EXE}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
+  fi
+
   # ── Banner ─────────────────────────────────────────────────────────────────
   echo "======================================================================"
   echo "  Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2"
@@ -151,7 +258,15 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   printf "  %-15s = %s\n"    "Data"          "$(date '+%Y-%m-%d %H:%M:%S')"
   printf "  %-15s = %s\n"    "Diretório"     "${PBS_O_WORKDIR}"
   printf "  %-15s = %s\n"    "Nó(s)"         "$(sort -u "${PBS_NODEFILE}" | tr '\n' ' ')"
+  printf "  %-15s = %s nó(s) × %s PET(s)/nó\n" "Topologia"  "${N_NODES}" "${PPN_EFF}"
+  printf "  %-15s = %s\n"    "TOPO"          "${N_NODES} nó(s) × ${PPN_EFF} PET/nó"
+  printf "  %-15s = %s\n"    "REGIME"        "${REGIME_DESC}"
+  printf "  %-15s = coupling_mode=%s  pet_layout=%s\n" \
+                             "ACOPL"         "${CM_JOB,,}" "${PL_JOB,,}"
   printf "  %-15s = %s\n"    "PETs"          "${NPES}"
+  printf "  %-15s = %s\n"    "Revisão"       "${BUILD_REV}"
+  printf "  %-15s = %s\n"    "ESMF"          "${BUILD_ESMF}"
+  printf "  %-15s = %s\n"    "Executável"    "${BUILD_EXE}"
   printf "  %-15s = %s\n"    "Início"        "${START_DATE:-?}"
   printf "  %-15s = %s\n"    "Fim"           "${STOP_DATE:-?}"
   printf "  %-15s = %4s s\n" "dt_coupling"   "${DT_COUP:-?}"
@@ -187,7 +302,13 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   fi
 
   # ── Execução ────────────────────────────────────────────────────────────────
+  # MULTI-NÓ: 'mpiexec -n NPES' basta — o PALS lê o PBS_NODEFILE (todos os nós do
+  # 'select') e distribui os NPES ranks pelos slots alocados. Não é preciso
+  # passar '--ppn' aqui; fazê-lo com um último nó parcial (NPES não múltiplo de
+  # PPN) causaria incompatibilidade com o nodefile. O padrão do PALS preenche
+  # nó a nó, que é a colocação correta para MPI puro (OMP_NUM_THREADS=1).
   echo "Iniciando ${MPIEXEC} -n ${NPES} ${EXECUTABLE} ..."
+  echo "  (topologia: ${N_NODES} nó(s), ~${PPN_EFF} PET(s)/nó)"
   echo ""
   "${MPIEXEC}" -n "${NPES}" "${EXECUTABLE}" 2>&1 | tee "${LOG_RUN}"
   STATUS=${PIPESTATUS[0]}
@@ -259,9 +380,10 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     if [[ -n "${hint_mem}" ]]; then
       echo ""
       echo " ── Dicas para kill por sinal (exit=${status}) ───────────────────────"
-      echo "   MOM6 global 1° com 4 PETs exige ~4–8 GB por PET."
-      echo "   a) Aumentar PETs: run_esmApp.jaci -n 32"
-      echo "   b) Adicionar memória no .pbs: -l select=1:ncpus=4:mem=32gb:mpiprocs=4"
+      echo "   Provável falta de memória. Aumente a RAM por PET assim:"
+      echo "   a) Menos PET/nó (espalha em mais nós, mais RAM/PET):"
+      echo "        run_esmApp.jaci -n ${NPES} --ppn 128     (metade dos cores/nó)"
+      echo "   b) Reservar memória por nó no .pbs:  run_esmApp.jaci --mem 700gb"
       echo "   c) Reduzir domínio MOM6 (MOM_input: NIGLOBAL, NJGLOBAL)"
       echo "   d) Desativar diagnósticos: write_import_diag=.false."
       echo "   Verificar: qstat -x -f <JOBID> | grep -E 'resources_used.mem|comment'"
@@ -308,14 +430,99 @@ WALLTIME="01:00:00"
 CHECK_ONLY=0
 COMPILE_FIRST=0
 
+# ── Topologia multi-nó (Jaci / Cray XD2000) ──────────────────────────────────
+# Nó de cálculo (cn-*) = 256 CORES FÍSICOS (2 sockets × 128 Zen5), SMT on → 512
+# CPUs lógicos, ~754 GB. O nó reporta resources_available.ncpus=512 (lógicos),
+# mas o orçamento das filas é em CORES FÍSICOS (pesqextra: 7680 ncpus / 30 nós =
+# 256 por nó). Por isso pedimos ncpus=mpiprocs=PPN com PPN ≤ 256 e garantimos a
+# posse do nó inteiro com place=scatter:excl.
+# PPN_PHYS      : teto RECOMENDADO de mpiprocs por nó = 256 CORES FÍSICOS.
+# PPN_HARD      : teto ABSOLUTO do hardware = 512 CPUs LÓGICAS (SMT). Só é
+#                 alcançável com --allow-smt, que coloca 2 ranks por core.
+# PPN_MAX       : teto efetivo, igual a PPN_PHYS ou, com --allow-smt, PPN_HARD.
+# PPN           : PETs por nó. Padrão 256 (um rank por core físico, nó cheio, sem
+#                 SMT). 0 = automático (distribui NPES no MENOR nº de nós, uniforme,
+#                 até PPN_MAX).
+# PLACE         : colocação dos chunks no PBS:
+#                   scatter:excl → 1 chunk por nó + nó EXCLUSIVO (PADRÃO). O
+#                                  ':excl' é essencial aqui: como pedimos
+#                                  ncpus=256 num nó que anuncia 512 lógicos,
+#                                  SEM ':excl' o PBS pode alocar outro job na
+#                                  metade restante, causando disputa por RAM e
+#                                  por largura de banda no mesmo socket.
+#                   scatter      → 1 chunk por nó, nó COMPARTILHÁVEL
+#                   pack         → empacota chunks no menor nº de nós
+# MEM_PER_PET_GB: reserva OPCIONAL de memória por PET (GB). Padrão 0 = DESLIGADA
+#                 (o nó fornece sua RAM; não se assume requisito por PET). Ative
+#                 só se souber o valor (ex.: --mem-per-pet 4). --mem (fixa) tem
+#                 prioridade.
+# MEM_PER_NODE  : reserva FIXA de memória por nó (ex.: 700gb), via --mem. Vazio
+#                 = sem diretiva 'mem' (usa a RAM do nó).
+# NODE_MEM_STD_GB: RAM do nó de cálculo (~754 GB), usada só para avisar quando um
+#                 --mem/--mem-per-pet informado exceder isso (iria p/ nós de ~1,5 TB).
+PPN_PHYS=256
+PPN_HARD=512
+ALLOW_SMT=0
+PPN_MAX="${PPN_PHYS}"        # redefinido adiante se --allow-smt for usado
+PPN=256
+PLACE="scatter:excl"
+MEM_PER_PET_GB=0
+MEM_PER_NODE=""
+NODE_MEM_STD_GB=754
+
+# ── Limites das filas (qstat -Qf, 2026-08) ───────────────────────────────────
+# Formato: "ncpus_max nodes_max walltime_max". nodes_max=0 → sem limite de nós.
+# Usados apenas para AVISAR antes do qsub, evitando rejeição do escalonador.
+# Atualize com: qstat -Qf | grep -E '^Queue|resources_max'
+QUEUE_LIMITS_pesqextra="7680 30 08:00:00"
+QUEUE_LIMITS_pesqhigh="5120 20 06:00:00"
+QUEUE_LIMITS_pesqmidi="1792 7 02:00:00"
+QUEUE_LIMITS_pesqmini="1792 7 00:30:00"
+QUEUE_LIMITS_longtime="2048 8 168:00:00"
+QUEUE_LIMITS_aux="256 1 24:00:00"
+QUEUE_LIMITS_oper="10240 0 08:00:00"
+QUEUE_LIMITS_preoper="10240 0 08:00:00"
+
+# ── Modo concurrent: consolidação PET/nó por componente ──────────────────────
+# No &nuopc_petlayout concurrent, ATM (MPAS-A) e OCN (MOM6+SIS2) ocupam blocos
+# DISJUNTOS de PET. Para não deixar um nó MISTO (ATM+OCN), o script alinha cada
+# bloco a fronteiras de nó, gerando um 'select' HETEROGÊNEO: um trecho de nós só
+# de ATM + um trecho só de OCN, de modo que nenhum nó fique MISTO (melhor
+# localidade e binding). Só se aplica quando atm_pet_count e ocn_pet_count estão
+# explícitos na nuopc.input.
+# PPN_ATM_CAP  : teto de PET/nó do ATM. 0 = PPN_MAX (nó cheio).
+# PPN_OCN_CAP  : teto de PET/nó do OCN. 0 = PPN_MAX (nó cheio). Reduza (ex.:
+#                --ppn-ocn 128) para espalhar o OCN se observar OOM.
+#                O PET/nó efetivo é o MAIOR divisor do count do componente ≤ cap
+#                (garante blocos que fecham em nós inteiros).
+# MEM_PER_PET_ATM : reserva OPCIONAL de GB/PET p/ o ATM. Padrão 0 = DESLIGADA
+#                   (como MEM_PER_PET_GB).
+# PET_ORDER    : ordem dos ranks no petList — atm-first (padrão NUOPC) ou
+#                ocn-first. Define qual bloco vem ANTES no 'select' (o PALS
+#                preenche o PBS_NODEFILE na ordem do select).
+PPN_ATM_CAP=0
+PPN_OCN_CAP=0
+MEM_PER_PET_ATM=0
+PET_ORDER="atm-first"
+
 # ── Parse de argumentos ──────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -n|--npes)     NPES="$2";       shift 2 ;;
-    -q|--queue)    QUEUE="$2";      shift 2 ;;
-    -w|--walltime) WALLTIME="$2";   shift 2 ;;
-    --check)       CHECK_ONLY=1;    shift   ;;
-    --compile)     COMPILE_FIRST=1; shift   ;;
+    -n|--npes)     NPES="$2";         shift 2 ;;
+    -q|--queue)    QUEUE="$2";        shift 2 ;;
+    -w|--walltime) WALLTIME="$2";     shift 2 ;;
+    -p|--ppn)      PPN="$2";          shift 2 ;;
+    --allow-smt)   ALLOW_SMT=1;       shift 1 ;;
+    --place)       PLACE="$2";        shift 2 ;;
+    --mem)         MEM_PER_NODE="$2"; shift 2 ;;
+    --mem-per-pet) MEM_PER_PET_GB="$2"; shift 2 ;;
+    --mem-per-pet-atm) MEM_PER_PET_ATM="$2"; shift 2 ;;
+    --no-mem)      MEM_PER_PET_GB=0; MEM_PER_PET_ATM=0; MEM_PER_NODE=""; shift ;;
+    --ppn-atm)     PPN_ATM_CAP="$2"; shift 2 ;;
+    --ppn-ocn)     PPN_OCN_CAP="$2"; shift 2 ;;
+    --pet-order)   PET_ORDER="$2";   shift 2 ;;
+    --check)       CHECK_ONLY=1;      shift   ;;
+    --compile)     COMPILE_FIRST=1;   shift   ;;
     -h|--help)
       cat << 'HELP'
 Uso: bash run_esmApp.jaci [opções]
@@ -323,22 +530,69 @@ Uso: bash run_esmApp.jaci [opções]
   Sistema Acoplado MONAN-A 2.0 × MOM6+SIS2 / ESMF-NUOPC 8.9.1
   INPE / CGCT / DIMNT — GT Acoplamento de Modelos
   Escalabilidade validada: 4 / 64 / 128 / 512 PETs
+  Nó de cálculo Jaci (cn-*) = 256 cores físicos (2×128 Zen5, SMT on → 512
+  lógicos), ~754 GB. PPN é em cores físicos (teto 256). Padrão: 256 PET/nó
+  (nó cheio, 1 rank/core físico) com place=scatter:excl, que garante a posse
+  do nó inteiro. O orçamento das filas é em cores físicos (pesqextra: 7680
+  PETs / 30 nós / 08:00:00). Sem reserva de memória por padrão (ver --mem).
 
 Opções:
-  -n, --npes N             Número de PETs MPI    (padrão: 4)
-  -q, --queue FILA         Fila PBS              (padrão: pesqextra)
-  -w, --walltime HH:MM:SS  Walltime do job       (padrão: 01:00:00)
+  -n, --npes N             Número total de PETs MPI       (padrão: 4)
+  -q, --queue FILA         Fila PBS                       (padrão: pesqextra)
+  -w, --walltime HH:MM:SS  Walltime do job                (padrão: 01:00:00)
+  -p, --ppn N              PETs por nó (0 = auto ≤256)     (padrão: 256)
+      --allow-smt          Permite --ppn acima de 256 (até 512), colocando 2
+                           ranks por core físico. Destinado a MEDIR o efeito do
+                           SMT; degrada MPAS/MOM6 e não deve ser usado em
+                           produção                        (padrão: desligado)
+      --place MODO         Colocação PBS: scatter:excl | scatter | pack
+                                                          (padrão: scatter:excl)
+      --mem TAM            Reserva FIXA de memória por nó (ex.: 700gb)
+      --mem-per-pet N      Reserva OPCIONAL por PET em GB (padrão: 0 = desligada)
+      --no-mem             Garante sem reserva de memória (equivale ao padrão)
+  Concurrent (só quando atm_pet_count/ocn_pet_count estão na nuopc.input):
+      --ppn-atm N          Teto de PET/nó do ATM  (0 = nó cheio 256)
+      --ppn-ocn N          Teto de PET/nó do OCN  (0 = nó cheio 256)
+      --mem-per-pet-atm N  Reserva opcional por PET do ATM em GB (padrão: 0)
+      --pet-order ORDEM    atm-first (padrão) | ocn-first
   --compile                make rebuild antes de submeter
-  --check                  Valida pré-requisitos sem submeter
+  --check                  Valida pré-requisitos e mostra a topologia
   -h, --help               Esta mensagem
 
+Topologia multi-nó (Jaci / Cray XD2000, nó de cálculo = 256 cores físicos, ~754 GB):
+  O nº de nós é derivado de NPES e de --ppn:
+     NNODES = teto(NPES / PPN)
+     select=NNODES:ncpus=PPN:mpiprocs=PPN         (sem 'mem' por padrão)
+  Padrão --ppn 256 → nó cheio (1 rank por core físico, sem SMT). --ppn 0 = auto
+  (distribui NPES no menor nº de nós). Se NPES não for múltiplo de PPN, o último
+  nó recebe o resto (chunk parcial). NÃO há reserva de memória por padrão: o nó
+  fornece sua RAM. Em caso de OOM (exit 137/143), reduza --ppn (espalha em mais
+  nós, mais RAM por PET) ou reserve memória com --mem.
+
 Exemplos:
-  bash run_esmApp.jaci                       # 4 PETs, pesqextra, 1h
-  bash run_esmApp.jaci -n 128               # 128 PETs (nó Turin completo)
-  bash run_esmApp.jaci -n 512 -w 02:00:00   # 512 PETs
+  bash run_esmApp.jaci                       # 4 PETs, 1 nó, pesqextra, 1h
+  bash run_esmApp.jaci -n 128               # 128 PETs = 1 nó (128/256 cores)
+  bash run_esmApp.jaci -n 256               # 256 PETs = 1 nó cheio (256 cores)
+  bash run_esmApp.jaci -n 512 -w 02:00:00   # 512 PETs = 2 nós × 256
+  bash run_esmApp.jaci -n 512 --ppn 128      # 512 PETs = 4 nós × 128 (mais RAM/PET)
+  bash run_esmApp.jaci -n 256 --mem 700gb    # reserva fixa de 700 GB por nó
+  bash run_esmApp.jaci -n 512 --place scatter:excl   # nós exclusivos
   bash run_esmApp.jaci --compile -n 4        # compila e submete
-  bash run_esmApp.jaci --check               # verifica sem submeter
+  bash run_esmApp.jaci --check -n 256        # verifica e mostra a topologia
   bash run_esmApp.jaci -q pesqmini -w 00:30:00
+
+Comparação controlada do SMT (mesmos PETs, mesma malha, mesma nuopc.input):
+  bash run_esmApp.jaci -n 512 -w 01:00:00                  # A: 2 nós de 256
+  bash run_esmApp.jaci -n 512 --ppn 512 --allow-smt \
+                       -w 01:00:00                          # B: 1 nó de 512
+
+Limites por fila (qstat -Qf, 2026-08) — verificados antes do qsub:
+  pesqextra  7680 PETs   30 nós   08:00:00   (padrão)
+  pesqhigh   5120 PETs   20 nós   06:00:00
+  pesqmidi   1792 PETs    7 nós   02:00:00
+  pesqmini   1792 PETs    7 nós   00:30:00
+  longtime   2048 PETs    8 nós  168:00:00
+  aux         256 PETs    1 nó    24:00:00   (nós aux01-10, ~1,5 TB; pré/pós)
 
 Modos ATM/OCN (nuopc.input &nuopc_mode):
   use_datm=F  use_docn=F  →  MPAS-A real  + MOM6+SIS2 dinâmico  (PRODUÇÃO)
@@ -346,12 +600,43 @@ Modos ATM/OCN (nuopc.input &nuopc_mode):
   use_datm=T  use_docn=F  →  DATM JRA55   + MOM6+SIS2 dinâmico   (teste MOM6)
   use_datm=T  use_docn=T  →  DATM JRA55   + DOCN SST dados        (teste MED)
 
-Particionamento de PETs (nuopc.input &nuopc_petlayout):
-  sequential   MPAS/MED/OCN em todos os PETs                       (padrão)
-  concurrent   ATM e OCN em blocos disjuntos; exige
-               -n = atm_pet_count + ocn_pet_count
-               a partição METIS do MPAS (.part.atm_pet_count) é
-               gerada automaticamente no pré-check
+Particionamento de PETs (nuopc.input &nuopc_petlayout) — DOIS eixos:
+
+  coupling_mode  ordem de execução (tempo)
+    sequential   ATM e OCN avançam um depois do outro, sem lag   (padrão)
+    concurrent   ATM e OCN avançam juntos; lag de 1 dt_coupling
+
+  pet_layout     ocupação de PETs (espaço)
+    shared       MPAS/MED/OCN em todos os PETs; METIS por -n     (padrão)
+    split        ATM e OCN em blocos disjuntos (split de comunicador);
+                 MED em todos. Exige -n = atm_pet_count + ocn_pet_count.
+                 A partição METIS do MPAS (.part.atm_pet_count) é gerada
+                 automaticamente no pré-check.
+                 CONSOLIDAÇÃO POR NÓ: com atm_pet_count/ocn_pet_count
+                 explícitos, o .pbs recebe um select HETEROGÊNEO — bloco
+                 de nós só-ATM + bloco só-OCN — de modo que nenhum nó
+                 fique misto (melhor localidade/binding). Ex.: atm=256,
+                 ocn=128 → select=1:ncpus=256:mpiprocs=256
+                                  +1:ncpus=128:mpiprocs=128.
+                 Ajuste com --ppn-atm/--ppn-ocn (reduza --ppn-ocn p/ dar
+                 mais RAM/PET ao OCN) e a ordem com --pet-order.
+
+  Ausente, pet_layout é derivado do coupling_mode (concurrent→split,
+  sequential→shared). concurrent+shared é rejeitado: PETs disjuntos são a
+  definição de execução concorrente. Com shared, atm_pet_count/ocn_pet_count
+  devem ser 0 — informá-los é ERRO, e não descarte silencioso.
+
+Exemplo concurrent+split (produção em escala):
+  # nuopc.input: coupling_mode=concurrent, pet_layout=split,
+  #              atm_pet_count=256, ocn_pet_count=128
+  bash run_esmApp.jaci -n 384 --check   # mostra o select ATM+OCN alinhado
+
+Exemplo sequential+split (MOM6 com LAYOUT pequeno, sem lag de 1 passo):
+  # nuopc.input: coupling_mode=sequential, pet_layout=split,
+  #              atm_pet_count=2048, ocn_pet_count=128
+  bash run_esmApp.jaci -n 2176 --check
+  # Não reduz tempo de parede: ATM e OCN não se sobrepõem. Serve para
+  # decompor MPAS e MOM6 em tamanhos muito diferentes.
 
 Saídas:
   esmApp-integrado.pbs                          script PBS gerado
@@ -436,6 +721,18 @@ _ensure_metis_part() {
 
   # 3) Não existe e não foi possível gerar.
   printf "  %-8s: %s\n" "FALTANDO" "x1.*.graph.info.part.${n}"
+  # Listar as partições presentes ajuda a distinguir "falta gerar" de "o script
+  # dimensionou pelo número errado" (ex.: .part.2048 presente e .part.2176
+  # pedida = pet_layout/atm_pet_count não foram lidos como se esperava).
+  local -a have=()
+  shopt -s nullglob; have=( x1.*.graph.info.part.* ); shopt -u nullglob
+  if [[ "${#have[@]}" -gt 0 ]]; then
+    echo "             Partições presentes no diretório:"
+    local h
+    for h in "${have[@]}"; do echo "               ${h##*/}"; done
+    printf "             Confira pet_layout/atm_pet_count em %s se esperava outro número.\n" \
+      "${CONFIG_FILE}"
+  fi
   [[ -z "${graph}" ]] && \
     echo "             (graph base x1.*.graph.info ausente — necessário para gerar)"
   echo "             Gerar com: gen-metis.bash -n ${NPES}   (ou gpmetis x1.NNNNN.graph.info ${n})"
@@ -499,31 +796,100 @@ _req "mpas_mesh.nc"
 _glob_req "x1.*.init.nc" "x1.*.init.nc"
 
 # ── Particionamento de PETs (ciente do grupo &nuopc_petlayout) ───────────────
-# Quantas partições METIS o MPAS realmente usa depende do modo de acoplamento:
-#   sequential → NPES (o -n);   concurrent → atm_pet_count (bloco ATM).
+# O grupo tem DOIS eixos ORTOGONAIS, e confundi-los era o defeito corrigido na
+# v14.20:
+#   coupling_mode = sequential | concurrent  → ordem de execução (tempo)
+#   pet_layout    = shared     | split       → ocupação de PETs  (espaço)
+#
+# Quantas partições METIS o MPAS realmente usa depende do LAYOUT, não do modo:
+#   shared → NPES (o -n);   split → atm_pet_count (bloco ATM).
 # O MOM6 não usa METIS. A partição que faltar é gerada automaticamente.
-COUPLING_MODE=$(_nuopc_get coupling_mode || true); COUPLING_MODE="${COUPLING_MODE:-sequential}"
-ATM_PET=$(_nuopc_get atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
-OCN_PET=$(_nuopc_get ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
+COUPLING_MODE=$(_nuopc_pet coupling_mode || true)
+COUPLING_MODE=$(printf '%s' "${COUPLING_MODE:-sequential}" | tr '[:upper:]' '[:lower:]')
+PET_LAYOUT=$(_nuopc_pet pet_layout || true)
+PET_LAYOUT=$(printf '%s' "${PET_LAYOUT}" | tr '[:upper:]' '[:lower:]')
+ATM_PET=$(_nuopc_pet atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
+OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
 
-if [[ "${COUPLING_MODE}" == "concurrent" ]]; then
-  # Guard: em concurrent, atm_pet_count + ocn_pet_count deve ser IGUAL a NPES.
+# Modo desconhecido é ERRO, não recuo silencioso para sequential: um typo em
+# coupling_mode faria o script procurar a partição errada (NPES em vez de
+# atm_pet_count) e o job rodaria num layout diferente do pretendido.
+if [[ "${COUPLING_MODE}" != "sequential" && "${COUPLING_MODE}" != "concurrent" ]]; then
+  echo ""
+  printf "ERRO: coupling_mode='%s' não reconhecido em %s (&nuopc_petlayout).\n" \
+    "${COUPLING_MODE}" "${CONFIG_FILE}"
+  echo "      Valores aceitos: sequential | concurrent."
+  exit 1
+fi
+
+# pet_layout ausente: derivar do coupling_mode, exatamente como faz o
+# config_read do mpas_cap_config.F90. Mantém nuopc.input legadas funcionando.
+if [[ -z "${PET_LAYOUT}" ]]; then
+  if [[ "${COUPLING_MODE}" == "concurrent" ]]; then PET_LAYOUT="split"
+  else                                              PET_LAYOUT="shared"; fi
+  printf "  %-8s: pet_layout ausente em %s — derivado de coupling_mode = %s\n" \
+    "INFO" "${CONFIG_FILE}" "${PET_LAYOUT}"
+fi
+
+if [[ "${PET_LAYOUT}" != "shared" && "${PET_LAYOUT}" != "split" ]]; then
+  echo ""
+  printf "ERRO: pet_layout='%s' não reconhecido em %s (&nuopc_petlayout).\n" \
+    "${PET_LAYOUT}" "${CONFIG_FILE}"
+  echo "      Valores aceitos: shared | split."
+  exit 1
+fi
+
+# PETs disjuntos são a definição de execução concorrente. A combinação
+# concurrent+shared não existe, e o driver a rejeita em config_read; abortar
+# aqui evita gastar a fila para descobrir isso.
+if [[ "${COUPLING_MODE}" == "concurrent" && "${PET_LAYOUT}" != "split" ]]; then
+  echo ""
+  echo "ERRO: coupling_mode=concurrent exige pet_layout=split."
+  echo "      Corrija &nuopc_petlayout em ${CONFIG_FILE}."
+  exit 1
+fi
+
+if [[ "${PET_LAYOUT}" == "split" ]]; then
+  # Guard: em split, atm_pet_count + ocn_pet_count deve ser IGUAL a NPES.
+  # Antes da v14.20 esta guarda valia só para concurrent, deixando passar a
+  # combinação sequential+split.
   if [[ "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 && $(( ATM_PET + OCN_PET )) -ne "${NPES}" ]]; then
     echo ""
-    echo "ERRO: modo concurrent inconsistente com -n."
+    echo "ERRO: pet_layout=split inconsistente com -n."
     printf "      atm_pet_count=%s + ocn_pet_count=%s = %s, mas -n = %s.\n" \
       "${ATM_PET}" "${OCN_PET}" "$(( ATM_PET + OCN_PET ))" "${NPES}"
-    echo "      Em concurrent, atm_pet_count + ocn_pet_count deve ser IGUAL a -n."
+    echo "      Em split, atm_pet_count + ocn_pet_count deve ser IGUAL a -n."
     printf "      Ajuste: run_esmApp.jaci -n %s   (ou corrija a nuopc.input).\n" "$(( ATM_PET + OCN_PET ))"
     exit 1
   fi
   # Nº de partições do MPAS = atm_pet_count (auto: metade de NPES, arred. p/ cima).
   if [[ "${ATM_PET}" -gt 0 ]]; then MPAS_NPART="${ATM_PET}"
   else                              MPAS_NPART=$(( (NPES + 1) / 2 )); fi
-  printf "  %-8s: modo concurrent — MPAS em %s PET(s), OCN em %s PET(s)\n" \
-    "INFO" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+  printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN em %s PET(s)\n" \
+    "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+  printf "  %-8s: partição METIS dimensionada por atm_pet_count = %s (não por -n = %s)\n" \
+    "INFO" "${MPAS_NPART}" "${NPES}"
+  if [[ "${COUPLING_MODE}" == "sequential" ]]; then
+    printf "  %-8s: sequential+split não reduz tempo de parede (ATM e OCN não se sobrepõem);\n" "INFO"
+    printf "  %-8s: o ganho é decompor MPAS e MOM6 em tamanhos diferentes, sem lag de 1 passo.\n" ""
+  fi
 else
+  # pet_layout=shared ignora as contagens. Antes da v14.20 esse descarte era
+  # silencioso, e uma nuopc.input com sequential + atm/ocn_pet_count entregava
+  # os DOIS componentes em todos os PETs — o MOM6 abortava depois, no
+  # mpp_define_domains, por LAYOUT incompatível. Agora é erro explícito.
+  if [[ "${ATM_PET}" -gt 0 || "${OCN_PET}" -gt 0 ]]; then
+    echo ""
+    echo "ERRO: pet_layout=shared ignora atm_pet_count/ocn_pet_count."
+    printf "      Lidos de %s: atm_pet_count=%s  ocn_pet_count=%s.\n" \
+      "${CONFIG_FILE}" "${ATM_PET}" "${OCN_PET}"
+    echo "      Para split de comunicador com execução serial: pet_layout = 'split'."
+    echo "      Para todos os componentes em todos os PETs: zere as duas contagens."
+    exit 1
+  fi
   MPAS_NPART="${NPES}"
+  printf "  %-8s: pet_layout shared (execução %s) — partição METIS por -n = %s\n" \
+    "INFO" "${COUPLING_MODE}" "${MPAS_NPART}"
 fi
 
 _ensure_metis_part "${MPAS_NPART}"
@@ -564,6 +930,215 @@ if [[ "${MISSING}" -gt 0 ]]; then
 fi
 
 echo "Todos os pré-requisitos presentes."
+
+# ── Topologia de nós (deriva o 'select' do PBS) ──────────────────────────────
+# CORAÇÃO da adaptação multi-nó. Dois caminhos:
+#   • sequential (ou concurrent SEM contagens explícitas): 'select' UNIFORME
+#     NNODES × PPN (o último nó recebe o resto, se NPES não for múltiplo de PPN).
+#   • concurrent COM atm_pet_count/ocn_pet_count: 'select' HETEROGÊNEO com um
+#     bloco de nós só-ATM (denso) + um bloco só-OCN (espalhado), alinhados a nós
+#     inteiros — nenhum nó fica misto.
+# O MODO PBS (mpiexec -n NPES) não precisa saber a topologia: o PALS lê o
+# PBS_NODEFILE, preenchido na ORDEM do 'select' (por isso a ordem ATM/OCN importa).
+if [[ ! "${NPES}" =~ ^[0-9]+$ || "${NPES}" -lt 1 ]]; then
+  echo "ERRO: NPES inválido ('${NPES}'). Use -n com inteiro ≥ 1."; exit 1
+fi
+if [[ ! "${PPN}" =~ ^[0-9]+$ ]]; then
+  echo "ERRO: --ppn inválido ('${PPN}'). Inteiro ≥ 0 (0 = auto)."; exit 1
+fi
+if [[ ! "${MEM_PER_PET_GB}" =~ ^[0-9]+$ || ! "${MEM_PER_PET_ATM}" =~ ^[0-9]+$ ]]; then
+  echo "ERRO: --mem-per-pet / --mem-per-pet-atm inválido (inteiro ≥ 0)."; exit 1
+fi
+if [[ "${PET_ORDER}" != "atm-first" && "${PET_ORDER}" != "ocn-first" ]]; then
+  echo "ERRO: --pet-order inválido ('${PET_ORDER}'). Use atm-first | ocn-first."; exit 1
+fi
+
+# Sufixo :mem= de um chunk. Prioridade: --mem (fixa por nó) > mpiprocs×razão > nada.
+_mem_for() {  # $1 = mpiprocs do chunk ; $2 = razão GB/PET (default MEM_PER_PET_GB)
+  local mp="$1" ratio="${2:-${MEM_PER_PET_GB}}"
+  if [[ -n "${MEM_PER_NODE}" ]]; then echo ":mem=${MEM_PER_NODE}"
+  elif [[ "${ratio}" -gt 0 ]]; then echo ":mem=$(( mp * ratio ))gb"
+  fi
+}
+
+# Maior divisor de N que seja ≤ cap — garante blocos que fecham em nós inteiros.
+_largest_div_le() {  # $1=N $2=cap
+  local n="$1" cap="$2" d
+  (( cap > n )) && cap="${n}"; (( cap < 1 )) && cap=1
+  for (( d=cap; d>=1; d-- )); do (( n % d == 0 )) && { echo "${d}"; return; }; done
+  echo 1
+}
+
+# Avisa quando a mem/nó excede o nó de cálculo (job iria só p/ os nós de ~1,5 TB).
+# Sempre retorna 0: como é chamada como comando simples sob 'set -e', um status
+# não-zero (quando o aviso NÃO dispara) encerraria o script antes do 'SELECT'.
+_mem_guard() {  # $1=label $2=GB
+  if [[ "$2" =~ ^[0-9]+$ && "$2" -gt "${NODE_MEM_STD_GB}" ]]; then
+    printf "  %-8s: mem/nó do %s (%s GB) excede o nó de cálculo (~%s GB) → só nós de ~1,5 TB.\n" \
+      "AVISO" "$1" "$2" "${NODE_MEM_STD_GB}"
+  fi
+  return 0
+}
+
+# Converte HH:MM:SS (ou HHH:MM:SS) em segundos. Retorna vazio se malformado.
+_wt_seconds() {
+  local h m s
+  IFS=: read -r h m s <<< "$1"
+  [[ "${h}" =~ ^[0-9]+$ && "${m}" =~ ^[0-9]+$ && "${s}" =~ ^[0-9]+$ ]] || return 1
+  echo $(( 10#${h} * 3600 + 10#${m} * 60 + 10#${s} ))
+}
+
+# Confere NPES, nós e walltime contra os limites da fila escolhida (qstat -Qf).
+# Apenas AVISA: os limites podem mudar sem que este script seja atualizado.
+_queue_guard() {  # $1 = nº de nós já calculado
+  local nn="$1" lim ncpus_max nodes_max wt_max wt_job wt_lim var
+  var="QUEUE_LIMITS_${QUEUE//-/_}"
+  lim="${!var:-}"
+  if [[ -z "${lim}" ]]; then
+    printf "  %-8s: fila '%s' não está na tabela de limites deste script; confira com 'qstat -Qf %s'.\n" \
+      "AVISO" "${QUEUE}" "${QUEUE}"
+    return 0
+  fi
+  read -r ncpus_max nodes_max wt_max <<< "${lim}"
+
+  if [[ "${NPES}" -gt "${ncpus_max}" ]]; then
+    printf "  %-8s: NPES=%s excede resources_max.ncpus=%s da fila '%s'.\n" \
+      "ERRO" "${NPES}" "${ncpus_max}" "${QUEUE}"
+    return 1
+  fi
+  if [[ "${nodes_max}" -gt 0 && "${nn}" -gt "${nodes_max}" ]]; then
+    printf "  %-8s: %s nós excedem resources_max.nodes=%s da fila '%s'.\n" \
+      "ERRO" "${nn}" "${nodes_max}" "${QUEUE}"
+    return 1
+  fi
+  wt_job="$(_wt_seconds "${WALLTIME}")" || { printf "  %-8s: walltime '%s' malformado.\n" "ERRO" "${WALLTIME}"; return 1; }
+  wt_lim="$(_wt_seconds "${wt_max}")"
+  if [[ "${wt_job}" -gt "${wt_lim}" ]]; then
+    printf "  %-8s: walltime %s excede o máximo %s da fila '%s'.\n" \
+      "ERRO" "${WALLTIME}" "${wt_max}" "${QUEUE}"
+    return 1
+  fi
+
+  printf "  %-8s: %s  (máx: %s PETs, %s nós, %s)\n" "FILA" "${QUEUE}" \
+    "${ncpus_max}" "$( [[ "${nodes_max}" -gt 0 ]] && echo "${nodes_max}" || echo "-" )" "${wt_max}"
+  return 0
+}
+
+# Teto efetivo de PET/nó. Sem --allow-smt fica nos cores físicos; com a opção,
+# sobe para as CPUs lógicas, o que significa 2 ranks por core. Isso existe para
+# viabilizar a MEDIÇÃO do efeito do SMT, não para uso em produção.
+if [[ "${ALLOW_SMT}" -eq 1 ]]; then PPN_MAX="${PPN_HARD}"; else PPN_MAX="${PPN_PHYS}"; fi
+
+# Consolidação por componente só quando há SPLIT de comunicador E ambos os
+# counts explícitos. O critério é o layout, não o modo: sequential+split
+# também tem blocos de PET disjuntos e se beneficia do 'select' heterogêneo
+# (cada componente ocupando nós inteiros, com memória por nó dimensionada
+# separadamente para ATM e OCN).
+CONC_PER_COMP=0
+[[ "${PET_LAYOUT}" == "split" && "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 ]] \
+  && CONC_PER_COMP=1
+
+if [[ "${CONC_PER_COMP}" -eq 1 ]]; then
+  # ── 'select' HETEROGÊNEO: bloco ATM (denso) + bloco OCN (espalhado) ────────
+  _cap_atm="${PPN_ATM_CAP}"; [[ "${_cap_atm}" -le 0 ]] && _cap_atm="${PPN_MAX}"
+  _cap_ocn="${PPN_OCN_CAP}"; [[ "${_cap_ocn}" -le 0 ]] && _cap_ocn="${PPN_MAX}"
+  [[ "${_cap_atm}" -gt "${PPN_MAX}" ]] && _cap_atm="${PPN_MAX}"
+  [[ "${_cap_ocn}" -gt "${PPN_MAX}" ]] && _cap_ocn="${PPN_MAX}"
+
+  PPN_ATM=$(_largest_div_le "${ATM_PET}" "${_cap_atm}")
+  PPN_OCN=$(_largest_div_le "${OCN_PET}" "${_cap_ocn}")
+  N_ATM=$(( ATM_PET / PPN_ATM ))
+  N_OCN=$(( OCN_PET / PPN_OCN ))
+  NNODES=$(( N_ATM + N_OCN ))
+
+  _chunk_atm="${N_ATM}:ncpus=${PPN_ATM}:mpiprocs=${PPN_ATM}$(_mem_for "${PPN_ATM}" "${MEM_PER_PET_ATM}")"
+  _chunk_ocn="${N_OCN}:ncpus=${PPN_OCN}:mpiprocs=${PPN_OCN}$(_mem_for "${PPN_OCN}" "${MEM_PER_PET_GB}")"
+  if [[ "${PET_ORDER}" == "ocn-first" ]]; then
+    SELECT="select=${_chunk_ocn}+${_chunk_atm}"
+  else
+    SELECT="select=${_chunk_atm}+${_chunk_ocn}"
+  fi
+
+  TOPO_DESC="ATM ${N_ATM}×${PPN_ATM} + OCN ${N_OCN}×${PPN_OCN}  (ordem: ${PET_ORDER})"
+  if [[ -n "${MEM_PER_NODE}" ]]; then MEM_DESC="${MEM_PER_NODE}/nó (fixo, ambos)"
+  elif [[ "${MEM_PER_PET_ATM}" -gt 0 || "${MEM_PER_PET_GB}" -gt 0 ]]; then
+    MEM_DESC="ATM ${MEM_PER_PET_ATM} GB/PET · OCN ${MEM_PER_PET_GB} GB/PET"
+  else MEM_DESC="padrão do nó (sem reserva)"
+  fi
+  unset _cap_atm _cap_ocn _chunk_atm _chunk_ocn
+else
+  # ── 'select' UNIFORME (sequential, ou concurrent sem counts explícitos) ────
+  if [[ "${PPN}" -le 0 ]]; then
+    # O modo automático nunca entra em SMT: usa sempre os cores físicos.
+    NNODES=$(( (NPES + PPN_PHYS - 1) / PPN_PHYS ))
+    if (( NPES % NNODES == 0 )); then PPN=$(( NPES / NNODES )); else PPN="${PPN_PHYS}"; fi
+  else
+    if [[ "${PPN}" -gt "${PPN_MAX}" ]]; then
+      echo ""
+      if [[ "${PPN}" -le "${PPN_HARD}" && "${ALLOW_SMT}" -eq 0 ]]; then
+        printf "ERRO: --ppn %s excede %s cores físicos por nó.\n" "${PPN}" "${PPN_PHYS}"
+        printf "      Acima de %s cada core recebe 2 ranks (SMT), o que degrada MPAS/MOM6.\n" "${PPN_PHYS}"
+        printf "      Para medir esse efeito deliberadamente, acrescente --allow-smt.\n"
+      else
+        printf "ERRO: --ppn %s excede %s CPUs lógicas por nó (limite do hardware).\n" \
+          "${PPN}" "${PPN_HARD}"
+      fi
+      exit 1
+    fi
+    # Cap: PPN > NPES → tudo em 1 nó (evita 'select=0:...', ex.: -n 4 --ppn 128).
+    [[ "${PPN}" -gt "${NPES}" ]] && PPN="${NPES}"
+    NNODES=$(( (NPES + PPN - 1) / PPN ))
+  fi
+
+  if (( NPES % PPN == 0 )); then
+    SELECT="select=${NNODES}:ncpus=${PPN}:mpiprocs=${PPN}$(_mem_for "${PPN}")"
+    PPN_LAST="${PPN}"
+  else
+    _full=$(( NPES / PPN )); _rem=$(( NPES - _full * PPN ))
+    SELECT="select=${_full}:ncpus=${PPN}:mpiprocs=${PPN}$(_mem_for "${PPN}")"
+    SELECT="${SELECT}+1:ncpus=${_rem}:mpiprocs=${_rem}$(_mem_for "${_rem}")"
+    NNODES=$(( _full + 1 )); PPN_LAST="${_rem}"
+    unset _full _rem
+  fi
+
+  if [[ "${PPN_LAST}" != "${PPN}" ]]; then
+    TOPO_DESC="${NNODES} nó(s) × ${PPN} PET/nó (último: ${PPN_LAST})"
+  else
+    TOPO_DESC="${NNODES} nó(s) × ${PPN} PET/nó"
+  fi
+  if [[ -n "${MEM_PER_NODE}" ]]; then MEM_DESC="${MEM_PER_NODE}/nó (fixo)"
+  elif [[ "${MEM_PER_PET_GB}" -gt 0 ]]; then
+    MEM_DESC="opcional: ${MEM_PER_PET_GB} GB/PET (=$(( PPN * MEM_PER_PET_GB )) GB/nó)"
+  else MEM_DESC="padrão do nó (sem reserva)"
+  fi
+fi
+
+echo ""
+echo "--- Topologia de nós (multi-nó) ---"
+printf "  %-8s: %s  →  %s PETs\n" "TOPO" "${TOPO_DESC}" "${NPES}"
+printf "  %-8s: %s\n" "PLACE" "${PLACE}"
+printf "  %-8s: %s\n" "MEM"   "${MEM_DESC}"
+# Regime de ocupação do core. Sem esta linha, um tempo de parede registrado hoje
+# é ambíguo daqui a alguns meses: 512 PETs podem ter sido 2 nós ou 1 nó com SMT.
+if [[ "${PPN}" -gt "${PPN_PHYS}" ]]; then
+  printf "  %-8s: SMT ATIVO - %s ranks em %s cores físicos (%s por core)\n" \
+    "REGIME" "${PPN}" "${PPN_PHYS}" "$(( (PPN + PPN_PHYS - 1) / PPN_PHYS ))"
+else
+  printf "  %-8s: 1 rank por core físico (SMT ocioso)\n" "REGIME"
+fi
+_queue_guard "${NNODES}" || exit 1
+# Guarda de memória por nó (só quando a mem é reservada).
+if [[ -n "${MEM_PER_NODE}" ]]; then
+  _mem_guard "nó" "${MEM_PER_NODE%%[gG]*}"
+elif [[ "${CONC_PER_COMP}" -eq 1 ]]; then
+  _mem_guard "ATM" "$(( PPN_ATM * MEM_PER_PET_ATM ))"
+  _mem_guard "OCN" "$(( PPN_OCN * MEM_PER_PET_GB ))"
+elif [[ "${MEM_PER_PET_GB}" -gt 0 ]]; then
+  _mem_guard "nó" "$(( PPN * MEM_PER_PET_GB ))"
+fi
+printf "  %-8s: %s\n" "SELECT" "${SELECT}"
+echo ""
+
 [[ "${CHECK_ONLY}" -eq 1 ]] && { echo "Modo --check concluído."; exit 0; }
 
 # ── Lê parâmetros de tempo do nuopc.input para exibir no .pbs ─────────────────
@@ -578,18 +1153,23 @@ mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 
 # ── Gera esmApp-integrado.pbs ─────────────────────────────────────────────────
 # O .pbs delega a execução ao run_esmApp.jaci em MODO PBS.
+# MULTI-NÓ: usamos a string ${SELECT} derivada acima (NNODES chunks) e
+# 'place=${PLACE}' (scatter = 1 chunk por nó). Antes o script fixava
+# 'select=1:ncpus=NPES:mpiprocs=NPES', o que só cabia em um único nó (≤128 PETs).
 cat > "${PBS_SCRIPT}" << HEREDOC
 #!/bin/bash
 #PBS -N GTA-MONAN2xMOM6
 #PBS -q ${QUEUE}
-#PBS -l select=1:ncpus=${NPES}:mpiprocs=${NPES}
+#PBS -l ${SELECT}
+#PBS -l place=${PLACE}
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
 #PBS -o ${WORKDIR}/logs/esmApp_run.log
 #PBS -v MPAS_NPES=${NPES}
 
 # Gerado por run_esmApp.jaci em $(date '+%Y-%m-%d %H:%M:%S')
-# NPES=${NPES}  fila=${QUEUE}  walltime=${WALLTIME}
+# NPES=${NPES}  nós=${NNODES}  layout=${TOPO_DESC}  place=${PLACE}
+# fila=${QUEUE}  walltime=${WALLTIME}  mem=${MEM_DESC}
 # ATM=${ATM_MODE_LABEL}  OCN=${OCN_MODE_LABEL}
 # Início=${START_DATE:-?}  Fim=${STOP_DATE:-?}  dt_coupling=${DT_COUP:-?}s
 # Diretório: ${WORKDIR}
@@ -601,6 +1181,10 @@ echo ""
 echo "PBS gerado : ${PBS_SCRIPT}"
 printf "  %-12s: %s\n" "Executável" "${EXECUTABLE}"
 printf "  %-12s: %s\n" "NPES"       "${NPES}"
+printf "  %-12s: %s\n" "Nós"        "${NNODES}"
+printf "  %-12s: %s\n" "Layout"     "${TOPO_DESC}"
+printf "  %-12s: %s\n" "Placement"  "${PLACE}"
+printf "  %-12s: %s\n" "Mem/nó"     "${MEM_DESC}"
 printf "  %-12s: %s\n" "Fila"       "${QUEUE}"
 printf "  %-12s: %s\n" "Walltime"   "${WALLTIME}"
 printf "  %-12s: %s\n" "ATM"        "${ATM_MODE_LABEL}"
@@ -703,10 +1287,9 @@ else
 
   if [[ "${EXIT_CODE}" -eq 143 || "${EXIT_CODE}" -eq 137 ]]; then
     echo ""
-    echo " Dicas para kill por sinal:"
-    echo "   MOM6 global 1° com 4 PETs exige ~4–8 GB/PET."
-    echo "   a) Aumentar PETs: run_esmApp.jaci -n 32"
-    echo "   b) Adicionar memória no .pbs: -l select=1:ncpus=4:mem=32gb:mpiprocs=4"
+    echo " Dicas para kill por sinal (provável falta de memória):"
+    echo "   a) Menos PET/nó (mais RAM/PET):  run_esmApp.jaci -n ${NPES} --ppn 128"
+    echo "   b) Reservar memória/nó       :  run_esmApp.jaci --mem 700gb"
     echo "   c) Verificar: qstat -x -f ${JOBID} | grep -E 'mem|comment'"
   fi
   echo "======================================================================"

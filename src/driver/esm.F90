@@ -70,8 +70,8 @@ module ESM_MONAN
   use DOCN_cap_mod,        only : DOCN_SetServices => SetServices
   use mpas_cap_config_mod, only : cfg_use_datm, cfg_use_docn, &
                                    cfg_use_med_to_mpas, config_read, &
-                                   cfg_coupling_mode, cfg_atm_pet_count, &
-                                   cfg_ocn_pet_count
+                                   cfg_coupling_mode, cfg_pet_layout, &
+                                   cfg_atm_pet_count, cfg_ocn_pet_count
 
   implicit none
   private
@@ -129,7 +129,10 @@ contains
     integer(ESMF_KIND_I8)   :: dt_coupling_i8
     integer              :: petCount, i, nAtm, nOcn
     integer, allocatable :: atmPetList(:), ocnPetList(:), medPetList(:)
-    logical              :: is_concurrent
+    logical              :: is_concurrent   ! eixo TEMPORAL  (RunSequence)
+    logical              :: is_split        ! eixo ESPACIAL  (petList)
+    character(len=10)    :: exec_str        ! 'SEQUENTIAL' | 'CONCURRENT'
+    integer              :: cfg_rc
     character(len=160)   :: msg
     character(len=16)    :: dt_str
     character(len=8)     :: val_med_to_mpas
@@ -159,20 +162,42 @@ contains
     ! Particionamento de PETs (lido de &nuopc_petlayout via config_read, que já
     ! foi chamado em esmApp.F90 antes de ESMF_Initialize).
     !
-    !   sequential : MPAS, MED e OCN em TODOS os PETs (execução serial).
-    !   concurrent : ATM e OCN em blocos DISJUNTOS de PETs (paralelo wall-clock);
-    !                MED permanece em todos os PETs nos dois modos.
+    ! São DOIS eixos ORTOGONAIS, e tratá-los como um só era o defeito corrigido
+    ! na v14.20 (o split de comunicador só existia no ramo concurrent, de modo
+    ! que atm_pet_count/ocn_pet_count eram descartados em silêncio no modo
+    ! sequential):
+    !
+    !   cfg_pet_layout    — decidido AQUI, pelas petList dos componentes:
+    !     'shared' : MPAS, MED e OCN em TODOS os PETs (sem split).
+    !     'split'  : ATM e OCN em blocos DISJUNTOS de PETs (split de
+    !                comunicador); MED permanece em todos os PETs.
+    !
+    !   cfg_coupling_mode — decidido em SetRunSequence, pela RunSequence:
+    !     'sequential' : ATM e OCN avançam um depois do outro (sem lag).
+    !     'concurrent' : ATM e OCN avançam ao mesmo tempo (lag de 1 passo).
+    !
+    ! sequential+split é uma configuração legal e útil: MPAS e MOM6 mantêm
+    ! decomposições de tamanhos muito diferentes, cada um no seu comunicador,
+    ! sem a defasagem de um passo do modo concorrente. O preço é tempo de
+    ! parede (soma dos dois componentes, com PETs ociosos em cada fase).
+    ! concurrent+shared é rejeitado em mpas_cap_config (config_read).
     !
     ! Os 4 conectores NÃO precisam de petList: NUOPC_DriverAddComp com
     ! src/dstCompLabel roda automaticamente na UNIÃO dos PETs de origem e
-    ! destino — válido tanto no modo sequencial quanto no concorrente.
+    ! destino — válido nos dois layouts e nos dois modos.
     !--------------------------------------------------------------------------
     is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
+    is_split      = (trim(cfg_pet_layout)    == 'split')
+    if (is_concurrent) then
+      exec_str = 'CONCURRENT'
+    else
+      exec_str = 'SEQUENTIAL'
+    end if
 
     allocate(medPetList(petCount))
     medPetList = [(i-1, i=1,petCount)]
 
-    if (is_concurrent) then
+    if (is_split) then
       ! Partição disjunta ATM | OCN, cobrindo todos os PETs.
       nAtm = cfg_atm_pet_count
       nOcn = cfg_ocn_pet_count
@@ -187,7 +212,7 @@ contains
 
       if (nAtm < 1 .or. nOcn < 1 .or. nAtm + nOcn /= petCount) then
         write(msg,'(A,I0,A,I0,A,I0,A)') &
-          'ESM: ERRO particao concurrent invalida — nAtm=', nAtm, &
+          'ESM: ERRO particao split invalida — nAtm=', nAtm, &
           ' nOcn=', nOcn, ' devem somar petCount=', petCount, '.'
         call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_ERROR)
         rc = ESMF_FAILURE; return
@@ -196,16 +221,17 @@ contains
       allocate(atmPetList(nAtm)); atmPetList = [(i-1,      i=1,nAtm)]
       allocate(ocnPetList(nOcn)); ocnPetList = [(nAtm+i-1, i=1,nOcn)]
 
-      write(msg,'(A,I0,A,I0,A,I0,A)') &
-        'ESM: modo CONCURRENT — ATM=PET[0..', nAtm-1, '] OCN=PET[', &
+      write(msg,'(A,A,A,I0,A,I0,A,I0,A)') &
+        'ESM: layout SPLIT (execucao ', trim(exec_str), &
+        ') — ATM=PET[0..', nAtm-1, '] OCN=PET[', &
         nAtm, '..', petCount-1, '] MED=todos'
       call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
     else
       allocate(atmPetList(petCount)); atmPetList = medPetList
       allocate(ocnPetList(petCount)); ocnPetList = medPetList
       call ESMF_LogWrite( &
-        'ESM: modo SEQUENTIAL — MPAS, MED e OCN em todos os PETs', &
-        ESMF_LOGMSG_INFO)
+        'ESM: layout SHARED (execucao '//trim(exec_str)// &
+        ') — MPAS, MED e OCN em todos os PETs', ESMF_LOGMSG_INFO)
     end if
 
     !--------------------------------------------------------------------------
@@ -263,7 +289,16 @@ contains
       line=__LINE__, file=__FILE__)) return
 
     ! ── Ler nuopc.input para obter cfg_use_datm / cfg_use_docn ─────────────
-    call config_read(rc=rc)
+    ! O rc de config_read era descartado aqui (a chamada NUOPC seguinte o
+    ! sobrescrevia), de modo que um erro de configuração — rc=2, por exemplo
+    ! um pet_layout invalido — passava despercebido neste ponto. Usa-se uma
+    ! variável própria para não colidir com o rc das chamadas ESMF/NUOPC.
+    call config_read(rc=cfg_rc)
+    if (cfg_rc == 2) then
+      call ESMF_LogWrite('ESM: ERRO em config_read (nuopc.input invalida) — '// &
+        'ver mensagens [mpas_cap_config] na saida padrao.', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE; return
+    end if
     use_datm_local = cfg_use_datm
     use_docn_local = cfg_use_docn
     str_use_datm = merge('true    ', 'false   ', use_datm_local)
@@ -527,6 +562,12 @@ contains
 
     rc = ESMF_SUCCESS
 
+    ! Eixo TEMPORAL, independente do eixo espacial (cfg_pet_layout, tratado em
+    ! SetModelServices). A RunSequence sequencial abaixo é válida tanto com
+    ! pet_layout=shared quanto com pet_layout=split: o driver NUOPC executa
+    ! cada componente apenas nos PETs de que ele é membro, e os conectores
+    ! rodam na união dos PETs de origem e destino. Já a RunSequence
+    ! concorrente EXIGE pet_layout=split, o que config_read garante.
     is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
 
     !-- Obter o timestep do clock do driver (= dt_coupling de nuopc.input) ----

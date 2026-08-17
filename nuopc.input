@@ -307,44 +307,88 @@
 !
 ! Controla como os PETs (persistent execution threads = ranks MPI) são
 ! distribuídos entre os componentes MPAS (ATM), MOM6/DOCN (OCN) e o
-! mediador (MED). Definido em esm_MONAN.F90::SetModelServices.
+! mediador (MED), e em que ordem eles avançam no tempo.
 !
-!   coupling_mode  'sequential' → MPAS, MED e OCN em TODOS os PETs, um de
-!                                  cada vez (execução serial). Padrão —
-!                                  retrocompatível com versões anteriores.
-!                                  Throughput máximo por componente; ATM e
-!                                  OCN NÃO se sobrepõem no tempo.
-!                  'concurrent' → ATM e OCN em blocos DISJUNTOS de PETs,
-!                                  avançando em paralelo (wall-clock). O MED
-!                                  permanece em todos os PETs. O tempo por
-!                                  passo passa a ser max(t_ATM, t_OCN) em
-!                                  vez de t_ATM + t_OCN.
-!                  (aceita maiúsculas: 'Concurrent', 'SEQUENTIAL', etc.)
+! São DOIS eixos ORTOGONAIS. Até a v14.19 eles estavam colapsados em
+! coupling_mode, de modo que atm_pet_count/ocn_pet_count eram DESCARTADOS
+! EM SILÊNCIO quando coupling_mode='sequential'.
 !
-!   atm_pet_count  Nº de PETs do ATM (MPAS) no modo concurrent.
+!   coupling_mode  eixo TEMPORAL — ordem de execução.
+!                  Decidido em esm_MONAN.F90::SetRunSequence.
+!                  'sequential' → ATM e OCN avançam um depois do outro; o
+!                                  MED entrega os campos do MESMO passo, sem
+!                                  defasagem. Tempo por passo = t_ATM+t_OCN.
+!                  'concurrent' → ATM e OCN avançam ao mesmo tempo; cada um
+!                                  recebe os campos calculados no passo
+!                                  ANTERIOR (lag de 1 dt_coupling, padrão
+!                                  CESM/UFS). Tempo por passo =
+!                                  max(t_ATM, t_OCN).
+!
+!   pet_layout     eixo ESPACIAL — ocupação de PETs.
+!                  Decidido em esm_MONAN.F90::SetModelServices (petList).
+!                  'shared' → MPAS, MED e OCN em TODOS os PETs. Sem split de
+!                             comunicador. atm_pet_count/ocn_pet_count devem
+!                             ser 0.
+!                  'split'  → ATM e OCN em blocos DISJUNTOS de PETs (split de
+!                             comunicador); o MED permanece em todos os PETs.
+!
+!                  (ambas as chaves aceitam maiúsculas: 'Concurrent',
+!                   'SEQUENTIAL', 'Split', etc.)
+!
+! COMBINAÇÕES
+!   sequential + shared  Baseline. Testes de correctness, execuções menores.
+!                        Comportamento histórico e padrão.
+!   sequential + split   MPAS e MOM6 com decomposições de tamanhos muito
+!                        diferentes (ex.: MPAS 2048 PETs, MOM6 128 PEs),
+!                        cada um no seu comunicador, SEM o lag de um passo.
+!                        NÃO reduz o tempo de parede: ATM e OCN não se
+!                        sobrepõem, e os PETs do outro componente ficam
+!                        ociosos em cada fase. Use quando a restrição for de
+!                        decomposição (LAYOUT do MOM_input) ou de memória,
+!                        não de desempenho.
+!   concurrent + split   Produção em escala, com custo calibrado.
+!   concurrent + shared  REJEITADO em config_read: PETs disjuntos são a
+!                        própria definição de execução concorrente.
+!
+! COMPATIBILIDADE: pet_layout ausente é derivado do coupling_mode
+!   ('concurrent'→'split', 'sequential'→'shared'), de modo que nuopc.input
+!   anteriores à v14.20 mantêm exatamente o comportamento que tinham.
+!
+!   atm_pet_count  Nº de PETs do ATM (MPAS) quando pet_layout='split'.
 !                  0 → auto: ceil(petCount/2).
-!   ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) no modo concurrent.
+!   ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) quando pet_layout='split'.
 !                  0 → auto: petCount - atm_pet_count.
 !
-! REGRA (concurrent): atm_pet_count + ocn_pet_count deve ser igual ao total
-!   de PETs lançados (mpiexec -n N / run_esmApp.jaci -n N). Se um dos dois
-!   for 0, o outro é completado automaticamente. Partição inconsistente
-!   aborta o driver em SetModelServices com mensagem no log ESMF.
+! REGRA (split): atm_pet_count + ocn_pet_count deve ser igual ao total de
+!   PETs lançados (mpiexec -n N / run_esmApp.jaci -n N). Se um dos dois for
+!   0, o outro é completado automaticamente. Partição inconsistente aborta o
+!   driver em SetModelServices com mensagem no log ESMF, e o run_esmApp.jaci
+!   aborta antes disso, ainda no nó de login.
 !
-! DIMENSIONAMENTO: escolha a razão ATM:OCN pelo custo relativo de cada
-!   componente. Como o MPAS costuma dominar, um ponto de partida típico é
-!   ~2:1 a ~3:1 (ex.: 128 PETs → atm=88, ocn=40). Ajuste medindo o tempo
-!   de parede de cada componente em logs/PET*.esmApp.log e rebalanceie até
-!   que ATM e OCN terminem o passo aproximadamente juntos. Uma partição mal
-!   dimensionada pode ficar MAIS lenta que o modo sequential.
+! REGRA (shared): atm_pet_count e ocn_pet_count devem ser 0. Informar
+!   contagens com pet_layout='shared' é ERRO explícito desde a v14.20 —
+!   antes era descarte silencioso, e o MOM6 recebia TODOS os PETs em vez da
+!   fatia pretendida, abortando bem depois, no mpp_define_domains, com
+!   mensagem que não mencionava PET algum.
+!
+! ATENÇÃO (split): a partição METIS do MPAS é dimensionada por
+!   atm_pet_count, NÃO por -n. O run_esmApp.jaci gera a partição que faltar.
+!
+! DIMENSIONAMENTO (concurrent): escolha a razão ATM:OCN pelo custo relativo
+!   de cada componente. Como o MPAS costuma dominar, um ponto de partida
+!   típico é ~2:1 a ~3:1 (ex.: 128 PETs → atm=88, ocn=40). Ajuste medindo o
+!   tempo de parede de cada componente em logs/PET*.esmApp.log e rebalanceie
+!   até que ATM e OCN terminem o passo aproximadamente juntos. Uma partição
+!   mal dimensionada pode ficar MAIS lenta que sequential+shared.
 !
 ! IMPORTANTE: os grupos &nuopc_mode e &nuopc_petlayout são independentes.
-!   O modo concurrent funciona tanto na Fase 1 (DOCN) quanto na Fase 2
-!   (MOM6 dinâmico) — a RunSequence correta é selecionada automaticamente.
-!   O ganho de concorrência é maior na Fase 2, onde o OCN é caro.
+!   Os dois modos funcionam tanto na Fase 1 (DOCN) quanto na Fase 2 (MOM6
+!   dinâmico) — a RunSequence correta é selecionada automaticamente. O ganho
+!   de concorrência é maior na Fase 2, onde o OCN é caro.
 !-----------------------------------------------------------------------
 &nuopc_petlayout
   coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
-  atm_pet_count = 0              ! concurrent: nº PETs do ATM (0 = auto: metade)
-  ocn_pet_count = 0              ! concurrent: nº PETs do OCN (0 = auto: resto)
+  pet_layout    = 'split'        ! 'shared' | 'split'
+  atm_pet_count = 4              ! split: nº PETs do ATM (0 = auto: metade)
+  ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
 /

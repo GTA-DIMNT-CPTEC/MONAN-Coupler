@@ -4,7 +4,7 @@ postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
                               (14 fluxos ATM→OCN calculados pelo mediador NCAR
                                bulk em MED_cap.F90)
 
-Versão 8.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+Versão 8.3 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
 
 HISTÓRICO DE CORREÇÕES
   v8.2 — BUG-PY-15 (Maio 2026):
@@ -805,7 +805,8 @@ def export_csv(timestamps, fields, field_names, outdir):
 
 # ─── Plotagem ─────────────────────────────────────────────────────────────────
 
-def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir):
+def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
+              coupling_mode=None):
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -1064,6 +1065,11 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir):
             f"MONAN-A 2.0 / INPE/CGCT/DIMNT",
             fontsize=11)
 
+        # Sem esta nota, "passo 1" no sequencial e "passo 1" no concorrente
+        # parecem comparaveis e nao sao. Ver consumption_note().
+        fig.text(0.5, 0.005, consumption_note(coupling_mode, k),
+                 ha='center', va='bottom', fontsize=8, color='0.35')
+
         outfile = os.path.join(outdir, f'mom6_import_{ts_str}.png')
         fig.savefig(outfile, dpi=130, bbox_inches='tight', facecolor='white')
         plt.close(fig)
@@ -1150,6 +1156,73 @@ def plot_timeseries(timestamps, fields, field_names, outdir):
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 
+
+def read_coupling_mode(diagdir):
+    """
+    Le coupling_mode do &nuopc_petlayout da nuopc.input do experimento.
+
+    Procura a nuopc.input subindo a partir de --diagdir (o diretorio de
+    diagnosticos costuma ser <experimento>/diag_import). Devolve
+    'sequential', 'concurrent' ou None quando nao encontra.
+    """
+    cand = []
+    d = os.path.abspath(diagdir)
+    for _ in range(3):
+        cand.append(os.path.join(d, 'nuopc.input'))
+        d = os.path.dirname(d)
+    for f in cand:
+        if not os.path.isfile(f):
+            continue
+        try:
+            with open(f, encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    line = line.split('!')[0]
+                    if 'coupling_mode' in line and '=' in line:
+                        v = line.split('=', 1)[1].strip().strip("'\"").lower()
+                        if v in ('sequential', 'concurrent'):
+                            return v
+        except OSError:
+            continue
+    return None
+
+
+def consumption_note(mode, k):
+    """
+    Rodape que diz em QUE passo o oceano consome os fluxos exibidos.
+
+    A mesma figura "passo N" significa coisas diferentes nos dois modos, e
+    confundi-las ja' custou uma investigacao inteira:
+
+      sequential : o mediador roda no MEIO do passo (3o elemento da
+                   RunSequence), entao os fluxos exibidos sao os que o MOM6
+                   consome NESTE mesmo passo. Em compensacao, no passo 1 o
+                   mediador ainda nao viu nenhum avanco do MPAS: radiacao,
+                   precipitacao e pressao saem nulas (spin-up de um passo;
+                   momento e calor sensivel ja' sao validos). A partir do
+                   passo 2 os campos estao completos.
+
+      concurrent : o mediador roda no FIM do passo (ultimo elemento), entao
+                   os fluxos exibidos so' chegam ao MOM6 no passo SEGUINTE
+                   (lag de 1 dt_coupling, por construcao). A forcante que o
+                   oceano recebeu no passo 1 e' o exportState da
+                   inicializacao do mediador, e NAO aparece em figura alguma.
+
+    Comparacao correta entre modos: sequencial passo N+1 x concorrente passo N.
+    """
+    if mode == 'sequential':
+        txt = (f"coupling_mode=sequential — fluxos consumidos pelo MOM6 "
+               f"NESTE passo ({k+1})")
+        if k == 0:
+            txt += ("  |  passo 1: radiacao/precipitacao/pressao nulas "
+                    "(mediador roda antes do 1o avanco do MPAS)")
+        return txt
+    if mode == 'concurrent':
+        return (f"coupling_mode=concurrent — fluxos consumidos pelo MOM6 no "
+                f"passo {k+2} (lag de 1 dt_coupling)")
+    return ("coupling_mode nao identificado — o passo em que o MOM6 consome "
+            "estes fluxos depende do modo (ver README, secao 6.2)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Validação dos campos importados pelo MOM6+SIS2 (fluxos ATM→OCN do mediador).',
@@ -1184,7 +1257,7 @@ def main():
     print()
     print('═' * 70)
     print('  MONAN-A 2.0 — Validação de campos importados MOM6 (ATM→OCN)')
-    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.2)')
+    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.3)')
     print('═' * 70)
     print(f"  Diagnósticos : {os.path.abspath(args.diagdir)}")
     print(f"  Saída        : {os.path.abspath(args.outdir)}")
@@ -1198,6 +1271,20 @@ def main():
     print()
 
     timestamps, fields, lat, lon, attrs = load_diag_files(files, args.field)
+
+    # O significado de "passo N" depende do coupling_mode (ver consumption_note).
+    coupling_mode = read_coupling_mode(args.diagdir)
+    if coupling_mode:
+        print(f"  coupling_mode      : {coupling_mode}")
+        if coupling_mode == 'sequential':
+            print("    fluxos exibidos sao consumidos pelo MOM6 no MESMO passo;")
+            print("    o passo 1 tem radiacao/precipitacao/pressao nulas (spin-up).")
+        else:
+            print("    fluxos exibidos sao consumidos pelo MOM6 no passo SEGUINTE")
+            print("    (lag de 1 dt_coupling); a forcante do passo 1 nao e' plotada.")
+    else:
+        print("  coupling_mode      : nao identificado (nuopc.input nao encontrada)")
+    print()
     print()
 
     # Passos para plotagem
@@ -1239,7 +1326,8 @@ def main():
     if args.plot:
         n_steps_plot = len(step_indices)
         print(f"  [--plot] Gerando figuras ({n_steps_plot} passo(s))...")
-        plot_maps(timestamps, fields, args.field, lat, lon, step_indices, args.outdir)
+        plot_maps(timestamps, fields, args.field, lat, lon, step_indices,
+                  args.outdir, coupling_mode=coupling_mode)
         plot_timeseries(timestamps, fields, args.field, args.outdir)
         print()
 

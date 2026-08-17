@@ -1,18 +1,42 @@
 #!/usr/bin/env bash
 # =============================================================================
-# test-concurrent.bash — Smoke test do modo de acoplamento CONCORRENTE, com
-#                        submissão PBS no supercomputador Jaci (Cray XD2000),
-#                        no mesmo padrão do run_esmApp.jaci.
+# test-sequential-split.bash — Smoke test da combinação SEQUENTIAL + SPLIT do
+#                        grupo &nuopc_petlayout, com submissão PBS no
+#                        supercomputador Jaci (Cray XD2000), no mesmo padrão do
+#                        run_esmApp.jaci e do test-concurrent.bash.
 #
-# INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v13.0
+# INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v14.20
 # Sistema acoplado MONAN-A 2.0 x MOM6+SIS2 / NUOPC-ESMF 8.9.1
 #
+# POR QUE ESTE TESTE EXISTE
+#   Até a v14.19 o grupo &nuopc_petlayout colapsava dois eixos ortogonais num
+#   único parâmetro: o split de comunicador só existia dentro do ramo
+#   concurrent, e atm_pet_count/ocn_pet_count eram DESCARTADOS EM SILÊNCIO
+#   quando coupling_mode='sequential'. Quem pedia 2048 PETs para o MPAS e 128
+#   para o MOM6 em modo sequencial recebia os DOIS componentes em todos os
+#   PETs, sem qualquer aviso, e o MOM6 abortava bem depois, no
+#   mpp_define_domains, com uma mensagem que não mencionava PET algum.
+#
+#   A v14.20 separou os eixos (coupling_mode × pet_layout) e tornou
+#   sequential+split uma configuração de primeira classe. Este teste é a
+#   verificação de que ela realmente funciona.
+#
 # OBJETIVO
-#   Verificar rapidamente que o modo concurrent (&nuopc_petlayout):
-#     (1) reparte os PETs em blocos disjuntos ATM | OCN;
-#     (2) inicializa os três componentes (MPAS + MED + OCN) nesses subconjuntos;
-#     (3) AVANÇA o 1º passo de acoplamento SEM TRAVAR nos MPI_Allreduce coletivos
-#         (o cenário de deadlock que a blindagem v13.0 previne).
+#   Verificar que, com coupling_mode='sequential' e pet_layout='split':
+#     (1) os PETs são repartidos em blocos DISJUNTOS ATM | OCN;
+#     (2) a RunSequence selecionada é a SEQUENCIAL (sem "CONCORRENTE");
+#     (3) os três componentes (MPAS + MED + OCN) inicializam nesses
+#         subconjuntos, com o MED em todos os PETs;
+#     (4) o 1º passo de acoplamento AVANÇA sem travar nos MPI_Allreduce
+#         coletivos, que agora rodam sobre comunicadores de componente
+#         DIFERENTES do global;
+#     (5) — a verificação que distingue este teste do test-concurrent.bash —
+#         as janelas de execução de ATM e OCN NÃO SE SOBREPÕEM no tempo.
+#
+#   O item (5) é o que separa sequential+split de concurrent+split: os dois
+#   produzem exatamente os mesmos conjuntos de PETs, e só os carimbos de tempo
+#   dos logs distinguem um do outro. Sem essa checagem, um erro que fizesse o
+#   driver montar a RunSequence concorrente passaria despercebido.
 #
 # DUAS FASES (igual ao run_esmApp.jaci — detecção por PBS_O_WORKDIR)
 #   • No NÓ DE LOGIN (sem PBS_O_WORKDIR): gera um script .pbs e faz `qsub`.
@@ -31,10 +55,27 @@
 #   surgir dentro das janelas de estagnação/tempo-limite (processo vivo, parado
 #   num coletivo), o veredito é "provável DEADLOCK".
 #
+# COMO O TESTE MEDE A SOBREPOSIÇÃO ATM × OCN
+#   Cada fase de componente deixa no log ESMF um par "intro."/"extro." com
+#   carimbo de tempo. O teste reúne as janelas `Run` de todos os PETs do bloco
+#   ATM e de todos os PETs do bloco OCN, une cada conjunto (as janelas de PETs
+#   irmãos se sobrepõem entre si, e isso é esperado) e mede a interseção das
+#   duas uniões. Em execução sequencial a interseção deve ser praticamente
+#   nula; uma sobreposição relevante indica que a RunSequence concorrente foi
+#   montada por engano. A tolerância é ajustável com --overlap-tol.
+#   Requer python3 no nó de execução; sem ele, a verificação é PULADA com
+#   aviso, e as demais seguem valendo.
+#
 # SEGURANÇA / ISOLAMENTO
 #   NÃO altera o seu nuopc.input: gera uma cópia de teste injetada via a variável
 #   NUOPC_INPUT (suportada por mpas_cap_config_mod). Logs e diagnósticos vão para
-#   diretórios *-concurrent-test isolados.
+#   diretórios *-seqsplit-test isolados.
+#
+# ATENÇÃO À PARTIÇÃO METIS
+#   Com pet_layout=split, o MPAS é decomposto em atm_pet_count partições, NÃO
+#   em -n. Antes de rodar com --atm K, garanta que existe
+#   x1.*.graph.info.part.K no diretório do experimento (gere com
+#   `gen-metis.bash --parts K`). O teste avisa se o arquivo não estiver lá.
 #
 # CONVENÇÕES DE CAMINHO (idênticas ao run_esmApp.jaci)
 #   COUPLER_ROOT  raiz do sistema acoplado — autodeduzida da localização deste
@@ -52,10 +93,9 @@
 #
 # USO
 #   # A partir do diretório de experimento, com run/ no PATH:
-#   test-concurrent.bash -n 8                      # 8 PETs (4 ATM / 4 OCN) via qsub
-#   test-concurrent.bash -n 128 --atm 88 --ocn 40 -w 00:20:00
-#   test-concurrent.bash -n 8 --local              # execução direta (sessão interativa)
-#   test-concurrent.bash -n 8 --dry-run            # mostra o .pbs e o comando, não submete
+#   test-sequential-split.bash -n 8 --atm 6 --ocn 2      # via qsub
+#   test-sequential-split.bash -n 8 --atm 6 --ocn 2 --local
+#   test-sequential-split.bash -n 8 --dry-run            # mostra o .pbs, não submete
 #
 #   -n, --np N            Total de PETs                     (padrão: 8)
 #       --atm K           PETs do ATM (MPAS)                (padrão: metade)
@@ -65,7 +105,7 @@
 #       --account NOME    Conta/projeto PBS (-A)            (padrão: nenhum)
 #       --ncpus-node N    Núcleos por nó (p/ calcular select) (padrão: 128)
 #       --select STR      Sobrescreve a linha select inteira
-#       --jobname NOME    Nome do job PBS (-N)              (padrão: smoke-concurrent)
+#       --jobname NOME    Nome do job PBS (-N)              (padrão: smoke-seqsplit)
 #       --exe CAMINHO     Executável esmApp                 (padrão: $COUPLER_ROOT/bin/esmApp)
 #       --rundir DIR      Diretório de experimento          (padrão: atual / PBS_O_WORKDIR)
 #       --input ARQ       nuopc.input base                  (padrão: <rundir>/nuopc.input)
@@ -77,8 +117,9 @@
 #       --timeout SEG     Tempo-limite do teste (watchdog)  (padrão: 900)
 #       --stall SEG       Sem-progresso ⇒ suspeita hang     (padrão: 180)
 #       --interval SEG    Período de amostragem             (padrão: 5)
+#       --overlap-tol SEG Sobreposição ATM×OCN tolerada     (padrão: 1.0)
 #       --local           Executa direto (sem qsub)
-#       --baseline        Roda também um teste SEQUENCIAL de sanidade antes
+#       --baseline        Roda também um teste sequential+shared de sanidade antes
 #       --keep            Preserva config/logs de teste ao final
 #       --dry-run         Só gera config + .pbs e imprime o comando (não submete/executa)
 #   -h, --help            Esta ajuda
@@ -99,7 +140,7 @@ QUEUE="${PBS_QUEUE:-}"
 ACCOUNT="${PBS_ACCOUNT:-}"
 NCPUS_NODE="${JACI_NCPUS_PER_NODE:-128}"
 PBS_SELECT_OVERRIDE="${PBS_SELECT:-}"
-JOBNAME="smoke-concurrent"
+JOBNAME="smoke-seqsplit"
 EXE="${ESMAPP_BIN:-$COUPLER_ROOT/bin/esmApp}"
 RUNDIR="${PBS_O_WORKDIR:-$(pwd)}"
 BASE_INPUT=""
@@ -111,12 +152,13 @@ STEPS_TARGET=1
 TIMEOUT=900
 STALL=180
 INTERVAL=5
+OVERLAP_TOL="1.0"       # segundos de sobreposição ATM×OCN tolerados
 FORCE_LOCAL=0
 DO_BASELINE=0
 KEEP=0
 DRY_RUN=0
 
-TAG="concurrent-test"
+TAG="seqsplit-test"
 CFG=""; LOG_DIR=""; IMPORT_DIR=""; EXPORT_DIR=""; STDOUT_LOG=""
 
 # ── Cores ────────────────────────────────────────────────────────────────────
@@ -155,6 +197,7 @@ while [[ $# -gt 0 ]]; do
     --timeout)        TIMEOUT="$2"; shift 2;;
     --stall)          STALL="$2"; shift 2;;
     --interval)       INTERVAL="$2"; shift 2;;
+    --overlap-tol)    OVERLAP_TOL="$2"; shift 2;;
     --local)          FORCE_LOCAL=1; shift;;
     --baseline)       DO_BASELINE=1; shift;;
     --keep)           KEEP=1; shift;;
@@ -216,6 +259,7 @@ submit_phase() {
                    --stall "$STALL" --interval "$INTERVAL"
                    --rundir "$RUNDIR" --input "$BASE_INPUT"
                    --exe "$EXE" --setenv "$SETENV" --keep )
+  run_args+=( --overlap-tol "$OVERLAP_TOL" )
   [[ -n "$DT_OVERRIDE"    ]] && run_args+=( --dt "$DT_OVERRIDE" )
   [[ -n "$LAUNCHER"       ]] && run_args+=( --launcher "$LAUNCHER" )
   [[ -n "$LAUNCHER_ARGS"  ]] && run_args+=( --launcher-args "$LAUNCHER_ARGS" )
@@ -242,7 +286,7 @@ submit_phase() {
   } > "$pbs"
 
   echo "============================================================="
-  echo "  Smoke test CONCORRENTE — submissão PBS (Jaci)"
+  echo "  Smoke test SEQUENTIAL + SPLIT — submissão PBS (Jaci)"
   echo "============================================================="
   log "COUPLER_ROOT = $COUPLER_ROOT"
   log "experimento  = $RUNDIR"
@@ -329,7 +373,7 @@ gen_config() {
     sed -i -E "s|^([[:space:]]*dt_coupling[[:space:]]*=[[:space:]]*)[0-9]+|\1$DT_OVERRIDE|" "$out"
   {
     echo ""
-    echo "!-- injetado por test-concurrent.bash ($(date '+%Y-%m-%d %H:%M:%S')) --"
+    echo "!-- injetado por test-sequential-split.bash ($(date '+%Y-%m-%d %H:%M:%S')) --"
     echo "&nuopc_petlayout"
     echo "  coupling_mode = '$mode'"
     echo "  pet_layout    = '$layout'"
@@ -421,26 +465,150 @@ _diag_tail() {
     tail -6 "$lastpet" | sed 's/^/        /'
   fi
 }
+# ── Sobreposição temporal ATM × OCN ──────────────────────────────────────────
+# Devolve, no stdout, três campos: <overlap_s> <span_atm_s> <span_ocn_s>.
+# Vazio quando não há python3 ou quando não há janelas suficientes nos logs.
+#
+# A união é necessária porque os PETs irmãos de um mesmo componente rodam ao
+# mesmo tempo (isso é esperado e não é sobreposição ATM×OCN); o que interessa
+# é a interseção entre a união do bloco ATM e a união do bloco OCN.
+measure_overlap() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$RUNDIR/$LOG_DIR" "$ATM" <<'PYEOF' 2>/dev/null
+import re, sys, glob, os
+from datetime import datetime
+
+logdir, n_atm = sys.argv[1], int(sys.argv[2])
+RE_LINE = re.compile(
+    r"^(?P<d>\d{8})\s+(?P<t>\d{6}\.\d+)\s+\S+\s+PET(?P<pet>\d+)\s+(?P<msg>.*)$")
+RE_RUN = re.compile(r"^(?P<comp>MPAS|OCN):\s*Run\s+(?P<edge>intro|extro)\.?\s*$")
+
+spans = {"MPAS": [], "OCN": []}
+for f in sorted(glob.glob(os.path.join(logdir, "PET*.esmApp.log"))):
+    pending = {}
+    for raw in open(f, errors="replace"):
+        m = RE_LINE.match(raw)
+        if not m:
+            continue
+        rm = RE_RUN.match(m.group("msg"))
+        if not rm:
+            continue
+        pet, comp = int(m.group("pet")), rm.group("comp")
+        # Só conta janelas no bloco esperado: um PET do bloco OCN que
+        # reportasse MPAS já seria, por si, falha de particionamento.
+        if comp == "MPAS" and pet >= n_atm:
+            continue
+        if comp == "OCN" and pet < n_atm:
+            continue
+        ts = datetime.strptime(m.group("d") + " " + m.group("t"),
+                               "%Y%m%d %H%M%S.%f").timestamp()
+        if rm.group("edge") == "intro":
+            pending[comp] = ts
+        else:
+            t0 = pending.pop(comp, None)
+            if t0 is not None and ts >= t0:
+                spans[comp].append((t0, ts))
+
+def merge(iv):
+    iv = sorted(iv)
+    out = []
+    for a, b in iv:
+        if out and a <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], b)
+        else:
+            out.append([a, b])
+    return out
+
+atm, ocn = merge(spans["MPAS"]), merge(spans["OCN"])
+if not atm or not ocn:
+    sys.exit(1)
+
+ov = 0.0
+i = j = 0
+while i < len(atm) and j < len(ocn):
+    lo, hi = max(atm[i][0], ocn[j][0]), min(atm[i][1], ocn[j][1])
+    if hi > lo:
+        ov += hi - lo
+    if atm[i][1] < ocn[j][1]:
+        i += 1
+    else:
+        j += 1
+
+print("%.3f %.3f %.3f" % (ov,
+      sum(b - a for a, b in atm), sum(b - a for a, b in ocn)))
+PYEOF
+}
+
 analyze() {
   echo ""; log "análise dos logs em $RUNDIR/$LOG_DIR/"
-  # v14.20: "layout SPLIT (execucao CONCURRENT) — ATM=PET[..] OCN=PET[..]".
-  # O formato <= v14.19 ("modo CONCURRENT — ...") segue aceito, para que o
-  # mesmo teste sirva na comparação com binários antigos.
-  if   grep_any "(layout SPLIT|modo CONCURRENT).*ATM=PET\[0\.\.$((ATM-1))\] OCN=PET\[$ATM\.\."; then
+
+  # (1) Split de comunicador aplicado, com as faixas de PET esperadas.
+  if   grep_any "layout SPLIT.*ATM=PET\[0\.\.$((ATM-1))\] OCN=PET\[$ATM\.\."; then
     ok "partição split aplicada (ATM=$ATM | OCN=$OCN)"
-  elif grep_any "layout SPLIT|modo CONCURRENT"; then ok "partição split aplicada"
-  else bad "marcador de partição split ausente"; NFAIL=$((NFAIL+1)); fi
+  elif grep_any "layout SPLIT"; then
+    warn "layout split anunciado, mas com faixas de PET diferentes das pedidas"
+    grep -hoE "layout SPLIT.*" "$RUNDIR/$LOG_DIR"/PET*.esmApp.log 2>/dev/null \
+      | head -1 | sed 's/^/        /'
+    NFAIL=$((NFAIL+1))
+  elif grep_any "layout SHARED"; then
+    bad "driver aplicou layout SHARED — pet_layout=split foi ignorado"
+    bad "  (este é exatamente o defeito que a v14.20 corrigiu; binário antigo?)"
+    NFAIL=$((NFAIL+1))
+  else
+    bad "marcador de layout ausente nos logs"; NFAIL=$((NFAIL+1))
+  fi
 
-  if grep_any "layout SPLIT \(execucao CONCURRENT\)|modo CONCURRENT"; then
-    ok "execução concorrente anunciada pelo driver"
-  else bad "driver não anunciou execução concorrente"; NFAIL=$((NFAIL+1)); fi
+  # (2) Execução sequencial: a RunSequence NÃO pode ser a concorrente.
+  if grep_any "layout SPLIT \(execucao SEQUENTIAL\)"; then
+    ok "execução sequencial anunciada pelo driver"
+  else bad "driver não anunciou execução sequencial"; NFAIL=$((NFAIL+1)); fi
 
-  if grep_any "RunSequence.*CONCORRENTE"; then ok "RunSequence concorrente selecionada"
-  else bad "RunSequence concorrente não registrada"; NFAIL=$((NFAIL+1)); fi
+  if grep_any "RunSequence.*CONCORRENTE"; then
+    bad "RunSequence CONCORRENTE selecionada — esperada a sequencial"
+    NFAIL=$((NFAIL+1))
+  elif grep_any "RunSequence Fase [12] \("; then
+    ok "RunSequence sequencial selecionada"
+  else bad "RunSequence não registrada nos logs"; NFAIL=$((NFAIL+1)); fi
 
   if grep -q "\[OK\] Inicializacao concluida" "$STDOUT_LOG" 2>/dev/null; then
     ok "inicialização concluída (MPAS + MED + OCN)"
   else bad "inicialização NÃO concluída"; NFAIL=$((NFAIL+1)); fi
+
+  # (3c) Valor físico de So_t (fix B-SEQINIT-02, v14.21). O carimbo de tempo
+  #      não prova conteúdo: o mom_cap carimba todos os campos exportados em
+  #      laço cego. Sem ocean_model_init_sfc, So_t chega zerado E carimbado.
+  if grep_any "ocean_model_init_sfc — t_surf de t=0"; then
+    ok "OCN extraiu t_surf antes do mom_export de t=0"
+  else
+    bad "OCN não chamou ocean_model_init_sfc — So_t exportado como zeros em t=0"
+    NFAIL=$((NFAIL+1))
+  fi
+  if grep_any "So_t carimbado mas SEM valor fisico"; then
+    bad "So_t chegou ao mediador carimbado e nulo (t_surf não preenchido)"
+    NFAIL=$((NFAIL+1))
+  elif grep_any "So_t com [0-9]+ celulas em \\[270,310\\] K"; then
+    ok "So_t com valores físicos no mediador em t=0"
+  fi
+
+  # (3b) Resolução da dependência de dados de So_t (fix B-SEQINIT-01, v14.21).
+  #      Na RunSequence sequencial o conector "OCN -> MED" vem ANTES do
+  #      elemento "OCN", então o mediador PRECISA pedir uma segunda iteração
+  #      do laço de dependência de dados do driver. Se ele declarar
+  #      InitializeDataComplete de primeira, So_t chega zerado a t=0.
+  if grep_any "MED: IDC aguardando So_t do OCN"; then
+    if grep_any "MED: InitializeDataComplete SATISFIED \(So_t em t=0\)"; then
+      ok "So_t resolvido no laço de dependência de dados (2ª iteração)"
+    else
+      bad "MED pediu nova iteração mas nunca recebeu So_t — laço não convergiu"
+      NFAIL=$((NFAIL+1))
+    fi
+  elif grep_any "MED: InitializeDataComplete SATISFIED \(So_t em t=0\)"; then
+    warn "MED concluiu em 1 iteração — ordem da RunSequence mudou?"
+  else
+    bad "MED declarou InitializeDataComplete sem verificar So_t (binário anterior à v14.21)"
+    bad "  So_t chega ZERADO ao mediador em t=0 neste modo"
+    NFAIL=$((NFAIL+1))
+  fi
 
   if grep_any "MPI_Abort|forrtl: severe|SIGSEGV|Segmentation fault|particao (split|concurrent) invalida"; then
     bad "marcadores de erro fatal encontrados:"; NFAIL=$((NFAIL+1))
@@ -449,12 +617,34 @@ analyze() {
   else ok "nenhum marcador de erro fatal / abort MPI"; fi
 
   case "$VERDICT" in
-    completed) ok "simulação concluída integralmente — coletivos concorrentes OK";;
+    completed) ok "simulação concluída integralmente — coletivos por componente OK";;
     progress)  ok "1º passo de acoplamento completou os coletivos — SEM deadlock";;
     hang)      bad "PROVÁVEL DEADLOCK: processo vivo, sem progresso nos coletivos"; NFAIL=$((NFAIL+1)); _diag_tail;;
     initfail)  bad "parada ANTES de concluir a inicialização (não chegou ao passo 1)"; NFAIL=$((NFAIL+1)); _diag_tail;;
     crash)     bad "o executável ABORTOU antes de completar o 1º passo"; NFAIL=$((NFAIL+1))
                echo "        --- últimas linhas do stdout ---"; tail -8 "$STDOUT_LOG" 2>/dev/null | sed 's/^/        /';;
+  esac
+
+  # (5) A verificação que distingue sequential+split de concurrent+split.
+  #     Só faz sentido se a execução chegou a avançar; num crash ou initfail
+  #     não há janelas Run suficientes, e o resultado seria ruído.
+  case "$VERDICT" in
+    completed|progress)
+      local ovline ov span_atm span_ocn
+      if ! ovline="$(measure_overlap)" || [[ -z "$ovline" ]]; then
+        warn "sobreposição ATM×OCN não medida (python3 ausente ou sem janelas Run nos logs)"
+      else
+        read -r ov span_atm span_ocn <<< "$ovline"
+        log "janelas Run: ATM=${span_atm}s  OCN=${span_ocn}s  sobreposição=${ov}s"
+        if awk -v o="$ov" -v t="$OVERLAP_TOL" 'BEGIN{exit !(o<=t)}'; then
+          ok "ATM e OCN não se sobrepõem no tempo (${ov}s <= tolerância ${OVERLAP_TOL}s)"
+        else
+          bad "ATM e OCN SE SOBREPÕEM por ${ov}s (tolerância ${OVERLAP_TOL}s)"
+          bad "  execução concorrente onde se esperava sequencial — conferir SetRunSequence"
+          NFAIL=$((NFAIL+1))
+        fi
+      fi
+      ;;
   esac
 }
 
@@ -470,13 +660,15 @@ cleanup() {
 run_phase() {
   trap cleanup EXIT
   echo "============================================================="
-  echo "  Smoke test — modo CONCORRENTE (deadlock em coletivos MPI)"
+  echo "  Smoke test — SEQUENTIAL + SPLIT (&nuopc_petlayout, v14.20)"
   echo "============================================================="
   log "COUPLER_ROOT = $COUPLER_ROOT"
   log "experimento  = $RUNDIR"
   log "executável   = $EXE"
   log "PETs         = $NP  (ATM=$ATM | OCN=$OCN)"
+  log "configuração = coupling_mode=sequential  pet_layout=split"
   log "encerra em   = $STEPS_TARGET passo(s) | timeout=${TIMEOUT}s | stall=${STALL}s"
+  log "tolerância de sobreposição ATM×OCN = ${OVERLAP_TOL}s"
   echo ""
 
   load_environment
@@ -484,8 +676,17 @@ run_phase() {
   log "lançador     = $LAUNCHER $LAUNCHER_ARGS"
 
   [[ -f "$BASE_INPUT" ]] || die "nuopc.input base não encontrado: $BASE_INPUT"
-  gen_config concurrent "$CFG" split
+  gen_config sequential "$CFG" split
   log "config de teste: $CFG"
+
+  # Com pet_layout=split o MPAS é decomposto em ATM partições, não em NP.
+  # Sem o .part.$ATM correspondente o MPAS aborta na leitura da malha, e o
+  # veredito sairia como "initfail" sem indicar a causa real.
+  if ! compgen -G "$RUNDIR/x1.*.graph.info.part.$ATM" > /dev/null 2>&1; then
+    warn "x1.*.graph.info.part.$ATM ausente em $RUNDIR"
+    warn "  em split a partição METIS é dimensionada por --atm ($ATM), não por -n ($NP)"
+    warn "  gere com: gen-metis.bash --parts $ATM"
+  fi
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo ""; log "--dry-run: comando que seria executado:"
@@ -508,13 +709,13 @@ run_phase() {
     [[ "$KEEP" -eq 1 ]] || rm -f "$seq_cfg"
   fi
 
-  echo ""; log "executando teste CONCORRENTE…"
+  echo ""; log "executando teste SEQUENTIAL + SPLIT…"
   run_and_watch "$CFG"
   analyze
 
   echo ""; echo "============================================================="
   if [[ "$NFAIL" -eq 0 ]]; then
-    printf '%s  RESULTADO: PASSOU%s — modo concorrente sem deadlock\n' "$C_OK" "$C_0"
+    printf '%s  RESULTADO: PASSOU%s — sequential+split aplicado, sem deadlock e sem sobreposição\n' "$C_OK" "$C_0"
     echo "============================================================="; exit 0
   else
     printf '%s  RESULTADO: FALHOU%s — %d verificação(ões) com problema\n' "$C_ERR" "$C_0" "$NFAIL"

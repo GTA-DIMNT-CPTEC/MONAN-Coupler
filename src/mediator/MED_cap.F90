@@ -25,6 +25,7 @@ module MED_cap_MONAN_mod
   use ESMF
   use ESMF, only: ESMF_State, ESMF_StateGet
   use mpi
+  use netcdf   ! FIX B-OCNGRID-01: leitura direta de ocean_hgrid.nc (grade T real MOM6)
   use mpas_cap_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn_ice,                 &
                                   cfg_docn_ice_init_only,           &
@@ -34,10 +35,12 @@ module MED_cap_MONAN_mod
                                   cfg_docn_dt_data,                 &
                                   cfg_docn_epoch_year,              &
                                   cfg_docn_epoch_month,             &
-                                  cfg_docn_epoch_day  ! Alternativa 1 + Sprint B.1.1
+                                  cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
+                                  cfg_use_docn, cfg_mom6_mesh_ocn     ! FIX B-OCNGRID-01
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
+  use NUOPC, only: NUOPC_IsAtTime
   use NUOPC, only: NUOPC_CompAttributeGet, NUOPC_CompAttributeAdd
   use NUOPC_Mediator, only: med_routine_SS          => SetServices
   use NUOPC_Mediator, only: med_label_DataInitialize => label_DataInitialize
@@ -268,6 +271,19 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
+    ! FIX B-COASTMASK-02 (Ago 2026): anuncia So_omask no importState do MED.
+    ! O OCN (mom_cap_methods.F90::mom_export) ja exporta 'So_omask' = nint(mask2dT)
+    ! (1=oceano, 0=terra), mas o MED nunca anunciava esse campo -> o NUOPC
+    ! descartava o conector e o MED era forcado a "adivinhar" a mascara terra/
+    ! oceano a partir do proprio valor de SST (limiar SST<270K), o que e
+    ! inconsistente com a mascara real do MOM6 e contamina a interpolacao
+    ! bilinear da costa com valores de celulas de terra fisicamente irreais.
+    call NUOPC_Advertise(importState, StandardName="So_omask", &
+      TransferOfferGeomObject="cannot provide", &
+      SharePolicyField="share", rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, file=__FILE__)) return
+
     ! Advertise campos de export para o OCN
     do n = 1, n_export
       call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
@@ -306,6 +322,7 @@ contains
     real(ESMF_KIND_R8), allocatable :: ocn_lon(:,:), ocn_lat(:,:)
     logical             :: isPresent, isSet
     character(len=8)    :: attr_val
+    character(len=256)  :: msg_tmp  ! FIX B-OCNGRID-01
 
     rc = ESMF_SUCCESS
 
@@ -354,8 +371,33 @@ contains
     !        Alinhada com DOCN_cap (OISST) — redistribuição zero-copy.
     nx_atm = 360
     ny_atm = 180
-    nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
-    ny_ocn = cfg_docn_ny  ! Grade DOCN de nuopc.input (ex: OISST 0.25° =  720)
+    ! FIX B-OCNGRID-01 (Ago 2026): cfg_docn_nx/ny (1440x720) sao a grade do
+    ! DOCN/OISST (0.25 grau, regular). Quando o OCN real e' o MOM6+SIS2
+    ! dinamico (cfg_use_docn=.false., modo de producao), a grade T real do
+    ! MOM6 e' definida por NIGLOBAL/NJGLOBAL no MOM_input e normalmente NAO
+    ! coincide com a grade DOCN (ex.: 180x155 vs 1440x720 observado em
+    ! producao). Usar cfg_docn_nx/ny nesse caso faz o mediador declarar uma
+    ! grade ~8x maior e geometricamente uniforme (lat/lon regular) onde a
+    ! grade real e' tripolar/nao-uniforme -> o conector NUOPC OCN->MED monta
+    ! um regrid automatico usando coordenadas erradas, contaminando TODOS os
+    ! campos (So_t, So_u, So_v, So_omask) antes mesmo da mascara de costa
+    ! entrar em acao. Por isso, em modo MOM6 lemos a dimensao real da grade T
+    ! diretamente do supergrid ocean_hgrid.nc (nx/ny do arquivo / 2, convencao
+    ! FRE-NCtools) em vez de reutilizar a config do DOCN.
+    if (cfg_use_docn) then
+      nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
+      ny_ocn = cfg_docn_ny  ! Grade DOCN de nuopc.input (ex: OISST 0.25° =  720)
+    else
+      call MED_ReadMom6TGridDims(trim(cfg_mom6_mesh_ocn), nx_ocn, ny_ocn, rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg="MED: falha ao ler dimensoes reais de ocean_hgrid.nc " // &
+            "(NIGLOBAL/NJGLOBAL do MOM6) - verifique cfg_mom6_mesh_ocn", &
+        line=__LINE__, file=__FILE__)) return
+      write(msg_tmp,'(A,I0,A,I0,A)') 'MED: grade T real do MOM6 lida de ' // &
+        trim(cfg_mom6_mesh_ocn) // ' = ', nx_ocn, ' x ', ny_ocn, &
+        ' (NIGLOBAL x NJGLOBAL)'
+      call ESMF_LogWrite(trim(msg_tmp), ESMF_LOGMSG_INFO)
+    end if
 
     !--------------------------------------------------------------------------
     ! Criar grade ATM regular 640x320
@@ -395,7 +437,18 @@ contains
     regDecomp(2) = ny_tiles        ! linhas (lat)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
-    ! Loops bulk usam lbound/ubound — agnósticos ao indexflag do MPAS.
+    ! Loops bulk usam lbound/ubound ? agnósticos ao indexflag do MPAS.
+    ! REVERT B-OCNGRID-05 (Ago 2026): a tentativa de fixar polekindflag=MONOPOLE
+    ! explicitamente foi REVERTIDA. Motivo: o usuario confirmou que a versao
+    ! ANTERIOR a qualquer mudanca de grade nesta sessao rodava sem SIGSEGV,
+    ! apesar do artefato de costa. atm_grid ja' usava ESMF_GridCreate1PeriDim
+    ! SEM polekindflag explicito (dependendo do default do ESMF) nessa versao
+    ! que funcionava. Declarar MONOPOLE nas bordas de latitude desta grade
+    ! regular (linhas extremas em ±89.5°, que NAO sao um ponto geometrico
+    ! unico) e' fisicamente incorreto e e' o principal suspeito de ter
+    ! corrompido os pesos de regrid perto dos polos, alimentando valores
+    ! invalidos para a malha Voronoi do MPAS-A e causando o SIGSEGV em
+    ! core_run. Voltando a configuracao original (sem polekindflag).
     atm_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_atm, ny_atm/), &
       regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &
       coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
@@ -458,10 +511,39 @@ contains
     regDecomp(2) = ny_tiles        ! linhas (lat)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
-    ocn_grid = ESMF_GridCreateNoPeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
-      regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &
+    ! FIX B-OCNGRID-03 (Ago 2026): a grade OCN era criada SEM dimensao
+    ! periodica (ESMF_GridCreateNoPeriDim). Isso significa que o ESMF nao
+    ! sabe que a coluna i=nx_ocn (longitude ~360) e a coluna i=1 (longitude
+    ! ~0) sao fisicamente vizinhas ? o regrid bilinear trata a borda leste/
+    ! oeste da grade como um limite de dominio, nao como um ponto de
+    ! continuidade. Resultado: uma coluna de celulas "sem vizinho valido"
+    ! exatamente na costura (visivel como uma faixa de valores indefinidos
+    ! no Oceano Indico, ~60E, onde a longitude bruta do supergrid do MOM6
+    ! da volta: intervalo nativo -300..60 fecha exatamente ali).
+    ! FIX: ESMF_GridCreate1PeriDim com periodicDim=1 (longitude periodica).
+    ! Essa parte, testada, funcionou (costura do Indico desapareceu).
+    ! REVERT PARCIAL (Ago 2026): a primeira versao desta correcao tambem
+    ! especificava polekindflag=(/MONOPOLE,MONOPOLE/) explicitamente. Isso foi
+    ! REVERTIDO ? o usuario confirmou que a versao anterior a qualquer
+    ! mudanca de grade rodava sem SIGSEGV, e a grade ATM (que ja' usava
+    ! GridCreate1PeriDim SEM polekindflag explicito) fazia parte dessa
+    ! configuracao que funcionava. Declarar MONOPOLE numa borda de latitude
+    ! que NAO e' um ponto geometrico unico (j=1 desta grade fica em -78°, a
+    ! borda da Antartida ? uma linha inteira de pontos, nao um polo) e'
+    ! fisicamente incorreto e e' o principal suspeito de ter corrompido os
+    ! pesos de regrid perto dos polos/dobra, alimentando valores invalidos
+    ! para a malha Voronoi do MPAS-A e causando o SIGSEGV em core_run.
+    ! Mantendo periodicDim=1 (beneficio confirmado) e deixando o ESMF usar
+    ! seu polekindflag padrao (mesma config que ja' funcionava no atm_grid).
+    ! ATENCAO: a assinatura exata de ESMF_GridCreate1PeriDim deve ser
+    ! conferida contra a versao instalada do ESMF (8.9.1) antes do build ?
+    ! nomes/ordem de argumentos podem variar entre versoes.
+    ocn_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
+      regDecomp=regDecomp, periodicDim=1, &
+      indexflag=ESMF_INDEX_GLOBAL, &
       coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha ao criar grade OCN", &
+    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha ao criar grade OCN " // &
+      "periodica (ESMF_GridCreate1PeriDim) ? verifique assinatura ESMF 8.9.1", &
       line=__LINE__, file=__FILE__)) return
 
     ! ESMF_GridAddCoord: COLETIVA — todos os PETs
@@ -477,19 +559,32 @@ contains
     do lde = 0, localDeCount_ocn - 1
       call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=lde, &
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-      do j = lbound(coordX,2), ubound(coordX,2)
-        do i = lbound(coordX,1), ubound(coordX,1)
-          coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_ocn)
-        end do
-      end do
       call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=lde, &
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      do j = lbound(coordY,2), ubound(coordY,2)
-        do i = lbound(coordY,1), ubound(coordY,1)
-          coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_ocn) + &
-                        (180.0_ESMF_KIND_R8/ny_ocn)/2.0_ESMF_KIND_R8
+      if (cfg_use_docn) then
+        ! DOCN/OISST: grade lat/lon regular DE VERDADE ? formula uniforme e' exata.
+        do j = lbound(coordX,2), ubound(coordX,2)
+          do i = lbound(coordX,1), ubound(coordX,1)
+            coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_ocn)
+          end do
         end do
-      end do
+        do j = lbound(coordY,2), ubound(coordY,2)
+          do i = lbound(coordY,1), ubound(coordY,1)
+            coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_ocn) + &
+                          (180.0_ESMF_KIND_R8/ny_ocn)/2.0_ESMF_KIND_R8
+          end do
+        end do
+      else
+        ! FIX B-OCNGRID-01: MOM6 tripolar real ? le as coordenadas T verdadeiras
+        ! do supergrid ocean_hgrid.nc (NAO uniformes; convergem no polo Norte).
+        ! Sem isso, o conector NUOPC OCN->MED interpola usando posicoes erradas
+        ! e a costa fica sistematicamente deslocada em todo o dominio.
+        call MED_FillMom6TGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
+        if (ESMF_LogFoundError(rcToCheck=rc, &
+          msg="MED: falha ao ler coordenadas T reais de ocean_hgrid.nc " // &
+              "para o DE local ? grade OCN do mediador ficara incorreta", &
+          line=__LINE__, file=__FILE__)) return
+      end if
     end do  ! lde OCN
 
     ! Opção 1: item de MÁSCARA na grade OCN (terra = SST fill ≈200 K do MOM6).
@@ -561,6 +656,16 @@ contains
 
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_v", rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, file=__FILE__)) return
+    call NUOPC_Realize(importState, field=tmp_field, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, file=__FILE__)) return
+
+    ! FIX B-COASTMASK-02: realizar So_omask (mascara real mask2dT do MOM6)
+    ! na grade OCN, simetrico a So_t/So_u/So_v.
+    tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, name="So_omask", rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
@@ -674,6 +779,198 @@ contains
   end subroutine InitializeRealize
 
   !============================================================================
+  ! FIX B-OCNGRID-01 (Ago 2026)
+  !
+  ! CAUSA-RAIZ: a grade "ocn_grid" que o MEDIADOR usa internamente para o
+  ! regrid OCN<->ATM era construida com as dimensoes do DOCN/OISST
+  ! (cfg_docn_nx x cfg_docn_ny = 1440x720) e coordenadas lat/lon UNIFORMES,
+  ! mesmo quando o componente OCN real e' o MOM6+SIS2 dinamico (grade
+  ! tripolar, NAO uniforme). Em producao (cfg_use_docn=.false.) a grade T
+  ! real do MOM6 (NIGLOBAL x NJGLOBAL no MOM_input) e' MUITO menor e
+  ! geometricamente diferente (ex.: 180x155 medido em campo vs 1440x720
+  ! assumido pelo mediador). Como os dois lados (OCN real, MED fabricado)
+  ! sao objetos ESMF geometricamente distintos, o NUOPC monta um regrid
+  ! AUTOMATICO entre eles usando as coordenadas erradas do MED ? isso
+  ! contamina todos os campos OCN->MED (So_t, So_u, So_v, So_omask) com um
+  ! deslocamento geografico sistematico, mais visivel exatamente na costa
+  ! (onde pequenos erros de posicao cruzam a fronteira terra/mar).
+  !
+  ! FIX: quando cfg_use_docn=.false. (MOM6 ativo), a grade T real e' lida
+  ! diretamente do supergrid FRE-NCtools (ocean_hgrid.nc, mesmo arquivo
+  ! apontado por mesh_ocn em nuopc.input): dimensoes = nx/ny do arquivo / 2;
+  ! coordenadas T = pontos pares do supergrid (indice 2*i, 2*j). Ambas as
+  ! subrotinas abaixo sao chamadas a partir de InitializeRealize, ANTES de
+  ! qualquer ESMF_FieldRegridStore, para que TODOS os campos OCN<->MED
+  ! herdem a geometria correta (nao so' o SST mascarado).
+  !============================================================================
+
+  !----------------------------------------------------------------------------
+  ! MED_ReadMom6TGridDims ? le as dimensoes do supergrid (variaveis 'nx'/'ny'
+  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
+  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
+  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
+  !----------------------------------------------------------------------------
+  subroutine MED_ReadMom6TGridDims(filename, ni, nj, rc)
+    character(len=*), intent(in)  :: filename
+    integer,           intent(out) :: ni, nj
+    integer,           intent(out) :: rc
+    integer :: ncid, dimid, nx_super, ny_super, ncstat
+
+    rc = ESMF_SUCCESS
+    ni = 0; nj = 0
+
+    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao abrir ' // trim(filename) // &
+        ' para ler dimensoes da grade T real do MOM6', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      return
+    end if
+
+    ncstat = nf90_inq_dimid(ncid, 'nx', dimid)
+    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=nx_super)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler dimensao "nx" de ' // &
+        trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      ncstat = nf90_close(ncid)
+      return
+    end if
+
+    ncstat = nf90_inq_dimid(ncid, 'ny', dimid)
+    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=ny_super)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler dimensao "ny" de ' // &
+        trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      ncstat = nf90_close(ncid)
+      return
+    end if
+
+    ncstat = nf90_close(ncid)
+
+    if (mod(nx_super,2) /= 0 .or. mod(ny_super,2) /= 0) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: AVISO ? nx/ny impar em ' // &
+        trim(filename) // ' (formato inesperado; nao parece supergrid ' // &
+        'FRE-NCtools padrao). Prosseguindo com divisao inteira por 2.', &
+        ESMF_LOGMSG_WARNING)
+    end if
+
+    ni = nx_super / 2
+    nj = ny_super / 2
+  end subroutine MED_ReadMom6TGridDims
+
+  !----------------------------------------------------------------------------
+  ! MED_FillMom6TGridCoords ? preenche coordX/coordY (bounds em indice GLOBAL,
+  ! pois ocn_grid usa ESMF_INDEX_GLOBAL) com as coordenadas T REAIS lidas do
+  ! supergrid ocean_hgrid.nc via hyperslab com stride=2 (pula os pontos de
+  ! vertice/aresta do supergrid, mantendo so' os centros das celulas T).
+  ! Convencao FRE-NCtools: celula T global (i,j), i=1..NIGLOBAL, j=1..NJGLOBAL,
+  ! esta no indice de supergrid (2*i, 2*j), 1-based.
+  !----------------------------------------------------------------------------
+  subroutine MED_FillMom6TGridCoords(filename, coordX, coordY, rc)
+    character(len=*),    intent(in)    :: filename
+    real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
+    integer,              intent(out)  :: rc
+    integer :: ncid, varid_x, varid_y, ncstat
+    integer :: i1, i2, j1, j2, ni_local, nj_local
+    integer :: start2(2), count2(2), stride2(2)
+
+    rc = ESMF_SUCCESS
+    if (.not. associated(coordX) .or. .not. associated(coordY)) return
+
+    i1 = lbound(coordX,1); i2 = ubound(coordX,1)
+    j1 = lbound(coordX,2); j2 = ubound(coordX,2)
+    ni_local = i2 - i1 + 1
+    nj_local = j2 - j1 + 1
+    if (ni_local <= 0 .or. nj_local <= 0) return
+
+    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao abrir ' // trim(filename) // &
+        ' para ler coordenadas T reais do MOM6', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      return
+    end if
+
+    ncstat = nf90_inq_varid(ncid, 'x', varid_x)
+    if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: variaveis "x"/"y" nao encontradas em ' // &
+        trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      ncstat = nf90_close(ncid)
+      return
+    end if
+
+    ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
+    ! stride=2 le direto os centros, sem carregar o supergrid inteiro (2x
+    ! resolucao) na memoria de cada PET.
+    start2  = (/ 2*i1, 2*j1 /)
+    count2  = (/ ni_local, nj_local /)
+    stride2 = (/ 2, 2 /)
+
+    ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
+      stride=stride2)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler "x" (lon) de ' // &
+        trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+
+    ! FIX B-OCNGRID-03: normaliza longitude bruta do supergrid (ex.: -300..60,
+    ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
+    ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
+    ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
+    where (coordX < 0.0_ESMF_KIND_R8)
+      coordX = coordX + 360.0_ESMF_KIND_R8
+    end where
+    where (coordX >= 360.0_ESMF_KIND_R8)
+      coordX = coordX - 360.0_ESMF_KIND_R8
+    end where
+
+    ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
+      stride=stride2)
+    if (ncstat /= NF90_NOERR) then
+      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler "y" (lat) de ' // &
+        trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+
+    ncstat = nf90_close(ncid)
+
+    ! DIAGNOSTICO TEMPORARIO B-OCNGRID-01b: comprova o que foi lido de fato.
+    ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
+    ! (exceto perto do fold tripolar); coordY o oposto. Se coordX nao variar
+    ! com i, a longitude "colapsou" e o regrid produz bandas puramente
+    ! zonais (sem estrutura leste-oeste) ? exatamente o sintoma relatado.
+    block
+      character(len=300) :: dbgmsg
+      real(ESMF_KIND_R8) :: x_row_min, x_row_max, y_col_min, y_col_max
+      if (ni_local >= 2 .and. nj_local >= 1) then
+        x_row_min = minval(coordX(:, j1))
+        x_row_max = maxval(coordX(:, j1))
+      else
+        x_row_min = -999.0_ESMF_KIND_R8; x_row_max = -999.0_ESMF_KIND_R8
+      end if
+      if (nj_local >= 2 .and. ni_local >= 1) then
+        y_col_min = minval(coordY(i1, :))
+        y_col_max = maxval(coordY(i1, :))
+      else
+        y_col_min = -999.0_ESMF_KIND_R8; y_col_max = -999.0_ESMF_KIND_R8
+      end if
+      write(dbgmsg,'(A,I0,A,I0,A,I0,A,I0,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
+        'MED B-OCNGRID-01b DIAG: DE i=[',i1,',',i2,'] j=[',j1,',',j2, &
+        '] coordX(i,j1) min=', x_row_min, ' max=', x_row_max, &
+        ' | coordY(i1,j) min=', y_col_min, ' max=', y_col_max, &
+        ' | coordX(i1,j1)=', coordX(i1,j1), ' coordX(i2,j1)=', coordX(i2,j1), &
+        ' | coordY(i1,j1)=', coordY(i1,j1), ' coordY(i1,j2)=', coordY(i1,j2)
+      call ESMF_LogWrite(trim(dbgmsg), ESMF_LOGMSG_INFO)
+    end block
+  end subroutine MED_FillMom6TGridCoords
+
+
+  !============================================================================
   ! InitializeDataComplete - cria routehandles
   ! CORRECAO 2: usa NUOPC_MediatorGet em vez de ESMF_GridCompGet para obter
   !   importState/exportState, que e a API correta para mediadores NUOPC.
@@ -687,12 +984,21 @@ contains
 
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
+    type(ESMF_Time)          :: startTime
     type(ESMF_Field)         :: atm_field, ocn_field, exp_field
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
     integer :: fieldCount, i, localrc
     character(len=64), allocatable :: fieldNameList(:)
+    character(len=160) :: msg_gate
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: sstp(:,:)
+    logical :: sst_ready
+    type(ESMF_VM) :: vm
+    integer :: lde, ldec_sst
+    integer :: n_phys_s(1), n_phys_g(1)
+    integer, save :: n_gate_tries = 0
+    integer, parameter :: MAX_GATE_TRIES = 5
 
     rc = ESMF_SUCCESS
 
@@ -729,40 +1035,207 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha Foxx_taux", &
       line=__LINE__, file=__FILE__)) return
 
-    ! Criar routehandle ATM -> OCN
-    call ESMF_FieldRegridStore( &
-      srcField       = is%f_taux_atm,   &
-      dstField       = exp_field,       &
-      routehandle    = is%rh_atm2ocn,   &
-      regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
-      unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
-      rc             = rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, &
-      msg="MED: falha FieldRegridStore ATM->OCN", &
+  !==========================================================================
+  ! FASE A — GEOMETRIA (uma unica vez, na primeira iteracao)
+  !
+  ! FIX B-SEQINIT-01 (v14.21): esta rotina foi dividida em duas fases porque
+  ! ela pode ser chamada MAIS DE UMA VEZ. O laco de resolucao de dependencia
+  ! de dados do driver NUOPC percorre a RunSequence repetidamente, executando
+  ! o Run dos conectores e o label_DataInitialize dos componentes, ate que
+  ! todos declarem InitializeDataComplete. Antes deste fix o MED declarava
+  ! "true" incondicionalmente na primeira passagem, e o laco parava ali.
+  !
+  ! Na RunSequence SEQUENCIAL o conector "OCN -> MED" vem ANTES do elemento
+  ! "OCN", ou seja, antes de o mom_cap escrever So_t em InitializeDataComplete.
+  ! Com uma unica passagem, o So_t que chega aqui e' o campo ainda nao
+  ! preenchido. Na RunSequence CONCORRENTE a ordem e' inversa ("OCN" antes de
+  ! "OCN -> MED"), e por isso o modo concorrente funcionava — por acidente de
+  ! ordenacao, nao por corretude. O pet_layout nao tem parte nisso: o mesmo
+  ! defeito ocorre em sequential+shared.
+  !
+  ! O FieldRegridStore abaixo depende so' da GEOMETRIA dos campos, nunca dos
+  ! valores, entao permanece na primeira passagem — e' caro e nao deve repetir.
+  !==========================================================================
+    if (.not. is%rh_created) then
+
+      ! Criar routehandle ATM -> OCN
+      call ESMF_FieldRegridStore( &
+        srcField       = is%f_taux_atm,   &
+        dstField       = exp_field,       &
+        routehandle    = is%rh_atm2ocn,   &
+        regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
+        unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+        rc             = rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg="MED: falha FieldRegridStore ATM->OCN", &
+        line=__LINE__, file=__FILE__)) return
+
+      ! Criar routehandle OCN -> ATM
+      ! So_t esta agora corretamente na grade OCN (ver InitializeRealize)
+      call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha So_t", &
+        line=__LINE__, file=__FILE__)) return
+
+      call ESMF_FieldRegridStore( &
+        srcField       = ocn_field,       &
+        dstField       = is%f_sst_atm,    &
+        routehandle    = is%rh_ocn2atm,   &
+        regridmethod   = ESMF_REGRIDMETHOD_BILINEAR, &
+        unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+        rc             = rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg="MED: falha FieldRegridStore OCN->ATM", &
+        line=__LINE__, file=__FILE__)) return
+
+      ! Inicializar exportState com valores fisicamente razoaveis
+      ! B-45: ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
+      ! Verificar localDeCount antes de acessar dados do campo.
+      call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+      if (fieldCount > 0) then
+        allocate(fieldNameList(fieldCount))
+        call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
+        do i = 1, fieldCount
+          call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
+            field=exp_field, rc=rc)
+          block
+            integer :: localDeCount_exp
+            call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
+            if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
+          end block
+          call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
+          select case(trim(fieldNameList(i)))
+            case('Sa_pslv')
+              fptr = 101325.0_ESMF_KIND_R8
+            case default
+              fptr = 0.0_ESMF_KIND_R8
+          end select
+        end do
+        deallocate(fieldNameList)
+      end if
+
+      is%rh_created = .true.
+      call ESMF_LogWrite('MED: IDC fase A — routehandles criados', &
+        ESMF_LOGMSG_INFO)
+    end if   ! .not. is%rh_created
+
+  !==========================================================================
+  ! GATE DE DADOS — So_t ja' foi escrito pelo OCN?
+  !
+  ! O mom_cap (e o DOCN) carimbam TODOS os campos exportados com startTime em
+  ! seu InitializeDataComplete, e o conector NUOPC propaga o carimbo ao campo
+  ! de destino. Portanto NUOPC_IsAtTime distingue exatamente os dois casos:
+  ! So_t recem-chegado do oceano (carimbado) contra o campo ainda nao escrito
+  ! (sem carimbo). Esse carimbo ja' existia no mom_cap desde a v7.0; nenhum
+  ! consumidor o verificava.
+  !
+  ! Enquanto o dado nao chega, declaramos Progress=true (a fase A progrediu:
+  ! os routehandles existem) e Complete=false. Isso forca o driver a percorrer
+  ! a RunSequence outra vez; na segunda passagem o "OCN -> MED" ja' encontra o
+  ! So_t escrito pelo "OCN" da passagem anterior, e o gate abre.
+  !==========================================================================
+    call ESMF_ClockGet(clock, startTime=startTime, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
-    ! Criar routehandle OCN -> ATM
-    ! So_t esta agora corretamente na grade OCN (ver InitializeRealize)
     call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha So_t", &
+    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha So_t (gate)", &
       line=__LINE__, file=__FILE__)) return
 
-    call ESMF_FieldRegridStore( &
-      srcField       = ocn_field,       &
-      dstField       = is%f_sst_atm,    &
-      routehandle    = is%rh_ocn2atm,   &
-      regridmethod   = ESMF_REGRIDMETHOD_BILINEAR, &
-      unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
-      rc             = rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, &
-      msg="MED: falha FieldRegridStore OCN->ATM", &
+    sst_ready = NUOPC_IsAtTime(ocn_field, startTime, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
-    ! BUG-CALC-DUU (fix v13.0): primeiro regrid de So_u e So_v para f_uocn_atm/f_vocn_atm.
-    ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid),
-    ! portanto ESMF_StateGet é seguro — sem risco de "Not found" no log.
-    ! O routehandle rh_ocn2atm (bilinear, já criado) é reutilizado: So_u/So_v
-    ! compartilham a mesma grade OCN que So_t → mapeamento idêntico.
+  !--------------------------------------------------------------------------
+  ! FIX B-SEQINIT-02 (v14.21): CARIMBO NAO E' DADO.
+  !
+  ! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
+  ! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
+  ! verificar quais deles o mom_export realmente preencheu. Um So_t
+  ! identicamente nulo passa no NUOPC_IsAtTime — foi o que aconteceu enquanto
+  ! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
+  ! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
+  ! o que por sua vez fazia a mascara Sprint A.5.1 classificar o planeta
+  ! inteiro como terra e zerar os 11 campos de fluxo.
+  !
+  ! Exigir tambem VALOR fisicamente plausivel em alguma celula, contado
+  ! GLOBALMENTE: um DE pode legitimamente conter so' terra e gelo.
+  !--------------------------------------------------------------------------
+    if (sst_ready) then
+      call ESMF_VMGetCurrent(vm, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, file=__FILE__)) return
+
+      n_phys_s(1) = 0
+      call ESMF_FieldGet(ocn_field, localDeCount=ldec_sst, rc=localrc)
+      if (localrc == ESMF_SUCCESS) then
+        do lde = 0, ldec_sst - 1
+          nullify(sstp)
+          call ESMF_FieldGet(ocn_field, localDe=lde, farrayPtr=sstp, rc=localrc)
+          if (localrc /= ESMF_SUCCESS .or. .not. associated(sstp)) cycle
+          n_phys_s(1) = n_phys_s(1) + &
+            count(sstp > 270.0_ESMF_KIND_R8 .and. sstp < 310.0_ESMF_KIND_R8)
+        end do
+      end if
+
+      ! Coletivo sobre a VM do MED — todos os PETs do mediador entram aqui.
+      call ESMF_VMAllReduce(vm, n_phys_s, n_phys_g, 1, ESMF_REDUCE_SUM, rc=localrc)
+      if (localrc /= ESMF_SUCCESS) n_phys_g(1) = n_phys_s(1)
+
+      if (n_phys_g(1) == 0) then
+        sst_ready = .false.
+        call ESMF_LogWrite('MED: IDC — So_t carimbado mas SEM valor fisico '// &
+          '(nenhuma celula em [270,310] K no globo)', ESMF_LOGMSG_WARNING)
+      else
+        write(msg_gate,'(A,I0,A)') 'MED: IDC — So_t com ', n_phys_g(1), &
+          ' celulas em [270,310] K'
+        call ESMF_LogWrite(trim(msg_gate), ESMF_LOGMSG_INFO)
+      end if
+    end if
+
+    if (.not. sst_ready) then
+      n_gate_tries = n_gate_tries + 1
+      ! Falhar alto em vez de seguir com SST nula: era exatamente esse
+      ! prosseguimento silencioso que produzia mapas de fluxo em branco no
+      ! passo 1, com a causa escondida a tres camadas de distancia.
+      if (n_gate_tries >= MAX_GATE_TRIES) then
+        ! AVISO, nao aborto. O modelo de como o driver NUOPC percorre a
+        ! RunSequence durante a resolucao de dependencia de dados ainda nao
+        ! esta plenamente verificado: o gate ja' foi observado fechando uma
+        ! vez em coupling_mode='concurrent', onde a ordem dos elementos
+        ! preveria abertura imediata. Enquanto essa discrepancia nao for
+        ! entendida, abortar aqui arriscaria derrubar execucoes que hoje
+        ! funcionam. O aviso e' alto e nomeia o que inspecionar; o
+        ! comportamento anterior a este gate e' preservado.
+        call ESMF_LogWrite('MED: AVISO — So_t sem valores fisicos apos '// &
+          'varias iteracoes do laco de dependencia de dados; prosseguindo.', &
+          ESMF_LOGMSG_WARNING)
+        call ESMF_LogWrite('  A SST em t=0 pode estar nula. Inspecione '// &
+          '"So_t BRUTO" e "[MED-DIAG] f_sst_atm" no passo 1 antes de '// &
+          'confiar nos fluxos.', ESMF_LOGMSG_WARNING)
+        call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
+          value="true", rc=rc)
+        call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
+          value="true", rc=rc)
+        return
+      end if
+      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
+        value="true", rc=rc)
+      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
+        value="false", rc=rc)
+      call ESMF_LogWrite('MED: IDC aguardando So_t do OCN — '// &
+        'nova iteracao do laco de dependencia de dados', ESMF_LOGMSG_INFO)
+      return
+    end if
+
+  !==========================================================================
+  ! FASE B — DADOS (So_t valido em maos)
+  !
+  ! BUG-CALC-DUU (fix v13.0): primeiro regrid de So_u e So_v para
+  ! f_uocn_atm/f_vocn_atm. So_u e So_v sao anunciados e realizados no
+  ! importState do MED (ocn_grid), portanto ESMF_StateGet e' seguro. O
+  ! routehandle rh_ocn2atm (bilinear, ja' criado na fase A) e' reutilizado:
+  ! So_u/So_v compartilham a mesma grade OCN que So_t → mapeamento identico.
+  !==========================================================================
     block
       type(ESMF_Field) :: f_uocn_src, f_vocn_src
       integer :: rc_uv
@@ -780,30 +1253,34 @@ contains
       end if
     end block
 
-    is%rh_created = .true.
+    ! SST de t=0 para a grade ATM. Sem isto, f_sst_atm permaneceria no valor de
+    ! bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
+    ! conector MED -> MPAS entregaria essa constante ao MPAS na inicializacao.
+    call ESMF_FieldRegrid(ocn_field, is%f_sst_atm, is%rh_ocn2atm, &
+      zeroregion=ESMF_REGION_TOTAL, rc=localrc)
+    if (localrc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
+        'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)
+    else
+      ! Publica a SST de t=0 no exportState (zerado na fase A), de modo que o
+      ! "MED -> MPAS" desta mesma passagem entregue SST fisica, e nao zero.
+      call RegridOrCopy(is%f_sst_atm, exportState, "So_t", is, localrc)
+      if (localrc /= ESMF_SUCCESS) &
+        call ESMF_LogWrite('MED: IDC — RegridOrCopy So_t falhou', &
+          ESMF_LOGMSG_WARNING)
+    end if
 
-    ! Inicializar exportState com valores fisicamente razoaveis
-    ! B-45: ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
-    ! Verificar localDeCount antes de acessar dados do campo.
+    ! Carimbar os campos exportados com startTime: e' o que permite ao MPAS
+    ! (e a qualquer consumidor futuro) aplicar o mesmo gate NUOPC_IsAtTime.
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
     if (fieldCount > 0) then
       allocate(fieldNameList(fieldCount))
       call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
       do i = 1, fieldCount
         call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
-          field=exp_field, rc=rc)
-        block
-          integer :: localDeCount_exp
-          call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
-          if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
-        end block
-        call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
-        select case(trim(fieldNameList(i)))
-          case('Sa_pslv')
-            fptr = 101325.0_ESMF_KIND_R8
-          case default
-            fptr = 0.0_ESMF_KIND_R8
-        end select
+          field=exp_field, rc=localrc)
+        if (localrc == ESMF_SUCCESS) &
+          call NUOPC_SetTimestamp(exp_field, startTime, rc=localrc)
       end do
       deallocate(fieldNameList)
     end if
@@ -811,7 +1288,8 @@ contains
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
 
-    call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
+    call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED (So_t em t=0)', &
+      ESMF_LOGMSG_INFO)
   end subroutine InitializeDataComplete
 
   !============================================================================
@@ -1281,53 +1759,131 @@ contains
     ! caindo abaixo de 270 K. Resultado: ~37% das celulas oceanicas mascaradas
     ! como "fill" pelo postproc (limiar fill_min_threshold=270 K).
     !
-    ! FIX: apos o regrid, substituir valores fisicamente impossiveis (T < T_min
-    ! ou T > T_max) por SST_FILL_LAND = 271.35 K (ponto de congelamento da agua
-    ! do mar). Isto:
-    !   (a) elimina a contaminacao do regrid com zeros do MOM6 mascarados,
-    !   (b) mantem celulas terra com valor fisicamente plausivel (gelo polar),
-    !   (c) preserva valores reais de SST sobre oceano (T entre 271-310 K).
+    ! FIX B-COASTMASK-02 (Ago 2026): a mascara terra/oceano usada no regrid
+    ! bilinear OCN->ATM NAO deve ser adivinhada a partir do proprio campo de
+    ! SST (limiar T<270K). Isso e' fragil e inconsistente com a mascara real
+    ! do modelo oceanico: a mascara agora vem diretamente de So_omask =
+    ! nint(mask2dT), exportada pelo MOM6 (mom_cap_methods.F90::mom_export).
+    ! Assim o bilinear so' usa celulas OCEANICAS VALIDAS como fonte da
+    ! interpolacao, nunca preenchimentos de terra (SST=0K sob mask2dT=0).
+    ! Residual nao mapeado na costa (onde nenhum vizinho valido bilinear
+    ! existe) e' tratado pela extrapolacao por vizinhanca logo abaixo.
     !==========================================================================
     if (is%rh_created) then
       call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
 
-      ! ── Opção 1 (v4.18): regrid SST ciente de máscara + extrap. vizinhança ─
+      ! DIAGNOSTICO TEMPORARIO B-OCNGRID-02: valores BRUTOS de So_t (antes de
+      ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
+      ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
+      block
+        logical, save :: raw_sst_diag_done = .false.
+        real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
+        character(len=300) :: dbgmsg2
+        integer :: i1r, i2r, j1r, mid_r, rc_diag
+        if (.not. raw_sst_diag_done) then
+          call ESMF_FieldGet(field, localDe=0, farrayPtr=sst_raw, rc=rc_diag)
+          if (rc_diag == ESMF_SUCCESS .and. associated(sst_raw)) then
+            i1r = lbound(sst_raw,1); i2r = ubound(sst_raw,1)
+            j1r = lbound(sst_raw,2)
+            mid_r = (i1r + i2r) / 2
+            write(dbgmsg2,'(A,I0,A,I0,A,I0)') &
+              'MED B-OCNGRID-02 DIAG: So_t BRUTO (OCN, DE local) i=[', i1r, &
+              ',', i2r, '] j1=', j1r
+            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
+            write(dbgmsg2,'(A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
+              '  sst_raw(i1,j1)=', sst_raw(i1r,j1r), &
+              ' sst_raw(mid,j1)=', sst_raw(mid_r,j1r), &
+              ' sst_raw(i2,j1)=', sst_raw(i2r,j1r), &
+              ' min_row=', minval(sst_raw(:,j1r))
+            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
+            raw_sst_diag_done = .true.
+          end if
+        end if
+      end block
+
+
+      ! ?? Opção 1 (v4.18, corrigido v5.0): regrid SST ciente da mascara real
+      !    do oceano (So_omask) + extrapolação de vizinhança para a costa. ??
       if (.not. is%rh_sst_masked) then
         block
-          real(ESMF_KIND_R8), pointer    :: sst_src(:,:)
+          real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
           integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-          integer :: lde_s, n_land, ldec_ocn, n_sea
+          type(ESMF_Field) :: omask_field
+          integer :: lde_s, n_land, ldec_ocn, n_sea, rc_omask
           integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
           type(ESMF_VM) :: vm
-          real(ESMF_KIND_R8), parameter  :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
+          logical :: got_omask
           call ESMF_VMGetCurrent(vm, rc=rc)
           n_land = 0; n_sea = 0
-          call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
-          if (rc == ESMF_SUCCESS) then
-            do lde_s = 0, ldec_ocn - 1
-              call ESMF_FieldGet(field, localDe=lde_s, farrayPtr=sst_src, rc=rc)
-              if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
-              call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-                staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-                farrayPtr=maskptr, rc=rc)
-              if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
-                where (sst_src < LAND_FILL_MAX)
-                  maskptr = 1
-                elsewhere
-                  maskptr = 0
-                end where
-                n_land = n_land + count(maskptr == 1)
-                n_sea  = n_sea  + count(maskptr == 0)
-              end if
-            end do
+          got_omask = .false.
+
+          ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra).
+          call ESMF_StateGet(importState, itemName="So_omask", &
+            field=omask_field, rc=rc_omask)
+          if (rc_omask == ESMF_SUCCESS) then
+            call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
+            if (rc == ESMF_SUCCESS) then
+              do lde_s = 0, ldec_ocn - 1
+                call ESMF_FieldGet(omask_field, localDe=lde_s, &
+                  farrayPtr=omask_src, rc=rc)
+                if (rc /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
+                call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+                  staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
+                  farrayPtr=maskptr, rc=rc)
+                if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
+                  ! So_omask: 1=oceano valido, 0=terra (mesma convencao do
+                  ! GRIDITEM_MASK aqui: valores em srcMaskValues sao EXCLUIDOS
+                  ! da fonte do regrid, logo terra=0 e' o valor a excluir).
+                  maskptr = nint(omask_src)
+                  n_land = n_land + count(maskptr == 0)
+                  n_sea  = n_sea  + count(maskptr == 1)
+                  got_omask = .true.
+                end if
+              end do
+            end if
+          else
+            call ESMF_LogWrite( &
+              'MED: So_omask indisponivel no importState ? usando ' // &
+              'fallback por limiar de SST (menos confiavel na costa)', &
+              ESMF_LOGMSG_WARNING)
           end if
+
+          ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
+          ! realizado): mantem o comportamento antigo em vez de travar.
+          if (.not. got_omask) then
+            block
+              real(ESMF_KIND_R8), pointer :: sst_src(:,:)
+              real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
+              n_land = 0; n_sea = 0
+              call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
+              if (rc == ESMF_SUCCESS) then
+                do lde_s = 0, ldec_ocn - 1
+                  call ESMF_FieldGet(field, localDe=lde_s, farrayPtr=sst_src, rc=rc)
+                  if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
+                  call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+                    staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
+                    farrayPtr=maskptr, rc=rc)
+                  if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
+                    where (sst_src < LAND_FILL_MAX)
+                      maskptr = 0
+                    elsewhere
+                      maskptr = 1
+                    end where
+                    n_land = n_land + count(maskptr == 0)
+                    n_sea  = n_sea  + count(maskptr == 1)
+                  end if
+                end do
+              end if
+            end block
+          end if
+
           n_land_s(1) = n_land; n_sea_s(1) = n_sea
           call ESMF_VMAllReduce(vm, n_land_s, n_land_g, 1, ESMF_REDUCE_SUM, rc=rc)
           if (rc /= ESMF_SUCCESS) n_land_g(1) = n_land
           call ESMF_VMAllReduce(vm, n_sea_s,  n_sea_g,  1, ESMF_REDUCE_SUM, rc=rc)
           if (rc /= ESMF_SUCCESS) n_sea_g(1) = n_sea
           if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
-            call ESMF_LogWrite('MED Opção1: SST uniforme/bootstrap — adiado', &
+            call ESMF_LogWrite('MED Opção1: mascara uniforme/bootstrap ? adiado', &
               ESMF_LOGMSG_INFO)
             is%rh_ocn2atm_sst = is%rh_ocn2atm
           else
@@ -1336,7 +1892,7 @@ contains
               dstField        = is%f_sst_atm,       &
               routehandle     = is%rh_ocn2atm_sst,  &
               regridmethod    = ESMF_REGRIDMETHOD_BILINEAR, &
-              srcMaskValues   = (/ 1_ESMF_KIND_I4 /), &
+              srcMaskValues   = (/ 0_ESMF_KIND_I4 /), &
               unmappedaction  = ESMF_UNMAPPEDACTION_IGNORE, &
               rc              = rc)
             if (ESMF_LogFoundError(rcToCheck=rc, &
@@ -1344,8 +1900,8 @@ contains
               line=__LINE__, file=__FILE__)) then
               is%rh_ocn2atm_sst = is%rh_ocn2atm
             else
-              call ESMF_LogWrite('MED Opção1: rh_ocn2atm_sst criado', &
-                ESMF_LOGMSG_INFO)
+              call ESMF_LogWrite('MED Opção1: rh_ocn2atm_sst criado ' // &
+                '(mascara So_omask)', ESMF_LOGMSG_INFO)
             end if
             is%rh_sst_masked = .true.
           end if
@@ -1362,14 +1918,50 @@ contains
           real(ESMF_KIND_R8), parameter :: T_MIN  = 270.0_ESMF_KIND_R8
           real(ESMF_KIND_R8), parameter :: T_MAX  = 310.0_ESMF_KIND_R8
           real(ESMF_KIND_R8), parameter :: T_FILL = 271.35_ESMF_KIND_R8
-          integer,            parameter :: N_ITER = 8
+          ! FIX B-OCNGRID-04 (Ago 2026): N_ITER=8 nao era suficiente para
+          ! buracos maiores (ex.: residuo perto do polo antes da correcao de
+          ! periodicidade). Aumentado para dar folga real de propagacao.
+          ! IMPORTANTE: este loop e' LOCAL ao DE de cada PET (nao ha troca de
+          ! halo entre PETs vizinhos) ? um buraco que atravessa a fronteira
+          ! entre dois PETs pode nunca fechar por vizinhanca aqui, mesmo com
+          ! N_ITER grande, porque cada lado so' enxerga seus proprios dados
+          ! locais. Para esses casos o fallback constante abaixo (T_FILL)
+          ! garante que NENHUM ponto fique com valor de fato indefinido ?
+          ! se pontos "pretos" persistirem apos esta correcao, o problema
+          ! nao esta' mais aqui (ver log B-OCNGRID-04 abaixo).
+          integer,            parameter :: N_ITER = 40
           real(ESMF_KIND_R8), allocatable :: tmp(:,:)
           logical,            allocatable :: valid(:,:)
-          integer :: i2,j2,ii2,jj2,it,i1,iN,j1,jN,nbr,n0,n_left
+          integer :: i2,j2,ii2,jj2,it,i1,iN,j1,jN,nbr,n0,n_left,n_after_fill
           real(ESMF_KIND_R8) :: acc
           i1=lbound(sst,1); iN=ubound(sst,1); j1=lbound(sst,2); jN=ubound(sst,2)
-          where (sst > T_MAX) sst = T_FILL
+          ! FIX B-OCNGRID-05 (Ago 2026): ANTES, "sst > T_MAX -> T_FILL" marcava a
+          ! celula como valid=.true. na linha 1760 (T_FILL cai dentro de
+          ! [T_MIN,T_MAX]), entao ela NUNCA entrava no loop de extrapolacao por
+          ! vizinhanca abaixo. Resultado: um overflow numerico (ex.: MOM6
+          ! divergindo para dezenas/centenas de graus) virava um ponto de
+          ! congelamento (-1,8 C) isolado, cercado de vizinhos quentes validos ?
+          ! e essa borda dura era exatamente o padrao em anel (bullseye) visto
+          ! nos diagnosticos. Agora o overflow e' tratado igual ao NaN: empurrado
+          ! para FORA do intervalo valido de proposito, para participar do loop
+          ! de extrapolacao por vizinhanca. So' cai num valor constante (T_MAX,
+          ! nao mais T_FILL) se sobrar sem nenhum vizinho valido apos N_ITER.
+          where (sst > T_MAX) sst = T_MAX + 1.0_ESMF_KIND_R8
           where (sst /= sst)  sst = T_MIN - 1.0_ESMF_KIND_R8
+          block
+            integer :: n_overflow
+            n_overflow = count(sst > T_MAX)
+            if (n_overflow > 0) then
+              block
+                character(len=300) :: logmsg_ovf
+                write(logmsg_ovf,'(A,I0,A)') &
+                  'MED B-OCNGRID-05 AVISO: ', n_overflow, &
+                  ' celulas com SST > T_MAX (36,85 C) neste passo/DE. ' // &
+                  'Contador crescente ao longo do tempo = blow-up numerico real.'
+                call ESMF_LogWrite(trim(logmsg_ovf), ESMF_LOGMSG_WARNING)
+              end block
+            end if
+          end block
           allocate(valid(i1:iN,j1:jN), tmp(i1:iN,j1:jN))
           valid = (sst >= T_MIN .and. sst <= T_MAX)
           n0 = count(.not. valid)
@@ -1394,7 +1986,36 @@ contains
             valid = (sst >= T_MIN .and. sst <= T_MAX)
           end do
           n_left = count(.not. valid)
+          ! FIX B-OCNGRID-05 (Ago 2026): fallback final agora e' direcional ?
+          ! celulas que sobraram sem NENHUM vizinho valido apos N_ITER (raro;
+          ! normalmente so' em buracos que atravessam fronteira de PET, ver nota
+          ! acima) caem no limite fisico mais proximo do lado de onde vieram
+          ! (T_MAX para overflow, T_MIN para NaN/subflow), preservando a direcao
+          ! do erro em vez de sempre pular para o ponto de congelamento T_FILL.
+          where (.not. valid .and. sst > T_MAX) sst = T_MAX
+          where (.not. valid .and. sst < T_MIN) sst = T_MIN
+          ! T_FILL mantido so' como rede de seguranca final absoluta, para
+          ! qualquer celula que por algum motivo nao caia em nenhum dos dois
+          ! casos acima (nao deveria acontecer, dado valid=(sst>=T_MIN .and.
+          ! sst<=T_MAX), mas evita undefined behavior residual).
           where (.not. valid) sst = T_FILL
+          ! DIAGNOSTICO B-OCNGRID-04: confirma que, apos o fallback acima,
+          ! absolutamente nenhuma celula deste DE deveria continuar fora do
+          ! intervalo fisico [T_MIN,T_MAX]. Se n_after_fill > 0 aqui, o bug
+          ! dos pontos pretos NAO e' a extrapolacao ? e' outra coisa (ex.:
+          ! memoria nao inicializada, ou o array sendo sobrescrito depois
+          ! deste ponto, antes da escrita do NetCDF).
+          n_after_fill = count(sst < T_MIN .or. sst > T_MAX .or. sst /= sst)
+          if (n_after_fill > 0) then
+            block
+              character(len=200) :: logmsg3
+              write(logmsg3,'(A,I0,A)') &
+                'MED B-OCNGRID-04 ALERTA: ', n_after_fill, &
+                ' celulas AINDA fora de [270,310]K apos fallback T_FILL ? ' // &
+                'a causa dos pontos indefinidos nao e a extrapolacao.'
+              call ESMF_LogWrite(trim(logmsg3), ESMF_LOGMSG_WARNING)
+            end block
+          end if
           deallocate(valid, tmp)
           if (n0 > 0) then
             block
@@ -1776,8 +2397,17 @@ contains
     allocate(f0(nx_o, ny_o), f1(nx_o, ny_o), buf(nx_o * ny_o))
     f0 = 0.0_ESMF_KIND_R8;  f1 = 0.0_ESMF_KIND_R8;  buf = 0.0_ESMF_KIND_R8
 
-    ! PET0 lê o arquivo; todos os outros PETs aguardam o broadcast
-    call ESMF_VMGetGlobal(vm, rc=rc)
+    ! PET0 lê o arquivo; todos os outros PETs aguardam o broadcast.
+    !
+    ! FIX-DEADLOCK (v14.20): usar a VM do COMPONENTE, não a global — mesmo
+    ! motivo já aplicado em DATM_cap.F90, DOCN_cap.F90 e docn_cap_netcdf.F90
+    ! na v13.1. Este era o último ESMF_VMGetGlobal dentro de uma rotina de
+    ! componente. Hoje o MED roda em todos os PETs nos dois layouts, então
+    ! as duas VMs coincidem e o broadcast funciona; a chamada global passa a
+    ! ser incorreta no instante em que o mediador ganhar uma petList própria,
+    ! e falharia com deadlock, não com erro. ESMF_VMGetCurrent devolve a VM
+    ! do componente em execução, tornando rootPet=0 local ao MED.
+    call ESMF_VMGetCurrent(vm, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(f0, f1, buf); return
     end if

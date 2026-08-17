@@ -771,6 +771,34 @@ contains
     ! Obtém grade para mom_export
     call get_ocean_grid(is%ocean_state, ocean_grid)
 
+    ! ── FIX B-SEQINIT-02 (v14.21) ────────────────────────────────────────
+    ! ocean_model_init NÃO preenche ocean_public%t_surf. O array é apenas
+    ! ALOCADO (mom_ocean_model_nuopc.F90:865); quem o escreve é
+    ! convert_state_to_ocean_type, e dentro de ocean_model_init essa chamada
+    ! (linha 432) está guardada por `if (present(gas_fields_ocn))`. O cap
+    ! chama ocean_model_init sem esse argumento opcional, então o ramo é
+    ! pulado: a linha 436 executa extract_surface_state, que preenche
+    ! OS%sfc_state mas NÃO Ocean_sfc%t_surf. Resultado: t_surf = 0.
+    !
+    ! ocean_model_init_sfc existe exatamente para fechar essa lacuna após a
+    ! inicialização (extract_surface_state + convert_state_to_ocean_type,
+    ! linhas 1019-1034). Ela era importada na linha 144 deste módulo e nunca
+    ! chamada, de modo que o mom_export abaixo copiava zeros para So_t.
+    !
+    ! O defeito era invisível em coupling_mode='concurrent': ali a
+    ! RunSequence executa "OCN" (ModelAdvance → update_ocean_model, que
+    ! preenche t_surf) ANTES do conector "OCN -> MED", e o mediador nunca
+    ! dependia desta exportação de t=0. Em 'sequential' o "OCN -> MED" é o
+    ! PRIMEIRO elemento do passo, e o mediador lê justamente estes zeros.
+    !
+    ! Simétrico ao que o cap atmosférico já fazia: mpas_cap_MONAN.F90:390
+    ! chama mpas_atm_init_sfc antes de mpas_export.
+    if (is%ocean_public%is_ocean_pe) then
+      call ocean_model_init_sfc(is%ocean_state, is%ocean_public)
+      call ESMF_LogWrite('OCN(MOM6): ocean_model_init_sfc — t_surf de t=0 '// &
+        'extraido do estado interno', ESMF_LOGMSG_INFO)
+    end if
+
     ! Exporta SST real (t=0) do ocean_public → exportState
     ! [C5] mom_export: ocean_state ANTES de exportState
     call mom_export(is%ocean_public, ocean_grid, is%ocean_state, &

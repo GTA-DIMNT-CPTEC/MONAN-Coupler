@@ -135,20 +135,51 @@ module mpas_cap_config_mod
   integer,           public, protected :: cfg_mom6_restart_n   = 0
 
   ! ══════════════════════════════════════════════════════════════════════════
-  ! Grupo &nuopc_petlayout — particionamento de PETs entre componentes (v13.0)
+  ! Grupo &nuopc_petlayout — particionamento de PETs entre componentes
+  !   v13.0 : introdução de coupling_mode
+  !   v14.20: separação dos dois eixos (correção do descarte silencioso das
+  !           contagens de PET no modo sequential — ver CHANGELOG)
   ! ══════════════════════════════════════════════════════════════════════════
-  !   cfg_coupling_mode  'sequential' → todos os componentes em todos os PETs
-  !                                      (execução serial; padrão retrocompatível)
-  !                      'concurrent' → ATM e OCN em subconjuntos DISJUNTOS de
-  !                                      PETs (ATM e OCN avançam em paralelo,
-  !                                      wall-clock). MED permanece em todos.
-  !   cfg_atm_pet_count  Nº de PETs do ATM (MPAS) no modo concurrent.
+  ! São DOIS eixos ORTOGONAIS, e confundi-los era a causa-raiz do defeito:
+  !
+  !   cfg_coupling_mode — eixo TEMPORAL (ordem de execução; decide a
+  !                       RunSequence montada em esm.F90/SetRunSequence)
+  !     'sequential' → ATM e OCN avançam um depois do outro, sem defasagem
+  !                    entre os campos trocados.
+  !     'concurrent' → ATM e OCN avançam ao mesmo tempo; cada um recebe os
+  !                    campos do passo anterior (lag de 1 dt_coupling).
+  !
+  !   cfg_pet_layout    — eixo ESPACIAL (ocupação de PETs; decide as petList
+  !                       passadas a NUOPC_DriverAddComp em SetModelServices)
+  !     'shared' → MPAS, MED e OCN em TODOS os PETs (sem split de comunicador).
+  !     'split'  → ATM e OCN em blocos DISJUNTOS de PETs (split de
+  !                comunicador); MED permanece em todos os PETs.
+  !
+  ! As quatro combinações são legais no NUOPC, exceto concurrent+shared:
+  ! PETs disjuntos são a própria definição de execução concorrente, e a
+  ! validação abaixo rejeita essa combinação.
+  !
+  !   sequential+shared → baseline; testes de correctness; execuções menores.
+  !   sequential+split  → MPAS e MOM6 com decomposições de tamanhos muito
+  !                       diferentes (ex.: MPAS 2048 PETs, MOM6 128 PEs),
+  !                       SEM o lag de um passo. Tempo de parede = soma dos
+  !                       dois componentes, com PETs ociosos: é um layout
+  !                       para contornar restrição de decomposição e de
+  !                       memória, não para ganhar desempenho.
+  !   concurrent+split  → produção em escala, com custo calibrado.
+  !
+  ! Compatibilidade: pet_layout ausente na nuopc.input é derivado do
+  ! coupling_mode ('concurrent'→'split', 'sequential'→'shared'), preservando
+  ! exatamente o comportamento das versões anteriores.
+  !
+  !   cfg_atm_pet_count  Nº de PETs do ATM (MPAS) quando pet_layout='split'.
   !                      <=0 → auto: ceil(petCount/2).
-  !   cfg_ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) no modo concurrent.
+  !   cfg_ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) quando 'split'.
   !                      <=0 → auto: petCount - atm_pet_count.
   !   A validação da soma (atm+ocn == petCount) é feita em esm.F90, pois
   !   petCount só é conhecido após ESMF_Initialize (pós-MPI_Init).
   character(len=16), public, protected :: cfg_coupling_mode = 'sequential'
+  character(len=16), public, protected :: cfg_pet_layout    = 'shared'
   integer,           public, protected :: cfg_atm_pet_count = 0
   integer,           public, protected :: cfg_ocn_pet_count = 0
 
@@ -254,11 +285,16 @@ contains
     namelist /nuopc_mode/ use_datm, use_docn, use_med_to_mpas, &
                           use_docn_ice, docn_ice_init_only
 
-    ! &nuopc_petlayout — particionamento de PETs entre componentes (v13.0)
+    ! &nuopc_petlayout — particionamento de PETs entre componentes (v13.0;
+    ! pet_layout acrescentado na v14.20). O default '' de pet_layout NÃO é
+    ! um valor válido: sinaliza "chave ausente na namelist", para que o valor
+    ! possa ser derivado do coupling_mode (retrocompatibilidade).
     character(len=16) :: coupling_mode = 'sequential'
+    character(len=16) :: pet_layout    = ''
     integer           :: atm_pet_count = 0
     integer           :: ocn_pet_count = 0
-    namelist /nuopc_petlayout/ coupling_mode, atm_pet_count, ocn_pet_count
+    namelist /nuopc_petlayout/ coupling_mode, pet_layout, &
+                               atm_pet_count, ocn_pet_count
 
     rc = 0
 
@@ -298,6 +334,11 @@ contains
     coupling_mode        = cfg_coupling_mode
     atm_pet_count        = cfg_atm_pet_count
     ocn_pet_count        = cfg_ocn_pet_count
+    ! pet_layout NÃO recebe cfg_pet_layout aqui, de propósito: o sentinela ''
+    ! precisa sobreviver à leitura para que a ausência da chave seja
+    ! distinguível de um valor explícito. A derivação a partir do
+    ! coupling_mode é idempotente, então chamar config_read mais de uma vez
+    ! (esmApp.F90 e esm.F90) produz sempre o mesmo resultado.
 
     ! ── 2. Determinar caminho do arquivo ─────────────────────────────────
     if (present(file_path) .and. len_trim(file_path) > 0) then
@@ -428,21 +469,72 @@ contains
     read(UNITN, nml=nuopc_petlayout, iostat=ios)
     if (ios /= 0) write(*,'(A)') &
       '[mpas_cap_config] INFO: &nuopc_petlayout ausente — ' // &
-      'coupling_mode=sequential (todos os componentes em todos os PETs).'
+      'coupling_mode=sequential, pet_layout=shared (todos os componentes ' // &
+      'em todos os PETs).'
 
     call str_lower(coupling_mode)
+    call str_lower(pet_layout)
+
+    ! ── Eixo TEMPORAL ────────────────────────────────────────────────────
     if (trim(coupling_mode) /= 'sequential' .and. &
         trim(coupling_mode) /= 'concurrent') then
       write(*,'(A,A,A)') '[mpas_cap_config] ERRO: coupling_mode="', &
         trim(coupling_mode), '" invalido — use sequential|concurrent.'
       rc = 2; return
     end if
+
+    ! ── Eixo ESPACIAL ────────────────────────────────────────────────────
+    ! Chave ausente: derivar do coupling_mode. Isso reproduz exatamente o
+    ! comportamento anterior à v14.20 para nuopc.input legadas.
+    if (len_trim(pet_layout) == 0) then
+      if (trim(coupling_mode) == 'concurrent') then
+        pet_layout = 'split'
+      else
+        pet_layout = 'shared'
+      end if
+    end if
+
+    if (trim(pet_layout) /= 'shared' .and. trim(pet_layout) /= 'split') then
+      write(*,'(A,A,A)') '[mpas_cap_config] ERRO: pet_layout="', &
+        trim(pet_layout), '" invalido — use shared|split.'
+      rc = 2; return
+    end if
+
+    ! Blocos disjuntos de PETs são a definição de execução concorrente:
+    ! concurrent+shared faria MPAS e OCN disputarem os mesmos PETs sem que
+    ! nenhum dos dois pudesse avançar em paralelo. Combinação inexistente.
+    if (trim(coupling_mode) == 'concurrent' .and. &
+        trim(pet_layout)    /= 'split') then
+      write(*,'(A)') '[mpas_cap_config] ERRO: coupling_mode=concurrent ' // &
+        'exige pet_layout=split (ATM e OCN em PETs disjuntos).'
+      rc = 2; return
+    end if
+
     if (atm_pet_count < 0 .or. ocn_pet_count < 0) then
       write(*,'(A)') '[mpas_cap_config] ERRO: atm_pet_count/ocn_pet_count ' // &
         'nao podem ser negativos.'
       rc = 2; return
     end if
+
+    ! CAUSA-RAIZ do defeito corrigido na v14.20: com pet_layout=shared as
+    ! contagens eram lidas, validadas e DESCARTADAS em silêncio. Quem
+    ! escrevia sequential + atm_pet_count/ocn_pet_count recebia os dois
+    ! componentes em todos os PETs, sem qualquer sinal — e o MOM6 abortava
+    ! depois, no mpp_define_domains, por LAYOUT incompatível. Agora é erro.
+    if (trim(pet_layout) == 'shared' .and. &
+        (atm_pet_count > 0 .or. ocn_pet_count > 0)) then
+      write(*,'(A,I0,A,I0,A)') &
+        '[mpas_cap_config] ERRO: pet_layout=shared ignora atm_pet_count=', &
+        atm_pet_count, ' e ocn_pet_count=', ocn_pet_count, '.'
+      write(*,'(A)') '  Para um split de comunicador com execucao serial, ' // &
+        'use pet_layout=split.'
+      write(*,'(A)') '  Para manter todos os componentes em todos os PETs, ' // &
+        'zere as duas contagens.'
+      rc = 2; return
+    end if
+
     cfg_coupling_mode = trim(coupling_mode)
+    cfg_pet_layout    = trim(pet_layout)
     cfg_atm_pet_count = atm_pet_count
     cfg_ocn_pet_count = ocn_pet_count
 
@@ -563,6 +655,7 @@ contains
     write(*,'(2X,A,L1)') 'cfg_docn_ice_init_only= ', cfg_docn_ice_init_only
     write(*,'(A)') '  --- Particionamento de PETs (&nuopc_petlayout) ---'
     write(*,'(2X,A,A)')  'cfg_coupling_mode    = ', trim(cfg_coupling_mode)
+    write(*,'(2X,A,A)')  'cfg_pet_layout       = ', trim(cfg_pet_layout)
     write(*,'(2X,A,I0)') 'cfg_atm_pet_count    = ', cfg_atm_pet_count
     write(*,'(2X,A,I0)') 'cfg_ocn_pet_count    = ', cfg_ocn_pet_count
   end subroutine config_print
@@ -594,8 +687,9 @@ contains
 
   !> @brief Converte uma string para minúsculas in-place (ASCII).
   !!
-  !! Usado para tornar a leitura de coupling_mode tolerante a maiúsculas
-  !! ('Concurrent', 'SEQUENTIAL', … → 'concurrent', 'sequential').
+  !! Usado para tornar a leitura de coupling_mode, pet_layout e log_kind
+  !! tolerante a maiúsculas ('Concurrent', 'SEQUENTIAL', 'Split', … →
+  !! 'concurrent', 'sequential', 'split').
   subroutine str_lower(s)
     character(len=*), intent(inout) :: s
     integer :: i, c

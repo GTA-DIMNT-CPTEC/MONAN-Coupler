@@ -5,10 +5,10 @@ analisa_balanceamento_pets.py
 ==============================================================================
 Extrai os tempos de parede por componente (MPAS/OCN/MED) a partir dos logs
 ESMF (`logs/PET*.esmApp.log`) do sistema acoplado MONAN-A 2.0 x MOM6+SIS2, e
-sugere uma partição de PETs balanceada para o modo concorrente
-(`&nuopc_petlayout`, `atm_pet_count` / `ocn_pet_count`).
+sugere uma partição de PETs balanceada para o layout com split de
+comunicador (`&nuopc_petlayout`, `atm_pet_count` / `ocn_pet_count`).
 
-INPE / CGCT / DIMNT - GT Acoplamento de Modelos - v13.1
+INPE / CGCT / DIMNT - GT Acoplamento de Modelos - v14.20
 
 --------------------------------------------------------------------------
 POR QUE "TEMPO TOTAL", E NÃO "TEMPO POR CHAMADA x NÚMERO DE PASSOS"
@@ -27,15 +27,30 @@ execução (`esmApp_run.log`, campo "Passos (est.)") ou informado via
 --------------------------------------------------------------------------
 DETECÇÃO DA PARTIÇÃO DE PETs (dois caminhos, com fallback automático)
 --------------------------------------------------------------------------
-1) Leitura direta da linha que `esm.F90` grava no log (nível INFO):
+O `&nuopc_petlayout` tem DOIS eixos ortogonais, e este script reporta os
+dois separadamente:
+  - `pet_layout`    (shared|split)          => os conjuntos de PETs de ATM e
+                                               OCN são iguais ou disjuntos;
+  - `coupling_mode` (sequential|concurrent) => os tempos de ATM e OCN podem
+                                               ou não se sobrepor.
+
+1) Leitura direta da linha que `esm.F90` grava no log (nível INFO), formato
+   a partir da v14.20:
+     "ESM: layout SPLIT (execucao SEQUENTIAL) - ATM=PET[0..5] OCN=PET[6..7] MED=todos"
+     "ESM: layout SHARED (execucao CONCURRENT) - MPAS, MED e OCN em todos os PETs"
+   O formato anterior (<= v14.19), em que os dois eixos eram um só, continua
+   reconhecido para logs arquivados:
      "ESM: modo CONCURRENT - ATM=PET[0..3] OCN=PET[4..7] MED=todos"
    Aceita tanto "-" quanto "—" antes de "ATM=PET".
 2) Se essa linha não existir (por exemplo, com o log ESMF configurado como
    `ESMF_LOGKIND_Multi_On_Error`, que suprime mensagens de nível INFO — a
-   configuração recomendada para produção), a partição é INFERIDA a partir
-   de quais PETs efetivamente reportam atividade de MPAS e quais reportam
-   atividade de OCN: conjuntos disjuntos => concorrente; conjuntos idênticos
-   => sequencial.
+   configuração recomendada para produção), o LAYOUT é INFERIDO a partir de
+   quais PETs efetivamente reportam atividade de MPAS e quais reportam
+   atividade de OCN: conjuntos disjuntos => split; conjuntos idênticos =>
+   shared. A EXECUÇÃO não é inferida, porque sequential+split e
+   concurrent+split produzem exatamente os mesmos conjuntos de PETs;
+   ela é reportada como indeterminada, e o relatório omite a linha de ganho
+   de wall-clock em vez de anunciar um ganho que talvez não exista.
 
 --------------------------------------------------------------------------
 FÓRMULA DE REBALANCEAMENTO
@@ -106,7 +121,16 @@ _RE_PHASE = re.compile(
     r"^(?P<comp>MPAS|OCN|MED):\s*(?P<phase>[A-Za-z0-9]+)\s+(?P<edge>intro|extro)\.?\s*$"
 )
 
-# "ESM: modo CONCURRENT - ATM=PET[0..3] OCN=PET[4..7] MED=todos"  (aceita - ou —)
+# A partir da v14.20 o driver anuncia os DOIS eixos separadamente:
+#   "ESM: layout SPLIT (execucao SEQUENTIAL) - ATM=PET[0..5] OCN=PET[6..7] MED=todos"
+#   "ESM: layout SHARED (execucao CONCURRENT) - MPAS, MED e OCN em todos os PETs"
+# Formato anterior (<= v14.19), ainda reconhecido para logs arquivados:
+#   "ESM: modo CONCURRENT - ATM=PET[0..3] OCN=PET[4..7] MED=todos"
+# Nos logs antigos os dois eixos eram um só, então 'modo CONCURRENT' implica
+# layout split e 'modo SEQUENTIAL' implica layout shared.
+_RE_LAYOUT_SPLIT  = re.compile(r"layout\s+SPLIT",  re.IGNORECASE)
+_RE_LAYOUT_SHARED = re.compile(r"layout\s+SHARED", re.IGNORECASE)
+_RE_EXEC_MODE = re.compile(r"execucao\s+(CONCURRENT|SEQUENTIAL)", re.IGNORECASE)
 _RE_MODE_CONCURRENT = re.compile(r"modo\s+CONCURRENT", re.IGNORECASE)
 _RE_MODE_SEQUENTIAL = re.compile(r"modo\s+SEQUENTIAL", re.IGNORECASE)
 _RE_PET_RANGE = re.compile(
@@ -148,7 +172,12 @@ class ParseResult:
     timing: Dict[str, Dict[int, ComponentTiming]] = field(
         default_factory=lambda: defaultdict(dict)
     )
-    mode_announced: Optional[str] = None          # "concurrent" | "sequential" | None
+    # Eixo ESPACIAL: "split" | "shared" | None. É o que determina se os
+    # conjuntos de PETs de ATM e OCN são disjuntos.
+    layout_announced: Optional[str] = None
+    # Eixo TEMPORAL: "concurrent" | "sequential" | None. É o que determina se
+    # os intervalos de execução de ATM e OCN podem se sobrepor no tempo.
+    mode_announced: Optional[str] = None
     atm_range: Optional[Tuple[int, int]] = None    # (primeiro, último) PET do ATM
     ocn_range: Optional[Tuple[int, int]] = None
     n_files: int = 0
@@ -182,17 +211,37 @@ def parse_logs(logdir: Path, pattern: str) -> ParseResult:
                 pet_id = int(m.group("pet"))
                 msg = m.group("msg")
 
-                # Detecta anúncio explícito de modo/partição (nível INFO)
+                # Detecta anúncio explícito de layout/modo/partição (INFO).
+                # Formato v14.20+: "layout SPLIT (execucao SEQUENTIAL) - ..."
+                if result.layout_announced is None:
+                    if _RE_LAYOUT_SPLIT.search(msg):
+                        result.layout_announced = "split"
+                    elif _RE_LAYOUT_SHARED.search(msg):
+                        result.layout_announced = "shared"
+                    if result.layout_announced is not None:
+                        me = _RE_EXEC_MODE.search(msg)
+                        if me:
+                            result.mode_announced = me.group(1).lower()
+
+                # Formato <= v14.19: um eixo só. 'modo CONCURRENT' implicava
+                # PETs disjuntos; 'modo SEQUENTIAL' implicava PETs compartilhados.
                 if result.mode_announced is None:
                     if _RE_MODE_CONCURRENT.search(msg):
                         result.mode_announced = "concurrent"
-                        rng = _RE_PET_RANGE.search(msg)
-                        if rng:
-                            a0, a1, o0, o1 = (int(x) for x in rng.groups())
-                            result.atm_range = (a0, a1)
-                            result.ocn_range = (o0, o1)
+                        if result.layout_announced is None:
+                            result.layout_announced = "split"
                     elif _RE_MODE_SEQUENTIAL.search(msg):
                         result.mode_announced = "sequential"
+                        if result.layout_announced is None:
+                            result.layout_announced = "shared"
+
+                # A faixa de PETs aparece na mesma linha, nos dois formatos.
+                if result.atm_range is None and result.layout_announced == "split":
+                    rng = _RE_PET_RANGE.search(msg)
+                    if rng:
+                        a0, a1, o0, o1 = (int(x) for x in rng.groups())
+                        result.atm_range = (a0, a1)
+                        result.ocn_range = (o0, o1)
 
                 pm = _RE_PHASE.match(msg)
                 if not pm:
@@ -232,28 +281,45 @@ def detect_pet_groups(
     result: ParseResult,
 ) -> Tuple[str, Set[int], Set[int]]:
     """
-    Determina o modo (concurrent/sequential) e os conjuntos de PETs de
-    ATM e OCN, priorizando o anúncio explícito do log e caindo para
-    inferência (a partir de quais PETs reportam MPAS/OCN) quando ausente.
+    Determina o rótulo de configuração e os conjuntos de PETs de ATM e OCN.
+
+    O rótulo devolvido combina os DOIS eixos anunciados pelo driver, na forma
+    "<execucao> + <layout>" (ex.: "sequential + split"). Isso importa porque
+    quem decide se os conjuntos de PETs são disjuntos é o LAYOUT, enquanto
+    quem decide se os tempos de ATM e OCN podem se sobrepor é a EXECUÇÃO — e
+    o relatório usa as duas informações para coisas diferentes.
+
+    A prioridade é o anúncio explícito do log; na ausência dele, cai para
+    inferência a partir de quais PETs reportam MPAS/OCN. A inferência
+    recupera o layout (conjuntos disjuntos = split), mas NÃO a execução:
+    sequential+split e concurrent+split produzem exatamente os mesmos
+    conjuntos de PETs. Nesse caso a execução é reportada como indeterminada,
+    em vez de assumida — assumir 'concurrent' faria o relatório anunciar um
+    ganho de wall-clock que talvez não exista.
     """
     atm_pets_observed = set(result.timing.get("MPAS", {}).keys())
     ocn_pets_observed = set(result.timing.get("OCN", {}).keys())
 
-    if result.mode_announced == "concurrent" and result.atm_range and result.ocn_range:
+    exec_mode = result.mode_announced or "execucao indeterminada"
+
+    if result.layout_announced == "split" and result.atm_range and result.ocn_range:
         a0, a1 = result.atm_range
         o0, o1 = result.ocn_range
-        return "concurrent", set(range(a0, a1 + 1)), set(range(o0, o1 + 1))
+        return (f"{exec_mode} + split",
+                set(range(a0, a1 + 1)), set(range(o0, o1 + 1)))
 
-    if result.mode_announced == "sequential":
+    if result.layout_announced == "shared":
         all_pets = atm_pets_observed | ocn_pets_observed
-        return "sequential", set(all_pets), set(all_pets)
+        return f"{exec_mode} + shared", set(all_pets), set(all_pets)
 
     # Fallback: inferência pura a partir da atividade observada.
     if atm_pets_observed and ocn_pets_observed:
         if atm_pets_observed.isdisjoint(ocn_pets_observed):
-            return "concurrent (inferido)", atm_pets_observed, ocn_pets_observed
+            return (f"{exec_mode} + split (inferido)",
+                    atm_pets_observed, ocn_pets_observed)
         if atm_pets_observed == ocn_pets_observed:
-            return "sequential (inferido)", atm_pets_observed, ocn_pets_observed
+            return (f"{exec_mode} + shared (inferido)",
+                    atm_pets_observed, ocn_pets_observed)
         # Sobreposição parcial: situação atípica, reporta como observado.
         return "indeterminado (sobreposição parcial)", atm_pets_observed, ocn_pets_observed
 
@@ -378,7 +444,7 @@ def print_report(
     print(bar)
     print("  Análise de balanceamento de PETs - MONAN-A x MOM6+SIS2")
     print(bar)
-    print(f"  Modo detectado       : {mode}")
+    print(f"  Configuração         : {mode}")
     print(f"  PETs do ATM (MPAS)   : {sorted(atm_pets)}")
     print(f"  PETs do OCN (MOM6)   : {sorted(ocn_pets)}")
     print(f"  Passos de acoplamento: {n_steps if n_steps else 'N/D (use --steps)'}")
@@ -418,10 +484,15 @@ def print_report(
     print(f"  Sugestão de partição para {target_pets} PETs totais:")
     print(f"    atm_pet_count = {n_atm_new}")
     print(f"    ocn_pet_count = {n_ocn_new}")
-    if "sequential" in mode:
+    if "shared" in mode:
+        # Com layout shared, cada componente foi medido usando TODOS os PETs;
+        # a sugestão é uma extrapolação para uma partição que nunca existiu.
+        # O critério aqui é o layout, não a execução: sequential+split já
+        # fornece medidas por partição real, e cai no ramo de baixo.
         print(
-            "  (base: custos medidos em modo sequencial, extrapolados linearmente\n"
-            "   para a nova partição - validar com uma execução concorrente real.)"
+            "  (base: custos medidos com todos os PETs em cada componente,\n"
+            "   extrapolados linearmente para a nova partição - validar com\n"
+            "   uma execução em pet_layout=split real.)"
         )
     else:
         n_atm_cur, n_ocn_cur = atm.n_pets, ocn.n_pets

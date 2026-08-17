@@ -80,7 +80,9 @@ module mpas_atm_model_mod
 
   use mpas_cap_config_mod,  only : cfg_sst_default, &
                                     cfg_ice_fraction_default, &
-                                    cfg_zorl_default
+                                    cfg_zorl_default,&
+                                    cfg_use_datm,&
+                                    cfg_use_docn
 
   implicit none
   private
@@ -854,7 +856,7 @@ contains
       call mpas_pool_get_array(sfcInputPool,'xland',xland_field )
 
       call mpas_pool_get_array(sfcInputPool, 'sst',         sst_field)
-      call mpas_pool_get_array(sfcInputPool, 'iceAreaCell', ice_field)
+      call mpas_pool_get_array(sfcInputPool, 'xice',        ice_field)
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
       !call mpas_pool_get_array(diag_physicsPool, 'znt',         zorl_field)
       call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
@@ -867,22 +869,25 @@ contains
               'sst/skintemp/ice/zorl da condicao inicial do MONAN-A (nao ' // &
               'aplicando atm_bnd)')
          end if
-         DO iCell =1, atm_state%nCells
-            if( xland_field(iCell) .gt. 1.5) then
-               if (.not. (first_coupling_call .and. is_cold_start)) then
-                  if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
-                     sst_field(iCell)  = atm_bnd%sst(iCell)
-                     skintemp_field(iCell) = atm_bnd%sst(iCell)
+         if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
+           ! so entre se nao utilizar dados de sst preescritos 
+            DO iCell =1, atm_state%nCells
+               if( xland_field(iCell) .gt. 1.5) then
+                  if (.not. (first_coupling_call .and. is_cold_start)) then
+                     if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
+                        sst_field(iCell)  = atm_bnd%sst(iCell)
+                        skintemp_field(iCell) = atm_bnd%sst(iCell)
+                     end if 
+                     if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) then 
+                        ice_field(iCell)  = atm_bnd%ice_fraction(iCell)
+                     end if 
+                     if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
+                          zorl_field(iCell) = atm_bnd%zorl(iCell)
+                     endif
                   end if
-                  if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) then
-                     ice_field(iCell)  = atm_bnd%ice_fraction(iCell)
-                  end if
-                  if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
-                       zorl_field(iCell) = atm_bnd%zorl(iCell)
-                  endif
-               end if
-            endif
-         end do
+               endif 
+            end do
+         endif
       end if
       first_coupling_call = .false.
     else
