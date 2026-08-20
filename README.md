@@ -2,6 +2,8 @@
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
 > v14.21 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Agosto 2026
+>
+> Instalação: [`Coupler-Install`](https://github.com/GTA-DIMNT-CPTEC/Coupler-Install) · Documentação: [`docs/`](docs/)
 
 Acoplador atmosfera–oceano–gelo de **produção**: o **MONAN-A 2.0** (MPAS-A, malha
 Voronoi hexagonal) acoplado ao **MOM6+SIS2** (grade tripolar) pelo framework
@@ -33,7 +35,7 @@ mediador próprio calcula os fluxos turbulentos ar–mar por fórmulas *bulk* NC
 Três componentes NUOPC — atmosfera (ATM), mediador (MED) e oceano (OCN) — são
 orquestrados por um driver único, sob um relógio ESMF global:
 
-```
+```text
         ┌────────────────────────────────────┐
         │   esmApp.F90 — programa principal   │
         └─────────────────┬──────────────────┘
@@ -185,7 +187,7 @@ Três formas de uso, da mais simples à mais flexível:
 São **dois repositórios distintos**. O **sistema acoplado** (com os modelos como
 submódulos):
 
-```
+```text
 MONAN-Coupler/                ← repositório do sistema acoplado (branch develop)
 ├── README.md                 ← este arquivo
 ├── .gitmodules               ← submódulos models/atmos e models/ocean
@@ -232,7 +234,7 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 
 E o **repositório do instalador** (separado):
 
-```
+```text
 Coupler-Install/    ← repositório dos scripts de instalação
 ├── Makefile        ← atalhos (make / make build / make check)
 ├── install.bash    ← ★ baixa (git recursivo) e instala
@@ -261,12 +263,12 @@ mantê-la junto dos fontes que documenta evita que as duas versões divirjam.
 
 | Documento | Assunto |
 |:----------|:--------|
-| `CHANGELOG.md` | Histórico de versões. Registra também o raciocínio por trás de decisões contraintuitivas, para que não sejam revertidas por engano. |
-| `notas-standalone.md` | Design da separação entre instalador e sistema acoplado: resolução de caminhos, preflight e o contrato entre os dois repositórios. |
-| `domain-mom6.md` | Algoritmo do `tools/ocean/domain-mom6.bash`: escore dos candidatos a `LAYOUT`, formato do `mask_table` e armadilhas. |
-| `mascara-cap-nuopc.md` | Por que um `mask_table` com `nmask > 0` é incompatível com o cap NUOPC atual do MOM6. |
-| `MULTINO-run_esmApp.md` | Execução multinó na Jaci: contabilidade de `ncpus`, topologia por `coupling_mode` × `pet_layout`, filas e limites. |
-| `SMT-Jaci.md` | Efeito do SMT sobre o acoplado: metodologia, resultados por componente e reprodução. |
+| [`CHANGELOG.md`](docs/CHANGELOG.md) | Histórico de versões. Registra também o raciocínio por trás de decisões contraintuitivas, para que não sejam revertidas por engano. |
+| [`notas-standalone.md`](docs/notas-standalone.md) | Design da separação entre instalador e sistema acoplado: resolução de caminhos, preflight e o contrato entre os dois repositórios. |
+| [`domain-mom6.md`](docs/domain-mom6.md) | Algoritmo do `tools/ocean/domain-mom6.bash`: escore dos candidatos a `LAYOUT`, formato do `mask_table` e armadilhas. |
+| [`mascara-cap-nuopc.md`](docs/mascara-cap-nuopc.md) | Por que um `mask_table` com `nmask > 0` é incompatível com o cap NUOPC atual do MOM6. |
+| [`MULTINO-run_esmApp.md`](docs/MULTINO-run_esmApp.md) | Execução multinó na Jaci: contabilidade de `ncpus`, topologia por `coupling_mode` × `pet_layout`, filas e limites. |
+| [`SMT-Jaci.md`](docs/SMT-Jaci.md) | Efeito do SMT sobre o acoplado: metodologia, resultados por componente e reprodução. |
 
 ---
 
@@ -548,7 +550,7 @@ PETs pelos **cores físicos** (limite de 256/nó) e fixe 1 rank por core no lan�
 
 A diretiva de recurso é montada assim:
 
-```
+```text
 NNODES = NPES / PPN, arredondado para cima
 #PBS -l select=NNODES:ncpus=PPN:mpiprocs=PPN     (sem 'mem' por padrão)
 #PBS -l place=scatter:excl
@@ -570,10 +572,10 @@ mais nós) ou reserve memória com `--mem`.
 | `--mem TAM`         | (sem)     | reserva FIXA de memória por nó (ex.: `700gb`) |
 | `--mem-per-pet N`   | 0         | reserva OPCIONAL por PET (0 = desligada)  |
 | `--no-mem`          | (padrão)  | garante sem reserva de memória            |
-| `--ppn-atm N`       | 0 (→256)  | limite de PET/nó do ATM (concurrent)        |
-| `--ppn-ocn N`       | 0 (→256)  | limite de PET/nó do OCN (concurrent)        |
-| `--mem-per-pet-atm` | 0         | reserva opcional por PET do ATM (concurrent) |
-| `--pet-order`       | atm-first | ordem dos blocos ATM/OCN (concurrent)     |
+| `--ppn-atm N`       | 0 (→256)  | limite de PET/nó do ATM (`pet_layout=split`) |
+| `--ppn-ocn N`       | 0 (→256)  | limite de PET/nó do OCN (`pet_layout=split`) |
+| `--mem-per-pet-atm` | 0         | reserva opcional por PET do ATM (`split`)   |
+| `--pet-order`       | atm-first | ordem dos blocos ATM/OCN (`split`)        |
 
 ```bash
 run_esmApp.jaci -n 512                        # 2 nós × 256 (sequential)
@@ -582,11 +584,13 @@ run_esmApp.jaci -n 512 --place scatter        # permite nó compartilhado
 run_esmApp.jaci -n 256 --mem 700gb            # reserva fixa por nó
 ```
 
-### 8.2 Modo concorrente — consolidação por componente (v14.19)
+### 8.2 Split de comunicador — consolidação por componente (v14.19)
 
-Desde a v14.17 o `run_esmApp.jaci` é **ciente do layout**: em `concurrent` valida
-`atm_pet_count + ocn_pet_count == -n`, gera a partição METIS correta
-(`.part.<atm_pet_count>`) e aborta com mensagem clara se a soma não bater.
+Desde a v14.17 o `run_esmApp.jaci` é **ciente do layout**: com
+`pet_layout = 'split'` valida `atm_pet_count + ocn_pet_count == -n`, gera a
+partição METIS correta (`.part.<atm_pet_count>`) e aborta com mensagem clara se
+a soma não bater. Até a v14.19 o critério era o `coupling_mode`; desde a v14.20
+é o `pet_layout`, de modo que `sequential + split` recebe o mesmo tratamento.
 
 A v14.19 acrescenta a **consolidação por componente**: quando `atm_pet_count` e
 `ocn_pet_count` estão explícitos, o `.pbs` recebe um `select` **heterogêneo** que
@@ -596,7 +600,7 @@ nós cheios (256); se o OCN estourar a memória, reduza o seu limite com `--ppn-
 A ordem dos blocos segue `--pet-order` (padrão `atm-first`), pois o PALS preenche
 o `PBS_NODEFILE` na ordem do `select`.
 
-```
+```text
              nó misto (ruim)              consolidado por componente (bom)
              ┌──────────┐ ┌──────────┐    ┌──────────┐ ┌──────────┐ ┌──────────┐
   concurrent │ ATM +    │ │ ATM +    │    │ 256 ATM  │ │ 256 ATM  │ │ 128 OCN  │
@@ -683,7 +687,7 @@ bash $G -n 128 --dry-run        # mostra o que faria, sem executar
 o total do job. O FMS aceita silenciosamente um `LAYOUT` inconsistente com o
 comunicador, mas o erro estoura quando `MASKTABLE` está ativo:
 
-```
+```text
 FATAL: MPP_DEFINE_DOMAINS2D: incorrect number of PEs assigned
        for this layout and maskmap.
 ```
@@ -820,7 +824,7 @@ monolítica — inicializa, roda até o fim e finaliza —, o que é incompatív
 ciclo de vida NUOPC, em que o driver controla o avanço passo a passo. Por isso o
 `mpas_atm_model.F90` **replica à mão** a sequência de inicialização:
 
-```
+```text
 phase1 → atm_setup_core → atm_setup_domain → setup_log → setup_namelist →
 phase2 → streamInfo → define_packages → setup_packages → setup_decompositions →
 setup_clock → bootstrap_phase1 → stream_mgr_init → add_stream_attributes →
