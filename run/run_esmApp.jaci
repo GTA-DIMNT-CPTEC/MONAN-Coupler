@@ -692,11 +692,23 @@ _glob_req() {
 # Garante a partição METIS do MPAS para N tarefas. Verifica o ARQUIVO DE
 # PARTIÇÃO diretamente (glob x1.*.graph.info.part.N) — é o que o MPAS lê, e não
 # depende da presença do graph base. Se faltar, tenta gerar via
-# run/gen-metis.bash (que aí sim exige o graph base x1.*.graph.info). Só marca
+# tools/atmos/gen-metis.bash (que aí sim exige o graph base). Só marca
 # FALTANDO se não existir e não for possível gerar. Evita 'return 1' para não
 # disparar o 'set -e' quando chamada como comando simples.
 _ensure_metis_part() {
-  local n="$1" gen="${COUPLER_ROOT}/run/gen-metis.bash" f="" graph=""
+  # O gen-metis.bash passou de run/ para tools/atmos/, junto com os demais
+  # utilitários do lado atmosférico. O caminho antigo permanece como recuo para
+  # árvores ainda não migradas: sem ele, o pré-check deixaria de gerar a
+  # partição ausente e falharia com "gerador não encontrado", numa mensagem que
+  # não explicaria a causa. Quando as duas árvores estiverem migradas, o
+  # segundo caminho pode sair.
+  local n="$1" f="" graph="" gen=""
+  local _g
+  for _g in "${COUPLER_ROOT}/tools/atmos/gen-metis.bash" \
+            "${COUPLER_ROOT}/run/gen-metis.bash"; do
+    if [[ -f "${_g}" ]]; then gen="${_g}"; break; fi
+  done
+  [[ -z "${gen}" ]] && gen="${COUPLER_ROOT}/tools/atmos/gen-metis.bash"
 
   # 1) A partição já existe? (glob direto, independente do graph base)
   if compgen -G "x1.*.graph.info.part.${n}" > /dev/null 2>&1; then
@@ -735,7 +747,8 @@ _ensure_metis_part() {
   fi
   [[ -z "${graph}" ]] && \
     echo "             (graph base x1.*.graph.info ausente — necessário para gerar)"
-  echo "             Gerar com: gen-metis.bash -n ${NPES}   (ou gpmetis x1.NNNNN.graph.info ${n})"
+  echo "             Gerar com: tools/atmos/gen-metis.bash -n ${NPES}"
+  echo "                        (ou gpmetis x1.NNNNN.graph.info ${n})"
   MISSING=$(( MISSING + 1 ))
   return 0
 }
@@ -923,7 +936,7 @@ if [[ "${MISSING}" -gt 0 ]]; then
   echo "Dicas:"
   printf "  %-38s  %s\n" "${EXECUTABLE}"            "make rebuild"
   printf "  %-38s  %s\n" "mpas_mesh.nc"             "ln -sf x1.NNNNN.esmf_mesh.nc mpas_mesh.nc"
-  printf "  %-38s  %s\n" "x1.*.graph.info.part.${MPAS_NPART:-$NPES}" "gen-metis.bash -n ${NPES}"
+  printf "  %-38s  %s\n" "x1.*.graph.info.part.${MPAS_NPART:-$NPES}" "tools/atmos/gen-metis.bash -n ${NPES}"
   printf "  %-38s  %s\n" "Tabelas radiação/LSM"     \
     "cp \$MPAS_DIR/src/core_atmosphere/physics/physics_wrf/files/* ."
   exit 1

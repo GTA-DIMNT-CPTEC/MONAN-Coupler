@@ -201,15 +201,29 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 ├── models/                   ← submódulos das fontes dos modelos
 │   ├── atmos/MONAN-Model/    ← MONAN-A 2.0 (MPAS-A 8.3.1)
 │   └── ocean/MOM6-examples/  ← MOM6+SIS2+FMS (com submódulos)
+├── docs/                     ← documentação (vinda do Coupler-Install)
+│   ├── CHANGELOG.md          ← histórico de versões
+│   ├── notas-standalone.md   ← design da separação instalador/acoplado
+│   ├── domain-mom6.md        ← decomposição de domínio do MOM6+SIS2
+│   ├── mascara-cap-nuopc.md  ← mask_table e o cap NUOPC do MOM6
+│   ├── MULTINO-run_esmApp.md ← execução multinó na Jaci
+│   └── SMT-Jaci.md           ← medição do efeito do SMT
 ├── tools/
+│   ├── atmos/                ← utilitários do lado atmosférico
+│   │   └── gen-metis.bash    ← gera partições METIS do MPAS por layout
+│   ├── ocean/                ← utilitários do lado oceânico
+│   │   └── domain-mom6.bash  ← escolhe LAYOUT e gera mask_table
+│   ├── coupler/              ← utilitários do acoplamento
+│   │   ├── plan-layout.py            ← planejador de topologia multinó
+│   │   ├── analisa_balanceamento_pets.py ← custo por componente nos logs
+│   │   ├── test-concurrent.bash      ← smoke test concurrent + split
+│   │   └── test-sequential-split.bash ← smoke test sequential + split
 │   ├── postproc/             ← pós-processamento (Python)
-│   ├── animation/            ← animações (Python)
-│   └── coupler/              ← plan-layout.py (planejador de topologia)
+│   └── animation/            ← animações (Python)
 ├── run/
 │   ├── setenv-gnu.bash       ← ambiente de compilação (Jaci/GNU)
 │   ├── setenv-site.bash      ← config de sítio (cópia do install.bash)
-│   ├── run_esmApp.jaci       ← submissão PBS multi-nó (pré-check ciente do layout)
-│   └── gen-metis.bash        ← gera partições METIS do MPAS por modo
+│   └── run_esmApp.jaci       ← submissão PBS multi-nó (pré-check ciente do layout)
 ├── mod/                      ← módulos .mod (gerados na instalação)
 ├── lib/                      ← libs .a (gerados na instalação)
 ├── diag_export/              ← monan_export_*.nc
@@ -228,9 +242,31 @@ Coupler-Install/    ← repositório dos scripts de instalação
 ├── 2-mom.bash      ← etapa 2 — MOM6+SIS2+FMS
 ├── 3-coupler.bash  ← etapa 3 — linka bin/esmApp
 ├── sites/          ← config por máquina (+ site-template.bash)
-├── templates/      ← cray-gnu-monan.mk (mkmf)
-└── docs/           ← CHANGELOG.md, notas de design
+└── templates/      ← cray-gnu-monan.mk (mkmf)
 ```
+
+> **O que saiu do `Coupler-Install`.** A documentação (`docs/`, incluindo o
+> `CHANGELOG.md`) e os utilitários `domain-mom6.bash` e `gen-metis.bash`
+> passaram a viver nesta árvore. O instalador ficou restrito ao que instala.
+>
+> A organização de `tools/` espelha a de `src/caps/`: quem procura um utilitário
+> do lado do oceano olha em `tools/ocean/`, do mesmo modo que procura o cap em
+> `src/caps/ocean/`. Os *smoke tests* ficam em `tools/coupler/` porque
+> exercitam o acoplamento em si; `run/` reúne apenas o procedimento de execução.
+
+### Documentação (`docs/`)
+
+Veio do `Coupler-Install` e descreve o **sistema acoplado**, e não o instalador —
+mantê-la junto dos fontes que documenta evita que as duas versões divirjam.
+
+| Documento | Assunto |
+|:----------|:--------|
+| `CHANGELOG.md` | Histórico de versões. Registra também o raciocínio por trás de decisões contraintuitivas, para que não sejam revertidas por engano. |
+| `notas-standalone.md` | Design da separação entre instalador e sistema acoplado: resolução de caminhos, preflight e o contrato entre os dois repositórios. |
+| `domain-mom6.md` | Algoritmo do `tools/ocean/domain-mom6.bash`: escore dos candidatos a `LAYOUT`, formato do `mask_table` e armadilhas. |
+| `mascara-cap-nuopc.md` | Por que um `mask_table` com `nmask > 0` é incompatível com o cap NUOPC atual do MOM6. |
+| `MULTINO-run_esmApp.md` | Execução multinó na Jaci: contabilidade de `ncpus`, topologia por `coupling_mode` × `pet_layout`, filas e limites. |
+| `SMT-Jaci.md` | Efeito do SMT sobre o acoplado: metodologia, resultados por componente e reprodução. |
 
 ---
 
@@ -395,8 +431,8 @@ divergência. Com `0` em ambos, a divisão é automática.
 Dois *smoke tests* cobrem as combinações com split, ambos em `run/`:
 
 ```bash
-bash run/test-concurrent.bash       -n 8 --atm 4 --ocn 4   # concurrent + split
-bash run/test-sequential-split.bash -n 8 --atm 6 --ocn 2   # sequential + split
+bash tools/coupler/test-concurrent.bash       -n 8 --atm 4 --ocn 4  # concurrent + split
+bash tools/coupler/test-sequential-split.bash -n 8 --atm 6 --ocn 2  # sequential + split
 ```
 
 O segundo inclui a verificação que distingue os dois modos: as janelas `Run` de
@@ -618,7 +654,7 @@ Exemplo de saída (`--sweep`):
 > (`atm_pet_count` / `ocn_pet_count` na `nuopc.input`) → **verificar**
 > (`run_esmApp.jaci -n … --check`) → **submeter**.
 
-### 8.4 Partições METIS do MPAS (`gen-metis.bash`)
+### 8.4 Partições METIS do MPAS (`tools/atmos/gen-metis.bash`)
 
 O MPAS decompõe a malha pelo METIS e lê `x1.NNNNN.graph.info.part.N`, onde **N é
 o número de tarefas MPI no comunicador do MPAS** — não o total do job.
@@ -628,15 +664,16 @@ o número de tarefas MPI no comunicador do MPAS** — não o total do job.
 | `sequential` | `x1.NNNNN.graph.info.part.<NPES>`          |
 | `concurrent` | `x1.NNNNN.graph.info.part.<atm_pet_count>` |
 
-O `run/gen-metis.bash` gera as partições lendo malha e modo diretamente da
+O `tools/atmos/gen-metis.bash` gera as partições lendo malha e layout diretamente da
 `nuopc.input`; o `run_esmApp.jaci` o chama automaticamente quando a partição
 necessária não existe.
 
 ```bash
 cd /…/exp1
-gen-metis.bash -n 128                  # gera a partição para o -n informado
-gen-metis.bash --parts "128 88 64"     # gera exatamente esses valores de N
-gen-metis.bash -n 128 --dry-run        # mostra o que faria, sem executar
+G=$COUPLER_ROOT/tools/atmos/gen-metis.bash
+bash $G -n 128                  # gera a partição para o -n informado
+bash $G --parts "128 88 64"     # gera exatamente esses valores de N
+bash $G -n 128 --dry-run        # mostra o que faria, sem executar
 ```
 
 ### 8.5 Decomposição de domínio do MOM6/SIS2
@@ -665,6 +702,18 @@ Referência rápida:
 > deste repositório): se contiverem `MASKTABLE` apontando para um arquivo de outro
 > layout, o erro acima ocorrerá. Comente o `MASKTABLE` nesses arquivos toda vez
 > que `ocn_pet_count` mudar.
+
+A tabela acima cobre os casos redondos. Para uma malha qualquer, o
+`tools/ocean/domain-mom6.bash` enumera os candidatos a `LAYOUT`, pontua-os por
+balanceamento e forma, e gera o `mask_table` quando pedido:
+
+```bash
+bash $COUPLER_ROOT/tools/ocean/domain-mom6.bash --no-mask --pes 128
+```
+
+Use `--no-mask` no acoplado: um `mask_table` com `nmask > 0` é incompatível com o
+cap NUOPC atual do MOM6. O algoritmo, o formato do `mask_table` e as armadilhas
+estão em `docs/domain-mom6.md`; a incompatibilidade, em `docs/mascara-cap-nuopc.md`.
 
 ---
 
@@ -839,7 +888,7 @@ ficar em torno de 170, não em 3.
 | 14.20  | Ago 2026 | Contabilidade de `ncpus` confirmada por `qstat -Qf`: o limite das filas é em **cores físicos** (`pesqextra` 7680/30 = 256 por nó), então o `select` mantém `ncpus = mpiprocs ≤ 256` e a posse do nó inteiro passa a vir de **`place=scatter:excl`, agora o padrão**. Nova **guarda de fila** (`QUEUE_LIMITS_*` + `_queue_guard`): NPES, nós e *walltime* são conferidos contra `resources_max` antes do `qsub`. Nós `aux01`-`aux10` (256 `ncpus`, ~1,5 TB, fila `aux`) documentados como destino de pré e pós-processamento |
 | 14.19  | Jul 2026 | Execução **multi-nó** no `run_esmApp.jaci`: `select` derivado de `-n` (`NNODES × PPN`, `place=scatter`), padrão 256 PET/nó (nó físico cheio, 1 rank/core) e **sem reserva de memória** por padrão (`--mem`/`--mem-per-pet` são opt-in). Modo concurrent com **consolidação por componente** (`select` heterogêneo: um componente por nó; `--ppn-atm`, `--ppn-ocn`, `--pet-order`). Novo `tools/coupler/plan-layout.py` (planejador de topologia) |
 | 14.18  | Jul 2026 | Correção: atributos globais ausentes nas saídas do MONAN-A acoplado (`diag`/`history`/`restart` saíam só com `file_id`). `mpas_atm_model.F90` v5.2 acrescenta `atm_add_stream_attributes`, réplica de `add_stream_attributes` de `mpas_subdriver.F`, chamada entre `stream_mgr_init` e `setup_immutable_streams` |
-| 14.17  | Jul 2026 | Particionamento MPI sequencial/concorrente: `&nuopc_petlayout` (`coupling_mode`, `atm_pet_count`, `ocn_pet_count`); `log_kind` em `&nuopc_driver`; `run/gen-metis.bash` (partições METIS por modo); `run_esmApp.jaci` ciente do layout (valida soma, gera `.part.<atm_pet_count>`) |
+| 14.17  | Jul 2026 | Particionamento MPI sequencial/concorrente: `&nuopc_petlayout` (`coupling_mode`, `atm_pet_count`, `ocn_pet_count`); `log_kind` em `&nuopc_driver`; `gen-metis.bash` (partições METIS por modo); `run_esmApp.jaci` ciente do layout (valida soma, gera `.part.<atm_pet_count>`) |
 | 14.16  | Jun 2026 | `Coupler-Install`: passos renomeados (`1-monan`/`2-mom`/`3-coupler`); `docs/`, `sites/site-template.bash`, `Makefile` de atalhos |
 | 14.15  | Jun 2026 | Instalador renomeado para `Coupler-Install`; config de sítio em `run/setenv-site.bash` (remove `install/` do acoplador) |
 | 14.14  | Jun 2026 | Instalador: `bootstrap`→`install.bash`, `install-all`→`build.bash`; layout `sites/`+`templates/` |
