@@ -176,6 +176,31 @@ A ordem dos blocos importa e está documentada no código: o PALS preenche o `PB
 
 Também foi acrescentada uma regra: em `split` com gelo, `ice_pet_count` precisa ser explícito. O `select` é montado antes de o driver executar, então o modo automático (`ice_pet_count = 0`) não tem como ser resolvido pelo script.
 
+### 9.8 Investigação de `sequential + split` com gelo
+
+A combinação foi investigada por não existir no projeto de origem: lá o gelo vivia dentro do ramo `if (is_concurrent)`, e portanto `sequential` implicava PETs compartilhados.
+
+**Conclusão: nenhum bloqueio funcional foi encontrado.** O que foi conferido, e como:
+
+| Verificação | Método | Resultado |
+|:---|:---|:---|
+| Validação da configuração | `config_read` compilado com gfortran e exercitado com 6 namelists | Aceita `sequential+split+gelo`; regressões sem gelo inalteradas |
+| Aritmética da partição | Bloco de `esm.F90` copiado literalmente para um programa de teste, 12 casos | Soma fecha em todos; automático e explícito |
+| Topologia do `select` | Lógica do `run_esmApp.jaci` replicada em Bash, 6 casos | 3 nós, 8 de 8 slots; idêntica à do modo concorrente |
+| Estrutura da RunSequence | Inspeção | Toda linha de componente separada por conector: execução realmente serial |
+| Campos do conector `MED -> ICE` | Comparação das listas | Os 15 nomes importados pelo gelo existem em `export_names` do mediador |
+| Dado do gelo em t=0 | Inspeção | `InitializeDataComplete` do cap do gelo já exporta `Si_ifrac`, então o primeiro `ICE -> MED` não lê lixo |
+| Regra de compilação | Comparação com o Makefile de origem | A regra é idêntica à que já compilou lá |
+| Dependência de modo no mediador | Busca por `coupling_mode` em `MED_cap.F90` e `med_cap_methods.F90` | Nenhuma: o mediador não distingue os modos |
+
+**Dois comentários factualmente errados foram corrigidos**, ambos herdados da origem e ativamente enganosos sobre esta combinação:
+
+O primeiro dizia que em modo sequencial "tudo roda em passo travado, sem PETs disjuntos". Isso é falso justamente em `sequential + split`, que é a combinação em questão. A frase fazia sentido na origem, onde os dois eixos estavam colapsados; aqui levaria alguém a concluir que a combinação não existe.
+
+O segundo dizia que o `MED -> ICE` fica depois do `OCN` "para que o SIS2 veja o estado oceânico do mesmo passo". Também é falso: o mediador executa uma única vez por passo, na linha `MED`, e não roda de novo entre `OCN` e `MED -> ICE`. O gelo recebe o estado oceânico que o mediador capturou ANTES de o oceano avançar. A posição do conector não muda o dado entregue; para o gelo ver o oceano já avançado seria preciso um segundo `OCN -> MED` seguido de nova execução do mediador, o que dobraria o custo do mediador. A ordenação foi mantida (é a exercitada em execução) e o comentário passou a descrever o que de fato acontece.
+
+**O que continua sem verificação.** Tudo o que exige execução real: compilação contra ESMF 8.9.1, comportamento dos conectores em tempo de execução e a pendência da seção 10. "Nenhum bloqueio encontrado por análise" não é o mesmo que "funciona".
+
 ## 10. Pendência que permanece
 
 O `Si_ifrac_sis2` continua sendo copiado ponto a ponto do componente ICE para o `Si_ifrac` do exportState do mediador. O PK2 não mexeu nisso.

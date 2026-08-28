@@ -861,13 +861,21 @@ contains
     else
       if (use_med_to_mpas .and. cfg_use_sis2_dynamic) then
         ! ── Fase 2 SEQUENCIAL (MOM6 dinâmico) + ICE (SIS2) ──────────────────
-        ! Equivalente sequencial da variante concorrente com gelo. Útil para
-        ! depuração: em modo sequencial tudo roda em passo travado, sem PETs
-        ! disjuntos, o que isola problemas de sincronização.
+        ! Equivalente sequencial da variante concorrente com gelo. Vale com
+        ! QUALQUER pet_layout: em 'shared' os três componentes dividem todos os
+        ! PETs; em 'split' cada um tem seu bloco disjunto e os demais ficam
+        ! ociosos durante a fase alheia. O que 'sequential' determina é a ORDEM
+        ! no tempo, não a ocupação de PETs; os dois eixos são independentes.
         !
-        ! O ICE avança DEPOIS do OCN, para que o SIS2 veja o estado oceânico do
-        ! mesmo passo; no modo concorrente isso não é possível, por causa do
-        ! atraso de um passo. Esta é a ordenação já exercitada em execução.
+        ! Sobre a posição de 'MED -> ICE': ela vem depois de 'OCN' porque essa é
+        ! a ordenação já exercitada em execução. Note que a escolha NÃO muda o
+        ! dado entregue ao gelo: o mediador executou uma única vez, na linha
+        ! 'MED' acima, e não roda de novo entre 'OCN' e 'MED -> ICE'. Portanto o
+        ! SIS2 recebe o estado oceânico que o mediador capturou ANTES de o OCN
+        ! avançar, e não o do mesmo passo. Essa defasagem de meio passo é da
+        ! mesma natureza das demais do acoplamento sequencial. Para o gelo ver o
+        ! oceano já avançado seria preciso um segundo 'OCN -> MED' seguido de
+        ! nova execução do 'MED', o que dobraria o custo do mediador.
         runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
           line1,              &  ! "@<dt_coupling>    "
           "  OCN -> MED      ", &  ! So_t, So_u, So_v -> mediador
