@@ -1,7 +1,7 @@
 # MONAN-A 2.0 × MOM6+SIS2 — Sistema Acoplado NUOPC/ESMF
 
 > **INPE / CGCT / DIMNT — GT Acoplamento de Modelos**
-> v14.21 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Agosto 2026
+> v14.22 · ESMF/NUOPC 8.9.1 · MPAS-A 8.3.1 · MOM6+SIS2 · Agosto 2026
 >
 > Instalação: [`Coupler-Install`](https://github.com/GTA-DIMNT-CPTEC/Coupler-Install) · Documentação: [`docs/`](docs/)
 
@@ -32,8 +32,7 @@ mediador próprio calcula os fluxos turbulentos ar–mar por fórmulas *bulk* NC
 
 ## 1. Arquitetura
 
-Três componentes NUOPC — atmosfera (ATM), mediador (MED) e oceano (OCN) — são
-orquestrados por um driver único, sob um relógio ESMF global:
+Quatro componentes NUOPC (atmosfera, mediador, oceano e gelo marinho) são orquestrados por um driver único, sob um relógio ESMF global. O componente de gelo (ICE, cap do SIS2) é **opcional** e só é criado com `use_sis2_dynamic = .true.`; sem ele o sistema é o de três componentes de sempre, e a fração de gelo vem da fórmula aproximada do oceano.
 
 ```text
         ┌────────────────────────────────────┐
@@ -42,16 +41,18 @@ orquestrados por um driver único, sob um relógio ESMF global:
         ┌─────────────────▼──────────────────┐
         │        esm.F90 — Driver NUOPC       │
         │     relógio · PETs · ATM/MED/OCN    │
-        └────┬───────────────┬───────────────┬┘
-             │               │               │
-      ┌──────▼─────┐  ┌───────▼─────┐  ┌──────▼─────┐
-      │    ATM     │  │     MED     │  │    OCN     │
-      │  MONAN-A   │  │  bulk NCAR  │  │  MOM6+SIS2 │
-      │   (MPAS)   │  │ (mediador)  │  │ (dinâmico) │
-      └──────┬─────┘  └──────┬──────┘  └──────┬─────┘
-             └───────────────┴───────────────┘
+        └───┬────────────┬────────────┬────────────┬┘
+            │            │            │            │
+     ┌──────▼────┐ ┌─────▼─────┐ ┌────▼─────┐ ┌────▼─────┐
+     │    ATM    │ │    MED    │ │   OCN    │ │   ICE    │
+     │  MONAN-A  │ │ bulk NCAR │ │   MOM6   │ │   SIS2   │
+     │   (MPAS)  │ │(mediador) │ │(dinâmico)│ │(opcional)│
+     └──────┬────┘ └─────┬─────┘ └────┬─────┘ └────┬─────┘
+            └────────────┴────────────┴────────────┘
                      Conectores NUOPC
 ```
+
+O relógio de cada componente e de cada conector é uma **cópia** do relógio do driver, e não o próprio objeto. `ESMF_Clock` é um tipo por referência: compartilhar o objeto fazia o NUOPC avançar o mesmo relógio uma vez por componente, ou seja, até três vezes por ciclo de acoplamento. Ver `AddModelCompWithClock` e `AddConnectorWithClock` em `esm.F90`.
 
 **Fluxo de acoplamento por passo** (Fase 2, MOM6 ativo):
 
@@ -61,9 +62,17 @@ orquestrados por um driver único, sob um relógio ESMF global:
 |     2 | ATM → MED | `u10m`, `v10m`, `tbot`, `qbot`, `pbot`, … (9 campos) |
 |     3 | MED       | *bulk* NCAR (Large & Yeager 2009) → 14 fluxos        |
 |     4 | MED → OCN | `Foxx_*` / `Faxa_*` → forçantes do MOM6              |
-|     5 | OCN       | `step_MOM` — avança MOM6+SIS2 por `dt_coupling`      |
+|     5 | OCN       | `step_MOM`: avança o MOM6 por `dt_coupling`          |
 |     6 | MED → ATM | `So_t`, `Si_ifrac`, `So_u`, `So_v`, `Sf_zorl` → MPAS |
 |     7 | ATM       | dinâmica + física (N × `dt_atm`)                     |
+
+Com `use_sis2_dynamic = .true.` a sequência ganha dois conectores e um avanço, todos condicionados ao gelo estar ativo:
+
+| Passo extra | Conector  | Campos / ação                                                     |
+|:------------|:----------|:------------------------------------------------------------------|
+| ICE → MED   | 6         | `Si_ifrac_sis2`: fração de gelo real, que substitui a do oceano    |
+| MED → ICE   | 5         | forçante atmosférica processada + SST e correntes do oceano        |
+| ICE         | -         | avança o SIS2 por `dt_coupling`                                    |
 
 > **Prefixos dos campos.** `So_*` estado do oceano · `Si_*` gelo marinho ·
 > `Sf_*` estado de superfície · `Foxx_*` / `Faxa_*` fluxos. Na **Fase 1** (DOCN)
@@ -198,7 +207,8 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 │   ├── driver/esm.F90        ← driver NUOPC
 │   ├── mediator/             ← MED (bulk NCAR): MED_cap + 4 módulos
 │   ├── caps/atmos/           ← cap MONAN-A (MPAS) + DATM
-│   ├── caps/ocean/           ← cap MOM6+SIS2 + DOCN (+ upstream/)
+│   ├── caps/ocean/           ← cap MOM6 + DOCN (+ upstream/)
+│   ├── caps/ice/             ← cap SIS2 (sis_cap_MONAN.F90), opcional
 │   └── shared/               ← mpi_allreduce_*, time_utils
 ├── models/                   ← submódulos das fontes dos modelos
 │   ├── atmos/MONAN-Model/    ← MONAN-A 2.0 (MPAS-A 8.3.1)
@@ -367,14 +377,42 @@ em silêncio no modo `sequential`.
 | `concurrent` | `split` | Produção em escala, com custo calibrado. |
 | `concurrent` | `shared` | **Rejeitado.** PETs disjuntos são a própria definição de execução concorrente; `config_read` aborta com mensagem explícita. |
 
+#### Componente de gelo (`use_sis2_dynamic`, `ice_pet_count`)
+
+O gelo marinho dinâmico segue os **mesmos dois eixos** dos demais componentes, e não um terceiro eixo próprio:
+
+| `pet_layout` | Com `use_sis2_dynamic = .true.` |
+|:-------------|:--------------------------------|
+| `split`  | Três blocos disjuntos: ATM \| OCN \| ICE |
+| `shared` | ICE em todos os PETs, junto com ATM, OCN e MED |
+
+Regras verificadas tanto pelo driver quanto pelo `run_esmApp.jaci`:
+
+- Em `split`, `atm_pet_count + ocn_pet_count + ice_pet_count` deve ser igual ao `-n` do job.
+- `ice_pet_count > 0` sem `use_sis2_dynamic` é **erro**, e não descarte silencioso: sem o componente ICE a contagem não teria a quem se aplicar.
+- `use_sis2_dynamic = .true.` exige `use_docn = .false.`. Com o DOCN o oceano é um arquivo OISST lido do disco e a fração de gelo vem do próprio arquivo, então não há a quem o SIS2 se acoplar.
+- Em `split` com gelo, `ice_pet_count` precisa ser **explícito**. O `select` do PBS é montado antes de o driver executar, então o script não tem como resolver o modo automático (`ice_pet_count = 0`).
+
+**Exemplo, concorrente com gelo em 8 PETs:**
+
+```fortran
+&nuopc_petlayout
+  coupling_mode    = 'concurrent'
+  pet_layout       = 'split'
+  atm_pet_count    = 4        ! MPAS → PET 0..3
+  ocn_pet_count    = 2        ! MOM6 → PET 4..5
+  use_sis2_dynamic = .true.
+  ice_pet_count    = 2        ! SIS2 → PET 6..7
+/
+```
+
+> **Estado do gelo: recurso em avaliação, não de produção.** O caminho do `Si_ifrac` real do ICE até o MPAS ainda não foi validado. O mediador copia `Si_ifrac_sis2` ponto a ponto, e essa cópia só está correta se as grades do ICE e da atmosfera coincidirem, o que em geral não acontece: falta um regrid dedicado, análogo ao `rh_ocn2atm` já usado para o `So_t`. Se as formas diferirem, o mediador mantém o valor anterior e registra aviso no log, em vez de escrever dado errado em silêncio. Os diagnósticos temporários `FIX-DIAG-TEMP5` (saída do cap do gelo) e `FIX-DIAG-TEMP6` (chegada ao mediador) existem para esclarecer esse ponto e devem ser removidos depois.
+
 Omitir `pet_layout` é seguro: ele é derivado do `coupling_mode`
 (`concurrent`→`split`, `sequential`→`shared`), de modo que uma `nuopc.input`
 anterior à v14.20 mantém exatamente o comportamento que tinha.
 
-Em `split`, `atm_pet_count + ocn_pet_count` deve ser igual ao `-n` do job. O
-`run_esmApp.jaci` valida ainda no nó de login, e o driver valida de novo antes
-de inicializar os componentes, abortando com mensagem clara em caso de
-divergência. Com `0` em ambos, a divisão é automática.
+Em `split`, a soma das contagens de PET deve ser igual ao `-n` do job (duas parcelas sem gelo, três com gelo; ver adiante). O `run_esmApp.jaci` valida ainda no nó de login, e o driver valida de novo antes de inicializar os componentes, abortando com mensagem clara em caso de divergência. Com `0` em ambas, a divisão é automática.
 
 **Exemplo — produção concorrente, 128 PETs com divisão 88:40:**
 
@@ -611,6 +649,16 @@ o `PBS_NODEFILE` na ordem do `select`.
            └──────── bloco ATM ─────┘     └──── bloco OCN ─────┘
 ```
 
+Com `use_sis2_dynamic = .true.` o `select` ganha um **terceiro bloco**, e o teto de PET/nó do gelo é ajustável por `--ppn-ice` (256 por padrão, como os demais). A soma de `mpiprocs` dos três blocos precisa fechar com o `-n` do job:
+
+```text
+  -n 8   atm=4  ocn=2  ice=2
+  select = 1:ncpus=4:mpiprocs=4 + 1:ncpus=2:mpiprocs=2 + 1:ncpus=2:mpiprocs=2
+           └──── bloco ATM ────┘   └──── bloco OCN ───┘   └──── bloco ICE ───┘
+```
+
+> **A ordem dos blocos importa.** O PALS preenche o `PBS_NODEFILE` na ordem do `select`, e o `esm.F90` atribui PETs por faixas contíguas de rank: ATM primeiro, depois OCN, depois ICE. Os blocos do `select` seguem essa mesma ordem, senão um componente executaria em nós dimensionados para outro. O `--pet-order` troca ATM e OCN de posição; o bloco do ICE vem sempre por último.
+
 ```bash
 run_esmApp.jaci -n 384 --check                # mostra a topologia e o select
 run_esmApp.jaci -n 384                         # valida, gera METIS e faz qsub
@@ -618,7 +666,7 @@ run_esmApp.jaci -n 384 --pet-order ocn-first   # inverte a ordem dos blocos
 ```
 
 O PET/nó de cada componente é o **maior divisor** do respectivo *count* que caiba
-no limite (`--ppn-atm` e `--ppn-ocn`, ambos 256 por padrão). Por isso convém que
+no limite (`--ppn-atm`, `--ppn-ocn` e `--ppn-ice`, todos 256 por padrão). Por isso convém que
 cada *count* caiba em um nó (≤ 256) ou seja múltiplo de 256; *counts* maiores que
 256 e não múltiplos forçam blocos tortos (ex.: `2×192`).
 
@@ -728,7 +776,7 @@ estão em `docs/domain-mom6.md`; a incompatibilidade, em `docs/mascara-cap-nuopc
 | `bin/esmApp`                     | Executável                               |
 | `logs/PET*.esmApp.log`           | Logs ESMF por PET                        |
 | `diag_export/monan_export_*.nc`  | Campos ATM exportados                    |
-| `diag_import/mom6_import_*.nc`   | Fluxos bulk MED→OCN                      |
+| `diag_import/mom6_import_*.nc`   | `exportState` do MED: 14 fluxos + `So_t`, `So_u`, `So_v`, `Sf_zorl` |
 | `diag_import/monan2_import_*.nc` | Campos OCN→ATM importados pelo MPAS      |
 | `diag_import/docn_import_*.nc`   | SST/gelo interpolados pelo DOCN (Fase 1) |
 | `diag_import/sst_ifrac_diag/`    | Evolução temporal de SST e Si_ifrac      |
@@ -743,6 +791,8 @@ python3 tools/postproc/analisa_comparacao.py         # comparação entre experi
 python3 tools/postproc/analisa_sst_ifrac.py          # evolução de SST/Si_ifrac
 python3 tools/animation/anim_monan2_import.py        # animações
 ```
+
+> **Campos novos no `mom6_import` (v14.22).** `So_u`, `So_v` e `Sf_zorl` faziam parte de `export_names` e por isso ganhavam variável no arquivo, mas não constavam de nenhum dos dois `select case` de `med_cap_netcdf.F90`. Caíam no `case default`, eram puladas pelo `cycle` e ficavam gravadas apenas com `_FillValue`: o GrADS as mostrava como *all undefined values*, o que é diferente de valor zerado. Corrigido; o `case default` passou a registrar aviso no log, para que a próxima lacuna do gênero apareça na compilação de diagnósticos em vez de só na hora de plotar.
 
 > O `write_import_diag=.true.` gera ~1,7 MB/passo (grade OISST 1440×720,
 > ≈ 41 MB/dia com `dt_coupling=3600 s`). Desative em produção longa.
@@ -798,6 +848,12 @@ do MOM6). Os fontes em `src/caps/ocean/upstream/` pertencem à biblioteca MOM6 e
 | `ocn_comp_NUOPC.F90`  | Módulo ponte (não compilado)      |
 | `DOCN_cap.F90`        | Cap OCN por dados OISST (Fase 1)  |
 | `docn_cap_netcdf.F90` | I/O NetCDF do DOCN                |
+
+**Cap de gelo marinho — `src/caps/ice/`**
+
+| Arquivo               | Descrição                                                        |
+|:----------------------|:-----------------------------------------------------------------|
+| `sis_cap_MONAN.F90`   | Cap NUOPC do SIS2. Componente separado, **não** um subcomponente embutido no OCN via `combined_ice_ocean_driver`. Compilado apenas quando o gelo é usado; sempre presente no binário, inerte com `use_sis2_dynamic = .false.` |
 
 **Compartilhados — `src/shared/`**
 
@@ -888,6 +944,7 @@ ficar em torno de 170, não em 3.
 
 | Versão | Data     | Mudanças                                                   |
 |:-------|:---------|:-----------------------------------------------------------|
+| 14.22  | Ago 2026 | **Componente de gelo marinho (SIS2) integrado**, como componente NUOPC próprio com os conectores `MED <-> ICE`, reexpresso sobre o eixo `pet_layout` (o gelo passa a existir também em `shared` e em `sequential + split`, combinações que não existiam na origem). Terceiro bloco de nós no `select` do PBS e nova opção `--ppn-ice`. Quatro correções encontradas em execução: relógio **compartilhado** entre componentes, que fazia o NUOPC avançar o mesmo objeto uma vez por componente (agora cada um recebe cópia via `ESMF_ClockCreate`); origem errada da fração de gelo (`Ice%sCS%IST%part_size` no lugar do campo de fachada); `SharePolicyField="share"` indevido na exportação do cap do gelo; e contagem de passos com calendário aproximado em `esmApp.F90` (365 dias/ano, 30 dias/mês), que encurtava a simulação em cerca de 24 h. **BUG-NC-06:** `So_u`, `So_v` e `Sf_zorl` ausentes dos `select case` de `med_cap_netcdf.F90`, gravados só com `_FillValue` no `mom6_import` |
 | 14.21  | Ago 2026 | **Efeito do SMT medido.** Novo `--allow-smt` no `run_esmApp.jaci`, que separa `PPN_PHYS=256` (cores físicos, limite recomendado e padrão) de `PPN_HARD=512` (CPUs lógicas, limite do hardware), e nova linha `REGIME` no resumo de topologia. Novo `mede_smt.py`, que compara as duas configurações a partir dos logs de PET, normalizando pelo número de nós. Medição de 06/08/2026 com 512 PETs e três repetições: em *wall-clock time* A é **2,22x mais rápido**; em custo de máquina o SMT **degrada 11,2%** (incerteza de 7,7%), com sinais opostos por componente, MED 0,97 e OCN 0,86 contra MPAS 1,20. O padrão de 256 PET/nó fica confirmado por medição |
 | 14.20  | Ago 2026 | Contabilidade de `ncpus` confirmada por `qstat -Qf`: o limite das filas é em **cores físicos** (`pesqextra` 7680/30 = 256 por nó), então o `select` mantém `ncpus = mpiprocs ≤ 256` e a posse do nó inteiro passa a vir de **`place=scatter:excl`, agora o padrão**. Nova **guarda de fila** (`QUEUE_LIMITS_*` + `_queue_guard`): NPES, nós e *walltime* são conferidos contra `resources_max` antes do `qsub`. Nós `aux01`-`aux10` (256 `ncpus`, ~1,5 TB, fila `aux`) documentados como destino de pré e pós-processamento |
 | 14.19  | Jul 2026 | Execução **multi-nó** no `run_esmApp.jaci`: `select` derivado de `-n` (`NNODES × PPN`, `place=scatter`), padrão 256 PET/nó (nó físico cheio, 1 rank/core) e **sem reserva de memória** por padrão (`--mem`/`--mem-per-pet` são opt-in). Modo concurrent com **consolidação por componente** (`select` heterogêneo: um componente por nó; `--ppn-atm`, `--ppn-ocn`, `--pet-order`). Novo `tools/coupler/plan-layout.py` (planejador de topologia) |

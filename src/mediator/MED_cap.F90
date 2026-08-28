@@ -36,7 +36,8 @@ module MED_cap_MONAN_mod
                                   cfg_docn_epoch_year,              &
                                   cfg_docn_epoch_month,             &
                                   cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
-                                  cfg_use_docn, cfg_mom6_mesh_ocn     ! FIX B-OCNGRID-01
+                                  cfg_use_docn, cfg_mom6_mesh_ocn,  & ! FIX B-OCNGRID-01
+                                  cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -283,6 +284,30 @@ contains
       SharePolicyField="share", rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
+
+    ! Si_ifrac_sis2 — fração de gelo real vinda do componente ICE (SIS2).
+    !
+    ! O nome é deliberadamente diferente de "Si_ifrac" para evitar que os dois
+    ! conectores automáticos, OCN->MED e ICE->MED, apontem para o mesmo nome de
+    ! campo: nesse caso o resultado dependeria da ordem de execução. Sem este
+    ! advertise, o conector ICE->MED não tem o que casar do lado do MED, o
+    ! campo aparece como "Connected: false" no Compliance Checker e a leitura
+    ! feita em RouteOcnToAtm (med_cap_methods.F90) falha sem alarde.
+    if (cfg_use_sis2_dynamic) then
+      ! SharePolicyField="share" é mantido aqui por consistência: todos os
+      ! demais campos de IMPORTAÇÃO do mediador (So_t, Sa_*, etc.) usam a
+      ! mesma política e funcionam. A anomalia corrigida estava do lado do
+      ! EXPORTADOR: o cap do gelo era o único do sistema a usar share numa
+      ! exportação, e com isso o conector aparentemente pulava a
+      ! transferência real e entregava zeros ao mediador (a origem tinha
+      ! máximo 0,997 e o destino chegava com mínimo e máximo iguais a zero).
+      ! Ver sis_cap_MONAN.F90::InitializeAdvertise.
+      call NUOPC_Advertise(importState, StandardName="Si_ifrac_sis2", &
+        TransferOfferGeomObject="cannot provide", &
+        SharePolicyField="share", rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, file=__FILE__)) return
+    end if
 
     ! Advertise campos de export para o OCN
     do n = 1, n_export
@@ -671,6 +696,19 @@ contains
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
+
+    ! Si_ifrac_sis2 é realizado na MESMA ocn_grid: o componente ICE foi montado
+    ! com a mesma geometria do oceano (mesmo ocean_hgrid.nc, mesmas dimensões,
+    ! mesma periodicidade), ver sis_cap_MONAN.F90.
+    if (cfg_use_sis2_dynamic) then
+      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
+        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_ifrac_sis2", rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, file=__FILE__)) return
+      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, file=__FILE__)) return
+    end if
 
     !--------------------------------------------------------------------------
     ! Realizar campos de export na grade OCN

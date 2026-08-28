@@ -55,6 +55,7 @@ include $(ESMFMKFILE)
 # =============================================================================
 override ATM_DIR      := src/caps/atmos
 override OCN_DIR      := src/caps/ocean
+override ICE_DIR      := src/caps/ice
 override UPSTREAM_DIR := src/caps/ocean/upstream
 override MEDIATOR_DIR := src/mediator
 override DRIVER_DIR   := src/driver
@@ -72,6 +73,9 @@ ifeq ($(strip $(ATM_DIR)),)
 endif
 ifeq ($(strip $(OCN_DIR)),)
   $(error FATAL: OCN_DIR vazio — verifique MAKEFLAGS=$$MAKEFLAGS)
+endif
+ifeq ($(strip $(ICE_DIR)),)
+  $(error FATAL: ICE_DIR vazio — verifique MAKEFLAGS=$$MAKEFLAGS)
 endif
 
 # =============================================================================
@@ -267,6 +271,7 @@ ALL_OBJS := \
   $(OBJDIR)/mom_cap_methods.o           \
   $(OBJDIR)/time_utils.o                \
   $(OBJDIR)/mom_cap_MONAN.o             \
+  $(OBJDIR)/sis_cap_MONAN.o             \
   $(OBJDIR)/esm.o                       \
   $(OBJDIR)/esmApp.o
 
@@ -364,7 +369,8 @@ $(OBJDIR)/med_cap_netcdf.o: $(MEDIATOR_DIR)/med_cap_netcdf.F90 \
 	$(FC) $(F90FLAGS) -c -o $@ $<
 
 $(OBJDIR)/med_cap_methods.o: $(MEDIATOR_DIR)/med_cap_methods.F90 \
-                              $(OBJDIR)/med_cap_types.o           | dirs
+                              $(OBJDIR)/med_cap_types.o           \
+                              $(OBJDIR)/mpas_cap_config.o         | dirs
 	$(FC) $(F90FLAGS) -c -o $@ $<
 
 $(OBJDIR)/med_bulk_ncar.o: $(MEDIATOR_DIR)/med_bulk_ncar.F90 \
@@ -426,6 +432,15 @@ $(OBJDIR)/mom_cap_MONAN.o: $(OCN_DIR)/mom_cap_MONAN.F90          \
                            $(OBJDIR)/time_utils.o                | dirs
 	$(FC) $(MOM6_FCFLAGS) -c -o $@ $<
 
+# Cap NUOPC/ESMF do componente de gelo marinho SIS2, componente separado do OCN.
+# ice_model_mod, MOM_time_manager, mpp_domains_mod, mpp_mod e MOM_domains vêm da
+# biblioteca já compilada (MOM6_LIBDIR/MOM6_MODDIR), sem alvo .o próprio aqui,
+# mesmo padrão que mom_cap_MONAN.o já usa para MOM_time_manager e mpp_mod.
+$(OBJDIR)/sis_cap_MONAN.o: $(ICE_DIR)/sis_cap_MONAN.F90 \
+                           $(OBJDIR)/time_utils.o        \
+                           $(OBJDIR)/mpas_cap_config.o   | dirs
+	$(FC) $(MOM6_FCFLAGS) -c -o $@ $<
+
 # L4 — driver ESM
 # esm.o usa: 'use MOM_cap_MONAN_mod, only: OCN_SetServices => SetServices'
 $(OBJDIR)/esm.o: $(DRIVER_DIR)/esm.F90      \
@@ -434,6 +449,7 @@ $(OBJDIR)/esm.o: $(DRIVER_DIR)/esm.F90      \
                  $(OBJDIR)/DATM_cap.o       \
                  $(OBJDIR)/DOCN_cap.o       \
                  $(OBJDIR)/mom_cap_MONAN.o  \
+                 $(OBJDIR)/sis_cap_MONAN.o  \
                  $(OBJDIR)/mpas_cap_utils.o | dirs
 	$(FC) $(F90FLAGS) -c -o $@ $<
 
@@ -549,6 +565,7 @@ printenv:
 	@echo "  Diretórios de código-fonte"
 	@echo "    ATM_DIR       = $(ATM_DIR)"
 	@echo "    OCN_DIR       = $(OCN_DIR)"
+	@echo "    ICE_DIR       = $(ICE_DIR)"
 	@echo "    UPSTREAM_DIR  = $(UPSTREAM_DIR)"
 	@echo "    MEDIATOR_DIR  = $(MEDIATOR_DIR)"
 	@echo "    SHARED_DIR    = $(SHARED_DIR)"

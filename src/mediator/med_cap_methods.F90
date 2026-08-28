@@ -21,6 +21,7 @@ module med_cap_methods_mod
   use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState
+  use mpas_cap_config_mod, only: cfg_use_sis2_dynamic
 
   implicit none
   private
@@ -304,6 +305,75 @@ contains
     ! So_u/So_v: Sprint B — preenchimento via RegridOrCopy no MediatorAdvance.
     !   RegridOptionalCurrent desativado para evitar conflito de grade
     !   (exportState.So_u/v vive na grade OCN após Sprint B).
+
+    ! Si_ifrac real vindo do componente ICE (SIS2).
+    !
+    ! Quando o SIS2 dinâmico está ativo, o gelo real chega aqui no importState
+    ! com o nome Si_ifrac_sis2 e sobrescreve o Si_ifrac do exportState, que até
+    ! então vinha da fórmula aproximada do OCN.
+    !
+    ! AINDA NÃO VALIDADO: a cópia abaixo é direta, ponto a ponto. Ela só está
+    ! correta se as duas grades coincidirem. O Si_ifrac_sis2 vive na grade do
+    ! ICE (tripolar, igual à do oceano) e o Si_ifrac do exportState vive na
+    ! grade do ATM, então o caminho certo é quase certamente um regrid próprio,
+    ! como o rh_ocn2atm já usado para o So_t. A comparação de shape abaixo
+    ! impede a cópia errada de acontecer em silêncio: se as formas diferirem, o
+    ! valor anterior é mantido e fica registrado um aviso no log. Rever antes
+    ! de usar em produção.
+    if (cfg_use_sis2_dynamic) then
+      block
+        type(ESMF_Field) :: f_ifrac_sis2, f_ifrac_exp
+        real(ESMF_KIND_R8), pointer :: ptr_sis2(:,:) => null()
+        real(ESMF_KIND_R8), pointer :: ptr_exp(:,:)  => null()
+        integer :: rc_ice
+
+        call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
+          field=f_ifrac_sis2, rc=rc_ice)
+        if (rc_ice == ESMF_SUCCESS) then
+          call ESMF_FieldGet(f_ifrac_sis2, farrayPtr=ptr_sis2, rc=rc_ice)
+        end if
+        if (rc_ice == ESMF_SUCCESS .and. associated(ptr_sis2)) then
+          call ESMF_StateGet(exportState, itemName="Si_ifrac", &
+            field=f_ifrac_exp, rc=rc_ice)
+          if (rc_ice == ESMF_SUCCESS) &
+            call ESMF_FieldGet(f_ifrac_exp, farrayPtr=ptr_exp, rc=rc_ice)
+          if (rc_ice == ESMF_SUCCESS .and. associated(ptr_exp)) then
+            ! Diagnóstico temporário, par do FIX-DIAG-TEMP5 em
+            ! sis_cap_MONAN.F90::export_si_ifrac. Imprime os extremos do que
+            ! chegou ao mediador pelo conector ICE -> MED. Comparando os dois
+            ! logs sabe-se se o valor se perdeu no conector (TEMP5 com valores
+            ! reais e TEMP6 zerado) ou se já saiu zerado do cap do gelo (os
+            ! dois zerados). REMOVER depois de concluído o diagnóstico.
+            block
+              character(len=256) :: diag_msg6
+              write(diag_msg6,'(A,ES12.4,A,ES12.4,A,I0,A,I0)') &
+                'FIX-DIAG-TEMP6: Si_ifrac_sis2 recebido no MED min=', &
+                minval(ptr_sis2), ' max=', maxval(ptr_sis2), &
+                ' | shape ', size(ptr_sis2,1), ' x ', size(ptr_sis2,2)
+              call ESMF_LogWrite(trim(diag_msg6), ESMF_LOGMSG_INFO)
+            end block
+
+            if (all(shape(ptr_exp) == shape(ptr_sis2))) then
+              ptr_exp(:,:) = ptr_sis2(:,:)
+              call ESMF_LogWrite('MED RouteOcnToAtm: Si_ifrac ' // &
+                'sobrescrito com o valor real do SIS2 (Si_ifrac_sis2)', &
+                ESMF_LOGMSG_INFO)
+            else
+              call ESMF_LogWrite('MED RouteOcnToAtm: AVISO — ' // &
+                'Si_ifrac_sis2 tem shape diferente de Si_ifrac no ' // &
+                'exportState (grades diferentes) — copia direta pulada, ' // &
+                'precisa de regrid dedicado. Mantido o valor anterior.', &
+                ESMF_LOGMSG_WARNING)
+            end if
+          end if
+        else
+          call ESMF_LogWrite('MED RouteOcnToAtm: cfg_use_sis2_dynamic=' // &
+            '.true. mas Si_ifrac_sis2 nao encontrado no importState — ' // &
+            'mantido o Si_ifrac do OCN (formula aproximada)', &
+            ESMF_LOGMSG_WARNING)
+        end if
+      end block
+    end if
 
     ! Estampilar timestamp no exportState (MPAS usa para validação)
     call NUOPC_SetTimestamp(exportState, clock, rc=rc)

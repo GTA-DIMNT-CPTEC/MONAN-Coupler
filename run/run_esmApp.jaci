@@ -502,6 +502,9 @@ QUEUE_LIMITS_preoper="10240 0 08:00:00"
 #                preenche o PBS_NODEFILE na ordem do select).
 PPN_ATM_CAP=0
 PPN_OCN_CAP=0
+# PPN_ICE_CAP  : teto de PET/nó do ICE. 0 = PPN_MAX (nó cheio). O SIS2 vive na
+#                grade do oceano, então na dúvida use o mesmo valor do OCN.
+PPN_ICE_CAP=0
 MEM_PER_PET_ATM=0
 PET_ORDER="atm-first"
 
@@ -520,6 +523,7 @@ while [[ $# -gt 0 ]]; do
     --no-mem)      MEM_PER_PET_GB=0; MEM_PER_PET_ATM=0; MEM_PER_NODE=""; shift ;;
     --ppn-atm)     PPN_ATM_CAP="$2"; shift 2 ;;
     --ppn-ocn)     PPN_OCN_CAP="$2"; shift 2 ;;
+    --ppn-ice)     PPN_ICE_CAP="$2"; shift 2 ;;
     --pet-order)   PET_ORDER="$2";   shift 2 ;;
     --check)       CHECK_ONLY=1;      shift   ;;
     --compile)     COMPILE_FIRST=1;   shift   ;;
@@ -553,6 +557,7 @@ Opções:
   Concurrent (só quando atm_pet_count/ocn_pet_count estão na nuopc.input):
       --ppn-atm N          Teto de PET/nó do ATM  (0 = nó cheio 256)
       --ppn-ocn N          Teto de PET/nó do OCN  (0 = nó cheio 256)
+      --ppn-ice N          Teto de PET/nó do ICE  (0 = nó cheio 256)
       --mem-per-pet-atm N  Reserva opcional por PET do ATM em GB (padrão: 0)
       --pet-order ORDEM    atm-first (padrão) | ocn-first
   --compile                make rebuild antes de submeter
@@ -823,6 +828,10 @@ PET_LAYOUT=$(_nuopc_pet pet_layout || true)
 PET_LAYOUT=$(printf '%s' "${PET_LAYOUT}" | tr '[:upper:]' '[:lower:]')
 ATM_PET=$(_nuopc_pet atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
 OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
+ICE_PET=$(_nuopc_pet ice_pet_count || true); [[ "${ICE_PET}" =~ ^[0-9]+$ ]] || ICE_PET=0
+USE_SIS2=$(_nuopc_pet use_sis2_dynamic || true)
+USE_SIS2=$(printf '%s' "${USE_SIS2}" | tr -d ". '\"" | tr '[:upper:]' '[:lower:]')
+case "${USE_SIS2}" in t|true) USE_SIS2=1 ;; *) USE_SIS2=0 ;; esac
 
 # Modo desconhecido é ERRO, não recuo silencioso para sequential: um typo em
 # coupling_mode faria o script procurar a partição errada (NPES em vez de
@@ -855,6 +864,16 @@ fi
 # PETs disjuntos são a definição de execução concorrente. A combinação
 # concurrent+shared não existe, e o driver a rejeita em config_read; abortar
 # aqui evita gastar a fila para descobrir isso.
+# ice_pet_count sem use_sis2_dynamic seria lido e jogado fora sem aviso, porque
+# nenhum componente ICE chega a ser criado. Mesma regra do driver (config_read).
+if [[ "${USE_SIS2}" -eq 0 && "${ICE_PET}" -gt 0 ]]; then
+  echo ""
+  printf "ERRO: ice_pet_count=%s exige use_sis2_dynamic = .true.\n" "${ICE_PET}"
+  printf "      Sem essa chave nenhum componente ICE e criado, e a contagem\n"
+  printf "      nao teria a quem se aplicar. Corrija &nuopc_petlayout em %s.\n" "${CONFIG_FILE}"
+  exit 1
+fi
+
 if [[ "${COUPLING_MODE}" == "concurrent" && "${PET_LAYOUT}" != "split" ]]; then
   echo ""
   echo "ERRO: coupling_mode=concurrent exige pet_layout=split."
@@ -866,20 +885,32 @@ if [[ "${PET_LAYOUT}" == "split" ]]; then
   # Guard: em split, atm_pet_count + ocn_pet_count deve ser IGUAL a NPES.
   # Antes da v14.20 esta guarda valia só para concurrent, deixando passar a
   # combinação sequential+split.
-  if [[ "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 && $(( ATM_PET + OCN_PET )) -ne "${NPES}" ]]; then
+  # Com o componente ICE ativo a soma tem tres parcelas; com ele desligado
+  # ICE_PET vale 0 e a conta e' exatamente a mesma de antes.
+  if [[ "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 \
+        && $(( ATM_PET + OCN_PET + ICE_PET )) -ne "${NPES}" ]]; then
     echo ""
     echo "ERRO: pet_layout=split inconsistente com -n."
-    printf "      atm_pet_count=%s + ocn_pet_count=%s = %s, mas -n = %s.\n" \
-      "${ATM_PET}" "${OCN_PET}" "$(( ATM_PET + OCN_PET ))" "${NPES}"
-    echo "      Em split, atm_pet_count + ocn_pet_count deve ser IGUAL a -n."
-    printf "      Ajuste: run_esmApp.jaci -n %s   (ou corrija a nuopc.input).\n" "$(( ATM_PET + OCN_PET ))"
+    printf "      atm_pet_count=%s + ocn_pet_count=%s + ice_pet_count=%s = %s, mas -n = %s.\n" \
+      "${ATM_PET}" "${OCN_PET}" "${ICE_PET}" "$(( ATM_PET + OCN_PET + ICE_PET ))" "${NPES}"
+    echo "      Em split, a soma das contagens deve ser IGUAL a -n."
+    printf "      Ajuste: run_esmApp.jaci -n %s   (ou corrija a nuopc.input).\n" \
+      "$(( ATM_PET + OCN_PET + ICE_PET ))"
     exit 1
   fi
   # Nº de partições do MPAS = atm_pet_count (auto: metade de NPES, arred. p/ cima).
   if [[ "${ATM_PET}" -gt 0 ]]; then MPAS_NPART="${ATM_PET}"
   else                              MPAS_NPART=$(( (NPES + 1) / 2 )); fi
-  printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN em %s PET(s)\n" \
-    "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+  if [[ "${USE_SIS2}" -eq 1 ]]; then
+    printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN+ICE em %s PET(s)\n" \
+      "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+    printf "  %-8s: componente ICE (SIS2) ATIVO — ice_pet_count = %s (0 = auto)\n" \
+      "INFO" "${ICE_PET}"
+    printf "  %-8s: ATENÇÃO — o caminho Si_ifrac ICE→MPAS ainda não foi validado.\n" "AVISO"
+  else
+    printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN em %s PET(s)\n" \
+      "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
+  fi
   printf "  %-8s: partição METIS dimensionada por atm_pet_count = %s (não por -n = %s)\n" \
     "INFO" "${MPAS_NPART}" "${NPES}"
   if [[ "${COUPLING_MODE}" == "sequential" ]]; then
@@ -891,13 +922,13 @@ else
   # silencioso, e uma nuopc.input com sequential + atm/ocn_pet_count entregava
   # os DOIS componentes em todos os PETs — o MOM6 abortava depois, no
   # mpp_define_domains, por LAYOUT incompatível. Agora é erro explícito.
-  if [[ "${ATM_PET}" -gt 0 || "${OCN_PET}" -gt 0 ]]; then
+  if [[ "${ATM_PET}" -gt 0 || "${OCN_PET}" -gt 0 || "${ICE_PET}" -gt 0 ]]; then
     echo ""
-    echo "ERRO: pet_layout=shared ignora atm_pet_count/ocn_pet_count."
-    printf "      Lidos de %s: atm_pet_count=%s  ocn_pet_count=%s.\n" \
-      "${CONFIG_FILE}" "${ATM_PET}" "${OCN_PET}"
+    echo "ERRO: pet_layout=shared ignora atm_pet_count/ocn_pet_count/ice_pet_count."
+    printf "      Lidos de %s: atm_pet_count=%s  ocn_pet_count=%s  ice_pet_count=%s.\n" \
+      "${CONFIG_FILE}" "${ATM_PET}" "${OCN_PET}" "${ICE_PET}"
     echo "      Para split de comunicador com execução serial: pet_layout = 'split'."
-    echo "      Para todos os componentes em todos os PETs: zere as duas contagens."
+    echo "      Para todos os componentes em todos os PETs: zere as contagens."
     exit 1
   fi
   MPAS_NPART="${NPES}"
@@ -1051,34 +1082,77 @@ CONC_PER_COMP=0
 [[ "${PET_LAYOUT}" == "split" && "${ATM_PET}" -gt 0 && "${OCN_PET}" -gt 0 ]] \
   && CONC_PER_COMP=1
 
+# Com o gelo ativo o 'select' precisa de um TERCEIRO bloco. Sem ele o total de
+# mpiprocs pedido ao PBS seria ATM+OCN, menor que -n, e o mpiexec ficaria sem
+# slots para os PETs do ICE.
+USE_ICE_BLOCK=0
+[[ "${CONC_PER_COMP}" -eq 1 && "${USE_SIS2}" -eq 1 && "${ICE_PET}" -gt 0 ]] \
+  && USE_ICE_BLOCK=1
+
+# Em split com gelo, ice_pet_count precisa ser explícito: o script monta o
+# 'select' ANTES de o driver rodar, então não tem como descobrir o valor que o
+# esm.F90 calcularia no modo automático (ice_pet_count = 0).
+if [[ "${CONC_PER_COMP}" -eq 1 && "${USE_SIS2}" -eq 1 && "${ICE_PET}" -le 0 ]]; then
+  echo ""
+  echo "ERRO: pet_layout=split com use_sis2_dynamic=.true. exige ice_pet_count > 0."
+  printf "      O 'select' do PBS e montado antes do driver executar, entao o\n"
+  printf "      modo automatico (ice_pet_count = 0) nao pode ser resolvido aqui.\n"
+  printf "      Defina ice_pet_count em &nuopc_petlayout de %s.\n" "${CONFIG_FILE}"
+  exit 1
+fi
+
 if [[ "${CONC_PER_COMP}" -eq 1 ]]; then
   # ── 'select' HETEROGÊNEO: bloco ATM (denso) + bloco OCN (espalhado) ────────
   _cap_atm="${PPN_ATM_CAP}"; [[ "${_cap_atm}" -le 0 ]] && _cap_atm="${PPN_MAX}"
   _cap_ocn="${PPN_OCN_CAP}"; [[ "${_cap_ocn}" -le 0 ]] && _cap_ocn="${PPN_MAX}"
+  _cap_ice="${PPN_ICE_CAP}"; [[ "${_cap_ice}" -le 0 ]] && _cap_ice="${PPN_MAX}"
   [[ "${_cap_atm}" -gt "${PPN_MAX}" ]] && _cap_atm="${PPN_MAX}"
   [[ "${_cap_ocn}" -gt "${PPN_MAX}" ]] && _cap_ocn="${PPN_MAX}"
+  [[ "${_cap_ice}" -gt "${PPN_MAX}" ]] && _cap_ice="${PPN_MAX}"
 
   PPN_ATM=$(_largest_div_le "${ATM_PET}" "${_cap_atm}")
   PPN_OCN=$(_largest_div_le "${OCN_PET}" "${_cap_ocn}")
   N_ATM=$(( ATM_PET / PPN_ATM ))
   N_OCN=$(( OCN_PET / PPN_OCN ))
-  NNODES=$(( N_ATM + N_OCN ))
 
   _chunk_atm="${N_ATM}:ncpus=${PPN_ATM}:mpiprocs=${PPN_ATM}$(_mem_for "${PPN_ATM}" "${MEM_PER_PET_ATM}")"
   _chunk_ocn="${N_OCN}:ncpus=${PPN_OCN}:mpiprocs=${PPN_OCN}$(_mem_for "${PPN_OCN}" "${MEM_PER_PET_GB}")"
+
+  if [[ "${USE_ICE_BLOCK}" -eq 1 ]]; then
+    PPN_ICE=$(_largest_div_le "${ICE_PET}" "${_cap_ice}")
+    N_ICE=$(( ICE_PET / PPN_ICE ))
+    NNODES=$(( N_ATM + N_OCN + N_ICE ))
+    # O SIS2 vive na grade do oceano, então usa o mesmo orçamento de memória
+    # por PET do OCN.
+    _chunk_ice="${N_ICE}:ncpus=${PPN_ICE}:mpiprocs=${PPN_ICE}$(_mem_for "${PPN_ICE}" "${MEM_PER_PET_GB}")"
+  else
+    N_ICE=0; PPN_ICE=0; _chunk_ice=""
+    NNODES=$(( N_ATM + N_OCN ))
+  fi
+
+  # A ORDEM DOS BLOCOS IMPORTA: o PALS preenche o PBS_NODEFILE na ordem do
+  # 'select', e o esm.F90 atribui os PETs por faixas contíguas de rank
+  # (ATM = [0..nAtm-1], OCN = [nAtm..nAtm+nOcn-1], ICE = o resto). Os blocos
+  # aqui precisam seguir essa mesma ordem, senão um componente executa em nós
+  # dimensionados para outro.
   if [[ "${PET_ORDER}" == "ocn-first" ]]; then
     SELECT="select=${_chunk_ocn}+${_chunk_atm}"
   else
     SELECT="select=${_chunk_atm}+${_chunk_ocn}"
   fi
+  [[ -n "${_chunk_ice}" ]] && SELECT="${SELECT}+${_chunk_ice}"
 
-  TOPO_DESC="ATM ${N_ATM}×${PPN_ATM} + OCN ${N_OCN}×${PPN_OCN}  (ordem: ${PET_ORDER})"
+  if [[ "${USE_ICE_BLOCK}" -eq 1 ]]; then
+    TOPO_DESC="ATM ${N_ATM}×${PPN_ATM} + OCN ${N_OCN}×${PPN_OCN} + ICE ${N_ICE}×${PPN_ICE}  (ordem: ${PET_ORDER})"
+  else
+    TOPO_DESC="ATM ${N_ATM}×${PPN_ATM} + OCN ${N_OCN}×${PPN_OCN}  (ordem: ${PET_ORDER})"
+  fi
   if [[ -n "${MEM_PER_NODE}" ]]; then MEM_DESC="${MEM_PER_NODE}/nó (fixo, ambos)"
   elif [[ "${MEM_PER_PET_ATM}" -gt 0 || "${MEM_PER_PET_GB}" -gt 0 ]]; then
     MEM_DESC="ATM ${MEM_PER_PET_ATM} GB/PET · OCN ${MEM_PER_PET_GB} GB/PET"
   else MEM_DESC="padrão do nó (sem reserva)"
   fi
-  unset _cap_atm _cap_ocn _chunk_atm _chunk_ocn
+  unset _cap_atm _cap_ocn _cap_ice _chunk_atm _chunk_ocn _chunk_ice
 else
   # ── 'select' UNIFORME (sequential, ou concurrent sem counts explícitos) ────
   if [[ "${PPN}" -le 0 ]]; then

@@ -175,6 +175,22 @@ module mpas_cap_config_mod
   !   cfg_atm_pet_count  Nº de PETs do ATM (MPAS) quando pet_layout='split'.
   !                      <=0 → auto: ceil(petCount/2).
   !   cfg_ocn_pet_count  Nº de PETs do OCN (MOM6/DOCN) quando 'split'.
+  !
+  ! Componente ICE (SIS2 dinâmico), integrado a partir do MONAN-Coupler-PK:
+  !
+  !   cfg_use_sis2_dynamic  .false. (padrão) → nenhum componente ICE é criado;
+  !                         o comportamento é idêntico ao de antes desta
+  !                         integração. .true. → registra o cap do SIS2
+  !                         (sis_cap_MONAN.F90) como componente NUOPC próprio,
+  !                         com os conectores MED<->ICE.
+  !   cfg_ice_pet_count     Nº de PETs do ICE quando pet_layout='split' e
+  !                         use_sis2_dynamic=.true. 0 → automático.
+  !
+  ! O gelo segue o MESMO par de eixos dos demais componentes. Em
+  ! pet_layout='shared' o ICE fica em todos os PETs, junto com ATM, OCN e MED;
+  ! em 'split' ele recebe um terceiro bloco disjunto de PETs. Na versão de
+  ! origem o gelo só existia no ramo 'concurrent', porque ali os dois eixos
+  ! ainda estavam grudados; aqui essa amarração foi desfeita.
   !                      <=0 → auto: petCount - atm_pet_count.
   !   A validação da soma (atm+ocn == petCount) é feita em esm.F90, pois
   !   petCount só é conhecido após ESMF_Initialize (pós-MPI_Init).
@@ -182,6 +198,9 @@ module mpas_cap_config_mod
   character(len=16), public, protected :: cfg_pet_layout    = 'shared'
   integer,           public, protected :: cfg_atm_pet_count = 0
   integer,           public, protected :: cfg_ocn_pet_count = 0
+  ! Componente ICE (SIS2 dinâmico)
+  integer,           public, protected :: cfg_ice_pet_count    = 0
+  logical,           public, protected :: cfg_use_sis2_dynamic = .false.
 
   ! ── Grupo &nuopc_mode — seleção de componentes ────────────────────────────
   !   cfg_use_datm  .true.  → usa DATM (JRA55) como ATM
@@ -293,8 +312,12 @@ contains
     character(len=16) :: pet_layout    = ''
     integer           :: atm_pet_count = 0
     integer           :: ocn_pet_count = 0
-    namelist /nuopc_petlayout/ coupling_mode, pet_layout, &
-                               atm_pet_count, ocn_pet_count
+    ! Componente ICE (SIS2 dinâmico)
+    integer           :: ice_pet_count    = 0
+    logical           :: use_sis2_dynamic = .false.
+    namelist /nuopc_petlayout/ coupling_mode, pet_layout,   &
+                               atm_pet_count, ocn_pet_count, &
+                               ice_pet_count, use_sis2_dynamic
 
     rc = 0
 
@@ -334,6 +357,8 @@ contains
     coupling_mode        = cfg_coupling_mode
     atm_pet_count        = cfg_atm_pet_count
     ocn_pet_count        = cfg_ocn_pet_count
+    ice_pet_count        = cfg_ice_pet_count
+    use_sis2_dynamic     = cfg_use_sis2_dynamic
     ! pet_layout NÃO recebe cfg_pet_layout aqui, de propósito: o sentinela ''
     ! precisa sobreviver à leitura para que a ausência da chave seja
     ! distinguível de um valor explícito. A derivação a partir do
@@ -510,9 +535,9 @@ contains
       rc = 2; return
     end if
 
-    if (atm_pet_count < 0 .or. ocn_pet_count < 0) then
-      write(*,'(A)') '[mpas_cap_config] ERRO: atm_pet_count/ocn_pet_count ' // &
-        'nao podem ser negativos.'
+    if (atm_pet_count < 0 .or. ocn_pet_count < 0 .or. ice_pet_count < 0) then
+      write(*,'(A)') '[mpas_cap_config] ERRO: atm_pet_count/ocn_pet_count/' // &
+        'ice_pet_count nao podem ser negativos.'
       rc = 2; return
     end if
 
@@ -522,14 +547,35 @@ contains
     ! componentes em todos os PETs, sem qualquer sinal — e o MOM6 abortava
     ! depois, no mpp_define_domains, por LAYOUT incompatível. Agora é erro.
     if (trim(pet_layout) == 'shared' .and. &
-        (atm_pet_count > 0 .or. ocn_pet_count > 0)) then
-      write(*,'(A,I0,A,I0,A)') &
+        (atm_pet_count > 0 .or. ocn_pet_count > 0 .or. ice_pet_count > 0)) then
+      write(*,'(A,I0,A,I0,A,I0,A)') &
         '[mpas_cap_config] ERRO: pet_layout=shared ignora atm_pet_count=', &
-        atm_pet_count, ' e ocn_pet_count=', ocn_pet_count, '.'
+        atm_pet_count, ', ocn_pet_count=', ocn_pet_count, &
+        ' e ice_pet_count=', ice_pet_count, '.'
       write(*,'(A)') '  Para um split de comunicador com execucao serial, ' // &
         'use pet_layout=split.'
       write(*,'(A)') '  Para manter todos os componentes em todos os PETs, ' // &
-        'zere as duas contagens.'
+        'zere as contagens.'
+      rc = 2; return
+    end if
+
+    ! Mesma regra do descarte silencioso, aplicada ao gelo: ice_pet_count sem
+    ! use_sis2_dynamic seria lido, validado e jogado fora sem aviso, porque
+    ! nenhum componente ICE chega a ser criado. Erro, não silêncio.
+    ! O gelo dinâmico só faz sentido com o MOM6 dinâmico. Com use_docn=.true.
+    ! o oceano é um arquivo OISST lido do disco, e o Si_ifrac vem do próprio
+    ! arquivo: não há a quem o SIS2 se acoplar. Sem esta guarda o sistema
+    ! subiria com um componente ICE cujo resultado seria descartado.
+    if (use_sis2_dynamic .and. use_docn) then
+      write(*,'(A)') '[mpas_cap_config] ERRO: use_sis2_dynamic=.true. exige ' // &
+        'use_docn=.false. (SIS2 dinamico precisa do MOM6 dinamico).'
+      rc = 2; return
+    end if
+
+    if (.not. use_sis2_dynamic .and. ice_pet_count > 0) then
+      write(*,'(A,I0,A)') &
+        '[mpas_cap_config] ERRO: ice_pet_count=', ice_pet_count, &
+        ' exige use_sis2_dynamic=.true. (sem ele nao ha componente ICE).'
       rc = 2; return
     end if
 
@@ -537,6 +583,8 @@ contains
     cfg_pet_layout    = trim(pet_layout)
     cfg_atm_pet_count = atm_pet_count
     cfg_ocn_pet_count = ocn_pet_count
+    cfg_ice_pet_count = ice_pet_count
+    cfg_use_sis2_dynamic = use_sis2_dynamic
 
     ! ── Validação: Alternativa 1 — Si_ifrac via arquivo OISST ────────────
     ! cfg_use_docn_ice=.true. exige cfg_docn_ice_file configurado.
@@ -658,6 +706,8 @@ contains
     write(*,'(2X,A,A)')  'cfg_pet_layout       = ', trim(cfg_pet_layout)
     write(*,'(2X,A,I0)') 'cfg_atm_pet_count    = ', cfg_atm_pet_count
     write(*,'(2X,A,I0)') 'cfg_ocn_pet_count    = ', cfg_ocn_pet_count
+    write(*,'(2X,A,L1)') 'cfg_use_sis2_dynamic = ', cfg_use_sis2_dynamic
+    write(*,'(2X,A,I0)') 'cfg_ice_pet_count    = ', cfg_ice_pet_count
   end subroutine config_print
 
   !> @brief Converte string 'YYYY-MM-DD' para componentes inteiros.

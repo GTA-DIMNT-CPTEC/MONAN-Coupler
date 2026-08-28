@@ -9,6 +9,32 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Componente de gelo marinho (SIS2) integrado ao acoplador.** O SIS2 passa a existir como componente NUOPC próprio (`src/caps/ice/sis_cap_MONAN.F90`), com os conectores `MED -> ICE` e `ICE -> MED`, e não como subcomponente embutido no oceano via `combined_ice_ocean_driver`. Controlado por `use_sis2_dynamic` em `&nuopc_petlayout`; com a chave desligada (o padrão) nada é criado e o sistema é idêntico ao anterior.
+
+  A lógica de partição de PETs foi **reescrita**, e não copiada da origem. Lá o gelo só existia dentro do ramo `if (is_concurrent)`, porque os eixos temporal e espacial ainda estavam colapsados em um só. Aqui ela vive sobre o eixo `pet_layout`, o que faz duas combinações passarem a funcionar: `shared` com gelo, e a sequência sequencial com gelo. Quando o gelo está desligado, `nIce` vale 0 e as contas recaem exatamente na divisão em dois blocos anterior, o que permite exigir saída NetCDF byte-idêntica ao baseline como teste de regressão.
+
+  Regras acrescentadas, no mesmo princípio que motivou a correção do split: configuração lida e jogada fora sem aviso passa a ser erro. `ice_pet_count > 0` exige `use_sis2_dynamic`; `use_sis2_dynamic` exige `use_docn = .false.`; em `split` com gelo, `ice_pet_count` precisa ser explícito, porque o `select` do PBS é montado antes de o driver executar.
+
+  **Pendência conhecida:** o caminho do `Si_ifrac` real do ICE até o MPAS não foi validado. O mediador copia `Si_ifrac_sis2` ponto a ponto, e a cópia só está correta se as grades coincidirem; falta um regrid dedicado, análogo ao `rh_ocn2atm` do `So_t`. Há guarda de formato que preserva o valor anterior e registra aviso quando as formas divergem. Tratar como recurso em avaliação.
+
+- **Relógio compartilhado entre componentes (defeito grave).** `ESMF_Clock` é um tipo por referência. As rotinas que registram componentes passavam `driverClock` direto para `ESMF_GridCompSet`, o que fazia todos os componentes apontarem para o mesmo relógio físico. Como o NUOPC avança o relógio associado a cada componente depois do respectivo `Advance`, com três componentes Model o mesmo relógio recebia até três avanços por ciclo de `dt_coupling`. O sintoma observado foi a escrita de `monan2_import` passar de horária para a cada três horas: exatamente o fator 3 previsto.
+
+  Cada componente e cada conector passa a receber uma cópia independente, criada com `ESMF_ClockCreate(driverClock, rc=rc)`. Ao acrescentar um componente ou conector novo, use `AddModelCompWithClock` ou `AddConnectorWithClock` em vez de chamar `NUOPC_DriverAddComp` diretamente: assim a cópia do relógio vem junto, sem depender de alguém lembrar de repetir o bloco.
+
+- **Origem errada da fração de gelo no cap do SIS2.** O cap lia `Ice%part_size`, campo de fachada do acoplador preenchido apenas no caminho de acoplamento rápido, que nesta configuração permanece zerado. O estado real vive em `Ice%sCS%IST%part_size`, que é o que o próprio SIS2 usa para calcular área e massa; esse tem halos e categorias com base 0, então o deslocamento de índices passou a ser derivado da grade do próprio SIS2. A fórmula também mudou: era `1 - part_size(:,:,1)`, tratando o índice 1 como água aberta, quando o índice 1 é categoria de gelo.
+
+- **`SharePolicyField="share"` indevido na exportação do cap do gelo.** Era o único campo de exportação do sistema a usar essa política. O campo saía correto da origem e chegava zerado ao mediador. Removida na exportação, alinhando ao cap do oceano, que usa `share` apenas nas importações. Do lado do mediador a política foi mantida, porque ali todos os campos de importação a usam e funcionam.
+
+- **Contagem de passos com calendário aproximado (`esmApp.F90`).** O número de passos era estimado com aritmética manual, usando 365 dias por ano e 30 dias por mês, e esse número servia de limite do laço de execução. Para o intervalo de 2026-03-29 a 2026-04-30 dava 31 dias em vez de 32, porque março tem 31 dias, e a simulação parava cerca de 24 h antes da data final configurada. Passou a ser derivado do próprio intervalo ESMF (`stopTime - startTime`), que já respeita o calendário Gregoriano.
+
+- **BUG-NC-06: `So_u`, `So_v` e `Sf_zorl` gravados apenas com `_FillValue`.** Os três campos faziam parte de `export_names` e por isso ganhavam variável no `mom6_import_*.nc`, com dimensões e atributos, mas não constavam de nenhum dos dois `select case` de `med_cap_netcdf.F90`. Caíam no `case default` e eram pulados pelo `cycle` antes de qualquer escrita.
+
+  O modo de falha é o que torna o caso instrutivo: o arquivo passava por `q file` parecendo saudável, com as 18 variáveis listadas, e só se revelava ao tentar plotar, quando o GrADS respondia *all undefined values*. Valor ausente e valor zerado são coisas diferentes, e confundir os dois levou a investigar o oceano e a rotação de grade sem necessidade. O único sinal disponível antes disso era o `long_name` genérico das três variáveis, herdado do mesmo `case default`.
+
+  Corrigido nos dois `select case`, com os campos internos `is%f_uocn_atm`, `is%f_vocn_atm` e `is%f_zorl_atm`. O `case default` passou a registrar aviso no log em vez de pular em silêncio. Conferido por script que os 18 nomes de `export_names` têm mapeamento.
+
+- **Terceiro bloco de nós no `run_esmApp.jaci`.** Com `pet_layout = 'split'` e gelo ativo, o script pedia ao PBS apenas `ATM + OCN` processos, enquanto o `mpiexec` era lançado com o total. Para `-n 8` com atm=4, ocn=2, ice=2 o pedido era de 6 slots para 8 PETs, e o trabalho falharia na largada com mensagem do PALS sem relação aparente com gelo. O bloco do ICE entra no `select` e a opção `--ppn-ice` foi acrescentada por simetria. A ordem dos blocos segue a das faixas de rank atribuídas em `esm.F90`.
+
 - **Endurecimento: o mediador declarava `InitializeDataComplete` sem verificar
   o dado (B-SEQINIT-01, revisto).** O `MED_cap.F90` marcava
   `InitializeDataComplete = "true"` na primeira chamada, incondicionalmente, e

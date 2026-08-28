@@ -374,6 +374,43 @@
 ! ATENÇÃO (split): a partição METIS do MPAS é dimensionada por
 !   atm_pet_count, NÃO por -n. O run_esmApp.jaci gera a partição que faltar.
 !
+! COMPONENTE ICE (gelo marinho SIS2 dinâmico)
+!
+!   use_sis2_dynamic  .false. (padrão) → nenhum componente ICE é criado, e o
+!                     sistema se comporta exatamente como antes desta chave
+!                     existir. A fração de gelo continua vindo da fórmula
+!                     aproximada do OCN.
+!                     .true. → registra o cap do SIS2 (sis_cap_MONAN.F90)
+!                     como componente NUOPC próprio, com os conectores
+!                     MED -> ICE e ICE -> MED.
+!   ice_pet_count     Nº de PETs do ICE quando pet_layout='split' e
+!                     use_sis2_dynamic=.true. 0 → auto: divide em três partes
+!                     aproximadamente iguais o que não tiver sido fixado.
+!
+! O gelo segue os MESMOS dois eixos dos demais componentes:
+!   split  + ICE  → três blocos disjuntos, ATM | OCN | ICE.
+!   shared + ICE  → ICE em todos os PETs, junto com ATM, OCN e MED.
+!
+! REGRA (split, com ICE): atm_pet_count + ocn_pet_count + ice_pet_count deve
+!   ser igual ao total de PETs lançados, mesma regra do caso sem gelo.
+!
+! REGRA (shared): as três contagens devem ser 0.
+!
+! REGRA: ice_pet_count > 0 com use_sis2_dynamic=.false. é ERRO, e não
+!   descarte silencioso: sem o componente ICE a contagem não teria a quem se
+!   aplicar. Mesma lógica da regra de shared acima.
+!
+! REGRA: use_sis2_dynamic=.true. exige use_docn=.false. em &nuopc_mode. Com o
+!   DOCN o oceano é um arquivo OISST lido do disco e o Si_ifrac vem do próprio
+!   arquivo, então não há a quem o SIS2 se acoplar.
+!
+! ESTADO: o caminho do Si_ifrac real do ICE até o MPAS AINDA NÃO FOI
+!   VALIDADO. O mediador copia Si_ifrac_sis2 ponto a ponto, e essa cópia só
+!   está correta se as grades do ICE e do ATM coincidirem, o que em geral não
+!   acontece: falta um regrid dedicado. Se as formas diferirem, o mediador
+!   mantém o valor anterior e registra aviso no log. Trate use_sis2_dynamic
+!   como recurso em avaliação, não de produção.
+!
 ! DIMENSIONAMENTO (concurrent): escolha a razão ATM:OCN pelo custo relativo
 !   de cada componente. Como o MPAS costuma dominar, um ponto de partida
 !   típico é ~2:1 a ~3:1 (ex.: 128 PETs → atm=88, ocn=40). Ajuste medindo o
@@ -389,6 +426,8 @@
 &nuopc_petlayout
   coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
   pet_layout    = 'split'        ! 'shared' | 'split'
-  atm_pet_count = 4              ! split: nº PETs do ATM (0 = auto: metade)
+  atm_pet_count = 64             ! split: nº PETs do ATM (0 = auto: metade)
   ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
+  use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
+  ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)
 /

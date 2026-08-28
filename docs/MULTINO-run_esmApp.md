@@ -106,8 +106,8 @@ Constantes de sítio (topo do script): `PPN_MAX=256`, `PPN=256`,
 
 ## 4. Modo *concurrent*: consolidação por componente
 
-Em `concurrent`, o **ATM (MPAS-A)** e o **OCN (MOM6+SIS2)** ocupam blocos
-disjuntos de PET. Se os blocos não coincidirem com as fronteiras de nó, um nó
+Em `pet_layout = 'split'`, o **ATM (MPAS-A)** e o **OCN (MOM6)** ocupam blocos
+disjuntos de PET (mais o **ICE (SIS2)**, quando `use_sis2_dynamic` está ligado). Se os blocos não coincidirem com as fronteiras de nó, um nó
 fica **misto** (ATM+OCN), o que piora a localidade e o *binding*.
 
 Com `atm_pet_count` e `ocn_pet_count` explícitos na `nuopc.input`, o script gera
@@ -147,6 +147,31 @@ Regras:
   custa de mais nós), ou reserve com `--mem`.
 - **Ordem** (`--pet-order`): `atm-first` (padrão) ou `ocn-first`; o PALS preenche
   o `PBS_NODEFILE` na ordem do `select`.
+- **Componente ICE**: com `use_sis2_dynamic = .true.` o `select` ganha um
+  terceiro bloco, sempre por último, com teto ajustável por `--ppn-ice`. A soma
+  das três parcelas de `mpiprocs` precisa fechar com o `-n` do job.
+
+```
+  -n 8   atm=4  ocn=2  ice=2
+
+  ┌──────┬──────┬──────┐
+  │ ATM  │ OCN  │ ICE  │
+  │  4   │  2   │  2   │
+  └──────┴──────┴──────┘
+
+  select=1:ncpus=4:mpiprocs=4 + 1:ncpus=2:mpiprocs=2 + 1:ncpus=2:mpiprocs=2
+         └─── bloco ATM ────┘   └─── bloco OCN ────┘   └─── bloco ICE ────┘
+```
+
+A ordem dos blocos não é cosmética: o `esm.F90` atribui os PETs por faixas
+contíguas de rank (ATM primeiro, depois OCN, depois ICE), e o PALS preenche o
+`PBS_NODEFILE` na ordem do `select`. Se as duas ordens divergirem, um componente
+executa em nós dimensionados para outro, e a falha não se anuncia como tal.
+
+Em `split` com gelo, `ice_pet_count` precisa ser **explícito** na `nuopc.input`:
+o `select` é montado antes de o driver executar, então o script não tem como
+resolver o modo automático (`ice_pet_count = 0`). O pré-check aborta com
+mensagem clara nesse caso.
 
 > A partição METIS (`x1.*.graph.info.part.<atm_pet_count>`) é gerada no
 > pré-check. O MOM6 não usa METIS.
@@ -167,7 +192,8 @@ Todas em `run_esmApp.jaci -h`. As principais:
 | `--mem TAM`                      | (sem)                | reserva fixa de memória por nó (ex.: 700gb) |
 | `--mem-per-pet N`                | 0                    | reserva opcional por PET em GB (0 = desligada) |
 | `--no-mem`                       | (padrão)             | garante sem reserva de memória         |
-| `--ppn-atm` / `--ppn-ocn`        | 256 / 256            | limite de PET/nó por componente (*concurrent*) |
+| `--ppn-atm` / `--ppn-ocn`        | 256 / 256            | limite de PET/nó por componente (*split*) |
+| `--ppn-ice`                      | 256                  | limite de PET/nó do ICE (*split* + SIS2) |
 | `--mem-per-pet-atm N`            | 0                    | reserva opcional por PET do ATM (*concurrent*) |
 | `--pet-order ORDEM`              | atm-first            | ordem dos blocos (*concurrent*)        |
 | `--check` / `--compile`          | (off)                | valida e mostra a topologia / `make rebuild` |

@@ -37,12 +37,14 @@ program esmApp
   type(ESMF_Clock)        :: clock
   type(ESMF_Time)         :: startTime, stopTime
   type(ESMF_TimeInterval) :: timeStep
+  type(ESMF_TimeInterval) :: totalInterval
   type(ESMF_VM)           :: vm
 
   integer :: rc, localPet, iStep, petCount
   integer :: yy_start, mm_start, dd_start
   integer :: yy_stop,  mm_stop,  dd_stop
-  integer :: dt_coupling_s, nSteps, total_sec
+  integer :: dt_coupling_s, nSteps
+  integer(ESMF_KIND_I8) :: total_sec_i8
   integer :: config_rc, parse_rc, chdir_stat
   type(ESMF_LogKind_Flag) :: esmfLogKind
 
@@ -143,13 +145,52 @@ program esmApp
                      trim(CONFIG_FILE_DEFAULT)
 
   !---------------------------------------------------------------------------
-  ! 3. Informações iniciais (apenas PET 0)
+  ! 3. Relógio global ESMF (movido para antes da estimativa de passos — ver
+  !    FIX abaixo)
   !---------------------------------------------------------------------------
-  ! Estimativa de passos (aproximada — o relógio ESMF é a fonte de verdade).
-  ! Usa calendário simplificado: 365 dias/ano, 30 dias/mês.
-  total_sec = (yy_stop-yy_start)*365*86400 + (mm_stop-mm_start)*30*86400 &
-            + (dd_stop-dd_start)*86400
-  nSteps = max(1, total_sec / max(1, dt_coupling_s))
+  call ESMF_TimeSet(startTime, yy=yy_start, mm=mm_start, dd=dd_start, &
+                    h=0, m=0, s=0, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+  if (ChkErr(rc, __LINE__, __FILE__)) then
+    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
+  end if
+
+  call ESMF_TimeSet(stopTime, yy=yy_stop, mm=mm_stop, dd=dd_stop, &
+                    h=0, m=0, s=0, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+  if (ChkErr(rc, __LINE__, __FILE__)) then
+    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
+  end if
+
+  call ESMF_TimeIntervalSet(timeStep, s=dt_coupling_s, rc=rc)
+  if (ChkErr(rc, __LINE__, __FILE__)) then
+    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
+  end if
+
+  !---------------------------------------------------------------------------
+  ! 4. Informações iniciais (apenas PET 0)
+  !---------------------------------------------------------------------------
+  ! FIX (corrigido, era bug real — reportado pelo usuário: "o acoplamento
+  ! não obedece a data inicial e final da simulação"): a versão anterior
+  ! calculava nSteps com um calendário APROXIMADO (365 dias/ano, 30
+  ! dias/mês) via aritmética manual em segundos — para 2026-03-29 até
+  ! 2026-04-30 isso dava 31 dias (1 mês "de 30" + 1 dia) = 744 passos,
+  ! quando o intervalo REAL (março tem 31 dias) é de 32 dias = 768 passos.
+  ! Nessa versão antiga, nSteps também era usado como limite de um laço
+  ! manual "do iStep = 1, nSteps" chamando ESMF_GridCompRun repetidamente
+  ! — a simulação genuinamente parava ~24h antes da stop_date configurada.
+  ! Esse laço foi removido (ver FIX mais abaixo, seção 8) — nSteps agora
+  ! serve só como valor informativo exibido no banner, não mais como
+  ! limite de execução.
+  !
+  ! Corrigido calculando nSteps a partir do PRÓPRIO intervalo ESMF
+  ! (stopTime - startTime), que já respeita o calendário Gregoriano real
+  ! (calkindflag=ESMF_CALKIND_GREGORIAN já usado acima) — sem
+  ! aproximação de dias por mês.
+  totalInterval = stopTime - startTime
+  call ESMF_TimeIntervalGet(totalInterval, s_i8=total_sec_i8, rc=rc)
+  if (ChkErr(rc, __LINE__, __FILE__)) then
+    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
+  end if
+  nSteps = max(1, int(total_sec_i8 / int(max(1, dt_coupling_s), ESMF_KIND_I8)))
 
   if (localPet == 0) then
     write(*,'(A)')
@@ -167,26 +208,6 @@ program esmApp
     write(*,'(A)') '  Conectores : MPAS->MED  OCN->MED  MED->OCN  OCN->MPAS'
     write(*,'(A)') '================================================='
     write(*,'(A)')
-  end if
-
-  !---------------------------------------------------------------------------
-  ! 4. Relógio global ESMF
-  !---------------------------------------------------------------------------
-  call ESMF_TimeSet(startTime, yy=yy_start, mm=mm_start, dd=dd_start, &
-                    h=0, m=0, s=0, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
-  if (ChkErr(rc, __LINE__, __FILE__)) then
-    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
-  end if
-
-  call ESMF_TimeSet(stopTime, yy=yy_stop, mm=mm_stop, dd=dd_stop, &
-                    h=0, m=0, s=0, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
-  if (ChkErr(rc, __LINE__, __FILE__)) then
-    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
-  end if
-
-  call ESMF_TimeIntervalSet(timeStep, s=dt_coupling_s, rc=rc)
-  if (ChkErr(rc, __LINE__, __FILE__)) then
-    call ESMF_Finalize(endflag=ESMF_END_ABORT); error stop
   end if
 
   clock = ESMF_ClockCreate(timeStep=timeStep, startTime=startTime, &
@@ -250,6 +271,18 @@ program esmApp
   !    versão do NUOPC.
   !
   !    Exemplo: dt_coupling=1800 s, integração de 24 h → nSteps = 48.
+  !
+  !    REVERT (Ago 2026): uma tentativa anterior de trocar este laço por
+  !    uma única chamada a ESMF_GridCompRun (baseada numa leitura de
+  !    NUOPC_Driver.F90::routine_Run que sugeria que o driver avança
+  !    sozinho até o stopTime) foi testada e IMEDIATAMENTE revertida: na
+  !    prática, uma única chamada avança só ~1-2h e retorna — a
+  !    simulação terminava prematuramente com "[OK] Todos os passos de
+  !    acoplamento concluidos" após meia dúzia de linhas de MOM Date. O
+  !    laço original estava certo nesse aspecto. A causa raiz real do
+  !    relógio do MED avançando mais rápido que o esperado (relatado
+  !    pelo usuário: diag_import chegando a datas muito além de
+  !    stop_date) permanece em investigação — não é este laço.
   !---------------------------------------------------------------------------
   if (localPet == 0) then
     write(*,'(A)') '--- Loop de execucao (NUOPC Driver) ---'

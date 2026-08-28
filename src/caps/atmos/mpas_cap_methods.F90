@@ -158,8 +158,33 @@ contains
         atm_bnd%ice_fraction = 0.0_MPAS_RKIND
       where (atm_bnd%ice_fraction > 1.0_MPAS_RKIND) &
         atm_bnd%ice_fraction = 1.0_MPAS_RKIND
-      where (atm_bnd%ice_fraction /= atm_bnd%ice_fraction) &       ! NaN guard
-        atm_bnd%ice_fraction = 0.0_MPAS_RKIND
+      ! Fallback de NaN para a fração de gelo: cair sempre em 0.0 (sem gelo)
+      ! tem o mesmo problema conceitual do fallback de SST. Nos trópicos "sem
+      ! gelo" é o palpite certo, mas perto dos polos é um palpite ruim, porque
+      ! ali gelo marinho é comum e esperado. Passa a interpolar linearmente de
+      ! 0.0 no equador até ICE_POLAR no polo, mesma lógica já usada para a SST
+      ! acima. Só o valor de preenchimento muda; o corte físico em [0,1] logo
+      ! acima continua igual, e aquele já estava correto.
+      if (present(latCell)) then
+        block
+          real(MPAS_RKIND), parameter :: ICE_POLAR = 0.5_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
+            3.14159265358979_MPAS_RKIND
+          real(MPAS_RKIND), allocatable :: ice_fallback(:)
+          integer :: n
+          n = nCells
+          allocate(ice_fallback(n))
+          ice_fallback = ICE_POLAR * min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, &
+            (abs(latCell(1:n)) * RAD2DEG) / 90.0_MPAS_RKIND))
+          where (atm_bnd%ice_fraction(1:n) /= atm_bnd%ice_fraction(1:n))  ! NaN guard
+            atm_bnd%ice_fraction(1:n) = ice_fallback
+          end where
+          deallocate(ice_fallback)
+        end block
+      else
+        where (atm_bnd%ice_fraction /= atm_bnd%ice_fraction) &     ! NaN guard
+          atm_bnd%ice_fraction = 0.0_MPAS_RKIND
+      end if
     end if
 
     ! -- Corrente oceanica zonal So_u [m/s] -------------------------------

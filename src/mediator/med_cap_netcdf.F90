@@ -268,6 +268,15 @@ contains
               case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
               case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
               case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
+              ! BUG-NC-06: So_u, So_v e Sf_zorl faziam parte de export_names e
+              ! portanto ganhavam variavel no arquivo, mas nao apareciam em
+              ! NENHUM dos dois select case desta rotina. Caiam no case default,
+              ! saiam com long_name generico e, pior, com o 'cycle' do select
+              ! case de DADOS mais abaixo, nunca eram preenchidas: ficavam com
+              ! _FillValue e o GrADS as mostrava como 'all undefined values'.
+              case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
+              case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
+              case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
               case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
             end select
             ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
@@ -320,7 +329,19 @@ contains
         case ('Si_ifrac');       call ESMF_FieldGet(is%f_ifrac_atm,  farrayPtr=fptr2d, rc=rc)
         case ('So_duu10n');      call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr2d, rc=rc)
         case ('So_t');           call ESMF_FieldGet(is%f_sst_atm,    farrayPtr=fptr2d, rc=rc)
-        case default; rc = ESMF_SUCCESS; cycle
+        ! BUG-NC-06: sem estas tres linhas os campos caiam no case default e
+        ! eram pulados pelo 'cycle', ficando com _FillValue no arquivo.
+        case ('So_u');           call ESMF_FieldGet(is%f_uocn_atm,   farrayPtr=fptr2d, rc=rc)
+        case ('So_v');           call ESMF_FieldGet(is%f_vocn_atm,   farrayPtr=fptr2d, rc=rc)
+        case ('Sf_zorl');        call ESMF_FieldGet(is%f_zorl_atm,   farrayPtr=fptr2d, rc=rc)
+        case default
+          ! Um campo do exportState sem mapeamento aqui vira variavel vazia no
+          ! arquivo, sem nenhum sinal. Registrar o aviso para que a proxima
+          ! lacuna apareca no log em vez de so aparecer no GrADS.
+          call ESMF_LogWrite(subname//': AVISO — campo "'// &
+            trim(fieldNameList(n))//'" nao tem mapeamento no select case; '// &
+            'a variavel sera gravada apenas com _FillValue', ESMF_LOGMSG_WARNING)
+          rc = ESMF_SUCCESS; cycle
       end select
       if (rc /= ESMF_SUCCESS .or. .not. associated(fptr2d)) then
         rc = ESMF_SUCCESS; cycle
