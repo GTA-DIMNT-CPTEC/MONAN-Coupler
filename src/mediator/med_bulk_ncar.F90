@@ -288,7 +288,7 @@ contains
             z0_total    = max(Z0_MIN, min(Z0_MAX, z0_charnock + z0_smith))
             ! Sobre terra (marcador Sprint A.5): usar default
             if (associated(sst)) then
-              if (abs(sst(i,j) - T_FILL_LAND) < TOL_LAND) z0_total = Z0_DEFAULT
+              if (abs(sst(i,j) - T_FILL_LAND) < TOL_LAND) z0_total = Z0_MIN
             end if
             p_zorl(i,j) = z0_total
           end do

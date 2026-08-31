@@ -129,6 +129,23 @@ contains
   !> @brief Registra um componente Model no driver e, no mesmo passo, atribui a
   !! ele o relógio do driver.
   !!
+  !! FIX-CLOCK-EXPLICITO (Ago 2026): criado para consertar um problema real —
+  !! com 3+ componentes concorrentes de PETs disjuntos (ATM/OCN/ICE), o
+  !! mecanismo automático do NUOPC não estava atribuindo relógio interno a
+  !! alguns componentes (rastreado até NUOPC_ModelBase.F90/
+  !! NUOPC_CompCheckSetClock, erro "Clock object is not present" — ver
+  !! SIS2_ativacao_plano_integracao.md para o histórico completo).
+  !!
+  !! IMPORTANTE PARA MANUTENÇÃO FUTURA: quando adicionar um NOVO componente
+  !! Model ao sistema (ex.: WAV, LND, um novo componente qualquer), use ESTA
+  !! função em vez de chamar NUOPC_DriverAddComp diretamente — assim a
+  !! correção do relógio é aplicada automaticamente, sem precisar lembrar de
+  !! repetir o mesmo bloco de código toda vez. Para Connectors (MED<->X),
+  !! use AddConnectorWithClock logo abaixo — o mesmo problema (e a mesma
+  !! correção, com ESMF_CplCompSet em vez de ESMF_GridCompSet) também
+  !! afeta Connectors, confirmado via NUOPC Compliance Checker
+  !! ("MED-TO-ICE: The internal Clock is not present!").
+  !!
   !! Com três ou mais componentes em blocos disjuntos de PETs (ATM/OCN/ICE), o
   !! mecanismo automático do NUOPC não estava atribuindo relógio interno a
   !! alguns componentes, e a execução abortava com "Clock object is not
@@ -199,6 +216,15 @@ contains
   !! O mesmo problema de relógio ausente afeta os conectores; o NUOPC Compliance
   !! Checker acusava "MED-TO-ICE: The internal Clock is not present!". Use esta
   !! rotina ao acrescentar um conector novo.
+  !!
+  !! Registra um Connector (MED<->X) no driver E atribui explicitamente
+  !! uma cópia independente do relógio do driver a ele, num único passo.
+  !! Equivalente a AddModelCompWithClock, mas para ESMF_CplComp (Connector),
+  !! não ESMF_GridComp (Model).
+  !!
+  !! IMPORTANTE PARA MANUTENÇÃO FUTURA: quando adicionar um NOVO conector
+  !! (ex.: MED<->WAV), use ESTA função em vez de chamar NUOPC_DriverAddComp
+  !! diretamente.
   subroutine AddConnectorWithClock(driver, srcCompLabel, dstCompLabel, &
       compSetServicesRoutine, driverClock, rc)
     type(ESMF_GridComp), intent(inout) :: driver
@@ -239,7 +265,6 @@ contains
 
   end subroutine AddConnectorWithClock
 
-  ! ============================================================================
   ! ============================================================================
   !> @brief Registra componentes (MPAS, MED, OCN) e conectores.
   subroutine SetModelServices(driver, rc)

@@ -154,7 +154,7 @@ module mpas_cap_MONAN_mod
     'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
     'Sf_zorl ' ]            ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
 
-  integer, parameter :: N_EXP = 9
+  integer, parameter :: N_EXP = 13
   character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
     character(len=20) ::            &
     'Sa_pslv_mpas  ',               &
@@ -165,7 +165,11 @@ module mpas_cap_MONAN_mod
     'Faxa_lwdn_mpas',               &
     'Faxa_rain_mpas',               &
     'Sa_shum_mpas  ',               &  ! B-Fase2-01: q2 [kg/kg] — hum. espec. 2m
-    'Faxa_snow_mpas' ]                  ! B-Fase2-02: Δsnownc/dt [kg/m²/s] — neve
+    'Faxa_snow_mpas',               &  ! B-Fase2-02: Δsnownc/dt [kg/m²/s] — neve
+    'Faxa_sen_mpas ',               &  ! Fase 3: calor sensivel nativo do PBL (hfx)
+    'Faxa_lat_mpas ',               &  ! Fase 3: calor latente nativo do PBL (lh)
+    'Faxa_taux_mpas',               &  ! Fase 3: tensao zonal nativa (de ust)
+    'Faxa_tauy_mpas' ]                 ! Fase 3: tensao meridional nativa (de ust)
 
   integer, parameter :: netcdf_write_freq = 1
 

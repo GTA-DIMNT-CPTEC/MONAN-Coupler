@@ -36,8 +36,8 @@ module med_cap_types_mod
   real(ESMF_KIND_R8), parameter :: es_coef_b  = 17.67_ESMF_KIND_R8   !< Coef. Clausius-Clapeyron
   real(ESMF_KIND_R8), parameter :: es_coef_c  = 243.5_ESMF_KIND_R8   !< Coef. Clausius-Clapeyron [°C]
   real(ESMF_KIND_R8), parameter :: sigma_sb   = 5.67e-8_ESMF_KIND_R8 !< Constante de Stefan-Boltzmann
-  !real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.06_ESMF_KIND_R8    !< Albedo médio do oceano
-  real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.26_ESMF_KIND_R8    !< Albedo médio do oceano
+  real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.06_ESMF_KIND_R8    !< Albedo médio do oceano
+  !real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.26_ESMF_KIND_R8    !< Albedo médio do oceano
   !> SST de segurança para bulk quando o valor recebido está fora de [271, 308] K.
   !! NÃO é fonte de dado — guard para evitar instabilidade numérica.
   real(ESMF_KIND_R8), parameter :: SST_BULK_FALLBACK = 290.0_ESMF_KIND_R8
@@ -103,11 +103,12 @@ module med_cap_types_mod
   !----------------------------------------------------------------------------
 
   !> Campos de import do MPAS (primário) — com sufixo _mpas.
-  integer, parameter :: n_import_mpas = 9
+  integer, parameter :: n_import_mpas = 13
   character(len=32), parameter :: import_mpas_names(n_import_mpas) = [ &
     "Sa_u10m_mpas  ", "Sa_v10m_mpas  ", "Sa_tbot_mpas  ", "Sa_pslv_mpas  ", &
     "Faxa_swdn_mpas", "Faxa_lwdn_mpas", "Faxa_rain_mpas", &
-    "Sa_shum_mpas  ", "Faxa_snow_mpas" ]
+    "Sa_shum_mpas  ", "Faxa_snow_mpas", &
+    "Faxa_sen_mpas ", "Faxa_lat_mpas ", "Faxa_taux_mpas", "Faxa_tauy_mpas" ]
 
   !> Campos de import do DATM (fallback) — sem sufixo.
   integer, parameter :: n_import_datm = 9

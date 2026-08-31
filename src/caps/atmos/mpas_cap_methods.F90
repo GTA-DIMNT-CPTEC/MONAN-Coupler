@@ -260,8 +260,25 @@ contains
   !! Campos exportados (nomes CMEPS com sufixo _mpas):
   !!   Sa_pslv_mpas, Sa_tbot_mpas, Sa_u10m_mpas, Sa_v10m_mpas, Sa_shum_mpas,
   !!   Faxa_swdn_mpas, Faxa_lwdn_mpas, Faxa_rain_mpas, Faxa_snow_mpas.
-  !! Faxa_taux/tauy e Faxa_lhflx/shflx sao calculados pelo MED_cap (bulk NCAR)
-  !! e nao pertencem ao exportState do MPAS cap.
+  !!
+  !! Fase 3 (adicionado): Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
+  !!   Faxa_tauy_mpas — fluxos JA calculados internamente pelo esquema de
+  !!   camada limite do MONAN-A (atm_public%shflx/lhflx vindos de 'hfx'/'lh'
+  !!   do pool diag/diag_physics; taux_sfc/tauy_sfc derivados de 'ust' em
+  !!   mpas_atm_model.F90). Antes descartados; o MED_cap recalculava
+  !!   sensivel/latente/momentum do zero via bulk NCAR a partir de T/q/vento
+  !!   de 10 m, gerando um fluxo diferente do que o proprio MONAN-A usou
+  !!   para fechar seu balanco de energia do PBL. Exportar esses campos
+  !!   permite ao MED_cap usar o valor fisicamente consistente (ver
+  !!   MED_cap.F90, secao "Fase 3") em vez de recalcular.
+  !!
+  !! *** VERIFICAR ANTES DE RODAR EM PRODUCAO ***
+  !!   Convencao de sinal de 'hfx'/'lh' no Registry.xml da suite de fisica
+  !!   em uso (mesoscale_reference_monan). A convencao usual WRF/MPAS/GFS
+  !!   e POSITIVO PARA CIMA (superficie -> atmosfera). O MED_cap.F90 ja
+  !!   inverte o sinal ao consumir estes campos (ver comentario la) supondo
+  !!   essa convencao — confirme no driver de fisica (ex. sfc_diff/GFS_surface
+  !!   generic) antes de validar contra observacoes.
   !!
   !! Campos nÃÂÃÂ£o-associados (pool diag_physics inativo ou nome ausente no
   !! Registry.xml) sÃÂÃÂ£o silenciosamente ignorados.
@@ -342,6 +359,35 @@ contains
       call netcdf_push_raw_field('Faxa_snow_mpas', atm_public%prec_snow, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_snow_mpas', n, atm_public%prec_snow, rc, &
+           atm_public%lonCell, atm_public%latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    end if
+    ! ── Fase 3: fluxos nativos do PBL (antes descartados, ver docstring) ──────
+    if (associated(atm_public%shflx)) then
+      call netcdf_push_raw_field('Faxa_sen_mpas', atm_public%shflx, n, vm, rc)
+      rc = ESMF_SUCCESS
+      call state_set_field_1d(exportState, 'Faxa_sen_mpas', n, atm_public%shflx, rc, &
+           atm_public%lonCell, atm_public%latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    end if
+    if (associated(atm_public%lhflx)) then
+      call netcdf_push_raw_field('Faxa_lat_mpas', atm_public%lhflx, n, vm, rc)
+      rc = ESMF_SUCCESS
+      call state_set_field_1d(exportState, 'Faxa_lat_mpas', n, atm_public%lhflx, rc, &
+           atm_public%lonCell, atm_public%latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    end if
+    if (associated(atm_public%taux_sfc)) then
+      call netcdf_push_raw_field('Faxa_taux_mpas', atm_public%taux_sfc, n, vm, rc)
+      rc = ESMF_SUCCESS
+      call state_set_field_1d(exportState, 'Faxa_taux_mpas', n, atm_public%taux_sfc, rc, &
+           atm_public%lonCell, atm_public%latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    end if
+    if (associated(atm_public%tauy_sfc)) then
+      call netcdf_push_raw_field('Faxa_tauy_mpas', atm_public%tauy_sfc, n, vm, rc)
+      rc = ESMF_SUCCESS
+      call state_set_field_1d(exportState, 'Faxa_tauy_mpas', n, atm_public%tauy_sfc, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if

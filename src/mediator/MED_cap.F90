@@ -37,7 +37,7 @@ module MED_cap_MONAN_mod
                                   cfg_docn_epoch_month,             &
                                   cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  & ! FIX B-OCNGRID-01
-                                  cfg_use_sis2_dynamic
+                                  cfg_use_sis2_dynamic                ! FIX SIS2-ATIVACAO
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -462,7 +462,7 @@ contains
     regDecomp(2) = ny_tiles        ! linhas (lat)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
-    ! Loops bulk usam lbound/ubound ? agnósticos ao indexflag do MPAS.
+    ! Loops bulk usam lbound/ubound - agnósticos ao indexflag do MPAS.
     ! REVERT B-OCNGRID-05 (Ago 2026): a tentativa de fixar polekindflag=MONOPOLE
     ! explicitamente foi REVERTIDA. Motivo: o usuario confirmou que a versao
     ! ANTERIOR a qualquer mudanca de grade nesta sessao rodava sem SIGSEGV,
@@ -539,7 +539,7 @@ contains
     ! FIX B-OCNGRID-03 (Ago 2026): a grade OCN era criada SEM dimensao
     ! periodica (ESMF_GridCreateNoPeriDim). Isso significa que o ESMF nao
     ! sabe que a coluna i=nx_ocn (longitude ~360) e a coluna i=1 (longitude
-    ! ~0) sao fisicamente vizinhas ? o regrid bilinear trata a borda leste/
+    ! ~0) sao fisicamente vizinhas - o regrid bilinear trata a borda leste/
     ! oeste da grade como um limite de dominio, nao como um ponto de
     ! continuidade. Resultado: uma coluna de celulas "sem vizinho valido"
     ! exatamente na costura (visivel como uma faixa de valores indefinidos
@@ -549,26 +549,26 @@ contains
     ! Essa parte, testada, funcionou (costura do Indico desapareceu).
     ! REVERT PARCIAL (Ago 2026): a primeira versao desta correcao tambem
     ! especificava polekindflag=(/MONOPOLE,MONOPOLE/) explicitamente. Isso foi
-    ! REVERTIDO ? o usuario confirmou que a versao anterior a qualquer
+    ! REVERTIDO - o usuario confirmou que a versao anterior a qualquer
     ! mudanca de grade rodava sem SIGSEGV, e a grade ATM (que ja' usava
     ! GridCreate1PeriDim SEM polekindflag explicito) fazia parte dessa
     ! configuracao que funcionava. Declarar MONOPOLE numa borda de latitude
     ! que NAO e' um ponto geometrico unico (j=1 desta grade fica em -78°, a
-    ! borda da Antartida ? uma linha inteira de pontos, nao um polo) e'
+    ! borda da Antartida - uma linha inteira de pontos, nao um polo) e'
     ! fisicamente incorreto e e' o principal suspeito de ter corrompido os
     ! pesos de regrid perto dos polos/dobra, alimentando valores invalidos
     ! para a malha Voronoi do MPAS-A e causando o SIGSEGV em core_run.
     ! Mantendo periodicDim=1 (beneficio confirmado) e deixando o ESMF usar
     ! seu polekindflag padrao (mesma config que ja' funcionava no atm_grid).
     ! ATENCAO: a assinatura exata de ESMF_GridCreate1PeriDim deve ser
-    ! conferida contra a versao instalada do ESMF (8.9.1) antes do build ?
+    ! conferida contra a versao instalada do ESMF (8.9.1) antes do build -
     ! nomes/ordem de argumentos podem variar entre versoes.
     ocn_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
       regDecomp=regDecomp, periodicDim=1, &
       indexflag=ESMF_INDEX_GLOBAL, &
       coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha ao criar grade OCN " // &
-      "periodica (ESMF_GridCreate1PeriDim) ? verifique assinatura ESMF 8.9.1", &
+      "periodica (ESMF_GridCreate1PeriDim) - verifique assinatura ESMF 8.9.1", &
       line=__LINE__, file=__FILE__)) return
 
     ! ESMF_GridAddCoord: COLETIVA — todos os PETs
@@ -587,7 +587,7 @@ contains
       call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=lde, &
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
       if (cfg_use_docn) then
-        ! DOCN/OISST: grade lat/lon regular DE VERDADE ? formula uniforme e' exata.
+        ! DOCN/OISST: grade lat/lon regular DE VERDADE - formula uniforme e' exata.
         do j = lbound(coordX,2), ubound(coordX,2)
           do i = lbound(coordX,1), ubound(coordX,1)
             coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_ocn)
@@ -600,14 +600,14 @@ contains
           end do
         end do
       else
-        ! FIX B-OCNGRID-01: MOM6 tripolar real ? le as coordenadas T verdadeiras
+        ! FIX B-OCNGRID-01: MOM6 tripolar real - le as coordenadas T verdadeiras
         ! do supergrid ocean_hgrid.nc (NAO uniformes; convergem no polo Norte).
         ! Sem isso, o conector NUOPC OCN->MED interpola usando posicoes erradas
         ! e a costa fica sistematicamente deslocada em todo o dominio.
         call MED_FillMom6TGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
         if (ESMF_LogFoundError(rcToCheck=rc, &
           msg="MED: falha ao ler coordenadas T reais de ocean_hgrid.nc " // &
-              "para o DE local ? grade OCN do mediador ficara incorreta", &
+              "para o DE local - grade OCN do mediador ficara incorreta", &
           line=__LINE__, file=__FILE__)) return
       end if
     end do  ! lde OCN
@@ -697,9 +697,11 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
-    ! Si_ifrac_sis2 é realizado na MESMA ocn_grid: o componente ICE foi montado
-    ! com a mesma geometria do oceano (mesmo ocean_hgrid.nc, mesmas dimensões,
-    ! mesma periodicidade), ver sis_cap_MONAN.F90.
+    ! FIX SIS2-ATIVACAO (Ago 2026): realizar Si_ifrac_sis2 (gelo real do
+    ! ICE) na MESMA grade ocn_grid — a grade do componente ICE (ver
+    ! sis_cap_MONAN.F90) foi construída com a mesma geometria (mesma
+    ! ocean_hgrid.nc, mesmas dimensões, mesma periodicidade), então é
+    ! geometricamente equivalente a ocn_grid para fins de realização aqui.
     if (cfg_use_sis2_dynamic) then
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_ifrac_sis2", rc=rc)
@@ -848,6 +850,14 @@ contains
   ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
   ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
   !----------------------------------------------------------------------------
+
+
+  !----------------------------------------------------------------------------
+  ! MED_ReadMom6TGridDims — le as dimensoes do supergrid (variaveis 'nx'/'ny'
+  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
+  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
+  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
+  !----------------------------------------------------------------------------
   subroutine MED_ReadMom6TGridDims(filename, ni, nj, rc)
     character(len=*), intent(in)  :: filename
     integer,           intent(out) :: ni, nj
@@ -888,7 +898,7 @@ contains
     ncstat = nf90_close(ncid)
 
     if (mod(nx_super,2) /= 0 .or. mod(ny_super,2) /= 0) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: AVISO ? nx/ny impar em ' // &
+      call ESMF_LogWrite('MED B-OCNGRID-01: AVISO - nx/ny impar em ' // &
         trim(filename) // ' (formato inesperado; nao parece supergrid ' // &
         'FRE-NCtools padrao). Prosseguindo com divisao inteira por 2.', &
         ESMF_LOGMSG_WARNING)
@@ -899,7 +909,7 @@ contains
   end subroutine MED_ReadMom6TGridDims
 
   !----------------------------------------------------------------------------
-  ! MED_FillMom6TGridCoords ? preenche coordX/coordY (bounds em indice GLOBAL,
+  ! MED_FillMom6TGridCoords - preenche coordX/coordY (bounds em indice GLOBAL,
   ! pois ocn_grid usa ESMF_INDEX_GLOBAL) com as coordenadas T REAIS lidas do
   ! supergrid ocean_hgrid.nc via hyperslab com stride=2 (pula os pontos de
   ! vertice/aresta do supergrid, mantendo so' os centros das celulas T).
@@ -1124,6 +1134,30 @@ contains
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="MED: falha FieldRegridStore OCN->ATM", &
         line=__LINE__, file=__FILE__)) return
+
+      ! BUG-CALC-DUU (fix v13.0): primeiro regrid de So_u e So_v para f_uocn_atm/f_vocn_atm.
+      ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid),
+      ! portanto ESMF_StateGet é seguro — sem risco de "Not found" no log.
+      ! O routehandle rh_ocn2atm (bilinear, já criado) é reutilizado: So_u/So_v
+      ! compartilham a mesma grade OCN que So_t → mapeamento idêntico.
+      block
+        type(ESMF_Field) :: f_uocn_src, f_vocn_src
+        integer :: rc_uv
+        call ESMF_StateGet(importState, itemName="So_u", field=f_uocn_src, rc=rc_uv)
+        if (rc_uv == ESMF_SUCCESS) then
+          call ESMF_FieldRegrid(f_uocn_src, is%f_uocn_atm, is%rh_ocn2atm, &
+            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+          if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_uocn_atm, rc_uv)
+        end if
+        call ESMF_StateGet(importState, itemName="So_v", field=f_vocn_src, rc=rc_uv)
+        if (rc_uv == ESMF_SUCCESS) then
+          call ESMF_FieldRegrid(f_vocn_src, is%f_vocn_atm, is%rh_ocn2atm, &
+            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+          if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_vocn_atm, rc_uv)
+        end if
+      end block
+
+      is%rh_created = .true.
 
       ! Inicializar exportState com valores fisicamente razoaveis
       ! B-45: ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
@@ -1356,6 +1390,12 @@ contains
     real(ESMF_KIND_R8), pointer :: lwdn_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: rain_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: snow_mpas(:,:) => null()
+    ! Fase 3: fluxos nativos do PBL do MONAN-A (opcionais — ausencia mantem
+    ! o fallback bulk NCAR via calc_bulk_ncar, ex. modo DATM)
+    real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: taux_mpas(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: tauy_mpas(:,:) => null()
     logical :: mpas_available
 
     ! Campos do DATM (fallback)
@@ -1510,6 +1550,19 @@ contains
       call GetFieldPtrOptional(importState, "Sa_shum_mpas",   shum_mpas, rc)
       call GetFieldPtrOptional(importState, "Faxa_snow_mpas", snow_mpas, rc)
       ! rc pode ser ESMF_FAILURE se campos Fase 2 ausentes — nao e erro
+    end if
+
+    !--------------------------------------------------------------------------
+    ! 1c. CAMPOS FASE 3 OPCIONAIS — fluxos nativos do PBL do MONAN-A.
+    !     Ausencia (mpas_cap antigo, ou modo DATM) NAO desabilita
+    !     mpas_available; apenas mantem sen/evap/taux/tauy vindos do bulk
+    !     NCAR (calc_bulk_ncar) mais abaixo.
+    !--------------------------------------------------------------------------
+    if (mpas_available) then
+      call GetFieldPtrOptional(importState, "Faxa_sen_mpas",  sen_mpas,  rc)
+      call GetFieldPtrOptional(importState, "Faxa_lat_mpas",  lat_mpas,  rc)
+      call GetFieldPtrOptional(importState, "Faxa_taux_mpas", taux_mpas, rc)
+      call GetFieldPtrOptional(importState, "Faxa_tauy_mpas", tauy_mpas, rc)
     end if
 
     !==========================================================================
@@ -1881,7 +1934,7 @@ contains
             end if
           else
             call ESMF_LogWrite( &
-              'MED: So_omask indisponivel no importState ? usando ' // &
+              'MED: So_omask indisponivel no importState - usando ' // &
               'fallback por limiar de SST (menos confiavel na costa)', &
               ESMF_LOGMSG_WARNING)
           end if
@@ -1984,7 +2037,7 @@ contains
           ! para FORA do intervalo valido de proposito, para participar do loop
           ! de extrapolacao por vizinhanca. So' cai num valor constante (T_MAX,
           ! nao mais T_FILL) se sobrar sem nenhum vizinho valido apos N_ITER.
-          where (sst > T_MAX) sst = T_MAX + 1.0_ESMF_KIND_R8
+          where (sst > T_MAX) sst = T_FILL
           where (sst /= sst)  sst = T_MIN - 1.0_ESMF_KIND_R8
           block
             integer :: n_overflow
@@ -2024,6 +2077,7 @@ contains
             valid = (sst >= T_MIN .and. sst <= T_MAX)
           end do
           n_left = count(.not. valid)
+          where (.not. valid) sst = T_FILL
           ! FIX B-OCNGRID-05 (Ago 2026): fallback final agora e' direcional ?
           ! celulas que sobraram sem NENHUM vizinho valido apos N_ITER (raro;
           ! normalmente so' em buracos que atravessam fronteira de PET, ver nota
@@ -2145,6 +2199,122 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: calc_bulk_ncar falhou', &
       line=__LINE__, file=__FILE__)) return
 
+    !==========================================================================
+    ! 4b. FASE 3 — SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
+    !     MONAN-A (Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
+    !     Faxa_tauy_mpas), onde disponiveis. calc_bulk_ncar acima continua
+    !     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
+    !
+    ! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
+    ! hfx/lh/ust internos (ver mpas_atm_model.F90/mpas_cap_methods.F90).
+    ! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
+    ! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
+    ! inconsistencia entre o balanco de energia do MONAN-A e o forcante
+    ! entregue ao MOM6/SIS2.
+    !
+    ! *** VERIFICAR ANTES DE RODAR EM PRODUCAO ***
+    !  1) Sinal de hfx/lh: assumido aqui como POSITIVO PARA CIMA (convencao
+    !     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
+    !     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
+    !     oceano). CONFIRME no driver de fisica da suite
+    !     mesoscale_reference_monan antes de validar contra observacoes —
+    !     se a convencao ja for "para baixo positivo", remova os sinais.
+    !  2) taux_sfc/tauy_sfc (de mpas_atm_model.F90) usam a mesma forma
+    !     rho*Cd*|V|*V do bulk NCAR — nao invertidos aqui, mas confirme
+    !     que a rotacao de referencial (Terra vs. grade) ja e tratada
+    !     antes de exportar (deve ser, pois MPAS ja roda em lat/lon).
+    !  3) Faxa_lat_mpas vem em W/m^2 (energia); Foxx_evap e fluxo de MASSA
+    !     (kg/m^2/s) — por isso a divisao por L_evap abaixo.
+    !==========================================================================
+    if (associated(sen_mpas) .and. associated(lat_mpas) .and. &
+        associated(taux_mpas) .and. associated(tauy_mpas)) then
+      block
+        real(ESMF_KIND_R8), allocatable :: sen_g2(:,:), lat_g2(:,:)
+        real(ESMF_KIND_R8), allocatable :: taux_g2(:,:), tauy_g2(:,:), tmp2(:,:)
+        real(ESMF_KIND_R8), pointer     :: fptr_sen(:,:), fptr_evap(:,:)
+        real(ESMF_KIND_R8), pointer     :: fptr_taux(:,:), fptr_tauy(:,:)
+        integer :: gi2, gj2, ierr2, ii, jj
+        integer, parameter :: NXG2 = 360, NYG2 = 180
+
+        nullify(fptr_sen, fptr_evap, fptr_taux, fptr_tauy)
+        allocate(sen_g2(NXG2,NYG2), lat_g2(NXG2,NYG2))
+        allocate(taux_g2(NXG2,NYG2), tauy_g2(NXG2,NYG2), tmp2(NXG2,NYG2))
+
+        ! Gather global (mesmo padrao BUG-CALC-08: SUM com tiles disjuntos)
+        tmp2 = 0.0_ESMF_KIND_R8
+        do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
+          do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
+            if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+              tmp2(gi2,gj2) = sen_mpas(gi2,gj2)
+          end do
+        end do
+        call MPI_Allreduce(tmp2, sen_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, med_mpi_comm, ierr2)
+
+        tmp2 = 0.0_ESMF_KIND_R8
+        do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
+          do gi2 = lbound(lat_mpas,1), ubound(lat_mpas,1)
+            if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+              tmp2(gi2,gj2) = lat_mpas(gi2,gj2)
+          end do
+        end do
+        call MPI_Allreduce(tmp2, lat_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, med_mpi_comm, ierr2)
+
+        tmp2 = 0.0_ESMF_KIND_R8
+        do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
+          do gi2 = lbound(taux_mpas,1), ubound(taux_mpas,1)
+            if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+              tmp2(gi2,gj2) = taux_mpas(gi2,gj2)
+          end do
+        end do
+        call MPI_Allreduce(tmp2, taux_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, med_mpi_comm, ierr2)
+
+        tmp2 = 0.0_ESMF_KIND_R8
+        do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
+          do gi2 = lbound(tauy_mpas,1), ubound(tauy_mpas,1)
+            if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+              tmp2(gi2,gj2) = tauy_mpas(gi2,gj2)
+          end do
+        end do
+        call MPI_Allreduce(tmp2, tauy_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+          MPI_SUM, med_mpi_comm, ierr2)
+
+        call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
+        call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr_evap, rc=rc)
+        call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr_taux, rc=rc)
+        call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=fptr_tauy, rc=rc)
+        rc = ESMF_SUCCESS
+
+        if (associated(fptr_sen) .and. associated(fptr_evap) .and. &
+            associated(fptr_taux) .and. associated(fptr_tauy)) then
+          do jj = lbound(fptr_sen,2), ubound(fptr_sen,2)
+            do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
+              if (ii >= 1 .and. ii <= NXG2 .and. jj >= 1 .and. jj <= NYG2) then
+                ! so sobrescreve onde ha dado nativo real (fora do fill=0
+                ! dos PETs sem tile MONAN-A local — mesmo criterio BUG-CALC-08)
+                if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
+                  fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
+                  fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s
+                  fptr_taux(ii,jj) = taux_g2(ii,jj)
+                  fptr_tauy(ii,jj) = tauy_g2(ii,jj)
+                end if
+              end if
+            end do
+          end do
+        end if
+
+        deallocate(sen_g2, lat_g2, taux_g2, tauy_g2, tmp2)
+      end block
+      call ESMF_LogWrite( &
+        'MED(Fase3): fluxos nativos MONAN-A (sen/evap/taux/tauy) aplicados ' // &
+        'sobre o resultado do bulk NCAR', ESMF_LOGMSG_INFO)
+    else
+      call ESMF_LogWrite( &
+        'MED(Fase3): Faxa_sen/lat/taux/tauy_mpas ausentes -- mantendo bulk ' // &
+        'NCAR (calc_bulk_ncar) para sen/evap/taux/tauy', ESMF_LOGMSG_INFO)
+    end if
 
     !==========================================================================
     ! 5. REGRID E EXPORTA PARA O OCEANO
@@ -2445,6 +2615,7 @@ contains
     ! ser incorreta no instante em que o mediador ganhar uma petList própria,
     ! e falharia com deadlock, não com erro. ESMF_VMGetCurrent devolve a VM
     ! do componente em execução, tornando rootPet=0 local ao MED.
+    !call ESMF_VMGetGlobal(vm, rc=rc)
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(f0, f1, buf); return

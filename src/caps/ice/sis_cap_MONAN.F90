@@ -70,6 +70,7 @@ module sis_cap_MONAN_mod
   use ice_model_mod, only : ice_data_type, ice_model_init, ice_model_end,   &
                              share_ice_domains, ice_model_restart,          &
                              update_ice_slow_thermo, update_ice_dynamics_trans, &
+                             unpack_ocean_ice_boundary, update_ice_model_fast, &
                              ocean_ice_boundary_type, atmos_ice_boundary_type
 
   use MOM_time_manager, only : time_type, set_date, set_calendar_type, GREGORIAN
@@ -78,7 +79,7 @@ module sis_cap_MONAN_mod
   use mpp_domains_mod, only : mpp_get_compute_domain, mpp_get_domain_npes, &
                                mpp_get_pelist
   use mpp_mod,         only : mpp_pe
-  use MOM_domains,     only : MOM_infra_init
+  use MOM_domains,     only : MOM_infra_init, AGRID
 
   implicit none
   private
@@ -522,6 +523,15 @@ contains
       is%oib%u = 0.0_ESMF_KIND_R8; is%oib%v = 0.0_ESMF_KIND_R8
       is%oib%t = 273.15_ESMF_KIND_R8; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
       is%oib%frazil = 0.0_ESMF_KIND_R8; is%oib%sea_level = 0.0_ESMF_KIND_R8
+      ! FIX (Ago 2026): is%oib%stagger — o default do tipo
+      ! ocean_ice_boundary_type e' BGRID_NE (ver ice_boundary_types.F90).
+      ! Os dados que chegam do mediador (So_t/So_u/So_v) sao valores
+      ! escalares co-localizados numa grade regular lat-lon simples, sem
+      ! staggering — equivalente a AGRID. Sem esta atribuicao explicita,
+      ! unpack_ocn_ice_bdry (chamada via unpack_ocean_ice_boundary em
+      ! ModelAdvance) tomaria o ramo B-grid/C-grid e interpretaria as
+      ! correntes com a geometria errada.
+      is%oib%stagger = AGRID
       ! calving/calving_hflx (ice shelf) — nao usados neste acoplamento,
       ! deixados nao-alocados (=> NULL() por padrao no tipo).
 
@@ -611,6 +621,32 @@ contains
     call import_forcing(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha import_forcing', &
       line=__LINE__, file=__FILE__)) return
+
+    ! ── Passo 1b (Ago 2026, FIX): desempacotar is%oib (SST/correntes do
+    ! OCN, ja populado acima) para dentro de Ice%sCS%OSS — a estrutura
+    ! interna que a fisica do SIS2 realmente le (ver
+    ! update_ice_slow_thermo -> slow_thermodynamics(..., Ice%sCS%OSS, ...)).
+    ! Sem esta chamada, is%oib ficava desconectado da fisica: as correntes
+    ! oceanicas (e SST/salinidade/frazil/nivel do mar) importadas do
+    ! mediador nunca chegavam ao SIS2, que rodava sobre os defaults de
+    ! Ice%sCS%OSS (inicializados em ice_model_init). unpack_ocean_ice_boundary
+    ! e a rotina nativa do SIS2 para essa conversao (ice_model.F90) — faz
+    ! tambem translate_OSS_to_sOSS internamente, alimentando a
+    ! termodinamica rapida. Requer is%oib%stagger=AGRID (ver InitializeRealize).
+    call unpack_ocean_ice_boundary(is%oib, is%ice)
+
+    ! ── Passo 1c (Ago 2026, FIX): registrar a forcante atmosferica (is%aib,
+    ! ja populada acima) em Ice — grava fluxos e calcula temperatura do
+    ! gelo no passo rapido (ver ice_model.F90::update_ice_model_fast).
+    ! Mesmo problema estrutural do oceano: is%aib ficava desconectado da
+    ! fisica, nunca chegando ao SIS2. Padrao de chamada confirmado no
+    ! driver de referencia coupler_main.F90 — la e gated por
+    ! Ice%fast_ice_pe (que este cap ja forca .true. sempre, ver
+    ! ice_model_init) e chamada uma vez por avanco do acoplamento
+    ! atmosfera-superficie, sem subciclo proprio — mesma granularidade do
+    ! nosso dt_coupling. Chamada ANTES da fisica lenta porque esta
+    ! consome os campos que update_ice_model_fast grava em Ice.
+    call update_ice_model_fast(is%aib, is%ice)
 
     ! ── Passo 2: avançar o SIS2 ───────────────────────────────────────────
     call update_ice_slow_thermo(is%ice)
@@ -854,6 +890,28 @@ contains
     ! padrao usado internamente por ice_model.F90 (i_off = LBOUND - sG%isc).
     ! IST so existe em slow_ice_PE — garantido aqui, pois o cap forca
     ! fast_ice_pe=.true. e slow_ice_pe=.true. antes de ice_model_init.
+    ! ------------------------------------------------------------------
+    ! Fracao de gelo marinho exportada ao mediador (Si_ifrac_sis2).
+    !
+    ! FONTE DO CAMPO — ponto critico: usa Ice%sCS%IST%part_size (estado
+    ! interno real do SIS2, ice_state_type), NAO Ice%part_size. Este ultimo
+    ! e o campo de fachada do acoplador, preenchido apenas no caminho de
+    ! acoplamento rapido (ver ice_type.F90:191 - only available on fast PEs)
+    ! e permanece ZERADO nesta configuracao. IST%part_size e o mesmo array
+    ! que o proprio SIS2 usa para calcular area/massa em ice_stock_pe, ou
+    ! seja, os valores nao-zero que aparecem no log SIS Date.
+    !
+    ! INDEXACAO: IST%part_size tem halos (isd:ied, jsd:jed) e categorias com
+    ! base 0, onde a fatia 0 e AGUA ABERTA e 1..CatIce sao as categorias de
+    ! gelo. O deslocamento vem da grade do proprio SIS2 (Ice%sCS%G%isc/jsc),
+    ! padrao usado internamente por ice_model.F90 - acompanha corretamente
+    ! qualquer decomposicao MPI (verificado: PET6 i_off=4, PET7 i_off=-86).
+    ! A soma e feita de k_lo+1 ate k_hi (todas as categorias de gelo, isto e,
+    ! todas as fatias menos a primeira), robusto a base 0 ou 1.
+    !
+    ! IST so existe em slow_ice_PE - garantido aqui, pois o cap forca
+    ! fast_ice_pe=.true. e slow_ice_pe=.true. antes de ice_model_init.
+    ! ------------------------------------------------------------------
     i_off = is%ice%sCS%G%isc - lb1
     j_off = is%ice%sCS%G%jsc - lb2
     k_lo  = lbound(is%ice%sCS%IST%part_size, 3)
