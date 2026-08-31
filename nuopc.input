@@ -76,7 +76,7 @@
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'
-  stop_date   = '2026-03-30'
+  stop_date   = '2026-04-30'
   dt_coupling = 3600  ! [N3] 3600 s recomendado MOM6 global (default Fortran: 1800)
   dt_atm      = 60
   log_dir     = 'logs'
