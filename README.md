@@ -218,6 +218,7 @@ MONAN-Coupler/                ← repositório do sistema acoplado (branch devel
 │   ├── notas-standalone.md   ← design da separação instalador/acoplado
 │   ├── domain-mom6.md        ← decomposição de domínio do MOM6+SIS2
 │   ├── mascara-cap-nuopc.md  ← mask_table e o cap NUOPC do MOM6
+│   ├── mascara-continentes.md ← _FillValue sobre terra em *_import_*.nc
 │   ├── MULTINO-run_esmApp.md ← execução multinó na Jaci
 │   └── SMT-Jaci.md           ← medição do efeito do SMT
 ├── tools/
@@ -277,6 +278,7 @@ mantê-la junto dos fontes que documenta evita que as duas versões divirjam.
 | [`notas-standalone.md`](docs/notas-standalone.md) | Design da separação entre instalador e sistema acoplado: resolução de caminhos, preflight e o contrato entre os dois repositórios. |
 | [`domain-mom6.md`](docs/domain-mom6.md) | Algoritmo do `tools/ocean/domain-mom6.bash`: escore dos candidatos a `LAYOUT`, formato do `mask_table` e armadilhas. |
 | [`mascara-cap-nuopc.md`](docs/mascara-cap-nuopc.md) | Por que um `mask_table` com `nmask > 0` é incompatível com o cap NUOPC atual do MOM6. |
+| [`mascara-continentes.md`](docs/mascara-continentes.md) | Por que `mom6_import_*.nc` e `monan2_import_*.nc` gravam `_FillValue` sobre terra (e a variável `ocn_frac`): fontes das máscaras (`So_omask`, `xland`), regrid até a grade de saída, efeito no pós-processamento. |
 | [`MULTINO-run_esmApp.md`](docs/MULTINO-run_esmApp.md) | Execução multinó na Jaci: contabilidade de `ncpus`, topologia por `coupling_mode` × `pet_layout`, filas e limites. |
 | [`SMT-Jaci.md`](docs/SMT-Jaci.md) | Efeito do SMT sobre o acoplado: metodologia, resultados por componente e reprodução. |
 
@@ -776,8 +778,8 @@ estão em `docs/domain-mom6.md`; a incompatibilidade, em `docs/mascara-cap-nuopc
 | `bin/esmApp`                     | Executável                               |
 | `logs/PET*.esmApp.log`           | Logs ESMF por PET                        |
 | `diag_export/monan_export_*.nc`  | Campos ATM exportados                    |
-| `diag_import/mom6_import_*.nc`   | `exportState` do MED: 14 fluxos + `So_t`, `So_u`, `So_v`, `Sf_zorl` |
-| `diag_import/monan2_import_*.nc` | Campos OCN→ATM importados pelo MPAS      |
+| `diag_import/mom6_import_*.nc`   | `exportState` do MED: 14 fluxos + `So_t`, `So_u`, `So_v`, `Sf_zorl` + `ocn_frac` |
+| `diag_import/monan2_import_*.nc` | Campos OCN→ATM importados pelo MPAS + `ocn_frac` |
 | `diag_import/docn_import_*.nc`   | SST/gelo interpolados pelo DOCN (Fase 1) |
 | `diag_import/sst_ifrac_diag/`    | Evolução temporal de SST e Si_ifrac      |
 
@@ -793,6 +795,16 @@ python3 tools/animation/anim_monan2_import.py        # animações
 ```
 
 > **Campos novos no `mom6_import` (v14.22).** `So_u`, `So_v` e `Sf_zorl` faziam parte de `export_names` e por isso ganhavam variável no arquivo, mas não constavam de nenhum dos dois `select case` de `med_cap_netcdf.F90`. Caíam no `case default`, eram puladas pelo `cycle` e ficavam gravadas apenas com `_FillValue`: o GrADS as mostrava como *all undefined values*, o que é diferente de valor zerado. Corrigido; o `case default` passou a registrar aviso no log, para que a próxima lacuna do gênero apareça na compilação de diagnósticos em vez de só na hora de plotar.
+
+> **Continentes mascarados (MASCARA-CONT-01/02).** `mom6_import_*.nc` e
+> `monan2_import_*.nc` agora gravam `_FillValue` real sobre terra — decidido
+> pela máscara nativa de cada modelo (`So_omask` do MOM6, `xland` do MPAS),
+> não por um limiar de temperatura — e incluem a variável `ocn_frac` com a
+> fração de cobertura oceânica usada nessa decisão. `postproc_mom6_import.py`
+> e `postproc_monan2_import.py` desligaram por padrão o antigo heurístico de
+> marcador de terra (religue com `--legacy-land-marker` para arquivos
+> gerados antes desta revisão). Desenho completo em
+> [`docs/mascara-continentes.md`](docs/mascara-continentes.md).
 
 > O `write_import_diag=.true.` gera ~1,7 MB/passo (grade OISST 1440×720,
 > ≈ 41 MB/dia com `dt_coupling=3600 s`). Desative em produção longa.

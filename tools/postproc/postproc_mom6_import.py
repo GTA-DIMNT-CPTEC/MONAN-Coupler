@@ -4,7 +4,31 @@ postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
                               (15 campos do exportState ATM→OCN calculados pelo
                                mediador NCAR bulk em MED_cap.F90)
 
-Versão 9.1 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Setembro 2026
+Versão 9.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Setembro 2026
+
+═══════════════════════════════════════════════════════════════════════════════
+CORREÇÕES v9.2
+═══════════════════════════════════════════════════════════════════════════════
+
+BUG-PY-23  Marcador de terra por temperatura tornado desnecessário
+  Contexto: BUG-PY-18 (abaixo) já registrava que a correção definitiva era o
+    lado Fortran gravar _FillValue sobre continente em vez de um valor
+    fisicamente plausível. Isso foi feito (MASCARA-CONT-01, med_cap_netcdf.F90):
+    mom6_import_*.nc agora grava _FillValue real sobre terra, decidido por
+    regrid da máscara oceânica do MOM6 (So_omask), não por limiar de
+    temperatura — e passa a incluir a variável 'ocn_frac' com a fração de
+    cobertura oceânica usada nessa decisão.
+  Efeito neste script: a leitura de _FillValue (linhas ~588-593, já existente)
+    passa a mascarar o continente corretamente nos arquivos novos, sem
+    depender do marcador de 271,35 K. Como esse marcador é comparação
+    aproximada, ele pode legitimamente remover SST real perto do ponto de
+    congelamento (BUG-PY-18) — agora que não é mais necessário na maioria dos
+    casos, --land-marker passa a ser DESLIGADO por padrão.
+  Compatibilidade: arquivos gerados ANTES desta revisão do acoplador não têm
+    'ocn_frac' nem _FillValue real sobre terra — para esses, religue o
+    marcador com --legacy-land-marker (equivalente ao antigo padrão). A opção
+    --no-land-marker é aceita como no-op (era o padrão implícito; agora é o
+    padrão explícito).
 
 ═══════════════════════════════════════════════════════════════════════════════
 CORREÇÕES v9.1
@@ -1277,11 +1301,24 @@ def main():
                         help='Teto de linhas por campo na tabela (0 = todas)')
 
     # Mascaramento
+    # v9.2 (BUG-PY-23): desligado por padrão. mom6_import_*.nc agora grava
+    # _FillValue real sobre continente (MASCARA-CONT-01, lado Fortran) — o
+    # marcador por temperatura só é necessário para arquivos gerados antes
+    # dessa revisão do acoplador (sem a variável 'ocn_frac').
+    parser.set_defaults(land_marker_on=False)
+    parser.add_argument('--legacy-land-marker', action='store_true',
+                        dest='land_marker_on',
+                        help='Religa o marcador de terra por temperatura '
+                             '(271.35 K) — use apenas em arquivos gerados '
+                             'antes da máscara real de continente (sem '
+                             "variável 'ocn_frac')")
     parser.add_argument('--no-land-marker', action='store_false',
                         dest='land_marker_on',
-                        help='Não remover o marcador de terra do So_t')
+                        help='Mantido por compatibilidade; sem efeito desde '
+                             'a v9.2, já que o marcador vem desligado por padrão')
     parser.add_argument('--land-marker', type=float, default=None,
-                        help='Valor do marcador de terra em K (padrão: 271.35)')
+                        help='Valor do marcador de terra em K (padrão: '
+                             '271.35, só usado com --legacy-land-marker)')
 
     args = parser.parse_args()
 

@@ -66,13 +66,17 @@ contains
   !! esta presente (apenas registra info no log ESMF). Isso permite usar
   !! este cap tanto na Fase 2 completa quanto em modos de teste com
   !! subconjunto de campos.
-  subroutine mpas_import(importState, atm_bnd, nCells, rc, lonCell, latCell)
+  subroutine mpas_import(importState, atm_bnd, nCells, rc, lonCell, latCell, xlandCell)
     type(ESMF_State),              intent(in)    :: importState
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(in)    :: nCells
     integer,                       intent(inout) :: rc
     real(MPAS_RKIND), optional,    intent(in)    :: lonCell(:)  !< lon celulas [rad, 0..2pi]
     real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat celulas [rad, -pi/2..pi/2]
+    !> MASCARA-CONT-02: mascara nativa MPAS (1=terra, 2=agua). Repassada
+    !! integralmente a write_mpas_import_diag; nao participa da importacao
+    !! dos campos OCN->ATM em si (atm_bnd), so' do diagnostico NetCDF.
+    real(MPAS_RKIND), optional,    intent(in)    :: xlandCell(:)
 
     character(len=*), parameter :: subname = '(mpas_import)'
 
@@ -249,7 +253,7 @@ contains
     !   Sf_zorl  (rugosidade [m])     — atm_bnd%zorl
     ! Arquivo: <cfg_import_diag_dir>/monan2_import_YYYYMMDD_HHMMSS.nc
     if (cfg_write_import_diag) then
-      call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
+      call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc, xlandCell)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! diagnóstico não-fatal
     end if
 

@@ -86,7 +86,19 @@ module med_cap_types_mod
     type(ESMF_RouteHandle) :: rh_ifrac_ocn2atm
     logical :: rh_ifrac_created = .false.   !< reservado; sempre .false. até Sprint E
 
-    real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)  !< Máscara oceano/continente
+    !> Fração de cobertura oceânica na grade ATM (360×180), regride uma única
+    !! vez de So_omask (=nint(mask2dT) do MOM6, ver FIX B-COASTMASK-02) pelo
+    !! routehandle bilinear rh_ocn2atm. 1,0 = célula 100% oceano; 0,0 = célula
+    !! 100% continente; valores intermediários ocorrem apenas na faixa costeira,
+    !! onde a célula ATM (mais grosseira) recobre células OCN de terra e água.
+    !! Usada por med_write_import_fields (MASCARA-CONT-01) para gravar
+    !! _FillValue sobre o continente em mom6_import_*.nc.
+    real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)
+    !> .true. após ocn_mask_atm ser calculada com sucesso (dados reais de
+    !! So_omask disponíveis — mesmo gate de is%rh_sst_masked). Enquanto
+    !! .false., med_write_import_fields não mascara (evita apagar o disco
+    !! inteiro por causa de um bootstrap ainda sem máscara real).
+    logical :: ocn_mask_atm_ready = .false.
 
     logical :: rh_created       = .false.
     logical :: use_mpas_atm     = .false.   !< Controlado por atributo NUOPC "use_mpas_atm"

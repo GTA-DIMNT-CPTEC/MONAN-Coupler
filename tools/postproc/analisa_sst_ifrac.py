@@ -275,6 +275,17 @@ def _build_land_mask(sst_list):
        não foi preenchido pelo acoplador: emite aviso e usa apenas a máscara
        automática do netCDF4.
 
+    Nota (Set/2026, MASCARA-CONT-01/02): mom6_import_*.nc e monan2_import_*.nc
+    passaram a gravar _FillValue real sobre continente (regride de So_omask
+    e xland, respectivamente — ver docs/mascara-continentes.md), em vez de um
+    valor fisicamente plausível. Nos arquivos novos, o passo 1 (nc_mask) já
+    cobre o continente inteiro; o passo 2 (thresh_mask) deixa de encontrar
+    células "constantes e próximas de T_FILL_LAND" porque essas células agora
+    chegam aqui como NaN (mascaradas pelo netCDF4), não como 271,35 K. A
+    função não precisa de nenhuma mudança para se beneficiar disso — o passo 2
+    é um complemento que continua útil para arquivos antigos ou para casos em
+    que a máscara geográfica ainda não estava disponível (bootstrap).
+
     Retorna: (land_mask, campo_nao_preenchido)
     """
     n = len(sst_list)

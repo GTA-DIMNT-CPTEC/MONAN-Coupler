@@ -202,6 +202,7 @@ contains
     type(mpas_pool_type), pointer :: meshPool     => null()
     type(mpas_pool_type), pointer :: diagPool     => null()
     type(mpas_pool_type), pointer :: diagPhysPool => null()
+    type(mpas_pool_type), pointer :: sfcInputPool => null()
 
     integer, pointer :: nCells_ptr      => null()
     integer, pointer :: nCellsSolve_ptr => null()   ! B-32: células próprias (sem halos)
@@ -543,6 +544,28 @@ contains
     if (.not. associated(atm_public%latCell)) then
       write(*,'(A)') 'ERRO mpas_atm_init: latCell nao encontrado no subpool mesh'
       rc = 1; return
+    end if
+
+    ! ------------------------------------------------------------------
+    ! 7a-2. Ponteiro zero-copy: mascara terra/agua nativa (subpool 'sfc_input')
+    !
+    ! MASCARA-CONT-02 (Set/2026): xland e' estatico (vem da condicao inicial,
+    ! nao muda por passo de tempo) e ja esta disponivel neste ponto — o mesmo
+    ! subpool que mpas_atm_run le a cada chamada de acoplamento (linha ~856
+    ! desta subrotina) para decidir onde aplicar atm_bnd. Reaproveitado aqui
+    ! para que o diagnostico monan2_import_*.nc saiba, celula a celula, quais
+    ! pontos da malha Voronoi sao continente. Nao-fatal se ausente: apenas
+    ! desabilita a mascara de continente no diagnostico (ver
+    ! mpas_cap_netcdf.F90::write_mpas_import_diag), o resto do acoplamento
+    ! continua normalmente.
+    ! ------------------------------------------------------------------
+    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'sfc_input', sfcInputPool)
+    if (associated(sfcInputPool)) then
+      call mpas_pool_get_array(sfcInputPool, 'xland', atm_public%xland)
+    end if
+    if (.not. associated(atm_public%xland)) then
+      write(*,'(A)') 'AVISO mpas_atm_init: xland nao encontrado no subpool ' // &
+        'sfc_input -- mascara de continente ficara desabilitada em monan2_import_*.nc'
     end if
 
     ! ------------------------------------------------------------------
@@ -1161,6 +1184,7 @@ contains
       !
       ! Apenas nulifica ponteiros para evitar dangling references:
       nullify(atm_public%latCell,    atm_public%lonCell,  atm_public%areaCell)
+      nullify(atm_public%xland)
       nullify(atm_public%t2m,        atm_public%u10,      atm_public%v10)
       nullify(atm_public%pslv)
       nullify(atm_public%lhflx,      atm_public%shflx)

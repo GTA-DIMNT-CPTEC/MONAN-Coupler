@@ -440,10 +440,16 @@ contains
     ! BUG-FIX-01: usar nCellsSolve (células próprias sem halos) em vez de nCells.
     ! nCells inclui células halo de PETs vizinhos, que podem conter valores não
     ! inicializados ou de outra região geográfica, corrompendo os campos importados.
+    ! MASCARA-CONT-02: g_atm_public%xland (subpool sfc_input, ver
+    ! mpas_atm_model.F90::mpas_atm_init) segue junto para que
+    ! write_mpas_import_diag possa mascarar continentes em monan2_import_*.nc
+    ! com a mascara nativa do MPAS, em vez do limiar de faixa fisica usado
+    ! ate aqui. Optional: se xland nao estiver associado (AVISO no log de
+    ! mpas_atm_init), o diagnostico simplesmente sai sem mascara, como antes.
     call mpas_import(importState, g_atm_bnd, &
          merge(g_atm_public%nCellsSolve, g_atm_public%nCells, &
                g_atm_public%nCellsSolve > 0), rc, &
-         g_atm_public%lonCell, g_atm_public%latCell)
+         g_atm_public%lonCell, g_atm_public%latCell, g_atm_public%xland)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (write_diag) then
       call state_diagnose(importState, 'importState@Advance', rc)

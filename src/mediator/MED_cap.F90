@@ -1995,6 +1995,111 @@ contains
                 '(mascara So_omask)', ESMF_LOGMSG_INFO)
             end if
             is%rh_sst_masked = .true.
+
+            !====================================================================
+            ! MASCARA-CONT-01 (Set/2026): fração de cobertura oceânica na grade
+            ! ATM (360×180), para mascarar continentes em mom6_import_*.nc.
+            !
+            ! Reaproveita a MESMA informação terra/água que acabou de ser escrita
+            ! no GRIDITEM_MASK de is%ocn_grid (maskptr, 0=terra/1=oceano), venha
+            ! ela de So_omask real (ramo got_omask acima) ou do fallback por
+            ! limiar de SST (LAND_FILL_MAX). Não é preciso distinguir os dois
+            ! casos aqui: qualquer que tenha sido o ramo, o GRIDITEM_MASK já
+            ! está preenchido antes deste ponto.
+            !
+            ! Diferença deliberada em relação a rh_ocn2atm_sst: aqui o regrid é
+            ! BILINEAR SEM mascarar a fonte — todas as células OCN (terra=0 e
+            ! água=1) entram na média. O resultado não é um booleano, é uma
+            ! FRAÇÃO de cobertura oceânica por célula ATM: 1,0 em pleno oceano,
+            ! 0,0 em pleno continente, intermediária na faixa costeira (onde uma
+            ! única célula ATM, mais grosseira que a OCN, recobre terra e água
+            ! ao mesmo tempo). med_write_import_fields decide o corte binário
+            ! (_FillValue) a partir dessa fração — ver docs/mascara-continentes.md.
+            !====================================================================
+            if (.not. is%ocn_mask_atm_ready) then
+              block
+                type(ESMF_Field)                :: f_omask_ocn, f_omask_tmp
+                real(ESMF_KIND_R8), pointer      :: omaskptr_ocn(:,:) => null()
+                integer(ESMF_KIND_I4), pointer   :: maskptr_ocn(:,:)  => null()
+                real(ESMF_KIND_R8), pointer      :: omask_atm_ptr(:,:) => null()
+                real(ESMF_KIND_R8), allocatable  :: mask_local(:,:)
+                integer :: lde_o, ldec_ocn2, rc_m, mpi_ierr_msk
+                integer :: i1m, i2m, j1m, j2m
+                integer, parameter :: NX_ATM_M = 360, NY_ATM_M = 180
+                real(ESMF_KIND_R8), parameter :: FILL_MASK = -9.99e+20_ESMF_KIND_R8
+
+                rc_m = ESMF_SUCCESS
+
+                ! 1. Campo real(8) na grade OCN, copiado do GRIDITEM_MASK (0/1).
+                f_omask_ocn = ESMF_FieldCreate(grid=is%ocn_grid, &
+                  typekind=ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, &
+                  rc=rc_m)
+                if (rc_m == ESMF_SUCCESS) then
+                  call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn2, rc=rc_m)
+                  do lde_o = 0, ldec_ocn2 - 1
+                    call ESMF_FieldGet(f_omask_ocn, localDe=lde_o, &
+                      farrayPtr=omaskptr_ocn, rc=rc_m)
+                    if (rc_m /= ESMF_SUCCESS .or. .not. associated(omaskptr_ocn)) cycle
+                    call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+                      staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_o, &
+                      farrayPtr=maskptr_ocn, rc=rc_m)
+                    if (rc_m == ESMF_SUCCESS .and. associated(maskptr_ocn)) &
+                      omaskptr_ocn = real(maskptr_ocn, ESMF_KIND_R8)
+                  end do
+                  rc_m = ESMF_SUCCESS
+                end if
+
+                ! 2. Campo real(8) na grade ATM: destino do regrid bilinear SEM
+                !    mascara de fonte (fração de cobertura, não booleano).
+                f_omask_tmp = ESMF_FieldCreate(grid=is%atm_grid, &
+                  typekind=ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, &
+                  rc=rc_m)
+                if (rc_m == ESMF_SUCCESS) &
+                  call ESMF_FieldRegrid(f_omask_ocn, f_omask_tmp, is%rh_ocn2atm, &
+                    zeroregion=ESMF_REGION_TOTAL, rc=rc_m)
+                if (rc_m == ESMF_SUCCESS) &
+                  call ESMF_FieldGet(f_omask_tmp, farrayPtr=omask_atm_ptr, rc=rc_m)
+
+                ! 3. Reúne os DEs locais num array global replicado (360×180) —
+                !    mesmo padrão MAX+sentinela de med_write_import_fields: cada
+                !    ponto pertence a exatamente 1 DE, logo MAX reconstrói o
+                !    campo inteiro a partir das contribuições locais.
+                if (rc_m == ESMF_SUCCESS .and. associated(omask_atm_ptr)) then
+                  if (.not. allocated(is%ocn_mask_atm)) &
+                    allocate(is%ocn_mask_atm(NX_ATM_M, NY_ATM_M))
+                  block
+                    real(ESMF_KIND_R8), allocatable :: mask_global(:,:)
+                    allocate(mask_local(NX_ATM_M, NY_ATM_M))
+                    allocate(mask_global(NX_ATM_M, NY_ATM_M))
+                    mask_local = FILL_MASK
+                    i1m = max(1, lbound(omask_atm_ptr,1)); i2m = min(NX_ATM_M, ubound(omask_atm_ptr,1))
+                    j1m = max(1, lbound(omask_atm_ptr,2)); j2m = min(NY_ATM_M, ubound(omask_atm_ptr,2))
+                    if (i2m >= i1m .and. j2m >= j1m) &
+                      mask_local(i1m:i2m, j1m:j2m) = omask_atm_ptr(i1m:i2m, j1m:j2m)
+                    call MPI_Allreduce(mask_local, mask_global, NX_ATM_M*NY_ATM_M, &
+                      MPI_DOUBLE_PRECISION, MPI_MAX, med_mpi_comm, mpi_ierr_msk)
+                    ! Ponto nunca coberto por PET nenhum (não deveria ocorrer —
+                    ! todo ponto da grade ATM pertence a exatamente 1 DE): trata
+                    ! como continente por segurança, em vez de deixar a sentinela
+                    ! −9,99e20 vazar para o cálculo de fração oceânica.
+                    where (mask_global < -1.0_ESMF_KIND_R8) mask_global = 0.0_ESMF_KIND_R8
+                    is%ocn_mask_atm = mask_global
+                    deallocate(mask_local, mask_global)
+                  end block
+                  is%ocn_mask_atm_ready = .true.
+                  call ESMF_LogWrite('MED MASCARA-CONT-01: ocn_mask_atm ' // &
+                    'calculada (fracao oceanica 360x180, regride de So_omask)', &
+                    ESMF_LOGMSG_INFO)
+                else
+                  call ESMF_LogWrite('MED MASCARA-CONT-01: falha ao calcular ' // &
+                    'ocn_mask_atm — mom6_import_*.nc sera gravado sem mascara ' // &
+                    'de continente nesta chamada', ESMF_LOGMSG_WARNING)
+                end if
+
+                call ESMF_FieldDestroy(f_omask_ocn, rc=rc_m)
+                call ESMF_FieldDestroy(f_omask_tmp, rc=rc_m)
+              end block
+            end if
           end if
         end block
       end if

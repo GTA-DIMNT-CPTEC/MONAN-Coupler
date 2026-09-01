@@ -3,7 +3,23 @@
 postproc_monan2_import.py — Diagnóstico dos campos importados pelo MONAN-A 2.0
                             via conector MED→MPAS (So_t, Si_ifrac, Sf_zorl)
 
-Versão 3.1 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Setembro 2026
+Versão 3.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Setembro 2026
+
+═══════════════════════════════════════════════════════════════════════════════
+CORREÇÕES v3.2
+═══════════════════════════════════════════════════════════════════════════════
+
+BUG-16  Marcador de terra por temperatura tornado desnecessário
+  Contexto: BUG-14 (abaixo) já registrava que a correção definitiva era o
+    lado Fortran gravar _FillValue sobre continente. Isso foi feito
+    (MASCARA-CONT-02, mpas_cap_netcdf.F90): monan2_import_*.nc agora mascara
+    continente com a máscara nativa do MPAS (xland), não por faixa física, e
+    passa a incluir a variável 'ocn_frac' com a fração de células Voronoi
+    oceânicas usada nessa decisão.
+  Efeito neste script: --land-marker passa a ser DESLIGADO por padrão nos
+    arquivos novos, que já chegam com _FillValue real sobre terra. Arquivos
+    gerados ANTES desta revisão do acoplador (sem 'ocn_frac') continuam
+    precisando do marcador — religue com --legacy-land-marker.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CORREÇÕES v3.1
@@ -1377,9 +1393,18 @@ def main():
     parser.add_argument('--max-rows', type=int, default=40, dest='max_rows',
                         help='Teto de linhas por campo nas listagens (0 = todas)')
 
+    # v3.2 (BUG-16): desligado por padrão — ver nota no cabeçalho do arquivo.
+    parser.set_defaults(land_marker_on=False)
+    parser.add_argument('--legacy-land-marker', action='store_true',
+                        dest='land_marker_on',
+                        help='Religa o marcador de terra por temperatura '
+                             '(271.35 K) — use apenas em arquivos gerados '
+                             'antes da máscara real de continente (sem '
+                             "variável 'ocn_frac')")
     parser.add_argument('--no-land-marker', action='store_false',
                         dest='land_marker_on',
-                        help='Não remover o marcador de terra do So_t')
+                        help='Mantido por compatibilidade; sem efeito desde '
+                             'a v3.2, já que o marcador vem desligado por padrão')
     parser.add_argument('--si-persist', action='store_true', dest='si_persist',
                         help='Aplica a persistência simulada de Si_ifrac nas '
                              'figuras (compensa o BUG-MEM do Fortran; o campo '

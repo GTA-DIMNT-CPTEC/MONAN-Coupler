@@ -52,6 +52,14 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), pointer :: lonCell(:)    => null()  !< lon [rad]
     real(MPAS_RKIND), pointer :: areaCell(:)   => null()  !< área [m²]
 
+    ! ── Máscara terra/água nativa (subpool 'sfc_input') ────────────────────
+    !> xland = 1,0 terra; xland = 2,0 água (convenção WRF/MPAS, a mesma já
+    !! usada em mpas_atm_run para decidir onde aplicar atm_bnd). Estática
+    !! durante a integração — vem do arquivo de condição inicial, não muda
+    !! por passo de tempo. Usada por mpas_import/write_mpas_import_diag para
+    !! mascarar continentes em monan2_import_*.nc (MASCARA-CONT-02).
+    real(MPAS_RKIND), pointer :: xland(:)      => null()
+
     ! ── Vento e temperatura em baixa atmosfera ────────────────────────────
     real(MPAS_RKIND), pointer :: t2m(:)        => null()  !< T a 2 m [K]
     real(MPAS_RKIND), pointer :: q2m(:)        => null()  !< Hum. específica 2 m [kg/kg]
