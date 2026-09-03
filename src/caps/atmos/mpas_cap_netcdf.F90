@@ -1038,31 +1038,7 @@ contains
 
     ! MASCARA-CONT-02: mascara nativa MPAS -> indicador 0/1 por celula-fonte
     ! (1=agua, xland>1.5; 0=terra), no mesmo MPI_Gatherv dos demais campos.
-    !
-    ! A decisao precisa ser COLETIVA: MPI_Gatherv abaixo e' coletivo, entao se
-    ! um PET entrasse no ramo e outro nao, o job travaria (deadlock) em vez de
-    ! falhar. Na pratica xland vem do mesmo registro do MPAS em todos os ranks,
-    ! logo present(xlandCell) ja seria uniforme -- mas um hang em maquina de
-    ! producao e' caro demais para depender disso. Soma de 0/1 comparada a
-    ! petCount = "so usa a mascara se TODOS os PETs a tiverem".
-    !
-    ! Usa o wrapper allreduce_i4 (W1-FIX, ver topo do modulo) em vez de chamar
-    ! MPI_Allreduce direto: o compilador cruza tipos entre chamadas de
-    ! MPI_Allreduce no mesmo escopo de modulo. O wrapper e' fixo em MPI_SUM,
-    ! dai a formulacao por soma em vez de MPI_MIN.
     have_xland = present(xlandCell)
-    block
-      integer :: ix_loc(1), ix_glb(1)
-      ix_loc(1) = merge(1, 0, have_xland)
-      ix_glb(1) = 0
-      call allreduce_i4(ix_loc, ix_glb, 1, mpiComm, mpi_ierr)
-      if (have_xland .and. ix_glb(1) /= petCount) &
-        call ESMF_LogWrite(subname//': AVISO — xland presente apenas em ' // &
-          'parte dos PETs; mascara de continente desabilitada para manter ' // &
-          'as coletivas MPI consistentes', ESMF_LOGMSG_WARNING)
-      have_xland = (ix_glb(1) == petCount)
-    end block
-
     if (have_xland) then
       sendBuf(1:nLocal) = merge(1.0_ESMF_KIND_R8, 0.0_ESMF_KIND_R8, &
                                  xlandCell(1:nLocal) > 1.5_MPAS_RKIND)
