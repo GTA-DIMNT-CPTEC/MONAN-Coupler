@@ -82,7 +82,8 @@ module mpas_atm_model_mod
                                     cfg_ice_fraction_default, &
                                     cfg_zorl_default,&
                                     cfg_use_datm,&
-                                    cfg_use_docn
+                                    cfg_use_docn, &
+                                    cfg_write_fixdiag
 
   implicit none
   private
@@ -202,7 +203,6 @@ contains
     type(mpas_pool_type), pointer :: meshPool     => null()
     type(mpas_pool_type), pointer :: diagPool     => null()
     type(mpas_pool_type), pointer :: diagPhysPool => null()
-    type(mpas_pool_type), pointer :: sfcInputPool => null()
 
     integer, pointer :: nCells_ptr      => null()
     integer, pointer :: nCellsSolve_ptr => null()   ! B-32: células próprias (sem halos)
@@ -547,28 +547,6 @@ contains
     end if
 
     ! ------------------------------------------------------------------
-    ! 7a-2. Ponteiro zero-copy: mascara terra/agua nativa (subpool 'sfc_input')
-    !
-    ! MASCARA-CONT-02 (Set/2026): xland e' estatico (vem da condicao inicial,
-    ! nao muda por passo de tempo) e ja esta disponivel neste ponto — o mesmo
-    ! subpool que mpas_atm_run le a cada chamada de acoplamento (linha ~856
-    ! desta subrotina) para decidir onde aplicar atm_bnd. Reaproveitado aqui
-    ! para que o diagnostico monan2_import_*.nc saiba, celula a celula, quais
-    ! pontos da malha Voronoi sao continente. Nao-fatal se ausente: apenas
-    ! desabilita a mascara de continente no diagnostico (ver
-    ! mpas_cap_netcdf.F90::write_mpas_import_diag), o resto do acoplamento
-    ! continua normalmente.
-    ! ------------------------------------------------------------------
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'sfc_input', sfcInputPool)
-    if (associated(sfcInputPool)) then
-      call mpas_pool_get_array(sfcInputPool, 'xland', atm_public%xland)
-    end if
-    if (.not. associated(atm_public%xland)) then
-      write(*,'(A)') 'AVISO mpas_atm_init: xland nao encontrado no subpool ' // &
-        'sfc_input -- mascara de continente ficara desabilitada em monan2_import_*.nc'
-    end if
-
-    ! ------------------------------------------------------------------
     ! 7b. Ponteiros zero-copy: diagnósticos
     !
     !  No MONAN-A 2.0 os campos estão distribuídos em dois subpools:
@@ -778,12 +756,17 @@ contains
              atm_bnd%ice_fraction(n), &
              atm_bnd%uocn        (n), &
              atm_bnd%vocn        (n), &
-             atm_bnd%zorl        (n))
+             atm_bnd%zorl        (n), &
+             atm_bnd%alb         (n))
     atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
     atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
     atm_bnd%uocn         = 0.0_MPAS_RKIND   ! Sprint A: corrente zonal
     atm_bnd%vocn         = 0.0_MPAS_RKIND   ! Sprint A: corrente meridional
     atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
+    ! Fase 2.6: default fisico de agua aberta (~0,08) ate a 1a troca real
+    ! do mediador. Sem config dedicado (cfg_alb_default) para nao adicionar
+    ! mais uma dependencia de namelist so' para um valor de bootstrap.
+    atm_bnd%alb          = 0.08_MPAS_RKIND
 
     atm_state%initialized = .true.
     ! B-32: nSolve = células próprias (sem halos); n = nCells total (com halos).
@@ -833,6 +816,13 @@ contains
     real(MPAS_RKIND), dimension(:), pointer :: sst_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: ice_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: zorl_field => null()
+    ! Fase 2.6 (B-ALBEDO-FEEDBACK-01): sfc_albedo real (Sf_albedo do
+    ! mediador) -> physica do MONAN-A, substituindo a climatologia mensal
+    ! (config_sfc_albedo=.false. necessario no namelist p/ nao ser
+    ! sobrescrito pelo NOAH LSM). Ver diagnostico logo apos a injecao.
+    real(MPAS_RKIND), dimension(:), pointer :: albedo_field => null()
+    integer :: diag_alb_cell
+    real(MPAS_RKIND) :: diag_alb_before
     integer :: n, ierr, iCell
     character(len=256) :: msg
     ! B-COLDSTART-01: na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
@@ -866,6 +856,8 @@ contains
     call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
     call mpas_pool_get_config(g_domain%configs, 'config_do_restart', config_do_restart)
+    diag_alb_cell = -1
+    diag_alb_before = -1.0_MPAS_RKIND
     if (associated(config_do_restart)) then
       is_cold_start = .not. config_do_restart
     else
@@ -883,6 +875,10 @@ contains
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
       !call mpas_pool_get_array(diag_physicsPool, 'znt',         zorl_field)
       call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
+      ! Fase 2.6: sfc_albedo vive em diag_physics (confirmado no Registry.xml
+      ! real do MONAN-Model — mpas_atmphys_driver_lsm.F le/escreve de la,
+      ! nao de sfc_input).
+      call mpas_pool_get_array(diag_physicsPool, 'sfc_albedo', albedo_field)
 
       if (associated(xland_field)  .and. allocated(atm_bnd%sst))then
          if (first_coupling_call .and. is_cold_start) then
@@ -906,6 +902,21 @@ contains
                      end if 
                      if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
                           zorl_field(iCell) = atm_bnd%zorl(iCell)
+                     endif
+                     ! Fase 2.6 (B-ALBEDO-FEEDBACK-01): mesma guarda de
+                     ! xland>1.5 (oceano) e first_coupling_call/cold-start
+                     ! ja usada para sst/ice/zorl acima.
+                     if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
+                       if (diag_alb_cell < 0) then
+                         ! FIX-DIAG-ALBFEEDBACK-01: guarda a 1a celula de
+                         ! oceano injetada nesta chamada, para comparar
+                         ! ANTES/DEPOIS de core_run logo abaixo — teste
+                         ! empirico de se o NOAH LSM preserva ou sobrescreve
+                         ! sfc_albedo em pontos de agua.
+                         diag_alb_cell   = iCell
+                         diag_alb_before = atm_bnd%alb(iCell)
+                       end if
+                       albedo_field(iCell) = atm_bnd%alb(iCell)
                      endif
                   end if
                endif 
@@ -947,6 +958,33 @@ contains
     end if
 
     call mpas_log_write('mpas_atm_run: core_run concluido')
+
+    ! FIX-DIAG-ALBFEEDBACK-01: reabre sfc_albedo (diag_physics) DEPOIS de
+    ! core_run e compara com o valor injetado ANTES (diag_alb_before), na
+    ! mesma celula de oceano (diag_alb_cell). Ja validado em producao
+    ! (Set/2026, preservado=T) — gated por cfg_write_fixdiag.
+    if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
+      block
+        real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
+        type(mpas_pool_type), pointer :: diag_physicsPool_after
+        character(len=250) :: diag_msg_alb
+        call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', &
+          diag_physicsPool_after)
+        if (associated(diag_physicsPool_after)) then
+          call mpas_pool_get_array(diag_physicsPool_after, 'sfc_albedo', &
+            albedo_field_after)
+          if (associated(albedo_field_after)) then
+            write(diag_msg_alb, '(A,I0,A,F10.6,A,F10.6,A,L1)') &
+              'FIX-DIAG-ALBFEEDBACK-01: celula=', diag_alb_cell, &
+              ' albedo_injetado=', diag_alb_before, &
+              ' albedo_pos_core_run=', albedo_field_after(diag_alb_cell), &
+              ' preservado=', &
+              (abs(albedo_field_after(diag_alb_cell) - diag_alb_before) < 1.0e-6_MPAS_RKIND)
+            call mpas_log_write(trim(diag_msg_alb))
+          end if
+        end if
+      end block
+    end if
 
     ! ------------------------------------------------------------------
     ! Pós-processamento dos campos acumulados e stress superficial.
@@ -1184,7 +1222,6 @@ contains
       !
       ! Apenas nulifica ponteiros para evitar dangling references:
       nullify(atm_public%latCell,    atm_public%lonCell,  atm_public%areaCell)
-      nullify(atm_public%xland)
       nullify(atm_public%t2m,        atm_public%u10,      atm_public%v10)
       nullify(atm_public%pslv)
       nullify(atm_public%lhflx,      atm_public%shflx)
@@ -1204,6 +1241,7 @@ contains
     if (allocated(atm_bnd%uocn))          deallocate(atm_bnd%uocn)   ! Sprint A
     if (allocated(atm_bnd%vocn))          deallocate(atm_bnd%vocn)   ! Sprint A
     if (allocated(atm_bnd%zorl))          deallocate(atm_bnd%zorl)
+    if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)     ! Fase 2.6
     ! Buffers de saída computados (propriedade deste módulo)
     if (allocated(g_prev_acswdnb)) deallocate(g_prev_acswdnb)
     if (allocated(g_prev_aclwdnb)) deallocate(g_prev_aclwdnb)
@@ -1259,17 +1297,20 @@ contains
     if (allocated(atm_bnd%uocn))         deallocate(atm_bnd%uocn)
     if (allocated(atm_bnd%vocn))         deallocate(atm_bnd%vocn)
     if (allocated(atm_bnd%zorl))         deallocate(atm_bnd%zorl)
+    if (allocated(atm_bnd%alb))          deallocate(atm_bnd%alb)      ! Fase 2.6
 
     allocate(atm_bnd%sst         (nCells_new))
     allocate(atm_bnd%ice_fraction(nCells_new))
     allocate(atm_bnd%uocn        (nCells_new))     ! Sprint A
     allocate(atm_bnd%vocn        (nCells_new))     ! Sprint A
     allocate(atm_bnd%zorl        (nCells_new))
+    allocate(atm_bnd%alb         (nCells_new))     ! Fase 2.6
     atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
     atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
     atm_bnd%uocn         = 0.0_MPAS_RKIND
     atm_bnd%vocn         = 0.0_MPAS_RKIND
     atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
+    atm_bnd%alb          = 0.08_MPAS_RKIND    ! Fase 2.6 — default agua aberta
 
     ! ── Redimensiona buffers de módulo (acumulados e stress) ─────────────
     ! Estes arrays são alocados em mpas_atm_init com tamanho = MPAS nCells.

@@ -128,6 +128,11 @@ module mpas_cap_config_mod
   ! Diagnóstico de importação: escreve NetCDF por passo (postproc_mom6_import.py)
   logical,           public, protected :: cfg_write_import_diag   = .false.
   character(len=256),public, protected :: cfg_import_diag_dir     = "diag_import"
+  ! Diagnósticos temporários FIX-DIAG-* (log textual, min/max, saturação
+  ! etc. — acumulados durante o desenvolvimento das Fases 1-3). .true. por
+  ! padrão durante validação; recomenda-se .false. em rodadas de produção
+  ! longas para não inflar os logs (alguns escrevem a cada passo).
+  logical,           public, protected :: cfg_write_fixdiag       = .true.
 
   ! ── Grupo &nuopc_ocn — parâmetros do cap MOM6+SIS2 (Migração v7.0) ────────
   character(len=256),public, protected :: cfg_mom6_mesh_ocn    = "INPUT/ocean_hgrid.nc"
@@ -253,6 +258,7 @@ contains
     character(len=16)  :: log_kind
     character(len=256) :: mesh_atm,     config_dir
     logical            :: write_netcdf, write_diag
+    logical            :: write_fixdiag
     character(len=256) :: output_dir
     real               :: grid_res_deg
     real               :: sst_default, ice_fraction_default, zorl_default
@@ -289,7 +295,8 @@ contains
                              docn_sst_varname, docn_ice_varname, &
                              docn_cur_u_varname, docn_cur_v_varname, &
                              docn_ice_pct, write_import_diag, import_diag_dir
-    namelist /nuopc_driver/ start_date, stop_date, dt_coupling, dt_atm, log_dir, log_kind
+    namelist /nuopc_driver/ start_date, stop_date, dt_coupling, dt_atm, log_dir, log_kind, &
+                             write_fixdiag
     namelist /nuopc_atm/    mesh_atm, config_dir, write_diag
     namelist /nuopc_netcdf/ write_netcdf, output_dir, grid_res_deg
     namelist /nuopc_atm_bnd/sst_default, ice_fraction_default, zorl_default
@@ -328,6 +335,7 @@ contains
     dt_atm              = cfg_dt_atm
     log_dir             = cfg_log_dir
     log_kind            = cfg_log_kind
+    write_fixdiag       = cfg_write_fixdiag
     mesh_atm            = cfg_mesh_atm
     config_dir          = cfg_config_dir
     write_netcdf        = cfg_write_netcdf
@@ -632,6 +640,7 @@ contains
     cfg_dt_atm               = dt_atm
     cfg_log_dir              = trim(log_dir)
     cfg_log_kind             = trim(log_kind)
+    cfg_write_fixdiag        = write_fixdiag
     cfg_mesh_atm             = trim(mesh_atm)
     cfg_config_dir           = trim(config_dir)
     cfg_write_diag           = write_diag
@@ -662,6 +671,7 @@ contains
     write(*,'(2X,A,I0)') '  dt_atm            = ', cfg_dt_atm
     write(*,'(2X,A,A)')  '  log_dir           = ', trim(cfg_log_dir)
     write(*,'(2X,A,A)')  '  log_kind          = ', trim(cfg_log_kind)
+    write(*,'(2X,A,L1)') '  write_fixdiag     = ', cfg_write_fixdiag
     write(*,'(A)') ''
     write(*,'(A,A)') '  [nuopc_atm]'
     write(*,'(2X,A,A)')  '  mesh_atm          = ', trim(cfg_mesh_atm)

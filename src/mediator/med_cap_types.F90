@@ -64,6 +64,16 @@ module med_cap_types_mod
     type(ESMF_Field) :: f_swidr_atm, f_swidf_atm
     type(ESMF_Field) :: f_rain_atm, f_snow_atm, f_pslv_atm
     type(ESMF_Field) :: f_ifrac_atm, f_duu10n_atm, f_sst_atm
+
+    !> Fase 4b (B-TSFC-DUALEXPORT-01, Set/2026): So_t exportado ao SIS2 e ao
+    !! MOM6-side deve permanecer SST PURA (o SIS2 precisa da temperatura real
+    !! do oceano sob o gelo para o fluxo de calor basal, ICE_KMELT — misturar
+    !! com Si_t_sis2 ali seria circular/errado). A temperatura de pele
+    !! COMPOSTA (blend por Si_ifrac com Si_t_sis2), util so' para a
+    !! atmosfera (radiacao/camada limite sobre a celula mista), vai por um
+    !! StandardName SEPARADO, "Sx_tsfc" — ver MED_cap.F90 e
+    !! mpas_cap_MONAN.F90. f_sst_atm permanece intocado (SST pura).
+    type(ESMF_Field) :: f_tsfc_atm
     !> Correntes oceânicas interpoladas para a grade ATM (BUG-CALC-DUU fix v13.0).
     !! Necessárias para So_duu10n = |(V_atm − V_ocn)|² (protocolo CMEPS).
     type(ESMF_Field) :: f_uocn_atm   !< So_u interpolado OCN → ATM [m/s]
@@ -71,6 +81,34 @@ module med_cap_types_mod
     !> Rugosidade superficial via Charnock + Smith (Sprint C, Maio 2026).
     !! Calculada no MED a partir de Foxx_taux/tauy; exportada como Sf_zorl → MPAS.
     type(ESMF_Field) :: f_zorl_atm   !< Sf_zorl rugosidade Charnock [m]
+    !> Fase 2.5 (B-ZENITH-01): angulo zenital solar, calculado no bulk NCAR
+    !! a partir de lat/lon/clock; exportado como Faxa_coszen -> SIS2
+    !! (is%aib%coszen, antes zerado — ver sis_cap_MONAN.F90::import_forcing).
+    type(ESMF_Field) :: f_coszen_atm !< Faxa_coszen — cos(ângulo zenital solar) [nondim]
+    !> Fase 2.6 (B-ALBEDO-FEEDBACK-01): albedo de banda larga efetivo
+    !! (água aberta dinâmica + gelo real, ponderado por f_vis_dir/f_vis_dif/
+    !! f_nir_dir/f_nir_dif), exportado como Sf_albedo -> MONAN-A.
+    type(ESMF_Field) :: f_albedo_atm
+
+    !> Fase 3 (B-ICE-FLUX-DIFF-01): temperatura de pele real do gelo
+    !! (Si_t_sis2, regrid via rh_ocn2atm) e o segundo conjunto de fluxos
+    !! turbulentos calculado a partir dela — Fioi_* — em vez de reusar
+    !! Foxx_* (calculado com SST) para o SIS2, como acontecia antes.
+    type(ESMF_Field) :: f_tice_atm
+    type(ESMF_Field) :: f_taux_ice, f_tauy_ice, f_sen_ice, f_evap_ice, f_lwnet_ice
+
+    !> Fase 4 (B-ICE-SWNET-01, Set/2026): fluxo liquido de onda curta
+    !! ESPECIFICO do gelo, calculado com o albedo REAL do gelo por banda
+    !! (is%f_alb_*_ice), sem misturar com o albedo de agua aberta. Antes
+    !! desta correcao, o SIS2 recebia Foxx_swnet_* — o MESMO valor enviado
+    !! ao MOM6, calculado com um albedo MEDIO da celula (agua+gelo
+    !! ponderados por Si_ifrac). Isso fazia o gelo absorver SW calculada
+    !! com um albedo mais BAIXO que o seu proprio (ex.: ifrac=0,5, albedo
+    !! gelo~0,7, albedo agua~0,06 -> albedo medio~0,38 -> gelo absorve
+    !! ~62% de swdn em vez dos ~30% fisicamente corretos). Ver
+    !! med_bulk_ncar.F90 para o calculo; Foxx_swnet_* passa a usar SOMENTE
+    !! o albedo de agua aberta (sem blend), simetrico a esta correcao.
+    type(ESMF_Field) :: f_swvdr_ice, f_swvdf_ice, f_swidr_ice, f_swidf_ice
 
     ! RouteHandles
     type(ESMF_RouteHandle) :: rh_atm2ocn      !< ATM → OCN
@@ -79,26 +117,56 @@ module med_cap_types_mod
     !! Máscara pelo fill MOM6 (~200 K); bordas por extrapolação de vizinhança.
     type(ESMF_RouteHandle) :: rh_ocn2atm_sst
     logical :: rh_sst_masked = .false.
-    !> Sprint B.2 (Mai/2026) — reservado para regrid Si_ifrac OCN→ATM.
-    !! Não utilizado na implementação atual (sigmoide calculada localmente
-    !! no MED a partir de is%f_sst_atm). Preservado para Sprint E, quando
-    !! Si_ifrac do SIS2 for exposto via cap NUOPC dedicado em ESMF_GEOMTYPE_MESH.
-    type(ESMF_RouteHandle) :: rh_ifrac_ocn2atm
-    logical :: rh_ifrac_created = .false.   !< reservado; sempre .false. até Sprint E
+    !> FIX B-ICEREGRID-01 (Set/2026): regrid bilinear OCN(SIS2)→ATM ciente
+    !! de máscara (So_omask), dedicado aos campos do gelo (Si_ifrac_sis2,
+    !! Si_avsdr/vdf/idr/idf, Si_t_sis2). Antes, esses campos usavam o
+    !! rh_ocn2atm generico (sem máscara nem extrapolação de vizinhança) —
+    !! mesma classe de problema que motivou o rh_ocn2atm_sst acima, so' que
+    !! sem correção: pior aqui, pois gelo se concentra justamente na região
+    !! de deformação da malha tripolar (alta latitude), onde o rh_ocn2atm_sst
+    !! ja' provou ser necessário mesmo para SST (campo global, onde o mesmo
+    !! artefato fica diluído no resto do domínio).
+    type(ESMF_RouteHandle) :: rh_ocn2atm_ice
+    logical :: rh_ice_masked = .false.
 
-    !> Fração de cobertura oceânica na grade ATM (360×180), regride uma única
-    !! vez de So_omask (=nint(mask2dT) do MOM6, ver FIX B-COASTMASK-02) pelo
-    !! routehandle bilinear rh_ocn2atm. 1,0 = célula 100% oceano; 0,0 = célula
-    !! 100% continente; valores intermediários ocorrem apenas na faixa costeira,
-    !! onde a célula ATM (mais grosseira) recobre células OCN de terra e água.
-    !! Usada por med_write_import_fields (MASCARA-CONT-01) para gravar
-    !! _FillValue sobre o continente em mom6_import_*.nc.
-    real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)
-    !> .true. após ocn_mask_atm ser calculada com sucesso (dados reais de
-    !! So_omask disponíveis — mesmo gate de is%rh_sst_masked). Enquanto
-    !! .false., med_write_import_fields não mascara (evita apagar o disco
-    !! inteiro por causa de um bootstrap ainda sem máscara real).
-    logical :: ocn_mask_atm_ready = .false.
+    !> FIX B-LANDMASK-01 (Set/2026): mascara terra/oceano REAL (So_omask),
+    !! regridada uma unica vez de ocn_grid para atm_grid. Substitui a
+    !! heuristica "SST~=271,35K = terra" (Sprint A.5.1/A.5.2), que colide
+    !! numericamente com agua aberta genuina no ponto de congelamento
+    !! (justamente a borda do gelo marinho). Metodo NEAREST_STOD (nao
+    !! precisa de precisao subcelular, so' discriminar terra/oceano).
+    type(ESMF_Field)       :: f_omask_atm
+    type(ESMF_RouteHandle) :: rh_ocn2atm_landmask
+    logical :: rh_landmask_created = .false.
+
+    !> FIX B-CONSERVE-03 (Set/2026): RouteHandle DEDICADO ATM->OCN para a
+    !! perna de exportacao de Si_ifrac (B-ICEREGRID-04) usando CONSERVE.
+    !! Nao reusa rh_atm2ocn (compartilhado com Foxx_taux/tauy/sen/... via
+    !! NEAREST_STOD) para nao alterar o metodo de regrid desses outros
+    !! campos, que nunca foi pedido nem validado para CONSERVE.
+    type(ESMF_RouteHandle) :: rh_atm2ocn_ice
+    logical :: rh_atm2ocn_ice_created = .false.
+    !> Sprint B.2 (Set/2026) — ENTREGUE. Si_ifrac_sis2 (e agora os 4 campos
+    !! de albedo do gelo, Fase 2) sao realizados pelo MED na MESMA ocn_grid
+    !! usada por So_t (ver InitializeRealize: "geometricamente equivalente
+    !! a ocn_grid" — mesma ocean_hgrid.nc). Por isso NAO precisam de um
+    !! RouteHandle proprio: o rh_ocn2atm ja existente (linha ~1130) e'
+    !! reutilizado, exatamente como ja e' feito para So_u/So_v. O slot
+    !! antes reservado como "rh_ifrac_ocn2atm" (Sprint E) fica sem uso —
+    !! a premissa de que precisaria de uma grade ICE dedicada nao se
+    !! confirmou; o bloqueio real era a fisica do SIS2 (ver
+    !! FIX B-ICE-FASTSYNC-01/02 em sis_cap_MONAN.F90), nao a geometria.
+
+    !> Fase 2 (B-ICE-ALBEDO-01) — albedo do gelo por banda, regridado do
+    !! SIS2 (ocn_grid, ver acima) para a grade ATM via rh_ocn2atm. Usado em
+    !! med_bulk_ncar.F90 para substituir a constante albedo_ocn nas células
+    !! com cobertura de gelo (ponderado por f_ifrac_atm).
+    type(ESMF_Field) :: f_alb_vdr_ice   !< Si_avsdr_sis2 regridado [visível direto]
+    type(ESMF_Field) :: f_alb_vdf_ice   !< Si_avsdf_sis2 regridado [visível difuso]
+    type(ESMF_Field) :: f_alb_idr_ice   !< Si_anidr_sis2 regridado [NIR direto]
+    type(ESMF_Field) :: f_alb_idf_ice   !< Si_anidf_sis2 regridado [NIR difuso]
+
+    real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)  !< Máscara oceano/continente
 
     logical :: rh_created       = .false.
     logical :: use_mpas_atm     = .false.   !< Controlado por atributo NUOPC "use_mpas_atm"
@@ -130,14 +198,22 @@ module med_cap_types_mod
 
   !> Campos de export para OCN (14 fluxos bulk) + 4 campos OCN→MPAS dinâmicos.
   !! Sprint A (Mai/2026): +So_t; Sprint B: +So_u, So_v; Sprint C: +Sf_zorl.
-  integer, parameter :: n_export = 18
+  !! Fase 2.5 (B-ZENITH-01): +Faxa_coszen — angulo zenital solar real p/ SIS2
+  !! (antes zerado em is%aib%coszen, ver sis_cap_MONAN.F90::import_forcing).
+  integer, parameter :: n_export = 30
   character(len=32), parameter :: export_names(n_export) = [ &
     "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", "Foxx_lwnet    ", &
     "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", "Foxx_swnet_idf", &
     "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", "Si_ifrac      ", "So_duu10n     ", &
     "So_t          ",                                                                          &
     "So_u          ", "So_v          ",  &   ! Sprint B
-    "Sf_zorl       " ]                        ! Sprint C — rugosidade Charnock → MPAS
+    "Sf_zorl       ", &                      ! Sprint C — rugosidade Charnock → MPAS
+    "Faxa_coszen   ", &                      ! Fase 2.5 — angulo zenital solar → SIS2
+    "Sf_albedo     ", &                      ! Fase 2.6 — albedo de banda larga → MPAS
+    "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! Fase 3
+    "Fioi_lwnet    ", &                      ! Fase 3 — fluxos calc. c/ T_gelo → SIS2
+    "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", "Fioi_swnet_idf", & ! Fase 4 — B-ICE-SWNET-01
+    "Sx_tsfc       " ]                      ! Fase 4b — B-TSFC-DUALEXPORT-01 — composto p/ MPAS-A
 
   !----------------------------------------------------------------------------
   ! Variáveis de módulo para diagnóstico de importação NetCDF (save)

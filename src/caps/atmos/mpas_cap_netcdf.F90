@@ -67,20 +67,6 @@
 !!               → MPI_Gatherv    (dados de campo → PET0)
 !!   PET0        → voronoi_to_latlon (binning + conversão)
 !!               → nf90_create / nf90_put_var / nf90_close
-!!
-!! MASCARA-CONT-02 (GT Acoplamento de Modelos/INPE — Set/2026):
-!!   Até aqui, continente era filtrado apenas pela faixa física de cada campo
-!!   (vmin/vmax em voronoi_to_grid) — insuficiente, porque a célula de terra
-!!   recebe So_t≈271,35 K, um valor dentro da faixa válida do oceano. Agora
-!!   write_mpas_import_diag recebe também xlandCell (máscara nativa do MPAS,
-!!   subpool sfc_input, 1=terra/2=água — a mesma usada em mpas_atm_run para
-!!   decidir onde aplicar atm_bnd). voronoi_to_grid passa a receber essa
-!!   máscara por ponto-fonte e calcula, por célula de saída, a fração de
-!!   pontos-fonte oceânicos: abaixo de ocean_frac_min a célula sai como
-!!   _FillValue. xlandCell é opcional — se ausente (xland não encontrado no
-!!   subpool sfc_input), o comportamento anterior (só faixa física) é mantido,
-!!   com aviso no log. A fração oceânica é também gravada como variável
-!!   diagnóstica 'ocn_frac'. Ver docs/mascara-continentes.md.
 
 module mpas_cap_netcdf_mod
 
@@ -920,38 +906,28 @@ contains
   !!
   !! Requer que set_mpas_diag_clock seja chamada em ModelAdvance antes de
   !! mpas_import, e que netcdf_init_coords tenha sido chamado em InitializeRealize.
-  !!
-  !! @param[in]  xlandCell  MASCARA-CONT-02, opcional: mascara nativa MPAS por
-  !!   célula Voronoi local (1=terra, 2=água — convenção WRF/sfc_input). Quando
-  !!   presente, mascara continentes em monan2_import_*.nc com base na
-  !!   geografia real do MPAS, em vez de só na faixa física de cada campo.
-  !!   Ausente (não associado em quem chama): comportamento anterior, sem
-  !!   máscara de continente — ver AVISO no log de mpas_atm_init.
-  subroutine write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc, xlandCell)
+  subroutine write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
     type(atm_ocean_boundary_type), intent(in)  :: atm_bnd
     integer,                       intent(in)  :: nCells
     real(MPAS_RKIND), optional,    intent(in)  :: lonCell(:)
     real(MPAS_RKIND), optional,    intent(in)  :: latCell(:)
     integer,                       intent(out) :: rc
-    real(MPAS_RKIND), optional,    intent(in)  :: xlandCell(:)
 
     character(len=*), parameter :: subname = '(write_mpas_import_diag)'
     character(len=256) :: fname
     integer :: ncid, ios
     integer :: dimid_lat, dimid_lon
-    integer :: varid_lat, varid_lon, varid_omask
+    integer :: varid_lat, varid_lon
     integer :: varid_sot, varid_ifrac, varid_zorl
     integer :: nlat, nlon, i, j
-    real(ESMF_KIND_R8), allocatable :: grid_2d(:,:), ocnfrac_2d(:,:)
+    real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
     real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
     integer, allocatable  :: allCounts(:), displs(:)
     real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf_sot(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_ifrac(:), recvBuf_zorl(:)
-    real(ESMF_KIND_R8), allocatable :: recvBuf_isocean(:)
     real(ESMF_KIND_R8), allocatable :: lon_global(:), lat_global(:)
-    logical :: have_xland
     integer :: nGlobal, nLocal
     real(ESMF_KIND_R8) :: res_deg, dlon, dlat
     character(len=19) :: ts_str
@@ -982,15 +958,9 @@ contains
     if (localPet == 0) then
       allocate(lon_global(nGlobal), lat_global(nGlobal))
       allocate(recvBuf_sot(nGlobal), recvBuf_ifrac(nGlobal), recvBuf_zorl(nGlobal))
-      allocate(recvBuf_isocean(nGlobal))
-      ! MASCARA-CONT-02: default sem xland — assume oceano em toda a malha,
-      ! ou seja, preserva o comportamento anterior (só a faixa física de cada
-      ! campo filtra). Sobrescrito pelo Gatherv abaixo quando xlandCell chega.
-      recvBuf_isocean = 1.0_ESMF_KIND_R8
     else
       allocate(lon_global(1), lat_global(1))
       allocate(recvBuf_sot(1), recvBuf_ifrac(1), recvBuf_zorl(1))
-      allocate(recvBuf_isocean(1))
     end if
 
     if (present(lonCell) .and. present(latCell)) then
@@ -1035,47 +1005,12 @@ contains
     call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
                      recvBuf_zorl, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
-
-    ! MASCARA-CONT-02: mascara nativa MPAS -> indicador 0/1 por celula-fonte
-    ! (1=agua, xland>1.5; 0=terra), no mesmo MPI_Gatherv dos demais campos.
-    !
-    ! A decisao precisa ser COLETIVA: MPI_Gatherv abaixo e' coletivo, entao se
-    ! um PET entrasse no ramo e outro nao, o job travaria (deadlock) em vez de
-    ! falhar. Na pratica xland vem do mesmo registro do MPAS em todos os ranks,
-    ! logo present(xlandCell) ja seria uniforme -- mas um hang em maquina de
-    ! producao e' caro demais para depender disso. Soma de 0/1 comparada a
-    ! petCount = "so usa a mascara se TODOS os PETs a tiverem".
-    !
-    ! Usa o wrapper allreduce_i4 (W1-FIX, ver topo do modulo) em vez de chamar
-    ! MPI_Allreduce direto: o compilador cruza tipos entre chamadas de
-    ! MPI_Allreduce no mesmo escopo de modulo. O wrapper e' fixo em MPI_SUM,
-    ! dai a formulacao por soma em vez de MPI_MIN.
-    have_xland = present(xlandCell)
-    block
-      integer :: ix_loc(1), ix_glb(1)
-      ix_loc(1) = merge(1, 0, have_xland)
-      ix_glb(1) = 0
-      call allreduce_i4(ix_loc, ix_glb, 1, mpiComm, mpi_ierr)
-      if (have_xland .and. ix_glb(1) /= petCount) &
-        call ESMF_LogWrite(subname//': AVISO — xland presente apenas em ' // &
-          'parte dos PETs; mascara de continente desabilitada para manter ' // &
-          'as coletivas MPI consistentes', ESMF_LOGMSG_WARNING)
-      have_xland = (ix_glb(1) == petCount)
-    end block
-
-    if (have_xland) then
-      sendBuf(1:nLocal) = merge(1.0_ESMF_KIND_R8, 0.0_ESMF_KIND_R8, &
-                                 xlandCell(1:nLocal) > 1.5_MPAS_RKIND)
-      call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
-                       recvBuf_isocean, allCounts, displs, MPI_DOUBLE_PRECISION, &
-                       0, mpiComm, mpi_ierr)
-    end if
     deallocate(sendBuf, allCounts, displs)
 
     ! ── 3. Escrita NetCDF (somente PET 0) ─────────────────────────────────
     if (localPet /= 0) then
       deallocate(lon_global, lat_global)
-      deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_isocean)
+      deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl)
       return
     end if
 
@@ -1139,88 +1074,37 @@ contains
     ios = nf90_put_att(ncid, varid_zorl,  'standard_name', 'surface_roughness_length')
     ios = nf90_put_att(ncid, varid_zorl,  '_FillValue',    -9.99e+20_ESMF_KIND_R8)
 
-    ! MASCARA-CONT-02: fração de pontos-fonte oceânicos por célula de saída
-    ! (xland do MPAS), usada para decidir o _FillValue de So_t/Si_ifrac/Sf_zorl
-    ! logo abaixo. Gravada também como variável, pelo mesmo motivo de
-    ! transparência do 'ocn_frac' em mom6_import_*.nc.
-    ios = nf90_def_var(ncid, 'ocn_frac', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_omask)
-    ios = nf90_put_att(ncid, varid_omask, 'units',         '1')
-    ios = nf90_put_att(ncid, varid_omask, 'long_name', &
-      'Fracao de pontos Voronoi oceanicos por celula (mascara xland do MPAS)')
-    ios = nf90_put_att(ncid, varid_omask, 'standard_name', 'sea_area_fraction')
-    ios = nf90_put_att(ncid, varid_omask, 'comment', &
-      'Celulas com ocn_frac < 0.5 foram gravadas como _FillValue nos demais ' // &
-      'campos deste arquivo (continente). Sem xland disponivel, esta ' // &
-      'variavel fica em _FillValue e nenhum campo e mascarado por geografia ' // &
-      '(so pela faixa fisica). Ver docs/mascara-continentes.md.')
-    ios = nf90_put_att(ncid, varid_omask, '_FillValue',    -9.99e+20_ESMF_KIND_R8)
-
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions',  'CF-1.8')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'title', &
       'MONAN-A 2.0 importState (= MED exportState MED->MPAS) — Campos OCN->ATM')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'institution',  'INPE/CGCT/DIMNT')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'source', &
-      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + Sf_zorl + ocn_frac)')
+      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + Sf_zorl)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'code_version', &
-      'v4.0-2026-09 (MASCARA-CONT-02: continente mascarado com xland do MPAS)')
+      'v3.0-2026-05 (migrado de mpas_cap_methods para mpas_cap_netcdf)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'step',         g_diag_step)
     ios = nf90_enddef(ncid)
 
     ios = nf90_put_var(ncid, varid_lat, lat_axis)
     ios = nf90_put_var(ncid, varid_lon, lon_axis)
 
-    ! Binning Voronoi → lat/lon. ocean_frac_min=0.5 filtra a MAIORIA da célula
-    ! de saída: quando xlandCell está presente (have_xland), o corte usa a
-    ! fração GEOGRÁFICA real de pontos oceânicos (recvBuf_isocean); quando
-    ! ausente, voronoi_to_grid recua para a heurística anterior (fração de
-    ! dado fisicamente válido) — mesmo comportamento de antes desta revisão.
-    allocate(ocnfrac_2d(nlon, nlat))
-    if (have_xland) then
-      call voronoi_to_grid(recvBuf_sot,   lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8, &
-                           is_ocean_v=recvBuf_isocean, ocean_frac_out=ocnfrac_2d)
-    else
-      call voronoi_to_grid(recvBuf_sot,   lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8)
-      ocnfrac_2d = -9.99e+20_ESMF_KIND_R8
-      call ESMF_LogWrite(subname//': AVISO — xland indisponivel; ' // &
-        'monan2_import gravado sem mascara geografica de continente ' // &
-        '(so a faixa fisica de cada campo filtra)', ESMF_LOGMSG_WARNING)
-    end if
+    ! Binning Voronoi → lat/lon (ocean_frac_min=0.5: elimina artefatos costeiros)
+    call voronoi_to_grid(recvBuf_sot,   lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
     ios = nf90_put_var(ncid, varid_sot, grid_2d)
-    ios = nf90_put_var(ncid, varid_omask, ocnfrac_2d)
-    deallocate(ocnfrac_2d)
 
-    if (have_xland) then
-      call voronoi_to_grid(recvBuf_ifrac, lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8, &
-                           is_ocean_v=recvBuf_isocean)
-    else
-      call voronoi_to_grid(recvBuf_ifrac, lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8)
-    end if
+    call voronoi_to_grid(recvBuf_ifrac, lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
     ios = nf90_put_var(ncid, varid_ifrac, grid_2d)
 
-    if (have_xland) then
-      call voronoi_to_grid(recvBuf_zorl,  lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=1.0e-5_ESMF_KIND_R8, vmax=0.1_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8, &
-                           is_ocean_v=recvBuf_isocean)
-    else
-      call voronoi_to_grid(recvBuf_zorl,  lon_global, lat_global, nGlobal, &
-                           grid_2d, nlon, nlat, dlon, dlat, &
-                           vmin=1.0e-5_ESMF_KIND_R8, vmax=0.1_ESMF_KIND_R8, &
-                           ocean_frac_min=0.5_ESMF_KIND_R8)
-    end if
+    call voronoi_to_grid(recvBuf_zorl,  lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=1.0e-5_ESMF_KIND_R8, vmax=0.1_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
     ios = nf90_put_var(ncid, varid_zorl, grid_2d)
 
     ios = nf90_close(ncid)
@@ -1229,7 +1113,7 @@ contains
     call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
 
 999 deallocate(lon_global, lat_global)
-    deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_isocean)
+    deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl)
 
   end subroutine write_mpas_import_diag
 
@@ -1238,62 +1122,34 @@ contains
   !! Algoritmo nearest-neighbor com spray ±1° em lat e adaptativo em lon.
   !! Fill value -9.99e+20 para células sem contribuição.
   !!
-  !! Parâmetro opcional ocean_frac_min: fração mínima por bin abaixo da qual
-  !! a célula de saída sai como _FillValue. Recomendado 0.5.
-  !!
-  !! MASCARA-CONT-02 (Set/2026): o significado dessa fração muda conforme
-  !! is_ocean_v é ou não fornecido pelo chamador.
-  !!   - is_ocean_v AUSENTE (comportamento anterior a esta revisão): fração de
-  !!     pontos-fonte com valor dentro de [vmin,vmax] — heurística de
-  !!     "completude de dado", cega à geografia. Não distingue terra de
-  !!     oceano quando a célula de terra carrega um valor fisicamente
-  !!     plausível (ex.: SST≈271,35 K, dentro de [270,310]).
-  !!   - is_ocean_v PRESENTE (1,0=água / 0,0=terra por célula Voronoi, via
-  !!     xland do MPAS): fração GEOGRÁFICA real de pontos oceânicos no bin.
-  !!     Pontos de terra também deixam de entrar na MÉDIA (acc/cnt), mesmo
-  !!     quando fisicamente plausíveis — é essa mudança que corrige o
-  !!     mascaramento de continente em monan2_import_*.nc.
-  !!
-  !! Parâmetro opcional ocean_frac_out: se fornecido, recebe a fração usada
-  !! no corte acima (só populada de fato quando is_ocean_v é fornecido; caso
-  !! contrário sai em _FillValue, pois não há fração geográfica a reportar).
-  !! Permite ao chamador gravar essa fração como variável 'ocn_frac' sem
-  !! refazer o binning.
+  !! Parâmetro opcional ocean_frac_min: fração mínima de células válidas
+  !! (oceano) por bin. Recomendado 0.5 — elimina artefatos de arquipélagos.
   subroutine voronoi_to_grid(data_v, lon_v, lat_v, npts, &
                               grid_out, nlon, nlat, dlon, dlat, &
-                              vmin, vmax, ocean_frac_min, is_ocean_v, ocean_frac_out)
+                              vmin, vmax, ocean_frac_min)
     real(ESMF_KIND_R8), intent(in)  :: data_v(:), lon_v(:), lat_v(:)
     integer,            intent(in)  :: npts, nlon, nlat
     real(ESMF_KIND_R8), intent(in)  :: dlon, dlat, vmin, vmax
     real(ESMF_KIND_R8), intent(out) :: grid_out(nlon, nlat)
-    real(ESMF_KIND_R8), optional, intent(in)  :: ocean_frac_min
-    real(ESMF_KIND_R8), optional, intent(in)  :: is_ocean_v(:)
-    real(ESMF_KIND_R8), optional, intent(out) :: ocean_frac_out(nlon, nlat)
+    real(ESMF_KIND_R8), optional, intent(in) :: ocean_frac_min
 
     real(ESMF_KIND_R8), allocatable :: acc(:,:)
-    integer,            allocatable :: cnt(:,:), cnt_all(:,:), cnt_ocean(:,:)
+    integer,            allocatable :: cnt(:,:), cnt_all(:,:)
     real(ESMF_KIND_R8) :: lon_n, cos_lat, val, ofrac_min
-    logical :: is_valid, is_ocn, use_ocean_mask
+    logical :: is_valid
     integer :: k, ic, jc, di, dj, i2, j2, ns
     real(ESMF_KIND_R8), parameter :: PI        = acos(-1.0_ESMF_KIND_R8)
     real(ESMF_KIND_R8), parameter :: CELL_HALF = 0.60_ESMF_KIND_R8
     integer,            parameter :: NSPAN_LAT = 1
-    real(ESMF_KIND_R8), parameter :: FILL_VG   = -9.99e+20_ESMF_KIND_R8
-
-    use_ocean_mask = present(is_ocean_v)
 
     ofrac_min = 0.0_ESMF_KIND_R8
-    if (present(ocean_frac_min)) then
-      ofrac_min = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ocean_frac_min))
-    else if (use_ocean_mask) then
-      ofrac_min = 0.5_ESMF_KIND_R8   ! default sensato quando ha mascara real
-    end if
+    if (present(ocean_frac_min)) ofrac_min = max(0.0_ESMF_KIND_R8, &
+                                                  min(1.0_ESMF_KIND_R8, ocean_frac_min))
 
-    allocate(acc(nlon, nlat), cnt(nlon, nlat), cnt_all(nlon, nlat), cnt_ocean(nlon, nlat))
-    acc       = 0.0_ESMF_KIND_R8
-    cnt       = 0
-    cnt_all   = 0
-    cnt_ocean = 0
+    allocate(acc(nlon, nlat), cnt(nlon, nlat), cnt_all(nlon, nlat))
+    acc     = 0.0_ESMF_KIND_R8
+    cnt     = 0
+    cnt_all = 0
 
     do k = 1, npts
       lon_n = lon_v(k)
@@ -1310,12 +1166,6 @@ contains
       val = data_v(k)
       is_valid = .not. (val < vmin .or. val > vmax .or. val /= val)
 
-      ! MASCARA-CONT-02: sem is_ocean_v, todo ponto conta como "oceano" para
-      ! fins de acumulação — ou seja, o filtro geográfico vira um no-op e o
-      ! comportamento reduz exatamente ao de antes desta revisão.
-      is_ocn = .true.
-      if (use_ocean_mask) is_ocn = (is_ocean_v(k) > 0.5_ESMF_KIND_R8)
-
       do dj = -NSPAN_LAT, NSPAN_LAT
         j2 = min(max(jc + dj, 1), nlat)
         do di = -ns, ns
@@ -1323,10 +1173,7 @@ contains
           if (i2 < 1)    i2 = i2 + nlon
           if (i2 > nlon) i2 = i2 - nlon
           cnt_all(i2, j2) = cnt_all(i2, j2) + 1
-          if (is_ocn) cnt_ocean(i2, j2) = cnt_ocean(i2, j2) + 1
-          ! Ponto de terra nunca entra na média, mesmo com valor fisicamente
-          ! plausível (é exatamente o caso de SST≈271,35 K sobre continente).
-          if (is_valid .and. is_ocn) then
+          if (is_valid) then
             acc(i2, j2) = acc(i2, j2) + val
             cnt(i2, j2) = cnt(i2, j2) + 1
           end if
@@ -1334,33 +1181,17 @@ contains
       end do
     end do
 
-    grid_out = FILL_VG
+    grid_out = -9.99e+20_ESMF_KIND_R8
     where (cnt > 0) grid_out = acc / real(cnt, ESMF_KIND_R8)
 
-    if (use_ocean_mask) then
-      ! Corte por GEOGRAFIA real: fração de pontos-fonte oceânicos no bin.
-      where (cnt_all > 0 .and. &
-             real(cnt_ocean, ESMF_KIND_R8) / real(cnt_all, ESMF_KIND_R8) < ofrac_min)
-        grid_out = FILL_VG
-      end where
-    else if (ofrac_min > 0.0_ESMF_KIND_R8) then
-      ! Sem máscara real: recua para a heurística anterior (completude de
-      ! dado fisicamente válido) — inalterado em relação a antes desta revisão.
+    if (ofrac_min > 0.0_ESMF_KIND_R8) then
       where (cnt_all > 0 .and. &
              real(cnt, ESMF_KIND_R8) / real(cnt_all, ESMF_KIND_R8) < ofrac_min)
-        grid_out = FILL_VG
+        grid_out = -9.99e+20_ESMF_KIND_R8
       end where
     end if
 
-    if (present(ocean_frac_out)) then
-      ocean_frac_out = FILL_VG
-      if (use_ocean_mask) then
-        where (cnt_all > 0) &
-          ocean_frac_out = real(cnt_ocean, ESMF_KIND_R8) / real(cnt_all, ESMF_KIND_R8)
-      end if
-    end if
-
-    deallocate(acc, cnt, cnt_all, cnt_ocean)
+    deallocate(acc, cnt, cnt_all)
 
   end subroutine voronoi_to_grid
 

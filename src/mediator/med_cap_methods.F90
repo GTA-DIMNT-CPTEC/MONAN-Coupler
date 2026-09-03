@@ -34,6 +34,7 @@ module med_cap_methods_mod
   public :: RegridOrCopy
   public :: RouteOcnToAtm
   public :: RegridOptionalCurrent
+  public :: NeighborFillExtrapolate
 
 contains
 
@@ -306,74 +307,30 @@ contains
     !   RegridOptionalCurrent desativado para evitar conflito de grade
     !   (exportState.So_u/v vive na grade OCN após Sprint B).
 
-    ! Si_ifrac real vindo do componente ICE (SIS2).
+    ! FIX B-ICEREGRID-03 (Set/2026): bloco DESATIVADO. Fazia copia DIRETA
+    ! ponto-a-ponto de Si_ifrac_sis2 (grade tripolar do SIS2) para Si_ifrac
+    ! (grade do ATM) sem regrid nenhum — so' protegido por uma checagem de
+    ! FORMA (shape), que passava porque as duas grades coincidentemente tem
+    ! as mesmas dimensoes (360x180) nesta configuracao, apesar de serem
+    ! GEOMETRICAMENTE diferentes. Perto do fold tripolar (Artico) isso
+    ! produzia valores sem relacao com a posicao real — exatamente a causa
+    ! do sumico de gelo visto no monan2_import_*.nc mesmo depois do
+    ! B-ICEREGRID-02 ja ter corrigido o regrid propriamente dito em
+    ! is%f_ifrac_atm (medido por FIX-DIAG-SPRINTB2-01, que mostrava valores
+    ! saudaveis) — esta rotina roda DEPOIS daquele regrid e sobrescrevia o
+    ! resultado correto com a copia crua.
     !
-    ! Quando o SIS2 dinâmico está ativo, o gelo real chega aqui no importState
-    ! com o nome Si_ifrac_sis2 e sobrescreve o Si_ifrac do exportState, que até
-    ! então vinha da fórmula aproximada do OCN.
+    ! Redundante agora: o regrid mascarado + extrapolacao de vizinhanca
+    ! (B-ICEREGRID-01/02, dentro de MediatorAdvance) ja preenche
+    ! is%f_ifrac_atm corretamente e ja e' exportado para "Si_ifrac" via
+    ! RegridOrCopy antes desta rotina ser chamada — nao ha mais nada a
+    ! fazer aqui.
     !
-    ! AINDA NÃO VALIDADO: a cópia abaixo é direta, ponto a ponto. Ela só está
-    ! correta se as duas grades coincidirem. O Si_ifrac_sis2 vive na grade do
-    ! ICE (tripolar, igual à do oceano) e o Si_ifrac do exportState vive na
-    ! grade do ATM, então o caminho certo é quase certamente um regrid próprio,
-    ! como o rh_ocn2atm já usado para o So_t. A comparação de shape abaixo
-    ! impede a cópia errada de acontecer em silêncio: se as formas diferirem, o
-    ! valor anterior é mantido e fica registrado um aviso no log. Rever antes
-    ! de usar em produção.
-    if (cfg_use_sis2_dynamic) then
-      block
-        type(ESMF_Field) :: f_ifrac_sis2, f_ifrac_exp
-        real(ESMF_KIND_R8), pointer :: ptr_sis2(:,:) => null()
-        real(ESMF_KIND_R8), pointer :: ptr_exp(:,:)  => null()
-        integer :: rc_ice
-
-        call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
-          field=f_ifrac_sis2, rc=rc_ice)
-        if (rc_ice == ESMF_SUCCESS) then
-          call ESMF_FieldGet(f_ifrac_sis2, farrayPtr=ptr_sis2, rc=rc_ice)
-        end if
-        if (rc_ice == ESMF_SUCCESS .and. associated(ptr_sis2)) then
-          call ESMF_StateGet(exportState, itemName="Si_ifrac", &
-            field=f_ifrac_exp, rc=rc_ice)
-          if (rc_ice == ESMF_SUCCESS) &
-            call ESMF_FieldGet(f_ifrac_exp, farrayPtr=ptr_exp, rc=rc_ice)
-          if (rc_ice == ESMF_SUCCESS .and. associated(ptr_exp)) then
-            ! Diagnóstico temporário, par do FIX-DIAG-TEMP5 em
-            ! sis_cap_MONAN.F90::export_si_ifrac. Imprime os extremos do que
-            ! chegou ao mediador pelo conector ICE -> MED. Comparando os dois
-            ! logs sabe-se se o valor se perdeu no conector (TEMP5 com valores
-            ! reais e TEMP6 zerado) ou se já saiu zerado do cap do gelo (os
-            ! dois zerados). REMOVER depois de concluído o diagnóstico.
-            block
-              character(len=256) :: diag_msg6
-              write(diag_msg6,'(A,ES12.4,A,ES12.4,A,I0,A,I0)') &
-                'FIX-DIAG-TEMP6: Si_ifrac_sis2 recebido no MED min=', &
-                minval(ptr_sis2), ' max=', maxval(ptr_sis2), &
-                ' | shape ', size(ptr_sis2,1), ' x ', size(ptr_sis2,2)
-              call ESMF_LogWrite(trim(diag_msg6), ESMF_LOGMSG_INFO)
-            end block
-
-            if (all(shape(ptr_exp) == shape(ptr_sis2))) then
-              ptr_exp(:,:) = ptr_sis2(:,:)
-              call ESMF_LogWrite('MED RouteOcnToAtm: Si_ifrac ' // &
-                'sobrescrito com o valor real do SIS2 (Si_ifrac_sis2)', &
-                ESMF_LOGMSG_INFO)
-            else
-              call ESMF_LogWrite('MED RouteOcnToAtm: AVISO — ' // &
-                'Si_ifrac_sis2 tem shape diferente de Si_ifrac no ' // &
-                'exportState (grades diferentes) — copia direta pulada, ' // &
-                'precisa de regrid dedicado. Mantido o valor anterior.', &
-                ESMF_LOGMSG_WARNING)
-            end if
-          end if
-        else
-          call ESMF_LogWrite('MED RouteOcnToAtm: cfg_use_sis2_dynamic=' // &
-            '.true. mas Si_ifrac_sis2 nao encontrado no importState — ' // &
-            'mantido o Si_ifrac do OCN (formula aproximada)', &
-            ESMF_LOGMSG_WARNING)
-        end if
-      end block
-    end if
+    ! if (cfg_use_sis2_dynamic) then
+    !   [bloco original removido — ver historico do arquivo/controle de
+    !   versao para o codigo completo, caso seja necessario reativar como
+    !   referencia]
+    ! end if
 
     ! Estampilar timestamp no exportState (MPAS usa para validação)
     call NUOPC_SetTimestamp(exportState, clock, rc=rc)
@@ -430,5 +387,129 @@ contains
     end if
 
   end subroutine RegridOptionalCurrent
+
+  !============================================================================
+  !> @brief Extrapolação por vizinhança (3x3, media iterativa) para preencher
+  !!   celulas invalidas apos regrid — generalização do algoritmo validado
+  !!   para So_t (FIX B-OCNGRID-04/05, "costura do Indico desapareceu",
+  !!   Ago/2026), parametrizado por faixa fisica valida em vez de fixo em
+  !!   temperatura. Usado pelo FIX B-ICEREGRID-01 para os campos do gelo
+  !!   (Si_ifrac_sis2, albedo, Si_t_sis2), que antes nao tinham NENHUM
+  !!   tratamento de borda/costura apos o regrid bilinear.
+  !!
+  !! IMPORTANTE (mesma ressalva do algoritmo original): o loop e' LOCAL ao
+  !! DE de cada PET — um buraco que atravessa a fronteira entre PETs pode
+  !! nao fechar por vizinhanca aqui, mesmo com N_ITER grande. O fallback
+  !! constante (vfill) ao final garante que nenhum ponto fique de fato
+  !! indefinido.
+  !!
+  !! FIX B-NEIGHBORFILL-02 (Set/2026): revisao do FIX B-NEIGHBORFILL-01.
+  !! Reduzir max_iter (40->5) resolvia o "vazamento" de valor real por
+  !! longa distancia (ver FIX-DIAG-ICEGEO-01), mas criava o problema
+  !! OPOSTO: buraco real e LOCAL (perto do fold tripolar) maior que 5
+  !! celulas de largura deixa de fechar com vizinho de verdade e cai no
+  !! vfill -- ou seja, gelo real passa a DESAPARECER onde antes (com
+  !! max_iter=40) apenas "vazava" para o lugar errado. Os dois sao
+  !! defeitos do MESMO mecanismo (difusao sem limite de escala), nao
+  !! contraditorios entre si.
+  !!
+  !! Correcao: FRAC_INVALID_SKIP verifica ANTES de iterar se a fracao de
+  !! celulas invalidas e' grande demais para ser um "buraco local" legitimo
+  !! (deformacao de malha). Se for, pula a difusao inteira e cai direto no
+  !! vfill -- um dominio com, digamos, mais de 25% invalido e' sinal de
+  !! problema no regrid/mascara upstream, nao algo que extrapolacao deva
+  !! tentar adivinhar. Para o caso restante (fracao pequena, buraco
+  !! genuinamente local), max_iter volta a um valor generoso o bastante
+  !! para fechar com dado real proximo, sem o risco de arrastar valor por
+  !! dezenas de graus, porque o caso "dominio muito invalido" -- que era o
+  !! que permitia esse arrasto de longo alcance -- ja foi filtrado acima.
+  !!
+  !! @param[inout] arr      Campo 2D a corrigir in-place
+  !! @param[in]    vmin     Limite fisico inferior valido
+  !! @param[in]    vmax     Limite fisico superior valido
+  !! @param[in]    vfill    Valor de fallback final para celulas sem nenhum
+  !!                         vizinho valido apos max_iter iteracoes OU
+  !!                         quando a fracao invalida inicial e' grande
+  !!                         demais para difusao local (ver FRAC_INVALID_SKIP)
+  !! @param[out]   rc       Codigo de retorno (sempre ESMF_SUCCESS; a rotina
+  !!                         nao falha, so' preenche o melhor que consegue)
+  !! @param[in]    max_iter Opcional. Alcance maximo (em celulas) da difusao
+  !!                         de vizinhanca, usado SO' quando a fracao
+  !!                         invalida inicial esta' abaixo de FRAC_INVALID_SKIP.
+  !!                         Default 15 -- fecha buracos locais razoaveis
+  !!                         (varias celulas de largura) sem arrastar valor
+  !!                         por dezenas de graus, ja que o caso de dominio
+  !!                         amplamente invalido e' tratado separadamente.
+  !============================================================================
+  subroutine NeighborFillExtrapolate(arr, vmin, vmax, vfill, rc, max_iter)
+    real(ESMF_KIND_R8), intent(inout) :: arr(:,:)
+    real(ESMF_KIND_R8), intent(in)    :: vmin, vmax, vfill
+    integer,             intent(out)   :: rc
+    integer, optional,   intent(in)    :: max_iter
+
+    real(ESMF_KIND_R8), parameter :: FRAC_INVALID_SKIP = 0.25_ESMF_KIND_R8
+    integer :: N_ITER
+    real(ESMF_KIND_R8), allocatable :: tmp(:,:)
+    logical,            allocatable :: valid(:,:)
+    integer :: i1,iN,j1,jN,i2,j2,ii2,jj2,it,nbr
+    real(ESMF_KIND_R8) :: acc, frac_invalid_ini
+
+    N_ITER = 15
+    if (present(max_iter)) N_ITER = max_iter
+
+    rc = ESMF_SUCCESS
+    i1=lbound(arr,1); iN=ubound(arr,1); j1=lbound(arr,2); jN=ubound(arr,2)
+
+    ! NaN/Inf tambem tratados como invalidos (empurrados para fora da faixa
+    ! valida de proposito, para participar do loop de extrapolacao).
+    where (arr /= arr) arr = vmin - 1.0_ESMF_KIND_R8
+
+    allocate(valid(i1:iN,j1:jN), tmp(i1:iN,j1:jN))
+    valid = (arr >= vmin .and. arr <= vmax)
+
+    ! FIX B-NEIGHBORFILL-02: fracao invalida grande demais para ser um
+    ! "buraco local" legitimo -- pula a difusao inteira, cai direto no
+    ! vfill. Um dominio amplamente invalido e' sinal de problema no
+    ! regrid/mascara upstream; tentar preencher por difusao aqui so' troca
+    ! um sintoma por outro (buraco vira valor arrastado de longe).
+    frac_invalid_ini = real(count(.not. valid), ESMF_KIND_R8) / &
+                        real(size(valid), ESMF_KIND_R8)
+    if (frac_invalid_ini > FRAC_INVALID_SKIP) then
+      where (.not. valid) arr = vfill
+      call ESMF_LogWrite('MED NeighborFillExtrapolate: fracao invalida ' // &
+        'inicial acima do limiar -- difusao pulada, fallback direto ' // &
+        '(ver FIX B-NEIGHBORFILL-02; investigar regrid/mascara upstream)', &
+        ESMF_LOGMSG_WARNING)
+      deallocate(valid, tmp)
+      return
+    end if
+
+    do it = 1, N_ITER
+      if (count(.not. valid) == 0) exit
+      tmp = arr
+      do j2 = j1, jN
+        do i2 = i1, iN
+          if (valid(i2,j2)) cycle
+          acc = 0.0_ESMF_KIND_R8; nbr = 0
+          do jj2 = max(j1,j2-1), min(jN,j2+1)
+            do ii2 = max(i1,i2-1), min(iN,i2+1)
+              if (valid(ii2,jj2)) then
+                acc = acc + arr(ii2,jj2); nbr = nbr + 1
+              end if
+            end do
+          end do
+          if (nbr > 0) tmp(i2,j2) = acc / real(nbr, ESMF_KIND_R8)
+        end do
+      end do
+      arr = tmp
+      valid = (arr >= vmin .and. arr <= vmax)
+    end do
+    ! Fallback final: qualquer celula que sobrou sem NENHUM vizinho valido
+    ! apos N_ITER (raro; tipicamente so' em buracos que atravessam fronteira
+    ! de PET) cai no valor constante de seguranca.
+    where (.not. valid) arr = vfill
+    deallocate(valid, tmp)
+
+  end subroutine NeighborFillExtrapolate
 
 end module med_cap_methods_mod

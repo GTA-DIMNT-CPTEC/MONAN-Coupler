@@ -76,7 +76,7 @@
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'
-  stop_date   = '2026-04-30'
+  stop_date   = '2026-03-30'
   dt_coupling = 3600  ! [N3] 3600 s recomendado MOM6 global (default Fortran: 1800)
   dt_atm      = 60
   log_dir     = 'logs'
@@ -118,7 +118,7 @@
   use_datm        = .false.   ! .true. → DATM JRA55 | .false. → MPAS-A real
   use_docn        = .false.   ! .true. → DOCN SST   | .false. → MOM6+SIS2
   use_med_to_mpas = .true.    ! [N1] Fase 2 MOM6: .true. obrigatório se use_docn=F
-  use_docn_ice    = .true.    ! Alternativa 1: Si_ifrac do arquivo OISST
+  use_docn_ice    = .false.   ! Alternativa 1: Si_ifrac do arquivo OISST
                               !   .false. → proxy sigmoide Sprint A.5
   !
   ! [N-B1] Sprint B.1 — docn_ice_init_only (Maio 2026)
@@ -128,7 +128,7 @@
   !             Requer use_docn_ice=.true. (validado em config_read).
   !   .false. → comportamento original: OISST prescrito a cada passo
   !             (campo congelado; recomendado apenas para diagnóstico).
-  docn_ice_init_only = .true.   ! [N-B1] Sprint B.1: evolução dinâmica
+  docn_ice_init_only = .false.   ! [N-B1] Sprint B.1: evolução dinâmica
 /
 
 !-----------------------------------------------------------------------

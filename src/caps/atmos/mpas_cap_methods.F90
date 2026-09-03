@@ -48,7 +48,10 @@ contains
   !> @brief Importa campos do importState ESMF para atm_bnd.
   !!
   !! Importa 5 campos do mediador MED->MPAS (Sprint C Fase 2):
-  !!   So_t      -> atm_bnd%sst           SST [K]              do MOM6 t_surf
+  !!   Sx_tsfc   -> atm_bnd%sst           Temp. de pele composta [K]
+  !!                (Fase 4b, B-TSFC-DUALEXPORT-01 — era So_t; So_t
+  !!                permanece SST pura, agora usada so' pelo SIS2 para o
+  !!                fluxo de calor basal do gelo, nao mais pelo MPAS-A)
   !!   Si_ifrac  -> atm_bnd%ice_fraction  Fracao de gelo [0-1] do SIS2/proxy
   !!   So_u      -> atm_bnd%uocn          Corrente zonal [m/s] do MOM6 u_surf
   !!   So_v      -> atm_bnd%vocn          Corrente merid [m/s] do MOM6 v_surf
@@ -66,30 +69,30 @@ contains
   !! esta presente (apenas registra info no log ESMF). Isso permite usar
   !! este cap tanto na Fase 2 completa quanto em modos de teste com
   !! subconjunto de campos.
-  subroutine mpas_import(importState, atm_bnd, nCells, rc, lonCell, latCell, xlandCell)
+  subroutine mpas_import(importState, atm_bnd, nCells, rc, lonCell, latCell)
     type(ESMF_State),              intent(in)    :: importState
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(in)    :: nCells
     integer,                       intent(inout) :: rc
     real(MPAS_RKIND), optional,    intent(in)    :: lonCell(:)  !< lon celulas [rad, 0..2pi]
     real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat celulas [rad, -pi/2..pi/2]
-    !> MASCARA-CONT-02: mascara nativa MPAS (1=terra, 2=agua). Repassada
-    !! integralmente a write_mpas_import_diag; nao participa da importacao
-    !! dos campos OCN->ATM em si (atm_bnd), so' do diagnostico NetCDF.
-    real(MPAS_RKIND), optional,    intent(in)    :: xlandCell(:)
 
     character(len=*), parameter :: subname = '(mpas_import)'
 
     rc = ESMF_SUCCESS
 
-    ! -- SST [K] -----------------------------------------------------------
+    ! -- Temperatura de pele composta [K] -----------------------------------
     ! BUG-FIX-03: passa coordenadas para mapeamento geografico correto
-    call state_get_field_1d(importState, 'So_t', nCells, atm_bnd%sst, rc, &
+    ! Fase 4b (B-TSFC-DUALEXPORT-01): 'Sx_tsfc' (composto por Si_ifrac com
+    ! Si_t_sis2), NAO 'So_t' (SST pura — essa agora e' consumida so' pelo
+    ! SIS2 para o fluxo de calor basal do gelo). Ver docstring acima.
+    call state_get_field_1d(importState, 'Sx_tsfc', nCells, atm_bnd%sst, rc, &
                             lonCell, latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     ! FIX B-SST-GUARD-01 (Ago 2026): SST era o UNICO dos 4 campos importados
     ! aqui sem clamp fisico nem guarda de NaN — Si_ifrac, So_u, So_v e Sf_zorl
-    ! ja tinham essa protecao (ver abaixo), mas So_t nao, apesar de ser usado
+    ! ja tinham essa protecao (ver abaixo), mas Sx_tsfc/So_t nao, apesar de
+    ! ser usado
     ! DIRETAMENTE em skintemp_field/sst_field logo antes de core_run
     ! (mpas_atm_model.F90). Qualquer celula da malha Voronoi que caia perto de
     ! uma regiao sem mapeamento valido no regrid grade-regular->Voronoi (ex.:
@@ -242,8 +245,27 @@ contains
         atm_bnd%zorl = real(cfg_zorl_default, MPAS_RKIND)
     end if
 
+    ! -- Albedo de superfície Sf_albedo [0-1] (Fase 2.6) -------------------
+    ! Vindo do mediador: media ponderada por banda entre albedo dinamico de
+    ! agua aberta (Briegleb 1986, dependente do zenite solar) e albedo real
+    ! do gelo (SIS2), ponderados por Si_ifrac. Substitui a climatologia
+    ! mensal (albedo12m) do MONAN-A sobre agua/gelo — requer
+    ! config_sfc_albedo=.false. no namelist (ver mpas_atm_model.F90,
+    ! FIX-DIAG-ALBFEEDBACK-01, para confirmacao empirica de que o NOAH LSM
+    ! nao sobrescreve o valor apos core_run).
+    if (allocated(atm_bnd%alb)) then
+      atm_bnd%alb = 0.08_MPAS_RKIND   ! default agua aberta, mesmo padrao de zorl acima
+      call state_get_field_1d(importState, 'Sf_albedo', nCells, atm_bnd%alb, rc, &
+                              lonCell, latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+      ! Clamps fisicos [0,1] + NaN guard
+      where (atm_bnd%alb < 0.0_MPAS_RKIND) atm_bnd%alb = 0.08_MPAS_RKIND
+      where (atm_bnd%alb > 1.0_MPAS_RKIND) atm_bnd%alb = 1.0_MPAS_RKIND
+      where (atm_bnd%alb /= atm_bnd%alb)   atm_bnd%alb = 0.08_MPAS_RKIND
+    end if
+
     call ESMF_LogWrite(subname//': importacao Fase 2 concluida ' // &
-      '(So_t + Si_ifrac + So_u + So_v + Sf_zorl)', ESMF_LOGMSG_INFO)
+      '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl)', ESMF_LOGMSG_INFO)
 
     ! ── Diagnóstico de importação MED→MPAS ──────────────────────────────
     ! Escrito quando write_import_diag=.true. em &nuopc_docn do nuopc.input
@@ -253,7 +275,7 @@ contains
     !   Sf_zorl  (rugosidade [m])     — atm_bnd%zorl
     ! Arquivo: <cfg_import_diag_dir>/monan2_import_YYYYMMDD_HHMMSS.nc
     if (cfg_write_import_diag) then
-      call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc, xlandCell)
+      call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! diagnóstico não-fatal
     end if
 
@@ -276,13 +298,11 @@ contains
   !!   permite ao MED_cap usar o valor fisicamente consistente (ver
   !!   MED_cap.F90, secao "Fase 3") em vez de recalcular.
   !!
-  !! *** VERIFICAR ANTES DE RODAR EM PRODUCAO ***
-  !!   Convencao de sinal de 'hfx'/'lh' no Registry.xml da suite de fisica
-  !!   em uso (mesoscale_reference_monan). A convencao usual WRF/MPAS/GFS
-  !!   e POSITIVO PARA CIMA (superficie -> atmosfera). O MED_cap.F90 ja
-  !!   inverte o sinal ao consumir estes campos (ver comentario la) supondo
-  !!   essa convencao — confirme no driver de fisica (ex. sfc_diff/GFS_surface
-  !!   generic) antes de validar contra observacoes.
+  !! CONFIRMADO (Set/2026): convencao de sinal de 'hfx'/'lh' verificada com a
+  !!   equipe de fisica do MONAN-A — POSITIVO PARA CIMA (superficie ->
+  !!   atmosfera), convencao usual WRF/MPAS/GFS. O MED_cap.F90 ja inverte o
+  !!   sinal ao consumir estes campos (ver comentario la), consistente com
+  !!   esta confirmacao.
   !!
   !! Campos nÃÂÃÂ£o-associados (pool diag_physics inativo ou nome ausente no
   !! Registry.xml) sÃÂÃÂ£o silenciosamente ignorados.

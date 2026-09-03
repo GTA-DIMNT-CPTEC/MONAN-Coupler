@@ -32,6 +32,11 @@ module med_cap_netcdf_mod
   public :: med_read_import_config    !< lê mom6_output.nml
   public :: med_write_import_fields   !< escreve campos importados em NetCDF
 
+  ! FIX-DIAG-NCWRITE-01 (Set/2026): garante que o diagnostico de fatia
+  ! global por PET so' imprima uma vez (1a chamada de med_write_import_fields),
+  ! nao a cada passo de acoplamento.
+  logical, save :: first_write_diag = .true.
+
 contains
 
   !============================================================================
@@ -96,24 +101,9 @@ contains
   !!   FIX-IMP-06: valid_time em ISO 8601.
   !!   FIX-IMP-07: Atributos globais revisados para clareza semântica.
   !!
-  !! MASCARA-CONT-01 (GT Acoplamento de Modelos/INPE — Set/2026):
-  !!   Continentes passam a ser gravados com _FillValue em vez de valores
-  !!   fisicamente enganosos (ex.: SST do stub em ~200 K, fluxos residuais do
-  !!   bulk NCAR sobre terra). A decisão célula a célula vem de is%ocn_mask_atm
-  !!   (fração de cobertura oceânica 0–1 na grade ATM 360×180, calculada uma
-  !!   única vez em MED_cap.F90 por regrid bilinear de So_omask = nint(mask2dT)
-  !!   do MOM6): _FillValue onde ocn_mask_atm < 0,5. A própria fração também é
-  !!   gravada como variável diagnóstica 'ocn_frac', para que o pós-processamento
-  !!   não precise mais adivinhar a costa por um limiar de temperatura (ver
-  !!   docs/mascara-continentes.md e o histórico "Observação para o lado
-  !!   Fortran" nos scripts tools/postproc/*.py). Enquanto is%ocn_mask_atm_ready
-  !!   for .false. (bootstrap, primeiras chamadas), o arquivo é gravado SEM
-  !!   máscara, como antes — nunca se apaga o disco por falta de dado ainda não
-  !!   disponível.
-  !!
   !! Saída: <med_import_diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
   !!   Dimensões: lat(180), lon(360)  [grade MED interna ATM]
-  !!   Variáveis: lat, lon, time, ocn_frac + 14 campos Foxx_*/Faxa_*/Sa_*/So_*
+  !!   Variáveis: lat, lon, time + 14 campos Foxx_*/Faxa_*/Sa_*/So_*
   !!
   !! @param[inout] state     exportState MED→OCN
   !! @param[in]   currTime  Tempo corrente (para nome do arquivo e atributo time)
@@ -134,7 +124,7 @@ contains
     real(ESMF_KIND_R8), allocatable :: grid_local(:,:), grid_global(:,:)
     integer :: fieldCount, n, ncid, varid, ios, mpi_ierr
     integer :: dimid_lat, dimid_lon
-    integer :: varid_lat, varid_lon, varid_t, varid_omask
+    integer :: varid_lat, varid_lon, varid_t
     integer :: nx_local, ny_local, nx_global, ny_global
     integer :: ix, iy, ig, jg, fld_rank
     integer :: nx_max_local, ny_max_local
@@ -257,23 +247,6 @@ contains
         'hours since '//tstamp(1:4)//'-'//tstamp(5:6)//'-'//tstamp(7:8)//' 00:00:00')
       ios = nf90_put_att(ncid, varid_t, 'calendar', 'gregorian')
 
-      ! MASCARA-CONT-01: fração de cobertura oceânica usada para decidir o
-      ! _FillValue de cada campo abaixo — gravada também como variável, para
-      ! que o pós-processamento veja exatamente o que foi mascarado e por quê,
-      ! em vez de inferir a costa por um limiar de temperatura.
-      ios = nf90_def_var(ncid, 'ocn_frac', NF90_FLOAT, &
-        [dimid_lon, dimid_lat], varid_omask)
-      if (ios == NF90_NOERR) then
-        ios = nf90_put_att(ncid, varid_omask, 'long_name', &
-          'Fracao de cobertura oceanica na celula ATM (regride de So_omask)')
-        ios = nf90_put_att(ncid, varid_omask, 'units',       '1')
-        ios = nf90_put_att(ncid, varid_omask, 'standard_name', 'sea_area_fraction')
-        ios = nf90_put_att(ncid, varid_omask, 'comment', &
-          'Celulas com ocn_frac < 0.5 foram gravadas como _FillValue nos ' // &
-          'demais campos deste arquivo (continente). Ver docs/mascara-continentes.md.')
-        ios = nf90_put_att(ncid, varid_omask, '_FillValue', FILL_IMP4)
-      end if
-
       do n = 1, fieldCount
         ! BUG-NC-03: NF90_FLOAT em vez de NF90_DOUBLE
         ios = nf90_def_var(ncid, trim(fieldNameList(n)), NF90_FLOAT, &
@@ -309,6 +282,17 @@ contains
               case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
               case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
               case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
+              ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima):
+              ! campos das Fases 2.5/2.6/3, presentes em export_names mas
+              ! ausentes dos dois select case desta rotina — mesmo sintoma
+              ! (GrADS "Entire Grid Undefined").
+              case ('Sf_albedo');      f_units='1';           f_long='Albedo de banda larga efetivo (agua+gelo)'; f_std='surface_albedo'
+              case ('Faxa_coszen');    f_units='1';           f_long='Cosseno do angulo zenital solar'; f_std='cosine_of_solar_zenith_angle'
+              case ('Fioi_taux');      f_units='Pa';          f_long='Tensao cisalhamento zonal (gelo, T_gelo)';     f_std='surface_downward_eastward_stress'
+              case ('Fioi_tauy');      f_units='Pa';          f_long='Tensao cisalhamento meridional (gelo, T_gelo)'; f_std='surface_downward_northward_stress'
+              case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
+              case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
+              case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
               case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
             end select
             ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
@@ -336,22 +320,6 @@ contains
       ios = nf90_put_var(ncid, varid_lon, lon_global)
       ios = nf90_put_var(ncid, varid_t, real(hh,ESMF_KIND_R8) + real(mn,ESMF_KIND_R8)/60.0_ESMF_KIND_R8)
       deallocate(lat_global, lon_global)
-
-      ! MASCARA-CONT-01: grava ocn_frac. Se a máscara ainda não foi calculada
-      ! (bootstrap — ver MED_cap.F90), grava _FillValue em toda a variável: o
-      ! arquivo fica consistente consigo mesmo (nenhum campo é mascarado nesta
-      ! chamada, e ocn_frac diz isso explicitamente, em vez de mentir 0 ou 1).
-      if (is%ocn_mask_atm_ready .and. allocated(is%ocn_mask_atm)) then
-        ios = nf90_put_var(ncid, varid_omask, real(is%ocn_mask_atm, 4))
-      else
-        block
-          real(4), allocatable :: omask4(:,:)
-          allocate(omask4(nx_global, ny_global))
-          omask4 = FILL_IMP4
-          ios = nf90_put_var(ncid, varid_omask, omask4)
-          deallocate(omask4)
-        end block
-      end if
     end if  ! localPet==0
 
     ! Para cada campo: preencher grid_local, MPI_Allreduce(MAX), PET0 escreve
@@ -382,6 +350,14 @@ contains
         case ('So_u');           call ESMF_FieldGet(is%f_uocn_atm,   farrayPtr=fptr2d, rc=rc)
         case ('So_v');           call ESMF_FieldGet(is%f_vocn_atm,   farrayPtr=fptr2d, rc=rc)
         case ('Sf_zorl');        call ESMF_FieldGet(is%f_zorl_atm,   farrayPtr=fptr2d, rc=rc)
+        ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima)
+        case ('Sf_albedo');      call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr2d, rc=rc)
+        case ('Faxa_coszen');    call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_taux');      call ESMF_FieldGet(is%f_taux_ice,   farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_tauy');      call ESMF_FieldGet(is%f_tauy_ice,   farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
         case default
           ! Um campo do exportState sem mapeamento aqui vira variavel vazia no
           ! arquivo, sem nenhum sinal. Registrar o aviso para que a proxima
@@ -404,6 +380,26 @@ contains
         j1a = max(1, lbound(fptr2d,2));  j2a = min(ny_global, ubound(fptr2d,2))
         if (i2a >= i1a .and. j2a >= j1a) &
           grid_local(i1a:i2a, j1a:j2a) = fptr2d(i1a:i2a, j1a:j2a)
+
+        ! FIX-DIAG-NCWRITE-01 (Set/2026): confirma/descarta a hipotese de
+        ! sobreposicao de indice entre PETs no MAX-combine abaixo. Logado
+        ! uma unica vez (1a chamada, so' para o campo Si_ifrac, que e' onde
+        ! o artefato foi observado) — cada PET reporta a fatia GLOBAL que
+        ! ACHA que possui. Se dois PETs vizinhos reportarem faixas i/j que
+        ! se sobrepoem, o MPI_Allreduce(MAX) abaixo pode escolher um valor
+        ! "estranho" de um PET que nao e' o dono real daquela celula —
+        ! mecanismo candidato para uma mancha isolada sem relacao com o
+        ! gelo real (ex.: ~50S/Atlantico Sul, observado antes e depois da
+        ! troca de metodo de regrid — ou seja, independente dela).
+        if (first_write_diag .and. trim(fieldNameList(n)) == "Si_ifrac") then
+          block
+            character(len=200) :: diag_msg_nc
+            write(diag_msg_nc,'(A,I0,A,I0,A,I0,A,I0,A,I0)') &
+              'FIX-DIAG-NCWRITE-01: PET declara fatia global i=[', i1a, ',', &
+              i2a, '] j=[', j1a, ',', j2a, ']'
+            call ESMF_LogWrite(trim(diag_msg_nc), ESMF_LOGMSG_INFO)
+          end block
+        end if
       end block
 
       ! MPI_Allreduce(MAX): combina subdomínios; descarta fill_val (−9.99e20)
@@ -415,22 +411,13 @@ contains
         grid_global = FILL_IMP
       end where
 
-      ! MASCARA-CONT-01: continente -> _FillValue. Corte em 0,5 (maioria da
-      ! célula ATM é terra): abaixo disso, mesmo um valor fisicamente "válido"
-      ! herdado do stub OCN ou do bulk NCAR sobre terra é descartado. Só roda
-      ! quando a máscara já foi calculada (ver MED_cap.F90); enquanto isso não
-      ! ocorre, o campo sai como antes, sem máscara — nunca se apaga dado por
-      ! falta de uma informação ainda não disponível.
-      if (is%ocn_mask_atm_ready .and. allocated(is%ocn_mask_atm)) then
-        where (is%ocn_mask_atm < 0.5_ESMF_KIND_R8) grid_global = FILL_IMP
-      end if
-
       if (med_local_pet == 0) then
         ios = nf90_inq_varid(ncid, trim(fieldNameList(n)), varid)
         if (ios == NF90_NOERR) ios = nf90_put_var(ncid, varid, real(grid_global, 4))
       end if
       rc = ESMF_SUCCESS
     end do  ! campos
+    first_write_diag = .false.
 
     deallocate(grid_local, grid_global, fieldNameList)
 

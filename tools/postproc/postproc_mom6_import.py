@@ -1,187 +1,195 @@
 #!/usr/bin/env python3
 """
 postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
-                              (15 campos do exportState ATM→OCN calculados pelo
-                               mediador NCAR bulk em MED_cap.F90)
+                              (14 fluxos ATM→OCN calculados pelo mediador NCAR
+                               bulk em MED_cap.F90)
 
-Versão 9.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Setembro 2026
+Versão 8.3 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
 
-═══════════════════════════════════════════════════════════════════════════════
-CORREÇÕES v9.2
-═══════════════════════════════════════════════════════════════════════════════
+HISTÓRICO DE CORREÇÕES
+  v8.2 — BUG-PY-15 (Maio 2026):
+    • BUG-PY-15 (A/C): cfeature.LAND ausente em plot_maps.
+                 A função adicionava apenas COASTLINE e BORDERS, sem preencher
+                 o interior dos continentes.  Isso gerava dois artefatos visuais:
+                 1. Patches brancos (NaN transparente sobre fundo branco da figura)
+                    em campos oceânicos — Foxx_lwnet, onda curta e precipitação —
+                    onde a grade não calcula fluxos sobre terra.
+                 2. So_duu10n e outros campos atmosféricos exibiam dados de vento
+                    calculados sobre terra sem nenhuma máscara geográfica, tornando
+                    o mapa difícil de interpretar.
+                 Correção: cfeature.LAND desenhada em zorder=5 (acima do
+                 pcolormesh em zorder=1); COASTLINE e BORDERS elevados para
+                 zorder=6, mantendo-se visíveis sobre a máscara de terra.
+    • BUG-PY-15 (B): fill_min_threshold de So_t elevado de 270.0 K para 271.4 K.
+                 O marcador-stub do Sprint A.5 coloca pontos de terra/gelo em
+                 271.35 K — acima do limiar antigo (270 K) e por isso não
+                 mascarado.  Isso gerava patches azuis retangulares em áreas
+                 oceânicas no mapa de SST.
+                 271.4 K captura 271.35 K sem mascarar SST oceânica real,
+                 cujo mínimo observado é ≈ 271.8 K.
+                 vmin_phys atualizado consistentemente para 271.4 K.
 
-BUG-PY-23  Marcador de terra por temperatura tornado desnecessário
-  Contexto: BUG-PY-18 (abaixo) já registrava que a correção definitiva era o
-    lado Fortran gravar _FillValue sobre continente em vez de um valor
-    fisicamente plausível. Isso foi feito (MASCARA-CONT-01, med_cap_netcdf.F90):
-    mom6_import_*.nc agora grava _FillValue real sobre terra, decidido por
-    regrid da máscara oceânica do MOM6 (So_omask), não por limiar de
-    temperatura — e passa a incluir a variável 'ocn_frac' com a fração de
-    cobertura oceânica usada nessa decisão.
-  Efeito neste script: a leitura de _FillValue (linhas ~588-593, já existente)
-    passa a mascarar o continente corretamente nos arquivos novos, sem
-    depender do marcador de 271,35 K. Como esse marcador é comparação
-    aproximada, ele pode legitimamente remover SST real perto do ponto de
-    congelamento (BUG-PY-18) — agora que não é mais necessário na maioria dos
-    casos, --land-marker passa a ser DESLIGADO por padrão.
-  Compatibilidade: arquivos gerados ANTES desta revisão do acoplador não têm
-    'ocn_frac' nem _FillValue real sobre terra — para esses, religue o
-    marcador com --legacy-land-marker (equivalente ao antigo padrão). A opção
-    --no-land-marker é aceita como no-op (era o padrão implícito; agora é o
-    padrão explícito).
+  v8.1 — Renomeação de arquivos de saída (Maio 2026):
+    • Mapas por passo : import_YYYYMMDD_HHMMSS.png  → mom6_import_YYYYMMDD_HHMMSS.png
+    • Série temporal  : import_timeseries.png        → mom6_import_timeseries.png
+    Padrão agora consistente com o prefixo dos arquivos NetCDF de entrada
+    (mom6_import_*.nc) e com o script de animação anim_mom6_import.py.
+  v8.0 — BUG-PY-14 (Maio 2026):
+    • BUG-PY-14 (A): Si_ifrac — escala adaptativa em plot_maps.
+                 O campo Si_ifrac é binário (0 ou 1). Com vmax=1.0 (padrão),
+                 as células polares com gelo (~0.05% da área) são visualmente
+                 invisíveis numa projeção global. Detecta automaticamente
+                 campos binários (max=1, p95=0) e aplica:
+                   vmax_efetivo = max(mean * 30, 0.005)
+                 tornando o gelo visível com colorbar interpretável.
+                 Paleta alterada para 'Blues' (intensidade de gelo) e
+                 annotation com área de gelo estimada.
+    • BUG-PY-14 (B): Si_ifrac — série temporal com eixo Y adaptativo.
+                 Com escala linear [0, 1], a curva de Si_ifrac (mean ~0.0005)
+                 aparece como linha reta no zero. Aplica escala simétrica-log
+                 (symlog com linthresh=1e-4) quando o sinal está abaixo de
+                 0.1, tornando o crescimento de gelo legível.
+    • BUG-PY-14 (C): So_t passo all-NaN — subplot informativo em vez de vazio.
+                 Quando So_t é 100% NaN num passo (passo 1: campo indisponível
+                 antes do primeiro avanço do MOM6), o subplot era pulado com
+                 'continue', deixando espaço em branco desorientador.
+                 Agora exibe painel cinza com texto "Campo indisponível /
+                 aguardando primeiro passo MOM6" para clareza diagnóstica.
+    • BUG-PY-14 (D): So_t — mascaramento do seam tripolar.
+                 A grade MOM6 (tripolar) tem uma descontinuidade de longitude
+                 que aparece como linha branca vertical no mapa após o roll
+                 de 0→360° para -180→180°. Aplica máscara automática de
+                 descontinuidade: células onde |Δlon_vizinho| > 90° são
+                 mascaradas como NaN antes do pcolormesh, eliminando o artefato
+                 sem alterar os dados físicos.
+    • BUG-PY-13 (C) rev.2: So_duu10n — vmax_phys calibrado de 900 para 1600 m²/s².
+                 Experimentos reais mostram máximos de 967–1459 m²/s² (|ΔV| ≈ 31–38 m/s)
+                 em ciclones extratropicais e furacões presentes no campo MPAS — valores
+                 fisicamente legítimos que disparavam falsos positivos com 900 m²/s².
+                 1600 m²/s² ≡ |ΔV| ≤ 40 m/s: teto físico real para vento em superfície
+                 oceânica; acima disso configura artefato numérico.
+                 check_msg atualizado para informar o limite e a ação sugerida.
 
-═══════════════════════════════════════════════════════════════════════════════
-CORREÇÕES v9.1
-═══════════════════════════════════════════════════════════════════════════════
+  v7.0 — BUG-PY-13 (Maio 2026):
+    • BUG-PY-13 (A): Foxx_lwnet — vmax_phys elevado de 100 W/m² para 150 W/m².
+    • BUG-PY-13 (B): So_t — vmin_phys reduzido de 271.0 K para 270.0 K.
+    • BUG-PY-13 (C): So_duu10n — vmax_phys inicial de 400 → 900 m²/s² (v7.0),
+                 corrigido para 1600 m²/s² em v7.1 após calibração experimental.
 
-Uma figura para CADA saída NetCDF, sem crescimento de memória
-  A v9.0 limitava os mapas a uma amostra (--max-maps 12) porque as camadas dos
-  passos a plotar ficavam retidas até o fim da leitura.  Isso deixava os
-  scripts de animação sem quadros suficientes.
-  Mudanças:
-    • o desenho passou a ocorrer DENTRO do laço de leitura (classe
-      RenderizadorMapas): o campo do passo é lido, vira figura e é descartado,
-      de modo que o pico de memória é o de um único passo;
-    • o padrão de --max-maps passou de 12 para 0 (sem teto): por padrão sai
-      uma figura por arquivo de diagnóstico;
-    • --step continua restringindo a passos específicos e --max-maps continua
-      disponível para amostrar uniformemente quando não se quer a série toda;
-    • --all-steps foi mantido apenas por compatibilidade e não altera nada,
-      pois plotar todos os passos virou o padrão;
-    • --dpi permite reduzir a resolução (o tempo de gravação da figura é
-      proporcional à área em pixels e domina o custo total).
-  Medido em 240 arquivos numa grade 360x180: 240 figuras geradas com pico de
-  291 MiB, constante em relação ao número de passos.
+  v6.0 — BUG-PY-12 (Maio 2026):
+    • BUG-PY-12 (A): fill_min_threshold de So_t elevado de 200 K para 270 K.
+                 O stub OCN coloca cells de terra/gelo em ~200.0049 K — logo
+                 ACIMA do limiar antigo (200.0 K), provocando os warnings:
+                   "⚠ So_t: min=200.0049 < 271.0 [K]" a cada execução.
+                 Com 270 K, todos os pontos terra/fill viram NaN antes da
+                 estatística e o aviso só aparece se houver SST de fato
+                 anômala (a abaixo do ponto de congelamento da água do mar).
+    • BUG-PY-12 (B): check_physics suprime aviso redundante de SST em °C.
+                 Antes, a falha em K e a derivada em °C geravam DOIS avisos:
+                   "⚠ So_t: min=200.0 < 271.0 [K]"
+                   "⚠ So_t − 273.15 = [-73.15, 31.19] °C — ..."
+                 sobre o MESMO problema. Agora a verificação em °C só roda
+                 (e só reporta confirmação ✓) quando a verificação em K já
+                 passou.
+    • BUG-PY-12 (C): plot_maps silencia RuntimeWarning de slice 100% NaN.
+                 np.nanpercentile sobre passo com todos NaN gerava warning
+                 "All-NaN slice encountered" mesmo já havendo fallback para
+                 limites físicos. Bloco encapsulado em warnings.catch_warnings.
+    • BUG-PY-12 (D): plot_timeseries idem — RuntimeWarning de nanmean e
+                 nanpercentile sobre slices 100% NaN são intencionais (geram
+                 gap natural no matplotlib) e foram silenciados.
+    • BUG-PY-12 (E): print_stats agora exibe coluna "Cobert." (percentual
+                 de pontos válidos por passo). Permite identificar passos
+                 com baixa cobertura de dados — útil para entender quando
+                 (sem dados) ou min/max suspeitamente pequenos aparecem.
 
---all-fields: processa TODAS as variáveis 2-D do arquivo
-  Campos gravados pelo mediador que ainda não têm entrada em FIELD_META
-  passam a poder ser incluídos, com escala 1,0, paleta padrão e sem limite
-  físico, em vez de serem silenciosamente ignorados.
+  v5.0 — BUG-PY-11 / CLEANUP (Maio 2026):
+    • BUG-PY-11 (A): imports não utilizados removidos.
+                 'timedelta' e 'date' importados mas nunca referenciados.
+                 Removidos para clareza e conformidade com PEP 8.
+    • BUG-PY-11 (B): código morto em compute_expected_interp.
+                 Ternário 'x if hasattr(ts, "date") else y' tinha ramo else
+                 inalcançável (ts é sempre datetime → possui .date()).
+                 Simplificado para chamada direta: (ts.date() - epoch_date).
+    • BUG-PY-11 (C): comentário mal-indentado em plot_maps.
+                 Linha '# BUG-PY-07: scale aplicado...' estava dentro do bloco
+                 'if flat.size == 0: continue' (código morto). Movido para
+                 fora do bloco condicional.
 
-═══════════════════════════════════════════════════════════════════════════════
-CORREÇÕES v9.0
-═══════════════════════════════════════════════════════════════════════════════
+  v4.0 — BUG-PY-08 (Maio 2026):
+    • BUG-PY-08 (A/B/C/D/E): scale não aplicado em nenhuma função de saída.
+                 print_stats, plot_maps, plot_timeseries e export_csv exibiam
+                 dados em unidades SI (kg/m²/s, Pa) com labels de scale_units
+                 (mm/d, hPa). Colorbars mostravam 1e-8 em vez de W/m².
+                 Corrigido: layer *= scale antes de calcular vmin/vmax/plot.
+                 Limites físicos de Faxa_rain/Faxa_snow corrigidos para mm/d.
 
-BUG-PY-16  Consumo de memória proporcional ao número de passos
-  Sintoma: o script não conclui (ou é morto pelo sistema) quando executado
-    sobre o intervalo completo de integração.
-  Causa  : load_diag_files() empilhava TODOS os passos de TODOS os campos em
-    memória, em float64, antes de qualquer cálculo.  Para 15 campos numa
-    grade 360x180 e 720 passos (30 dias com dt_coupling=1 h) isso são
-    15 x 720 x 64.800 x 8 B = 5,2 GB; numa grade 640x320, 25,8 GB.
-    print_stats, check_physics e plot_timeseries ainda faziam cópias
-    completas desse bloco (data[~np.isnan(data)], data * scale,
-    np.nanpercentile sobre o array inteiro), multiplicando o pico.
-  Correção: leitura em UMA passagem, um arquivo por vez.  As estatísticas por
-    passo (mínimo, máximo, média, desvio padrão, percentis, cobertura) são
-    calculadas na leitura e guardadas como ESCALARES.  Apenas os passos que
-    serão efetivamente plotados ficam residentes como campos 2-D, em float32.
-    O pico de memória passa a ser O(n_campos x n_mapas), independente da
-    duração da integração.
+  v3.0 — BUG-PY-06 (Maio 2026):
+    • BUG-PY-06: Referências semânticas ao DOCN corrigidas em todo o script.
+                 Os campos dos arquivos mom6_import_*.nc são fluxos ATM→OCN
+                 calculados pelo mediador MED_cap.F90 (bulk NCAR), NÃO
+                 campos exportados pelo DOCN_cap (So_t, Si_ifrac, So_u, So_v).
+                 Corrigido: nome CSV, título de plot, comentários, docstrings.
 
-BUG-PY-17  Eixo de tempo fixo em 6 h na série temporal
-  Sintoma: rótulos ilegíveis em integrações de vários dias e, acima de ~1000
-    marcas (mais de 250 dias), exceção MAXTICKS do matplotlib.
-  Causa  : mdates.HourLocator(interval=6) fixo.
-  Correção: AutoDateLocator + ConciseDateFormatter, que escolhem a unidade
-    (hora, dia, mês) conforme o intervalo coberto.
-
-BUG-PY-18  Marcador de terra removia SST oceânica real (buracos nas figuras)
-  Sintoma: manchas brancas no mapa de So_t exatamente nas regiões cobertas por
-    gelo marinho (Ártico, Mar de Weddell, Mar de Ross, Baía de Hudson).
-  Causa  : fill_min_threshold=271,4 K descartava como "preenchimento" TODA
-    célula abaixo desse valor.  O ponto de congelamento da água do mar com
-    S≈35 é 271,35 K: a SST sob gelo marinho fica legitimamente entre 271,2 e
-    271,4 K e era apagada junto com o marcador do Sprint A.5.
-  Correção: o marcador passa a ser identificado por IGUALDADE APROXIMADA com o
-    valor exato gravado pelo mediador (land_marker=271,35 K, atol=1e-4 K), e
-    não por um limiar inferior.  O piso de preenchimento verdadeiro
-    (stub OCN em ~200 K) fica em fill_min_threshold=250 K.  O número de
-    células removidas pelo marcador é reportado por passo, para que a remoção
-    nunca seja silenciosa.
-  Observação para o lado Fortran: a solução definitiva é o MED gravar
-    _FillValue no NetCDF em vez de usar um valor fisicamente válido como
-    marcador.  Enquanto isso não ocorre, use --no-land-marker para inspecionar
-    o campo sem nenhuma remoção.
-
-BUG-PY-19  Heurística de "seam tripolar" corrompia uma coluna de dados
-  Sintoma: listra vertical com valores interpolados (ou apagados) perto do
-    meridiano de Greenwich em campos oceânicos.
-  Causa  : o bloco mask_tripole_seam procurava a coluna anômala em torno de
-    n_cols // 2.  Depois do giro de 0–360° para -180–180°, esse índice
-    corresponde a lon ≈ 0°, e não a lon ≈ 180° como dizia o comentário.  Em
-    campos oceânicos a coluna de Greenwich atravessa Europa e África e tem
-    mais de 50% de NaN, disparando a heurística sempre: a coluna era
-    substituída por 0,5*(vizinha_esq + vizinha_dir) e, onde isso também era
-    NaN, pela média global do campo.  Ou seja, o script inventava dado.
-  Correção: bloco removido.  A grade do MED é regular em (0–360°, -90–90°) e
-    não possui costura própria; qualquer descontinuidade herdada da grade
-    nativa do MOM6 é um problema de regrid a ser corrigido no MED, não
-    maquiado no pós-processamento.
-
-BUG-PY-20  Ausência de dado indistinguível de valor nulo nas figuras
-  Sintoma: em Faxa_rain, Faxa_snow e nos campos de onda curta, a área sem dado
-    e a área com valor zero apareciam ambas em branco.
-  Correção: cor explícita para célula sem dado (cinza claro) via set_bad() e
-    facecolor do eixo; barra de cores com extend='both' quando os limites de
-    exibição cortam a distribuição.
-
-BUG-PY-21  Falha de rede do cartopy em nó de execução sem internet
-  Sintoma: exceção (ou espera longa) ao gravar a figura, no primeiro acesso ao
-    Natural Earth.
-  Correção: disponibilidade das feições geográficas é testada uma única vez no
-    início; se o download não for possível, as figuras são geradas sem
-    contorno de costa, com aviso, em vez de abortar.
-
-BUG-PY-22  Orientação (lat,lon) decidida por heurística de tamanho
-  Correção: a transposição passa a usar os tamanhos reais de lat e lon lidos do
-    arquivo; a heurística nlat<nlon só é usada quando as coordenadas estão
-    ausentes.
-
-ADIÇÕES v9.0 (controle do volume de saída em integrações longas)
-  --stride N        processa 1 a cada N arquivos de diagnóstico
-  --tmin / --tmax   recorta a janela temporal (YYYY-MM-DD[THH:MM])
-  --max-maps N      teto de figuras por execução (v9.1: padrão 0, sem teto)
-  --max-rows N      teto de linhas por campo na tabela de estatísticas
-  --no-land-marker  desativa a remoção do marcador de terra
-  --land-marker V   valor do marcador de terra em K (padrão 271.35)
-
-═══════════════════════════════════════════════════════════════════════════════
-HISTÓRICO ANTERIOR (resumido)
-═══════════════════════════════════════════════════════════════════════════════
-  v8.3  rodapé indicando em que passo o MOM6 consome os fluxos exibidos
-  v8.2  BUG-PY-15: cfeature.LAND ausente; fill_min_threshold de So_t
-  v8.1  renomeação dos arquivos de saída para o prefixo mom6_import_
-  v8.0  BUG-PY-14: escala adaptativa de Si_ifrac; painel informativo
-  v7.0  BUG-PY-13: calibração de vmax_phys de Foxx_lwnet e So_duu10n
-  v6.0  BUG-PY-12: limiares de preenchimento e supressão de avisos duplicados
-  v5.0  BUG-PY-11: limpeza de imports e código morto
-  v4.0  BUG-PY-08: aplicação de 'scale' em todas as saídas
-  v3.0  BUG-PY-06: correção semântica DOCN -> exportState MED
-  v2.0  BUG-PY-01/02/03: padrão de busca e lista de campos
+  v2.0 — BUG-PY-01/02/03 (Maio 2026):
+    • BUG-PY-01: padrão de busca corrigido de docn_import_*.nc → mom6_import_*.nc
+    • BUG-PY-02: remoção de prefixo corrigida (docn_import_ → mom6_import_)
+    • BUG-PY-03: FIELD_META e FIELDS atualizados dos campos DOCN (So_t, Si_ifrac,
+                 So_u, So_v) para os 14 campos do exportState MED→OCN:
+                 Foxx_taux/tauy, Foxx_sen, Foxx_evap, Foxx_lwnet,
+                 Foxx_swnet_vdr/vdf/idr/idf, Faxa_rain/snow,
+                 Sa_pslv, Si_ifrac, So_duu10n.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Cenário de uso
 ═══════════════════════════════════════════════════════════════════════════════
 O MED_cap.F90 calcula os fluxos ATM→OCN via bulk NCAR a cada passo de
 acoplamento e os escreve no exportState (= importState do MOM6+SIS2).
-Ativar write_import_diag=.true. faz o mediador gravar um arquivo NetCDF de
-diagnóstico por passo em diag_import/mom6_import_YYYYMMDD_HHMMSS.nc.
+Ativar write_import_diag=.true. em mom6_output.nml faz o mediador escrever um
+arquivo NetCDF de diagnóstico por passo em diag_import/mom6_import_YYYYMMDD_HHMMSS.nc.
 
+Este script valida esses arquivos de três formas:
+  1. ESTATÍSTICAS — min/max/média/σ por campo e passo
+  2. FÍSICA       — verifica limites físicos e consistência
+  3. SÉRIES TEMPORAIS — evolução das médias globais ao longo do experimento
+
+═══════════════════════════════════════════════════════════════════════════════
+Estrutura do arquivo de diagnóstico (diag_import/mom6_import_*.nc)
+═══════════════════════════════════════════════════════════════════════════════
+  Conventions: CF-1.8
+  dimensions: lat(320), lon(640)  [grade MED interna 640×320]
+  variables:
+    lon(lon)            [degrees_east]
+    lat(lat)            [degrees_north]
+    time                [hours since YYYY-MM-DD 00:00:00] — escalar CF
+    Foxx_taux(lat,lon)  [Pa]       — tensão zonal
+    Foxx_tauy(lat,lon)  [Pa]       — tensão meridional
+    Foxx_sen(lat,lon)   [W m-2]    — calor sensível
+    Foxx_evap(lat,lon)  [kg m-2 s-1] — evaporação
+    Foxx_lwnet(lat,lon) [W m-2]    — balanço onda longa
+    Foxx_swnet_vdr(lat,lon) [W m-2] — OC vis. direta
+    Foxx_swnet_vdf(lat,lon) [W m-2] — OC vis. difusa
+    Foxx_swnet_idr(lat,lon) [W m-2] — OC IR direta
+    Foxx_swnet_idf(lat,lon) [W m-2] — OC IR difusa
+    Faxa_rain(lat,lon)  [kg m-2 s-1] — chuva
+    Faxa_snow(lat,lon)  [kg m-2 s-1] — neve
+    Sa_pslv(lat,lon)    [Pa]       — pressão nível do mar
+    Si_ifrac(lat,lon)   [1]        — fração de gelo
+    So_duu10n(lat,lon)  [m2 s-2]   — |V10|² neutro
+
+═══════════════════════════════════════════════════════════════════════════════
 Modos
-  --stats       estatísticas por campo e passo
+═══════════════════════════════════════════════════════════════════════════════
+  --stats       estatísticas globais por campo e passo
   --check       verificação de limites físicos
   --csv         exporta séries temporais em CSV
-  --plot        mapas + série temporal
+  --plot        mapas pcolormesh + série temporal
   --all         todos os modos [padrão]
 
-Exemplos
+Exemplos:
   python3 postproc_mom6_import.py
   python3 postproc_mom6_import.py --stats --check
-  python3 postproc_mom6_import.py --plot                 # uma figura por arquivo
-  python3 postproc_mom6_import.py --plot --max-maps 8    # só uma amostra
-  python3 postproc_mom6_import.py --all-fields --stats
-  python3 postproc_mom6_import.py --tmin 2026-03-29 --tmax 2026-03-31 --plot
+  python3 postproc_mom6_import.py --diagdir diag_import --outdir diag_import/figs --plot
 
 Dependências obrigatórias : numpy, netCDF4
 Dependências opcionais    : matplotlib, cartopy  (para --plot)
@@ -202,19 +210,15 @@ try:
 except ImportError:
     sys.exit("ERRO: netCDF4 não encontrado.  pip install --user netCDF4")
 
-
 # ─── Metadados de exibição ─────────────────────────────────────────────────────
-# Os arquivos mom6_import_*.nc contêm os campos do exportState MED→OCN,
+# BUG-PY-03 fix (GT Acoplamento de Modelos/INPE — Maio 2026):
+# Os arquivos mom6_import_*.nc contêm os 14 campos do exportState MED→OCN,
 # calculados pelo mediador MED_cap.F90 via parametrização bulk NCAR
-# (Large & Yeager 2009).  A fonte ATM é o MPAS-A (ou DATM como alternativa);
-# a SST provém do MOM6+SIS2.
-#
-# Chaves de mascaramento:
-#   fill_threshold      : |valor| acima disto é preenchimento
-#   fill_min_threshold  : valor abaixo disto é preenchimento (piso absoluto)
-#   fill_equal          : valor exatamente igual a este é preenchimento
-#   land_marker         : marcador de terra gravado pelo MED (removido com
-#                         tolerância estreita; ver BUG-PY-18)
+# (Large & Yeager 2009). A fonte ATM é o MPAS-A (ou DATM como fallback);
+# a SST provém do MOM6+SIS2 (ou do stub sintético 290 K).
+# NÃO são campos do DOCN_cap (So_t, Si_ifrac, So_u, So_v): o DOCN fornece
+# condições de contorno oceânicas ao mediador, não os fluxos ATM→OCN.
+# (A versão v1.0 do script cometia esse erro conceitual.)
 FIELD_META = {
     # ── Fluxos turbulentos ────────────────────────────────────────────────────
     'Foxx_taux': {
@@ -242,6 +246,7 @@ FIELD_META = {
         'long_name': 'Fluxo de evaporação (Foxx_evap)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'RdBu_r', 'vperc': [2, 98], 'symmetric': True,
+        # BUG-PY-09: limites em mm/d
         'vmin_phys': -15.0, 'vmax_phys': 200.0,
         'check_msg': 'Evaporação fora de [-15, 200] mm/d',
     },
@@ -286,6 +291,8 @@ FIELD_META = {
         'long_name': 'Precipitação líquida (Faxa_rain)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
+        # BUG-PY-08-B: limites em mm/d (scale_units), não em kg/m²/s.
+        # check_physics aplica scale antes de comparar: 2e-4 kg/m²/s × 86400 = 17.28 mm/d → vmax=600 mm/d.
         'vmin_phys': 0.0, 'vmax_phys': 600.0,
         'check_msg': 'Precipitação líquida > 600 mm/d (improvável exceto artefato NaN)',
     },
@@ -293,6 +300,7 @@ FIELD_META = {
         'long_name': 'Precipitação sólida (Faxa_snow)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
+        # BUG-PY-08-B: limites em mm/d: 5e-5 kg/m²/s × 86400 = 4.32 mm/d → vmax=150 mm/d.
         'vmin_phys': 0.0, 'vmax_phys': 150.0,
         'check_msg': 'Neve > 150 mm/d (improvável exceto artefato NaN)',
     },
@@ -301,35 +309,40 @@ FIELD_META = {
         'long_name': 'Pressão ao nível do mar (Sa_pslv)',
         'units': 'Pa', 'scale': 1.0e-2, 'scale_units': 'hPa',
         'cmap': 'RdYlBu_r', 'vperc': [2, 98], 'symmetric': False,
+        # BUG-PY-05-C: limites em unidades de scale_units (hPa), não em Pa.
+        # check_physics agora aplica 'scale' antes de comparar.
         'vmin_phys': 870.0, 'vmax_phys': 1080.0,
         'check_msg': 'Pressão fora de [870, 1080] hPa',
-        # Célula sem pressão sai exatamente em 0 Pa.  Igualdade exata é mais
-        # segura que um limiar: nenhuma pressão física real é 0 Pa, e o teste
-        # não corre o risco de apagar mínimos profundos de ciclone.
-        'fill_equal': 0.0,
+        # BUG-PY-05-D: fill_threshold exclui células oceânicas sem dado (pslv=0 Pa).
+        # Pontualmente o stub OCN deixa cells sem pressão → pslv=0.
+        # Aplicar antes do scaling: 0 Pa × 0.01 = 0 hPa → abaixo de 870 hPa.
+        'fill_min_threshold': 1000.0,  # Pa — mascara pslv < 1000 Pa (stub/terra com pslv=0)
     },
     'Si_ifrac': {
         'long_name': 'Fração de gelo marinho (Si_ifrac)',
         'units': '1', 'scale': 1.0, 'scale_units': '[0–1]',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
         'vmin_phys': 0.0, 'vmax_phys': 1.0,
-        'binary_field': True,   # habilita escala adaptativa por passo
+        # BUG-PY-14 (A): campo binário (0 ou 1) — escala adaptativa em plot_maps.
+        # vmax_efetivo = max(mean * 30, 0.005) para tornar o gelo polar visível.
+        'binary_field': True,   # flag: habilita escala adaptativa por passo
         'check_msg': 'Fração de gelo fora de [0, 1]',
     },
     'So_t': {
         'long_name': 'SST dinâmica MOM6 (So_t)',
         'units': 'K', 'scale': 1.0, 'scale_units': 'K',
         'cmap': 'RdYlBu_r', 'vperc': [2, 98], 'symmetric': False,
-        # BUG-PY-18: vmin_phys volta a 271,0 K.  A água do mar congela a
-        # 271,35 K (S≈35) e a SST sob gelo marinho fica legitimamente logo
-        # abaixo disso; 271,4 K produzia aviso falso e, junto com o antigo
-        # fill_min_threshold, apagava as regiões polares do mapa.
-        'vmin_phys': 271.0, 'vmax_phys': 310.0,
-        # Piso absoluto de preenchimento: o stub OCN grava ~200 K.
-        'fill_min_threshold': 250.0,
-        # Marcador de terra do Sprint A.5, removido por igualdade aproximada.
-        'land_marker': 271.35,
-        'check_msg': 'SST fora de [271, 310] K',
+        'vmin_phys': 271.4, 'vmax_phys': 310.0,
+        # BUG-PY-12 fix: threshold elevado de 200 K para 270 K.
+        # BUG-PY-15 fix: threshold elevado de 270 K para 271.4 K.
+        #   O marcador-stub do Sprint A.5 coloca pontos de terra/gelo
+        #   em 271.35 K — valor ACIMA do limiar anterior (270 K) e
+        #   portanto não mascarado, gerando patches azuis retangulares
+        #   em áreas oceânicas.
+        #   271.4 K captura 271.35 K (stub) como NaN sem mascarar SST
+        #   oceânica real, cujo mínimo observado é ≈ 271.8 K.
+        'fill_min_threshold': 271.4,  # SST < 271.4 K → stub/fill (NaN)
+        'check_msg': 'SST fora de [271.4, 310] K',
     },
     'So_duu10n': {
         'long_name': 'Vento relativo ao oceano² (So_duu10n)',
@@ -341,680 +354,546 @@ FIELD_META = {
 }
 
 FIELDS = list(FIELD_META.keys())
-SST_CELSIUS_OFFSET = 273.15
-
-# Tolerância de igualdade do marcador de terra, em K.  O valor é gravado em
-# float32 pelo Fortran; 1e-3 K cobre a representação sem alcançar a SST real.
-LAND_MARKER_ATOL = 1.0e-4
-
-# Cor usada para célula sem dado (distingue "ausente" de "zero").
-NODATA_COLOR = '#d9d9d9'
+SST_CELSIUS_OFFSET = 273.15   # offset de conversão °C → K (não usado nos campos MOM6, mantido por compatibilidade)
 
 
-# ─── Localização e ordenação dos arquivos ─────────────────────────────────────
+# ─── Carregamento ─────────────────────────────────────────────────────────────
+
+def find_diag_files(diag_dir):
+    # BUG-PY-01 fix: padrão correto é mom6_import_*.nc (gerado por
+    # MED_cap.F90::med_write_import_fields), não docn_import_*.nc.
+    pattern = os.path.join(diag_dir, 'mom6_import_*.nc')
+    files = sorted(glob.glob(pattern))
+    if not files:
+        sys.exit(f"ERRO: nenhum arquivo mom6_import_*.nc em '{diag_dir}'.\n"
+                 f"  Ative write_import_diag=.true. em mom6_output.nml e rode o acoplador.")
+    return files
+
 
 def parse_timestamp_from_filename(fname):
-    """Extrai datetime de mom6_import_YYYYMMDD_HHMMSS.nc.  None se não casar."""
-    base = os.path.basename(fname)
-    if not base.startswith('mom6_import_') or not base.endswith('.nc'):
-        return None
-    stamp = base[len('mom6_import_'):-len('.nc')]
+    """Extrai datetime de mom6_import_YYYYMMDD_HHMMSS.nc."""
+    # BUG-PY-02 fix: prefixo correto é mom6_import_ (era docn_import_)
+    base = os.path.basename(fname).replace('mom6_import_', '').replace('.nc', '')
     try:
-        return datetime.strptime(stamp, '%Y%m%d_%H%M%S')
+        return datetime.strptime(base, '%Y%m%d_%H%M%S')
     except ValueError:
         return None
 
 
-def find_diag_files(diag_dir):
+def load_diag_files(files, field_names):
     """
-    Lista os diagnósticos ordenados por carimbo de tempo (não por nome).
-
-    A ordenação lexicográfica funciona para YYYYMMDD_HHMMSS, mas quebra se o
-    diretório tiver arquivos com outro padrão; ordenar pelo datetime lido é
-    equivalente no caso normal e robusto no caso anormal.
+    Carrega todos os arquivos de diagnóstico.
+    Retorna: timestamps, fields{name: (nsteps, nlat, nlon)}, lat, lon, attrs
     """
-    pattern = os.path.join(diag_dir, 'mom6_import_*.nc')
-    raw = glob.glob(pattern)
-    if not raw:
-        sys.exit(f"ERRO: nenhum arquivo mom6_import_*.nc em '{diag_dir}'.\n"
-                 f"  Ative write_import_diag=.true. e rode o acoplador.")
+    timestamps = []
+    all_data   = {f: [] for f in field_names}
+    lat = lon  = None
+    attrs_sample = {}
 
-    pares, ignorados = [], []
-    for f in raw:
-        ts = parse_timestamp_from_filename(f)
+    print(f"  Carregando {len(files)} arquivos de diagnóstico...")
+
+    for fpath in files:
+        ts = parse_timestamp_from_filename(fpath)
         if ts is None:
-            ignorados.append(f)
-        else:
-            pares.append((ts, f))
-    if ignorados:
-        print(f"  AVISO: {len(ignorados)} arquivo(s) com nome fora do padrão "
-              f"mom6_import_YYYYMMDD_HHMMSS.nc — ignorado(s).")
-    if not pares:
-        sys.exit(f"ERRO: nenhum arquivo com carimbo de tempo válido em '{diag_dir}'.")
-    pares.sort(key=lambda p: p[0])
-    return [ts for ts, _ in pares], [f for _, f in pares]
-
-
-def filtrar_arquivos(timestamps, files, tmin, tmax, stride):
-    """Aplica a janela temporal e o passo de amostragem à lista de arquivos."""
-    idx = list(range(len(files)))
-    if tmin is not None:
-        idx = [i for i in idx if timestamps[i] >= tmin]
-    if tmax is not None:
-        idx = [i for i in idx if timestamps[i] <= tmax]
-    if stride > 1:
-        idx = idx[::stride]
-    if not idx:
-        sys.exit("ERRO: a janela temporal (--tmin/--tmax/--stride) não "
-                 "selecionou nenhum arquivo.")
-    return [timestamps[i] for i in idx], [files[i] for i in idx]
-
-
-def parse_datahora(txt):
-    """Converte YYYY-MM-DD, YYYY-MM-DDTHH:MM ou YYYY-MM-DDTHH:MM:SS."""
-    if txt is None:
-        return None
-    for fmt in ('%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M', '%Y-%m-%d %H:%M:%S',
-                '%Y-%m-%d %H:%M', '%Y-%m-%d'):
-        try:
-            return datetime.strptime(txt, fmt)
-        except ValueError:
+            print(f"  AVISO: timestamp não reconhecido em {fpath}, ignorado.")
             continue
-    sys.exit(f"ERRO: data/hora '{txt}' não reconhecida "
-             f"(use YYYY-MM-DD ou YYYY-MM-DDTHH:MM).")
 
-
-def selecionar_passos_mapa(n_steps, lista_passos, max_maps):
-    """
-    Índices (base 0) dos passos que receberão mapa.
-
-    O padrão é TODOS os passos: uma figura por saída NetCDF, que é o que os
-    scripts de animação consomem.  --step restringe a passos específicos e
-    --max-maps impõe um teto com amostragem uniforme, incluindo sempre o
-    primeiro e o último passo.
-    """
-    if lista_passos:
-        idx = [s - 1 for s in lista_passos]
-    else:
-        idx = list(range(n_steps))
-    idx = sorted({int(min(max(s, 0), n_steps - 1)) for s in idx})
-    if max_maps and 0 < max_maps < len(idx):
-        print(f"  AVISO: {len(idx)} passo(s) selecionado(s); limitado a "
-              f"{max_maps} figura(s) por --max-maps "
-              f"(padrão: sem teto).")
-        pos = np.unique(np.linspace(0, len(idx) - 1, max_maps).astype(int))
-        idx = [idx[i] for i in pos]
-    return idx
-
-
-def descobrir_campos(fpath):
-    """
-    Lista as variáveis 2-D (lat,lon) presentes no arquivo de diagnóstico.
-
-    Usada por --all-fields: processa tudo o que o mediador gravou, inclusive
-    campos ainda sem entrada em FIELD_META (que recebem escala 1,0, paleta
-    padrão e nenhum limite físico).
-    """
-    achados = []
-    with Dataset(fpath, 'r') as ds:
-        nomes_coord = {'lat', 'lon', 'latitude', 'longitude', 'time'}
-        for nome, var in ds.variables.items():
-            if nome in nomes_coord:
-                continue
-            if var.ndim == 2:
-                achados.append(nome)
-    conhecidos = [f for f in FIELDS if f in achados]
-    novos = [f for f in achados if f not in FIELD_META]
-    return conhecidos + sorted(novos)
-
-# ─── Mascaramento e estatística de uma camada ─────────────────────────────────
-
-def aplicar_mascaras(arr, meta, usar_marcador=True, marcador_valor=None):
-    """
-    Converte valores de preenchimento em NaN.
-
-    Retorna (arr, n_marcador) — n_marcador é quantas células foram removidas
-    pelo marcador de terra, reportado para que a remoção não seja silenciosa.
-    """
-    # Preenchimento nativo do NetCDF (magnitude muito grande).
-    arr = np.where(np.abs(arr) > 1.0e10, np.nan, arr)
-
-    thresh = meta.get('fill_threshold')
-    if thresh is not None:
-        arr = np.where(np.abs(arr) > thresh, np.nan, arr)
-
-    fmin = meta.get('fill_min_threshold')
-    if fmin is not None:
-        arr = np.where(arr < fmin, np.nan, arr)
-
-    feq = meta.get('fill_equal')
-    if feq is not None:
-        arr = np.where(arr == feq, np.nan, arr)
-
-    n_marc = 0
-    marc = marcador_valor if marcador_valor is not None else meta.get('land_marker')
-    if usar_marcador and marc is not None:
-        alvo = np.isclose(arr, marc, rtol=0.0, atol=LAND_MARKER_ATOL)
-        n_marc = int(np.count_nonzero(alvo))
-        arr = np.where(alvo, np.nan, arr)
-
-    return arr, n_marc
-
-
-def estatisticas_camada(arr, scale):
-    """
-    Estatísticas escalares de uma camada 2-D, já em unidades de exibição.
-
-    Retorna dicionário com chaves n_valid, cov, min, max, mean, std,
-    p02, p05, p50, p95, p98 — ou None quando não há célula válida.
-    """
-    if arr is None:
-        return None
-    finito = np.isfinite(arr)
-    n_ok = int(np.count_nonzero(finito))
-    n_tot = int(arr.size)
-    if n_ok == 0:
-        return {'n_valid': 0, 'n_total': n_tot, 'cov': 0.0}
-    flat = arr[finito].astype(np.float64) * scale
-    p02, p05, p50, p95, p98 = np.percentile(flat, [2, 5, 50, 95, 98])
-    return {
-        'n_valid': n_ok, 'n_total': n_tot, 'cov': 100.0 * n_ok / max(n_tot, 1),
-        'min': float(flat.min()), 'max': float(flat.max()),
-        'mean': float(flat.mean()), 'std': float(flat.std()),
-        'sum': float(flat.sum()), 'sumsq': float(np.dot(flat, flat)),
-        'p02': float(p02), 'p05': float(p05), 'p50': float(p50),
-        'p95': float(p95), 'p98': float(p98),
-    }
-
-
-def _novo_agregado():
-    return {'min': np.inf, 'max': -np.inf, 'sum': 0.0, 'sumsq': 0.0,
-            'n': 0, 'n_marcador': 0, 'n_gt1': 0, 'n_lt0': 0,
-            'sum_raw': 0.0, 'n_raw': 0, 'max_raw': -np.inf, 'min_raw': np.inf}
-
-
-def _acumular(agg, st, arr_raw, fname):
-    if st is None or st.get('n_valid', 0) == 0:
-        return
-    agg['min'] = min(agg['min'], st['min'])
-    agg['max'] = max(agg['max'], st['max'])
-    agg['sum'] += st['sum']
-    agg['sumsq'] += st['sumsq']
-    agg['n'] += st['n_valid']
-    if fname == 'Si_ifrac' and arr_raw is not None:
-        finito = np.isfinite(arr_raw)
-        vals = arr_raw[finito]
-        agg['n_gt1'] += int(np.count_nonzero(vals > 1.001))
-        agg['n_lt0'] += int(np.count_nonzero(vals < -0.001))
-        if vals.size:
-            agg['max_raw'] = max(agg['max_raw'], float(vals.max()))
-            agg['min_raw'] = min(agg['min_raw'], float(vals.min()))
-            agg['sum_raw'] += float(vals.sum())
-            agg['n_raw'] += int(vals.size)
-
-
-# ─── Leitura em uma passagem ──────────────────────────────────────────────────
-
-def scan_diag_files(files, timestamps, field_names, plot_idx=(),
-                    renderer=None, usar_marcador=True, marcador_valor=None,
-                    verbose=True):
-    """
-    Percorre os arquivos UMA vez, calculando estatísticas por passo.
-
-    Quando um renderizador é fornecido, o mapa do passo é desenhado e gravado
-    ainda dentro do laço, com o campo já em memória; nada da série fica
-    retido.  É isso que permite gerar uma figura para CADA saída NetCDF sem
-    que o consumo de memória cresça com a duração da integração.
-
-    Retorna (stats, agg, lat, lon, attrs, n_marcador_por_passo)
-      stats : {campo: [dict_por_passo, ...]}      (escalares, já escalados)
-      agg   : {campo: agregado global}
-    """
-    plot_idx = set(plot_idx)
-    stats = {f: [] for f in field_names}
-    agg = {f: _novo_agregado() for f in field_names}
-    marcador_passo = []
-    lat = lon = None
-    attrs = {}
-    ausentes = {f: 0 for f in field_names}
-    n = len(files)
-    n_mapas = len(plot_idx)
-    i_mapa = 0
-
-    for k, fpath in enumerate(files):
-        if verbose and (n <= 20 or k % max(1, n // 20) == 0 or k == n - 1):
-            pct = 100.0 * (k + 1) / n
-            print(f"\r  Lendo diagnósticos: {k+1:5d}/{n}  ({pct:5.1f}%)",
-                  end='', flush=True)
-
-        campos_passo = {}
         with Dataset(fpath, 'r') as ds:
             if lat is None:
-                v_lat = ds.variables.get('lat', ds.variables.get('latitude'))
-                v_lon = ds.variables.get('lon', ds.variables.get('longitude'))
-                lat = np.array(v_lat[:], dtype=float) if v_lat is not None else None
-                lon = np.array(v_lon[:], dtype=float) if v_lon is not None else None
-                for a in ds.ncattrs():
-                    attrs[a] = getattr(ds, a)
+                lat = ds.variables.get('lat', ds.variables.get('latitude', None))
+                lon = ds.variables.get('lon', ds.variables.get('longitude', None))
+                lat = np.array(lat[:]) if lat is not None else None
+                lon = np.array(lon[:]) if lon is not None else None
+                # Salvar atributos globais do primeiro arquivo
+                for attr in ds.ncattrs():
+                    attrs_sample[attr] = getattr(ds, attr)
 
-            n_marc_passo = 0
+            timestamps.append(ts)
             for fname in field_names:
-                meta = FIELD_META.get(fname, {})
-                if fname not in ds.variables:
-                    ausentes[fname] += 1
-                    stats[fname].append(None)
-                    campos_passo[fname] = None
-                    continue
+                if fname in ds.variables:
+                    var = ds.variables[fname]
+                    arr = np.array(var[:], dtype=np.float64)
 
-                var = ds.variables[fname]
-                arr = np.array(var[:], dtype=np.float64)
+                    # Máscara 1: _FillValue declarado no atributo
+                    # BUG-PY-05-A: tolerância relativa (1e-3) em vez de absoluta 1.0.
+                    # abs(arr - (-9.99e20)) < 1.0 é sempre False para qualquer valor
+                    # finito, pois a diferença é sempre ~1e20. Tolerância relativa
+                    # funciona para qualquer magnitude de fill value.
+                    fill = getattr(var, '_FillValue', None)
+                    if fill is not None:
+                        arr = np.where(
+                            np.isclose(arr, float(fill), rtol=1e-3, atol=0),
+                            np.nan, arr)
 
-                # _FillValue declarado: comparação relativa (o valor típico
-                # -9.99e20 nunca casaria com tolerância absoluta).
-                fill = getattr(var, '_FillValue', None)
-                if fill is not None:
-                    arr = np.where(np.isclose(arr, float(fill), rtol=1e-3, atol=0),
-                                   np.nan, arr)
+                    # Máscara 2: qualquer fill value grande (≥ 1×10¹⁰) — captura fills nativos do NetCDF
+                    arr = np.where(np.abs(arr) > 1.0e10, np.nan, arr)
 
-                arr, n_marc = aplicar_mascaras(arr, meta, usar_marcador,
-                                               marcador_valor)
-                n_marc_passo += n_marc
+                    # Máscara 3: limiar por valor absoluto grande (ex: correntes OSCAR fill=-999)
+                    thresh = FIELD_META.get(fname, {}).get('fill_threshold', None)
+                    if thresh is not None:
+                        arr = np.where(np.abs(arr) > thresh, np.nan, arr)
+                    # Máscara 4: limiar mínimo — exclui fill=0 em campos positivos
+                    # BUG-PY-05-D: Sa_pslv tem 0 Pa em pontos terra (stub sem pressão).
+                    fill_min = FIELD_META.get(fname, {}).get('fill_min_threshold', None)
+                    if fill_min is not None:
+                        arr = np.where(arr < fill_min, np.nan, arr)
 
-                arr = orientar_lat_lon(arr, lat, lon)
-                st = estatisticas_camada(arr, meta.get('scale', 1.0))
-                stats[fname].append(st)
-                _acumular(agg[fname], st, arr, fname)
-                agg[fname]['n_marcador'] += n_marc
-                campos_passo[fname] = arr
+                    all_data[fname].append(arr)
+                else:
+                    # Preenche com NaN se campo ausente neste passo
+                    all_data[fname].append(None)
 
-            marcador_passo.append(n_marc_passo)
+    # Converter para arrays (nsteps, nlat, nlon)
+    # NetCDF escrito como (lon, lat) em Fortran → dimensão 0 = lon, dimensão 1 = lat
+    # Python lê na mesma ordem → precisa transpor para (lat, lon) se shape[0] = nlon
+    fields = {}
+    for fname in field_names:
+        layers = all_data[fname]
+        valid  = [l for l in layers if l is not None]
+        if not valid:
+            continue
+        shape = valid[0].shape
+        stack = []
+        for l in layers:
+            if l is None:
+                stack.append(np.full(shape, np.nan))
+            else:
+                stack.append(l)
+        arr_3d = np.stack(stack, axis=0)   # (nsteps, dim0, dim1)
+        # Detectar se precisa transpor: lon é o eixo mais rápido no Fortran,
+        # portanto shape[1] = nlat < shape[2] = nlon para grade global (nlat < nlon).
+        # Para grade 1440×720: dim0=1440 (lon), dim1=720 (lat) → transpor.
+        # Para grade 360×181:  dim0=360  (lon), dim1=181 (lat) → transpor.
+        if arr_3d.ndim == 3 and arr_3d.shape[1] > arr_3d.shape[2]:
+            # shape = (nsteps, nlon, nlat) → (nsteps, nlat, nlon)
+            arr_3d = np.transpose(arr_3d, (0, 2, 1))
+        fields[fname] = arr_3d
 
-        if renderer is not None and k in plot_idx:
-            if verbose:
-                print()
-            i_mapa += 1
-            renderer.render(k, timestamps[k], campos_passo, lat, lon,
-                            i_mapa, n_mapas)
-        del campos_passo
-
-    if verbose:
-        print()
-
-    for fname, n_aus in ausentes.items():
-        if 0 < n_aus < n:
-            print(f"  AVISO: campo '{fname}' ausente em {n_aus} de {n} arquivos "
-                  f"— os passos sem o campo aparecem como lacuna, sem "
-                  f"deslocamento da série.")
-
-    return stats, agg, lat, lon, attrs, marcador_passo
-
-
-def orientar_lat_lon(arr, lat, lon):
-    """
-    Garante orientação (nlat, nlon).
-
-    O Fortran declara a variável com [dimid_lon, dimid_lat]; conforme a versão
-    do escritor, a leitura pode chegar como (nlon, nlat).  A decisão usa os
-    tamanhos reais de lat e lon; a heurística nlat<nlon só entra quando as
-    coordenadas não estão disponíveis (BUG-PY-22).
-    """
-    if arr.ndim != 2:
-        return arr
-    if lat is not None and lon is not None:
-        nlat, nlon = len(lat), len(lon)
-        if arr.shape == (nlat, nlon):
-            return arr
-        if arr.shape == (nlon, nlat):
-            return arr.T
-        return arr
-    return arr.T if arr.shape[0] > arr.shape[1] else arr
+    print(f"  {len(timestamps)} passos carregados.")
+    return timestamps, fields, lat, lon, attrs_sample
 
 
 # ─── Estatísticas ─────────────────────────────────────────────────────────────
 
-def print_stats(timestamps, stats, field_names, max_rows=40):
-    """Tabela por campo e passo, em unidades de exibição."""
+def print_stats(timestamps, fields, field_names):
+    """Imprime min/máx/média/desvpad por campo e passo, em unidades de exibição.
+
+    BUG-PY-12-E: agora também mostra a fração de pontos válidos (não-NaN) por
+    passo, útil para detectar passos com pouca cobertura (típico no início do
+    experimento, quando a radiação SW ainda não foi escrita).
+    """
     hdr = "══" * 50
     print(f"\n{hdr}")
     print("  ESTATÍSTICAS — MED exportState → MOM6 importState (fluxos ATM→OCN)")
     print(f"{hdr}\n")
 
-    n = len(timestamps)
-    if max_rows and n > max_rows:
-        metade = max_rows // 2
-        mostrar = list(range(metade)) + list(range(n - metade, n))
-        corte = metade
-    else:
-        mostrar = list(range(n))
-        corte = None
-
     for fname in field_names:
-        serie = stats.get(fname)
-        if not serie or all(s is None for s in serie):
+        if fname not in fields:
             continue
         meta = FIELD_META.get(fname, {'long_name': fname, 'scale_units': '?'})
+        data = fields[fname]                         # (nsteps, nlat, nlon)
         print(f"  ┌─ {fname}  —  {meta['long_name']}  [{meta['scale_units']}]")
         print(f"  │  {'Passo':6s}  {'Data/hora':22s}  {'Mínimo':>12s}  {'Máximo':>12s}"
               f"  {'Média':>12s}  {'DesvPad':>10s}  {'Cobert.':>8s}")
         print(f"  │  {'─'*94}")
-
-        for pos, k in enumerate(mostrar):
-            if corte is not None and pos == corte:
-                print(f"  │  {'...':6s}  ({n - max_rows} passo(s) omitido(s); "
-                      f"use --max-rows 0 para listar todos)")
-            st = serie[k]
-            ts_txt = timestamps[k].strftime('%Y-%m-%d %H:%M')
-            if st is None:
-                print(f"  │  {k+1:6d}  {ts_txt:22s}  {'(campo ausente)':>50s}")
+        sc = meta.get('scale', 1.0)  # BUG-PY-08-A: aplicar scale antes de exibir
+        for k, (ts, layer) in enumerate(zip(timestamps, data)):
+            mask_ok = ~np.isnan(layer)
+            n_ok    = int(mask_ok.sum())
+            n_total = int(layer.size)
+            cov     = (n_ok / n_total * 100.0) if n_total > 0 else 0.0
+            flat    = layer[mask_ok] * sc
+            if flat.size == 0:
+                print(f"  │  {k+1:6d}  {ts.strftime('%Y-%m-%d %H:%M'):22s}"
+                      f"  {'(sem dados)':>50s}  {cov:>7.1f}%")
                 continue
-            if st['n_valid'] == 0:
-                print(f"  │  {k+1:6d}  {ts_txt:22s}"
-                      f"  {'(sem dados)':>50s}  {st['cov']:>7.1f}%")
-                continue
-            print(f"  │  {k+1:6d}  {ts_txt:22s}"
-                  f"  {st['min']:12.4f}  {st['max']:12.4f}"
-                  f"  {st['mean']:12.4f}  {st['std']:10.4f}  {st['cov']:>7.1f}%")
-
-        # Agregado da série: média e desvio padrão ponderados pelo número de
-        # células válidas de cada passo (equivale a tratar todos os pontos
-        # de todos os passos como uma amostra única, sem materializá-la).
-        n_tot = sum(s['n_valid'] for s in serie if s and s.get('n_valid'))
-        if n_tot > 0:
-            soma = sum(s['sum'] for s in serie if s and s.get('n_valid'))
-            somaq = sum(s['sumsq'] for s in serie if s and s.get('n_valid'))
-            media = soma / n_tot
-            var = max(somaq / n_tot - media * media, 0.0)
-            gmin = min(s['min'] for s in serie if s and s.get('n_valid'))
-            gmax = max(s['max'] for s in serie if s and s.get('n_valid'))
+            print(f"  │  {k+1:6d}  {ts.strftime('%Y-%m-%d %H:%M'):22s}"
+                  f"  {flat.min():12.4f}  {flat.max():12.4f}"
+                  f"  {flat.mean():12.4f}  {flat.std():10.4f}  {cov:>7.1f}%")
+        all_flat = data[~np.isnan(data)] * sc
+        if all_flat.size > 0:
             print(f"  │  {'─'*94}")
             print(f"  │  {'SÉRIE':6s}  {'(todos os passos)':22s}"
-                  f"  {gmin:12.4f}  {gmax:12.4f}"
-                  f"  {media:12.4f}  {np.sqrt(var):10.4f}")
+                  f"  {all_flat.min():12.4f}  {all_flat.max():12.4f}"
+                  f"  {all_flat.mean():12.4f}  {all_flat.std():10.4f}")
         print(f"  └{'─'*96}\n")
 
 
 # ─── Verificação de limites físicos ───────────────────────────────────────────
 
-def check_physics(agg, field_names, usar_marcador=True):
+def check_physics(timestamps, fields, field_names):
     print("\n  ┌─ VERIFICAÇÃO FÍSICA ─────────────────────────────────────────────────")
-    ok_count = warn_count = 0
+    ok_count = 0
+    warn_count = 0
 
     for fname in field_names:
         meta = FIELD_META.get(fname, {})
-        a = agg.get(fname)
-        if a is None or a['n'] == 0:
-            if meta.get('optional', False):
-                print(f"  │  ℹ {fname}: campo opcional não presente")
+        optional = meta.get('optional', False)
+
+        if fname not in fields:
+            if optional:
+                print(f"  │  ℹ {fname}: campo opcional não presente "
+                      f"(requer use_med_to_mpas=true)")
             continue
 
-        vmin = meta.get('vmin_phys')
-        vmax = meta.get('vmax_phys')
+        vmin   = meta.get('vmin_phys')
+        vmax   = meta.get('vmax_phys')
+        scale  = meta.get('scale', 1.0)
         sunits = meta.get('scale_units', meta.get('units', ''))
-        fmin_s, fmax_s = a['min'], a['max']
-
+        data   = fields[fname]
+        flat   = data[~np.isnan(data)]
+        if flat.size == 0:
+            continue
+        # BUG-PY-05-B: comparar em unidades de exibição (após 'scale').
+        # vmin_phys/vmax_phys devem estar nas mesmas unidades de scale_units.
+        fmin_s = flat.min() * scale
+        fmax_s = flat.max() * scale
         if vmin is not None and fmin_s < vmin:
-            print(f"  │  ⚠ {fname}: min={fmin_s:.4f} < {vmin}  [{sunits}] — "
-                  f"{meta.get('check_msg','')}")
+            print(f"  │  ⚠ {fname}: min={fmin_s:.4f} < {vmin}  [{sunits}] — {meta.get('check_msg','')}")
             warn_count += 1
         elif vmax is not None and fmax_s > vmax:
-            print(f"  │  ⚠ {fname}: max={fmax_s:.4f} > {vmax}  [{sunits}] — "
-                  f"{meta.get('check_msg','')}")
+            print(f"  │  ⚠ {fname}: max={fmax_s:.4f} > {vmax}  [{sunits}] — {meta.get('check_msg','')}")
             warn_count += 1
         else:
-            print(f"  │  ✓ {fname}: [{fmin_s:.4f}, {fmax_s:.4f}] [{sunits}] "
-                  f"dentro de [{vmin}, {vmax}]")
+            print(f"  │  ✓ {fname}: [{fmin_s:.4f}, {fmax_s:.4f}] [{sunits}] dentro de [{vmin}, {vmax}]")
             ok_count += 1
 
-    # SST em °C: relatada apenas quando a verificação em K passou, para não
-    # emitir dois avisos sobre o mesmo problema.
-    a_sst = agg.get('So_t')
-    if a_sst and a_sst['n'] > 0:
-        meta_st = FIELD_META['So_t']
-        ok_k = (a_sst['min'] >= meta_st['vmin_phys']
-                and a_sst['max'] <= meta_st['vmax_phys'])
-        if ok_k:
-            c_min = a_sst['min'] - SST_CELSIUS_OFFSET
-            c_max = a_sst['max'] - SST_CELSIUS_OFFSET
-            c_med = a_sst['sum'] / a_sst['n'] - SST_CELSIUS_OFFSET
-            if c_min >= -2.5 and c_max <= 42.0:
-                print(f"  │  ✓ So_t em °C: [{c_min:.2f}, {c_max:.2f}] "
-                      f"(média {c_med:.2f}) — conversão consistente")
+    # Verificação especial: SST − 273.15 deve ser SST em °C ([-2.5, 42])
+    # BUG-PY-12-B: só relata aqui se a verificação principal em K passou OK.
+    # Caso contrário, geraríamos DOIS avisos sobre o mesmo problema:
+    #   ⚠ So_t: min=200.0 < 271.0 [K]            (verificação em K)
+    #   ⚠ So_t − 273.15 = [-73.15, 31.19] °C ...  (mesmo problema em °C)
+    # Mantém-se apenas a confirmação positiva em °C quando tudo está bem.
+    if 'So_t' in fields:
+        meta_st = FIELD_META.get('So_t', {})
+        sst_k   = fields['So_t']
+        flat_k  = sst_k[~np.isnan(sst_k)]
+        sst_ok_in_K = (flat_k.size > 0
+                       and flat_k.min() >= meta_st.get('vmin_phys', 271.0)
+                       and flat_k.max() <= meta_st.get('vmax_phys', 310.0))
+        sst_c  = sst_k - SST_CELSIUS_OFFSET
+        flat_c = sst_c[~np.isnan(sst_c)]
+        if flat_c.size > 0 and sst_ok_in_K:
+            if flat_c.min() >= -2.5 and flat_c.max() <= 42.0:
+                print(f"  │  ✓ So_t em °C (={flat_c.mean():.2f}±{flat_c.std():.2f}) — "
+                      f"conversão °C→K consistente (offset≈273.15)")
                 ok_count += 1
-        if usar_marcador and a_sst['n_marcador'] > 0:
-            print(f"  │  ℹ So_t: {a_sst['n_marcador']} célula(s) removida(s) como "
-                  f"marcador de terra ({FIELD_META['So_t']['land_marker']} K).")
-            print(f"  │     Use --no-land-marker para ver o campo sem remoção; "
-                  f"a correção definitiva é gravar _FillValue no MED.")
 
-    a_ice = agg.get('Si_ifrac')
-    if a_ice and a_ice['n'] > 0:
-        if a_ice['n_gt1'] == 0 and a_ice['n_lt0'] == 0:
-            print("  │  ✓ Si_ifrac: clamping [0,1] verificado — sem valores fora do intervalo")
+    # Verificação do gelo: não deve haver valores > 1 (clamping deve ter atuado)
+    if 'Si_ifrac' in fields:
+        ice = fields['Si_ifrac']
+        flat_ice = ice[~np.isnan(ice)]
+        n_over = np.sum(ice > 1.001)
+        n_neg  = np.sum(ice < -0.001)
+        if n_over == 0 and n_neg == 0:
+            print(f"  │  ✓ Si_ifrac: clamping [0,1] verificado — sem valores fora do intervalo")
             ok_count += 1
         else:
-            print(f"  │  ⚠ Si_ifrac: {a_ice['n_gt1']} valores > 1 e "
-                  f"{a_ice['n_lt0']} < 0 — clamping incompleto")
+            print(f"  │  ⚠ Si_ifrac: {n_over} valores > 1 e {n_neg} < 0 — clamping incompleto")
             warn_count += 1
-        ice_max = a_ice['max_raw']
-        ice_mean = a_ice['sum_raw'] / max(a_ice['n_raw'], 1)
-        if ice_max < 0.05:
-            print(f"  │  ⚠ Si_ifrac: max={ice_max:.4f} < 0.05 — DUPLA divisão por 100.")
-            print("  │     Definir datocn_ice_pct=.false. em nuopc.input")
-            warn_count += 1
-        elif ice_max > 1.05:
-            print(f"  │  ⚠ Si_ifrac: max={ice_max:.4f} > 1.05 — dados em % sem /100.")
-            print("  │     Definir datocn_ice_pct=.true. em nuopc.input")
-            warn_count += 1
-        else:
-            print(f"  │  ✓ Si_ifrac: max={ice_max:.4f} — escala [0,1] correta "
-                  f"(média global {ice_mean:.4f})")
-            ok_count += 1
+        # Verificação de plausibilidade — baseada em max, não em mean.
+        # OISST armazena oceano livre de gelo como fill value (não 0.0).
+        # Stats são calculadas APENAS sobre células com gelo (max ≈ 0.99).
+        # Usar max para detectar problemas de escala:
+        #   max < 0.05 → dupla divisão por 100 (datocn_ice_pct=.true. errado)
+        #   max > 1.05 → falta de divisão (dados em %, datocn_ice_pct=.false. errado)
+        if flat_ice.size > 0:
+            ice_max  = float(flat_ice.max())
+            ice_mean = float(flat_ice.mean())
+            n_total  = flat_ice.size
+            if ice_max < 0.05:
+                print(f"  │  ⚠ Si_ifrac: max={ice_max:.4f} < 0.05 — DUPLA divisão por 100.")
+                print(f"  │     Definir datocn_ice_pct=.false. em nuopc.input")
+                print(f"  │     (verificar: ncdump -h ice_file.nc | grep 'units|scale_factor')")
+                warn_count += 1
+            elif ice_max > 1.05:
+                print(f"  │  ⚠ Si_ifrac: max={ice_max:.4f} > 1.05 — dados em % sem /100.")
+                print(f"  │     Definir datocn_ice_pct=.true. em nuopc.input")
+                warn_count += 1
+            else:
+                print(f"  │  ✓ Si_ifrac: max={ice_max:.4f} — escala [0,1] correta"
+                      f"  (média sobre células c/ gelo: {ice_mean:.4f})")
+                ok_count += 1
+
+    # Verificação de So_u e So_v: esses campos não fazem parte do exportState
+    # MED→OCN — o MOM6 importState contém fluxos calculados, não correntes OCN.
+    # Bloco preservado para compatibilidade com futuros experimentos DATM+DOCN.
+    for cur_field in ['So_u', 'So_v']:
+        if cur_field in fields:
+            cur_flat = fields[cur_field][~np.isnan(fields[cur_field])]
+            if cur_flat.size > 0 and np.all(cur_flat == 0.0):
+                print(f"  │  ℹ {cur_field}: todos zeros — corrente não configurada"
+                      f"  (datocn_cur_file='' em nuopc.input)")
+                ok_count += 1
+
+    # Verificação de eixos OSCAR: So_u ≡ So_v indica (time,lon,lat) em vez de
+    # (time,lat,lon) — artefato de transposição em arquivos de correntes OSCAR.
+    if 'So_u' in fields and 'So_v' in fields:
+        u_flat = fields['So_u'][~np.isnan(fields['So_u'])]
+        v_flat = fields['So_v'][~np.isnan(fields['So_v'])]
+        if u_flat.size > 100 and v_flat.size > 100:
+            corr_uv = float(np.corrcoef(u_flat[:10000], v_flat[:10000])[0, 1]) \
+                      if len(u_flat) > 10000 else float(np.corrcoef(u_flat, v_flat)[0, 1])
+            if corr_uv > 0.9999:
+                print(f"  │  ⚠ So_u ≡ So_v: correlação={corr_uv:.6f} ≈ 1.0 — EIXOS TROCADOS!")
+                print(f"  │     Arquivo OSCAR: ncpdq -a time,latitude,longitude para corrigir a ordem.")
+                print(f"  │     Corrigir: ncpdq -a time,latitude,longitude oscar.nc oscar_fixado.nc")
+                print(f"  │              cdo remapbil,r1440x720 oscar_fixado.nc INPUT/OISST_cur.nc")
+                warn_count += 1
+            elif not np.all(u_flat == 0.0):
+                print(f"  │  ✓ So_u ≠ So_v: correlação={corr_uv:.4f} — eixos corretos")
+                ok_count += 1
 
     print(f"  └─ {ok_count} OK, {warn_count} avisos\n")
     return warn_count == 0
 
 
+# ─── Comparação com arquivo fonte ─────────────────────────────────────────────
+
+def compute_expected_interp(timestamps, sst_file, varname, epoch_date,
+                             dt_data_s, ice_file=None, ice_varname=None):
+    """
+    Recalcula independentemente a interpolação temporal do arquivo SST de referência.
+    Útil para validar So_t em configurações DOCN (stub/netcdf) — não aplicável
+    ao exportState MED→OCN (Foxx_* etc.) que são calculados pelo mediador.
+    Retorna: sst_expected(nsteps, nlat_src, nlon_src), ice_expected ou None
+    """
+    with Dataset(sst_file, 'r') as ds:
+        var = ds.variables[varname]
+        nt  = var.shape[0]
+        src_data = var[:]    # (nt, ny, nx) — OISST armazena (time, lat, lon)
+        if hasattr(src_data, 'mask'):
+            src_data = src_data.filled(np.nan)
+        src_data = np.array(src_data, dtype=np.float64)
+
+    sst_exp = np.full((len(timestamps),) + src_data.shape[1:], np.nan)
+
+    for k, ts in enumerate(timestamps):
+        dt_since = (ts.date() - epoch_date).total_seconds()
+        tidx0 = int(dt_since / dt_data_s) % nt
+        tidx1 = (tidx0 + 1) % nt
+        alpha = (dt_since % dt_data_s) / dt_data_s
+        alpha = max(0.0, min(1.0, alpha))
+        sst_exp[k] = (1.0 - alpha) * src_data[tidx0] + alpha * src_data[tidx1]
+        sst_exp[k] += SST_CELSIUS_OFFSET   # conversão °C→K
+
+    ice_exp = None
+    if ice_file and ice_varname:
+        with Dataset(ice_file, 'r') as ds:
+            var = ds.variables[ice_varname]
+            nt_i = var.shape[0]
+            ice_data = np.array(var[:], dtype=np.float64)
+        ice_exp = np.full((len(timestamps),) + ice_data.shape[1:], np.nan)
+        for k, ts in enumerate(timestamps):
+            dt_since = (ts.date() - epoch_date).total_seconds()
+            tidx0 = int(dt_since / dt_data_s) % nt_i
+            tidx1 = (tidx0 + 1) % nt_i
+            alpha = (dt_since % dt_data_s) / dt_data_s
+            alpha = max(0.0, min(1.0, alpha))
+            ice_exp[k] = np.clip(
+                (1.0 - alpha) * ice_data[tidx0] + alpha * ice_data[tidx1], 0.0, 1.0)
+
+    return sst_exp, ice_exp
+
+
+def compare_with_reference(timestamps, fields, sst_file, varname,
+                            epoch_date, dt_data_s,
+                            ice_file=None, ice_varname=None):
+    """Compara So_t / Si_ifrac (modo DOCN) contra interpolação calculada.
+    Não aplicável ao exportState MED→OCN (sem campo So_t). Preservado para
+    compatibilidade com experimentos DOCN stub/netcdf."""
+    print("\n  ┌─ COMPARAÇÃO COM ARQUIVO FONTE (interpolação independente) ────────────")
+    print(f"  │  SST fonte : {sst_file}  [{varname}]")
+    if ice_file:
+        print(f"  │  Gelo fonte: {ice_file}  [{ice_varname}]")
+    print(f"  │  Epoch     : {epoch_date}  |  dt_data : {dt_data_s} s")
+
+    sst_exp, ice_exp = compute_expected_interp(
+        timestamps, sst_file, varname, epoch_date, dt_data_s,
+        ice_file, ice_varname)
+
+    if 'So_t' in fields and sst_exp is not None:
+        sst_obs = fields['So_t']
+        # O arquivo diagnóstico está em 360×181 (1°) enquanto o OISST pode ser
+        # 1440×720 — fazemos o comparativo no espaço de saída (1°)
+        # sst_exp vem na grade original do OISST; fazer binning 1°
+        # Por simplicidade: calcular Δ nos bins 1° apenas
+        # Se grades forem iguais:
+        if sst_obs.shape[1:] == sst_exp.shape[1:]:
+            delta = sst_obs - sst_exp
+        else:
+            # Binning do sst_exp para 1° se necessário (simplificado: reshape)
+            print(f"  │  NOTA: grade fonte {sst_exp.shape[1:]} ≠ grade diag {sst_obs.shape[1:]}"
+                  f" — comparação por estatísticas globais")
+            delta = None
+
+        print(f"  │")
+        print(f"  │  {'Passo':6s}  {'Data/hora':22s}  {'RMSE_SST':>10s}  "
+              f"{'Bias_SST':>10s}  {'MaxΔ':>10s}")
+        print(f"  │  {'─'*70}")
+        total_rmse = []
+        for k, ts in enumerate(timestamps):
+            if delta is not None:
+                d = delta[k][~np.isnan(delta[k])]
+                rmse = np.sqrt(np.mean(d**2)) if d.size > 0 else np.nan
+                bias = np.mean(d) if d.size > 0 else np.nan
+                maxd = np.max(np.abs(d)) if d.size > 0 else np.nan
+                total_rmse.append(rmse)
+                flag = '⚠' if rmse > 0.1 else '✓'
+                print(f"  │  {k+1:6d}  {ts.strftime('%Y-%m-%d %H:%M'):22s}"
+                      f"  {rmse:10.4f}  {bias:+10.4f}  {maxd:10.4f}  {flag}")
+            else:
+                # Grade diferente: comparar estatísticas globais
+                e_mean = np.nanmean(sst_exp[k])
+                o_mean = np.nanmean(sst_obs[k]) if k < len(timestamps) else np.nan
+                print(f"  │  {k+1:6d}  {ts.strftime('%Y-%m-%d %H:%M'):22s}"
+                      f"  fonte μ={e_mean:.2f} K  diag μ={o_mean:.2f} K  "
+                      f"Δμ={o_mean-e_mean:+.4f} K")
+        if total_rmse:
+            mean_rmse = np.nanmean(total_rmse)
+            status = '✓ EXCELENTE' if mean_rmse < 0.001 else \
+                     '✓ BOM'      if mean_rmse < 0.05  else \
+                     '⚠ VERIFICAR'
+            print(f"  │  {'─'*70}")
+            print(f"  │  RMSE médio (SST): {mean_rmse:.6f} K — {status}")
+            print(f"  │  Nota: RMSE > 0 esperado pelo não-determinismo FP das reduções MPI")
+
+    if 'Si_ifrac' in fields and ice_exp is not None:
+        ice_obs = fields['Si_ifrac']
+        if ice_obs.shape[1:] == ice_exp.shape[1:]:
+            delta_ice = ice_obs - ice_exp
+            rmse_ice = np.sqrt(np.nanmean(delta_ice**2))
+            bias_ice = np.nanmean(delta_ice)
+            print(f"  │")
+            print(f"  │  Si_ifrac: RMSE={rmse_ice:.6f}  Bias={bias_ice:+.6f}  "
+                  f"{'✓' if rmse_ice < 0.001 else '⚠'}")
+
+    print(f"  └{'─'*72}\n")
+
+
 # ─── Exportação CSV ───────────────────────────────────────────────────────────
 
-def export_csv(timestamps, stats, field_names, outdir):
+def export_csv(timestamps, fields, field_names, outdir):
     os.makedirs(outdir, exist_ok=True)
+
+    # CSV consolidado de estatísticas
     consolidated = os.path.join(outdir, 'mom6_import_stats.csv')
+    rows = []
+    for k, ts in enumerate(timestamps):
+        row = {'timestamp': ts.strftime('%Y-%m-%dT%H:%M:%S')}
+        for fname in field_names:
+            if fname not in fields:
+                continue
+            sc    = FIELD_META.get(fname, {}).get('scale', 1.0)  # BUG-PY-08-E
+            layer = fields[fname][k]
+            flat  = layer[~np.isnan(layer)] * sc
+            row[f'{fname}_min']  = f'{flat.min():.6f}' if flat.size > 0 else 'NaN'
+            row[f'{fname}_p05']  = f'{np.percentile(flat, 5):.6f}' if flat.size > 0 else 'NaN'
+            row[f'{fname}_p95']  = f'{np.percentile(flat, 95):.6f}' if flat.size > 0 else 'NaN'
+            row[f'{fname}_max']  = f'{flat.max():.6f}' if flat.size > 0 else 'NaN'
+            row[f'{fname}_mean'] = f'{flat.mean():.6f}' if flat.size > 0 else 'NaN'
+            row[f'{fname}_std']  = f'{flat.std():.6f}' if flat.size > 0 else 'NaN'
+        rows.append(row)
 
-    campos = [f for f in field_names
-              if stats.get(f) and any(s is not None for s in stats[f])]
-    colunas = ['timestamp']
-    for f in campos:
-        colunas += [f'{f}_min', f'{f}_p05', f'{f}_p95', f'{f}_max',
-                    f'{f}_mean', f'{f}_std', f'{f}_cov']
-
-    with open(consolidated, 'w', newline='', encoding='utf-8') as fh:
-        writer = csv.DictWriter(fh, fieldnames=colunas)
-        writer.writeheader()
-        for k, ts in enumerate(timestamps):
-            row = {'timestamp': ts.strftime('%Y-%m-%dT%H:%M:%S')}
-            for f in campos:
-                st = stats[f][k]
-                if st is None or st.get('n_valid', 0) == 0:
-                    for suf in ('min', 'p05', 'p95', 'max', 'mean', 'std'):
-                        row[f'{f}_{suf}'] = 'NaN'
-                    row[f'{f}_cov'] = f"{(st or {}).get('cov', 0.0):.2f}"
-                    continue
-                row[f'{f}_min'] = f"{st['min']:.6f}"
-                row[f'{f}_p05'] = f"{st['p05']:.6f}"
-                row[f'{f}_p95'] = f"{st['p95']:.6f}"
-                row[f'{f}_max'] = f"{st['max']:.6f}"
-                row[f'{f}_mean'] = f"{st['mean']:.6f}"
-                row[f'{f}_std'] = f"{st['std']:.6f}"
-                row[f'{f}_cov'] = f"{st['cov']:.2f}"
-            writer.writerow(row)
-    print(f"  CSV consolidado : {consolidated}")
+    if rows:
+        with open(consolidated, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"  CSV consolidado : {consolidated}")
 
 
-# ─── Apoio à plotagem ─────────────────────────────────────────────────────────
+# ─── Plotagem ─────────────────────────────────────────────────────────────────
 
-def preparar_longitude(lon):
-    """
-    Converte a grade 0→360 em -180→180 e devolve (lon_ordenado, permutação).
-
-    Sem essa conversão os contornos de costa do Natural Earth ficam deslocados
-    em relação ao preenchimento.
-    """
-    lon_plot = np.asarray(lon, dtype=float)
-    if lon_plot.size == 0:
-        return lon_plot, np.arange(0)
-    if lon_plot[0] >= 0 and lon_plot[-1] > 180:
-        lon_plot = np.where(lon_plot >= 180, lon_plot - 360, lon_plot)
-        idx = np.argsort(lon_plot)
-        return lon_plot[idx], idx
-    return lon_plot, np.arange(lon_plot.size)
-
-
-def testar_feicoes_cartopy(cfeature):
-    """
-    Verifica UMA vez se as feições do Natural Earth estão disponíveis.
-
-    Em nó de execução sem saída para a internet e sem cache local, o download
-    ocorre no momento do desenho e derruba a gravação da figura.  Testar antes
-    permite gerar as figuras sem contorno de costa, com aviso.
-    """
+def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
+              coupling_mode=None):
     try:
-        next(iter(cfeature.LAND.geometries()))
-        return True
-    except Exception as exc:                                  # noqa: BLE001
-        print(f"  AVISO: feições geográficas do cartopy indisponíveis ({exc.__class__.__name__}).")
-        print("         Mapas gerados sem contorno de costa. Para habilitar, "
-              "faça o cache do Natural Earth em nó com rede:")
-        print("         python3 -c \"import cartopy.feature as cf; "
-              "list(cf.LAND.geometries())\"")
-        return False
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import Normalize
+    except ImportError:
+        print("  matplotlib não disponível — mapas ignorados.")
+        return
 
+    try:
+        import cartopy.crs as ccrs
+        import cartopy.feature as cfeature
+        USE_CARTOPY = True
+    except ImportError:
+        USE_CARTOPY = False
 
-def _cmap_com_nodata(plt, nome):
-    """Paleta com cor explícita para célula sem dado (BUG-PY-20)."""
-    cmap = plt.get_cmap(nome).copy()
-    cmap.set_bad(NODATA_COLOR)
-    return cmap
+    os.makedirs(outdir, exist_ok=True)
 
+    if lon is None or lat is None:
+        print("  AVISO: coordenadas ausentes — mapas ignorados.")
+        return
 
-# ─── Mapas ────────────────────────────────────────────────────────────────────
+    # Converter grade 0→360 para -180→180 para alinhamento com Cartopy/Natural Earth.
+    # O arquivo NetCDF tem lon nativo OISST (0°→359.75°). Sem essa conversão,
+    # os contornos de costa ficam deslocados ~180° em relação ao preenchimento.
+    lon_plot = np.array(lon, dtype=float)
+    roll_n = 0
+    if lon_plot[0] >= 0 and lon_plot[-1] > 180:
+        # encontrar o índice onde lon cruza 180° → ali o roll começa
+        roll_n = int(np.searchsorted(lon_plot, 180))
+        lon_plot = np.where(lon_plot >= 180, lon_plot - 360, lon_plot)
+        # reordenar: [180→360 → -180→0] ++ [0→180]
+        idx_sorted = np.argsort(lon_plot)
+        lon_plot   = lon_plot[idx_sorted]
+    else:
+        idx_sorted = np.arange(len(lon_plot))
 
-class RenderizadorMapas:
-    """
-    Desenha e grava o mapa multi-painel de UM passo por vez.
+    LON2D, LAT2D = np.meshgrid(lon_plot, lat)
 
-    O objeto guarda apenas o que é constante entre os passos (coordenadas,
-    disponibilidade do cartopy, paletas).  O campo do passo é recebido, usado
-    e descartado, de modo que gerar uma figura para cada saída NetCDF não faz
-    o consumo de memória crescer com o número de passos.
-    """
+    for k in step_indices:
+        if k >= len(timestamps):
+            continue
+        ts = timestamps[k]
+        ts_str = ts.strftime('%Y%m%d_%H%M%S')
 
-    def __init__(self, field_names, outdir, coupling_mode=None, dpi=130):
-        self.field_names = field_names
-        self.outdir = outdir
-        self.coupling_mode = coupling_mode
-        self.dpi = dpi
-        self.disponivel = False
-        self.n_geradas = 0
-        self._preparado = False
-        self.plt = None
-        self.ccrs = None
-        self.cfeature = None
-        self.usa_cartopy = False
-        self.tem_feicoes = False
-
-        try:
-            import matplotlib
-            matplotlib.use('Agg')
-            import matplotlib.pyplot as plt
-        except ImportError:
-            print("  matplotlib não disponível — mapas ignorados.")
-            return
-        self.plt = plt
-        self.disponivel = True
-
-        try:
-            import cartopy.crs as ccrs
-            import cartopy.feature as cfeature
-            self.ccrs, self.cfeature = ccrs, cfeature
-            self.usa_cartopy = True
-        except ImportError:
-            print("  AVISO: cartopy não disponível — mapas sem contornos de costa")
-
-    # ── Preparação única, quando as coordenadas ficam conhecidas ─────────────
-    def _preparar(self, lat, lon):
-        os.makedirs(self.outdir, exist_ok=True)
-        self.lon_plot, self.idx_sorted = preparar_longitude(lon)
-        self.LON2D, self.LAT2D = np.meshgrid(self.lon_plot,
-                                             np.asarray(lat, dtype=float))
-        self.tem_feicoes = (testar_feicoes_cartopy(self.cfeature)
-                            if self.usa_cartopy else False)
-        self._cache_cmap = {}
-        self._preparado = True
-
-    def _cmap(self, nome):
-        if nome not in self._cache_cmap:
-            self._cache_cmap[nome] = _cmap_com_nodata(self.plt, nome)
-        return self._cache_cmap[nome]
-
-    def _moldura(self, ax):
-        if not self.usa_cartopy:
-            return
-        if self.tem_feicoes:
-            # Terra acima do dado: campo oceânico não deixa buraco branco no
-            # continente e campo atmosférico não exibe valor sobre terra.
-            ax.add_feature(self.cfeature.LAND, facecolor='lightgray', zorder=5)
-            ax.add_feature(self.cfeature.COASTLINE, linewidth=0.5,
-                           edgecolor='black', zorder=6)
-            ax.add_feature(self.cfeature.BORDERS, linewidth=0.3, linestyle=':',
-                           edgecolor='gray', zorder=6)
-        ax.set_extent([-180, 180, -90, 90], self.ccrs.PlateCarree())
-
-    # ── Um passo ─────────────────────────────────────────────────────────────
-    def render(self, k, ts, campos, lat, lon, i_mapa=0, n_mapas=0):
-        if not self.disponivel:
-            return
-        if lon is None or lat is None:
-            if not self._preparado:
-                print("  AVISO: coordenadas ausentes — mapas ignorados.")
-                self.disponivel = False
-            return
-        if not self._preparado:
-            self._preparar(lat, lon)
-
-        plt = self.plt
-        presentes = [f for f in self.field_names if f in campos]
-        if not presentes:
-            return
+        n_fields = sum(1 for f in field_names if f in fields)
+        if n_fields == 0:
+            continue
         ncols = 2
-        nrows = (len(presentes) + 1) // 2
+        nrows = (n_fields + 1) // 2
 
-        kw = {'projection': self.ccrs.PlateCarree()} if self.usa_cartopy else {}
-        fig, axes = plt.subplots(nrows, ncols, figsize=(14, 4 * nrows),
-                                 subplot_kw=kw if self.usa_cartopy else None,
-                                 constrained_layout=True)
+        if USE_CARTOPY:
+            fig, axes = plt.subplots(nrows, ncols,
+                                      figsize=(14, 4 * nrows),
+                                      subplot_kw={'projection': ccrs.PlateCarree()},
+                                      constrained_layout=True)
+        else:
+            fig, axes = plt.subplots(nrows, ncols,
+                                      figsize=(14, 4 * nrows),
+                                      constrained_layout=True)
+
         axes = np.array(axes).flatten()
+        ax_i = 0
 
-        for ax_i, fname in enumerate(presentes):
-            meta = FIELD_META.get(fname, {'long_name': fname, 'scale_units': '?',
-                                          'cmap': 'viridis', 'vperc': [2, 98],
-                                          'symmetric': False})
-            ax = axes[ax_i]
-            ax.set_facecolor(NODATA_COLOR)   # ausência de dado nunca é branca
-            layer = campos.get(fname)
-
-            if layer is not None and layer.ndim == 2 \
-                    and layer.shape[1] == self.idx_sorted.size:
-                layer = layer[:, self.idx_sorted]
-
-            sc_plot = meta.get('scale', 1.0)
-            layer_plt = None if layer is None else np.asarray(layer, dtype=float) * sc_plot
-            flat = (np.array([]) if layer_plt is None
-                    else layer_plt[np.isfinite(layer_plt)])
+        for fname in field_names:
+            if fname not in fields:
+                continue
+            meta  = FIELD_META.get(fname, {'long_name': fname, 'scale_units': '?',
+                                           'cmap': 'viridis', 'vperc': [2, 98],
+                                           'symmetric': False})
+            layer = fields[fname][k]
+            # Reordenar colunas (lon) para -180→180 — mesmo índice do lon_plot
+            if layer.ndim == 2 and layer.shape[1] == len(idx_sorted):
+                layer = layer[:, idx_sorted]
+            sc_f  = FIELD_META.get(fname, {}).get('scale', 1.0)
+            flat  = layer[~np.isnan(layer)] * sc_f  # BUG-PY-07
+            ax    = axes[ax_i]
 
             if flat.size == 0:
+                # BUG-PY-14 (C): painel informativo em vez de espaço em branco.
+                # Quando So_t (ou qualquer campo) é 100% NaN num passo
+                # (ex.: passo 1 antes do primeiro avanço do MOM6), exibe
+                # mensagem diagnóstica clara em vez de subplot vazio.
+                ax.set_facecolor('#e8e8e8')
                 ax.text(0.5, 0.5,
-                        "Campo indisponível neste passo\n"
-                        "(aguardando primeiro avanço MOM6)",
+                        f"Campo indisponível neste passo\n"
+                        f"(aguardando primeiro avanço MOM6)",
                         ha='center', va='center', transform=ax.transAxes,
                         fontsize=9, color='#555555',
                         bbox=dict(boxstyle='round,pad=0.4', fc='white',
@@ -1022,41 +901,110 @@ class RenderizadorMapas:
                 ax.set_title(f"{fname} — {meta['long_name']}\n"
                              f"{ts.strftime('%Y-%m-%d %H:%M')}  (passo {k+1})",
                              fontsize=9)
-                self._moldura(ax)
+                if USE_CARTOPY:
+                    ax.add_feature(cfeature.LAND,      facecolor='lightgray', zorder=5)
+                    ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
+                                                       edgecolor='black', zorder=6)
+                    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+                ax_i += 1
                 continue
 
-            phys_min = meta.get('vmin_phys')
-            phys_max = meta.get('vmax_phys')
+            # BUG-PY-07: scale aplicado → unidades corretas na colorbar
+            sc_plot   = meta.get('scale', 1.0)
+            layer_plt = layer * sc_plot
+            phys_min  = meta.get('vmin_phys')
+            phys_max  = meta.get('vmax_phys')
 
-            # Percentis: em campo simétrico o zero exato costuma ser
-            # preenchimento residual e distorce o percentil; em campo não
-            # simétrico o zero é física legítima.
+            # BUG-PY-14 (D) FIX v2: mascaramento + interpolação do seam.
+            # A grade MED é regular 360x180 em (0–360°, -90–90°) e não tem seam
+            # tripolar próprio. Porém o campo So_t (e fluxos calculados em
+            # função de SST) carregam o seam da grade nativa MOM6 (tripolar),
+            # propagado pelo regrid OCN→ATM. Após o roll para -180→180°, esse
+            # seam aparece como linha branca vertical próximo a 180°.
+            #
+            # Estratégia: detectar a coluna onde mais de 80% das linhas têm
+            # NaN ou valores idênticos à coluna anterior — substituir por
+            # interpolação linear das duas colunas vizinhas (apenas na cópia
+            # de plot; dados originais permanecem intactos).
+            if meta.get('mask_tripole_seam', True) and lon is not None:
+                lon_arr = np.array(lon_plot)   # já reordenado para -180→180
+                dlon = np.abs(np.diff(lon_arr))
+                seam_cols = np.where(dlon > 90)[0]
+                # Caso 1: salto de longitude > 90° (seam de roll)
+                if seam_cols.size > 0:
+                    layer_plt = layer_plt.copy()
+                    for col in seam_cols:
+                        layer_plt[:, col]   = np.nan
+                        layer_plt[:, col+1] = np.nan
+                else:
+                    # Caso 2: detectar coluna anômala próximo a lon=180° por
+                    # alta fração de NaN ou valores idênticos à vizinha.
+                    # Janela de busca: ±2 colunas do índice central.
+                    n_cols = layer_plt.shape[1]
+                    center = n_cols // 2
+                    for col in range(max(1, center - 3), min(n_cols - 1, center + 3)):
+                        col_data = layer_plt[:, col]
+                        # fração de NaN ou de valores que coincidem com a coluna
+                        # vizinha à esquerda (indicador de coluna degenerada)
+                        nan_frac = np.mean(~np.isfinite(col_data))
+                        if nan_frac > 0.5:
+                            # Substituir por interpolação linear vizinhos válidos
+                            layer_plt = layer_plt.copy()
+                            left  = layer_plt[:, col - 1]
+                            right = layer_plt[:, col + 1] if (col + 1) < n_cols \
+                                                          else layer_plt[:, 0]
+                            interp = 0.5 * (left + right)
+                            mask_nan_int = ~np.isfinite(interp)
+                            interp[mask_nan_int] = np.nanmean(layer_plt)
+                            layer_plt[:, col] = interp
+                            break
+
+            # BUG-PY-10-A: máscara para percentil — zeros em campos simétricos
+            # provavelmente são fill; em campos não-simétricos são física legítima.
             if meta.get('symmetric', False):
-                arr_perc = np.where(layer_plt == 0.0, np.nan, layer_plt)
+                arr_for_perc = np.where(layer_plt == 0.0, np.nan, layer_plt)
             else:
-                arr_perc = layer_plt
+                arr_for_perc = layer_plt
 
+            # BUG-PY-14 (A): escala adaptativa para campos binários (0 ou 1).
+            # Si_ifrac tem p95=0 e max=1: células de gelo são ~0.05% da área.
+            # Com vmax=1, o sinal polar é invisível na paleta global.
+            # Estratégia: se max > 0.9 e p95 ≈ 0 → campo quase-binário;
+            #   vmax_efetivo = max(mean_não_zero * 30, 0.005, vperc98 * 2)
+            # Isso estica a colorbar para tornar o gelo visível mantendo
+            # a interpretação física da escala [0–1].
+            is_binary = meta.get('binary_field', False)
             ice_area_info = ''
-            if meta.get('binary_field', False) and flat.max() > 0.9:
+            if is_binary and flat.max() > 0.9:
+                # Detecta se o campo é predominantemente zero com pico em 1
                 perc95 = float(np.nanpercentile(flat, 95))
                 mean_f = float(np.nanmean(flat))
                 if perc95 < 0.01 and mean_f > 0:
+                    # Escala adaptativa: estica suficientemente para ver o gelo
                     perc98 = float(np.nanpercentile(flat, 98))
+                    vmax_ada = max(mean_f * 30, 0.005, perc98 * 2.0, 0.002)
+                    vmax_ada = min(vmax_ada, 1.0)  # nunca ultrapassa 1
                     vmin = 0.0
-                    vmax = min(max(mean_f * 30, 0.005, perc98 * 2.0), 1.0)
-                    n_ice = int(np.sum(flat >= 0.5))
-                    ice_area_info = (f" | ~{n_ice} cél. "
-                                     f"({100*n_ice/max(flat.size,1):.3f}%)")
+                    vmax = vmax_ada
+                    # Estimar fração de área com gelo (em % do oceano)
+                    n_ice   = int(np.sum(flat >= 0.5))
+                    n_total = flat.size
+                    ice_area_info = (f" | ~{n_ice} cél. ({100*n_ice/max(n_total,1):.3f}%)")
                 else:
+                    # Campo binário mas com gelo suficiente para escala normal
                     vmin, vmax = 0.0, 1.0
             else:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", RuntimeWarning)
-                    vmin = float(np.nanpercentile(arr_perc, meta['vperc'][0]))
-                    vmax = float(np.nanpercentile(arr_perc, meta['vperc'][1]))
-                if not (np.isfinite(vmin) and np.isfinite(vmax)):
+                # Caminho normal: percentis robustos
+                try:
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", RuntimeWarning)
+                        vmin = float(np.nanpercentile(arr_for_perc, meta['vperc'][0]))
+                        vmax = float(np.nanpercentile(arr_for_perc, meta['vperc'][1]))
+                    if not (np.isfinite(vmin) and np.isfinite(vmax)):
+                        raise ValueError
+                except (ValueError, RuntimeWarning):
                     vmin = phys_min if phys_min is not None else -1.0
-                    vmax = phys_max if phys_max is not None else 1.0
+                    vmax = phys_max if phys_max is not None else  1.0
 
                 if meta.get('symmetric', False):
                     v = max(abs(vmin), abs(vmax))
@@ -1066,43 +1014,49 @@ class RenderizadorMapas:
                         v = phys_max if phys_max is not None else 1.0
                     vmin, vmax = -v, v
                 else:
-                    if phys_min is not None:
-                        vmin = max(vmin, phys_min)
-                    if phys_max is not None:
-                        vmax = min(vmax, phys_max)
+                    if phys_min is not None: vmin = max(vmin, phys_min)
+                    if phys_max is not None: vmax = min(vmax, phys_max)
                     if abs(vmax - vmin) < 1e-12:
                         if phys_max is not None and phys_max > vmin:
                             vmax = phys_max
                         else:
-                            vmax = vmin + max(abs(vmin) * 0.01, 1e-6)
+                            vmax = vmin + max(abs(vmin)*0.01, 1e-6)
 
-            campo_ma = np.ma.masked_invalid(layer_plt)
-            pk = dict(cmap=self._cmap(meta['cmap']), vmin=vmin, vmax=vmax,
-                      shading='nearest', zorder=1)
-            if self.usa_cartopy:
-                im = ax.pcolormesh(self.LON2D, self.LAT2D, campo_ma,
-                                   transform=self.ccrs.PlateCarree(), **pk)
+            if USE_CARTOPY:
+                im = ax.pcolormesh(LON2D, LAT2D, layer_plt,
+                                   cmap=meta['cmap'], vmin=vmin, vmax=vmax,
+                                   transform=ccrs.PlateCarree(),
+                                   zorder=1)
+                # BUG-PY-15 (A/C): adicionar LAND com zorder 5 garante que:
+                #   • áreas de terra com NaN (campos oceânicos — Foxx_lwnet,
+                #     onda curta, precipitação) aparecem cinza em vez de
+                #     branco transparente;
+                #   • So_duu10n e outros campos atmosféricos que possuem
+                #     dados sobre terra (vento calculado em toda a grade)
+                #     ficam visualmente mascarados nos continentes, evitando
+                #     a exibição de informação fisicamente sem sentido.
+                # COASTLINE e BORDERS em zorder 6 ficam visíveis acima
+                # da máscara de terra.
+                ax.add_feature(cfeature.LAND,      facecolor='lightgray',
+                                                   zorder=5)
+                ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
+                                                   edgecolor='black', zorder=6)
+                ax.add_feature(cfeature.BORDERS,   linewidth=0.3, linestyle=':',
+                                                   edgecolor='gray',  zorder=6)
+                ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
             else:
-                im = ax.pcolormesh(self.LON2D, self.LAT2D, campo_ma, **pk)
-            self._moldura(ax)
-
-            # extend indica que há valores além dos limites de exibição.
-            abaixo = bool(np.any(flat < vmin))
-            acima = bool(np.any(flat > vmax))
-            extend = ('both' if abaixo and acima else
-                      'min' if abaixo else 'max' if acima else 'neither')
+                im = ax.pcolormesh(LON2D, LAT2D, layer_plt,
+                                   cmap=meta['cmap'], vmin=vmin, vmax=vmax)
             plt.colorbar(im, ax=ax, orientation='vertical',
-                         label=meta['scale_units'], fraction=0.025, pad=0.02,
-                         extend=extend)
-
-            n_falta = int(np.count_nonzero(~np.isfinite(layer_plt)))
-            frac_falta = 100.0 * n_falta / max(layer_plt.size, 1)
+                         label=meta['scale_units'], fraction=0.025, pad=0.02)
+            title_suffix = ice_area_info  # extra info para Si_ifrac
             ax.set_title(f"{fname} — {meta['long_name']}\n"
                          f"{ts.strftime('%Y-%m-%d %H:%M')}  (passo {k+1})"
-                         f"{ice_area_info}  |  sem dado: {frac_falta:.1f}%",
+                         f"{title_suffix}",
                          fontsize=9)
+            ax_i += 1
 
-        for ax in axes[len(presentes):]:
+        for ax in axes[ax_i:]:
             ax.set_visible(False)
 
         fig.suptitle(
@@ -1110,21 +1064,19 @@ class RenderizadorMapas:
             f"Passo {k+1}  |  {ts.strftime('%Y-%m-%d %H:%M')}  |  "
             f"MONAN-A 2.0 / INPE/CGCT/DIMNT",
             fontsize=11)
-        fig.text(0.5, 0.005, consumption_note(self.coupling_mode, k),
+
+        # Sem esta nota, "passo 1" no sequencial e "passo 1" no concorrente
+        # parecem comparaveis e nao sao. Ver consumption_note().
+        fig.text(0.5, 0.005, consumption_note(coupling_mode, k),
                  ha='center', va='bottom', fontsize=8, color='0.35')
 
-        outfile = os.path.join(self.outdir,
-                               f"mom6_import_{ts.strftime('%Y%m%d_%H%M%S')}.png")
-        fig.savefig(outfile, dpi=self.dpi, facecolor='white')
+        outfile = os.path.join(outdir, f'mom6_import_{ts_str}.png')
+        fig.savefig(outfile, dpi=130, bbox_inches='tight', facecolor='white')
         plt.close(fig)
-        self.n_geradas += 1
-        prefixo = f"  [{i_mapa:5d}/{n_mapas}]" if n_mapas else "  "
-        print(f"{prefixo} Figura: {outfile}")
+        print(f"  Figura: {outfile}")
 
 
-# ─── Série temporal ───────────────────────────────────────────────────────────
-
-def plot_timeseries(timestamps, stats, field_names, outdir):
+def plot_timeseries(timestamps, fields, field_names, outdir):
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -1134,51 +1086,57 @@ def plot_timeseries(timestamps, stats, field_names, outdir):
         return
 
     os.makedirs(outdir, exist_ok=True)
-    available = [f for f in field_names
-                 if stats.get(f) and any(s is not None for s in stats[f])]
+    available = [f for f in field_names if f in fields]
     if not available:
         return
 
-    nrows = (len(available) + 1) // 2
-    fig, axes = plt.subplots(nrows, 2, figsize=(14, 3.5 * nrows),
-                             sharex=True, constrained_layout=True)
+    n = len(available)
+    ncols = 2
+    nrows = (n + 1) // 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 3.5 * nrows),
+                              sharex=True, constrained_layout=True)
     axes = np.array(axes).flatten()
 
-    def _serie(fname, chave):
-        return np.array([np.nan if (s is None or s.get('n_valid', 0) == 0)
-                         else s[chave] for s in stats[fname]], dtype=float)
-
     for ax, fname in zip(axes, available):
-        meta = FIELD_META.get(fname, {'long_name': fname, 'scale_units': '?'})
-        means = _serie(fname, 'mean')
-        p02 = _serie(fname, 'p02')
-        p98 = _serie(fname, 'p98')
+        meta  = FIELD_META.get(fname, {'long_name': fname, 'scale': 1.0,
+                                        'scale_units': '?'})
+        sc    = meta.get('scale', 1.0)  # BUG-PY-08-D: scale para unidades de exibição
+        data  = fields[fname] * sc
+        flat  = data.reshape(len(timestamps), -1)
+        # BUG-PY-12-D: passo com todos os NaN é situação esperada (ex.: SW
+        # logo após inicialização, antes do primeiro registro radiativo).
+        # nanmean/nanpercentile sobre slice 100% NaN é INTENCIONAL aqui:
+        # devolve NaN, que o matplotlib trata como gap natural na curva.
+        # Suprimimos os warnings em loop interno para manter a saída limpa.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            means = np.nanmean(flat, axis=1)
+            p2    = np.nanpercentile(flat, 2,  axis=1)
+            p98   = np.nanpercentile(flat, 98, axis=1)
 
-        ax.fill_between(timestamps, p02, p98, alpha=0.18, color='steelblue',
-                        label='P₂–P₉₈')
-        ax.plot(timestamps, means, lw=1.6, color='steelblue', label='média')
+        ax.fill_between(timestamps, p2, p98, alpha=0.18, color='steelblue', label='P₂–P₉₈')
+        ax.plot(timestamps, means, lw=1.8, color='steelblue', label='média')
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m\n%H:%M'))
+        ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
         ax.set_ylabel(meta['scale_units'], fontsize=9)
         ax.set_title(f"{fname}  —  {meta['long_name']}", fontsize=9)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc='upper right')
 
-        # BUG-PY-14 (B): escala symlog para campos quase binários com sinal
-        # pequeno, senão a curva de Si_ifrac fica colada no zero.
+        # BUG-PY-14 (B): escala symlog para campos binários com sinal pequeno.
+        # Si_ifrac tem mean ~0.0005: numa escala linear [0, 1] a série aparece
+        # como linha reta no zero, tornando o crescimento de gelo ilegível.
+        # symlog com linthresh=1e-4 usa escala linear em [-1e-4, 1e-4] e
+        # logarítmica fora desse intervalo — torna a curva legível sem distorcer
+        # a interpretação física da unidade [0–1].
         if meta.get('binary_field', False):
-            finitos = means[np.isfinite(means)]
-            max_mean = float(finitos.max()) if finitos.size else 0.0
-            if 0 < max_mean < 0.1:
+            max_mean = float(np.nanmax(means)) if np.any(np.isfinite(means)) else 0
+            if max_mean < 0.1:
                 linthresh = max(max_mean * 0.05, 1e-6)
                 ax.set_yscale('symlog', linthresh=linthresh)
+                # Adicionar linha de referência no threshold linear
                 ax.axhline(linthresh, color='gray', lw=0.6, ls=':', alpha=0.5)
                 ax.set_ylabel(f"{meta['scale_units']} (symlog)", fontsize=9)
-
-    # BUG-PY-17: localizador automático — o intervalo pode ser de horas a meses.
-    locator = mdates.AutoDateLocator(minticks=4, maxticks=9)
-    formatter = mdates.ConciseDateFormatter(locator)
-    for ax in axes[:len(available)]:
-        ax.xaxis.set_major_locator(locator)
-        ax.xaxis.set_major_formatter(formatter)
 
     for ax in axes[len(available):]:
         ax.set_visible(False)
@@ -1191,19 +1149,21 @@ def plot_timeseries(timestamps, stats, field_names, outdir):
         fontsize=11)
 
     outfile = os.path.join(outdir, 'mom6_import_timeseries.png')
-    fig.savefig(outfile, dpi=130, facecolor='white')
+    fig.savefig(outfile, dpi=130, bbox_inches='tight', facecolor='white')
     plt.close(fig)
     print(f"  Série temporal: {outfile}")
 
 
-# ─── Modo de acoplamento ──────────────────────────────────────────────────────
+# ─── Main ──────────────────────────────────────────────────────────────────────
+
 
 def read_coupling_mode(diagdir):
     """
     Le coupling_mode do &nuopc_petlayout da nuopc.input do experimento.
 
-    Procura a nuopc.input subindo a partir de --diagdir.  Devolve 'sequential',
-    'concurrent' ou None quando nao encontra.
+    Procura a nuopc.input subindo a partir de --diagdir (o diretorio de
+    diagnosticos costuma ser <experimento>/diag_import). Devolve
+    'sequential', 'concurrent' ou None quando nao encontra.
     """
     cand = []
     d = os.path.abspath(diagdir)
@@ -1230,13 +1190,22 @@ def consumption_note(mode, k):
     """
     Rodape que diz em QUE passo o oceano consome os fluxos exibidos.
 
-      sequential : o mediador roda no MEIO do passo, entao os fluxos exibidos
-                   sao os que o MOM6 consome NESTE mesmo passo. No passo 1 o
-                   mediador ainda nao viu nenhum avanco do MPAS: radiacao,
-                   precipitacao e pressao saem nulas.
+    A mesma figura "passo N" significa coisas diferentes nos dois modos, e
+    confundi-las ja' custou uma investigacao inteira:
 
-      concurrent : o mediador roda no FIM do passo, entao os fluxos exibidos
-                   so' chegam ao MOM6 no passo SEGUINTE (lag de 1 dt_coupling).
+      sequential : o mediador roda no MEIO do passo (3o elemento da
+                   RunSequence), entao os fluxos exibidos sao os que o MOM6
+                   consome NESTE mesmo passo. Em compensacao, no passo 1 o
+                   mediador ainda nao viu nenhum avanco do MPAS: radiacao,
+                   precipitacao e pressao saem nulas (spin-up de um passo;
+                   momento e calor sensivel ja' sao validos). A partir do
+                   passo 2 os campos estao completos.
+
+      concurrent : o mediador roda no FIM do passo (ultimo elemento), entao
+                   os fluxos exibidos so' chegam ao MOM6 no passo SEGUINTE
+                   (lag de 1 dt_coupling, por construcao). A forcante que o
+                   oceano recebeu no passo 1 e' o exportState da
+                   inicializacao do mediador, e NAO aparece em figura alguma.
 
     Comparacao correta entre modos: sequencial passo N+1 x concorrente passo N.
     """
@@ -1254,8 +1223,6 @@ def consumption_note(mode, k):
             "estes fluxos depende do modo (ver README, secao 6.2)")
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
-
 def main():
     parser = argparse.ArgumentParser(
         description='Validação dos campos importados pelo MOM6+SIS2 (fluxos ATM→OCN do mediador).',
@@ -1264,61 +1231,21 @@ def main():
 
     parser.add_argument('--diagdir', default='diag_import',
                         help='Diretório com mom6_import_*.nc (padrão: diag_import)')
-    parser.add_argument('--outdir', default='diag_import/postproc',
+    parser.add_argument('--outdir',  default='diag_import/postproc',
                         help='Saída: CSV e figuras (padrão: diag_import/postproc)')
     parser.add_argument('--field', nargs='+', default=FIELDS,
-                        help='Campos a processar (padrão: os catalogados)')
-    parser.add_argument('--all-fields', action='store_true', dest='all_fields',
-                        help='Processa TODAS as variáveis 2-D do arquivo, '
-                             'inclusive as ainda não catalogadas em FIELD_META')
+                        help=f'Campos a processar (padrão: todos os 14 campos MOM6)')
 
-    parser.add_argument('--stats', action='store_true', help='Estatísticas globais')
-    parser.add_argument('--check', action='store_true', help='Verificação de limites físicos')
-    parser.add_argument('--csv', action='store_true', help='Exportar CSV')
-    parser.add_argument('--plot', action='store_true', help='Gerar mapas e série temporal')
-    parser.add_argument('--all', action='store_true', help='Todos os modos [padrão]')
+    # Modos
+    parser.add_argument('--stats',  action='store_true', help='Estatísticas globais')
+    parser.add_argument('--check',  action='store_true', help='Verificação de limites físicos')
+    parser.add_argument('--csv',    action='store_true', help='Exportar CSV')
+    parser.add_argument('--plot',   action='store_true', help='Gerar mapas e série temporal')
+    parser.add_argument('--all',    action='store_true', help='Todos os modos [padrão]')
 
-    parser.add_argument('--step', nargs='+', type=int, default=None,
-                        help='Passos específicos a plotar (base 1). '
-                             'Padrão: todos os passos')
-    parser.add_argument('--all-steps', action='store_true', dest='all_steps',
-                        help='Mantido por compatibilidade: plotar todos os '
-                             'passos já é o padrão')
-
-    # Controle de volume em integrações longas
-    parser.add_argument('--stride', type=int, default=1,
-                        help='Processa 1 a cada N arquivos (padrão: 1)')
-    parser.add_argument('--tmin', default=None,
-                        help='Início da janela (YYYY-MM-DD[THH:MM])')
-    parser.add_argument('--tmax', default=None,
-                        help='Fim da janela (YYYY-MM-DD[THH:MM])')
-    parser.add_argument('--max-maps', type=int, default=0, dest='max_maps',
-                        help='Teto de figuras de mapa por execução '
-                             '(padrão: 0 = uma figura por saída NetCDF)')
-    parser.add_argument('--dpi', type=int, default=130,
-                        help='Resolução das figuras (padrão: 130)')
-    parser.add_argument('--max-rows', type=int, default=40, dest='max_rows',
-                        help='Teto de linhas por campo na tabela (0 = todas)')
-
-    # Mascaramento
-    # v9.2 (BUG-PY-23): desligado por padrão. mom6_import_*.nc agora grava
-    # _FillValue real sobre continente (MASCARA-CONT-01, lado Fortran) — o
-    # marcador por temperatura só é necessário para arquivos gerados antes
-    # dessa revisão do acoplador (sem a variável 'ocn_frac').
-    parser.set_defaults(land_marker_on=False)
-    parser.add_argument('--legacy-land-marker', action='store_true',
-                        dest='land_marker_on',
-                        help='Religa o marcador de terra por temperatura '
-                             '(271.35 K) — use apenas em arquivos gerados '
-                             'antes da máscara real de continente (sem '
-                             "variável 'ocn_frac')")
-    parser.add_argument('--no-land-marker', action='store_false',
-                        dest='land_marker_on',
-                        help='Mantido por compatibilidade; sem efeito desde '
-                             'a v9.2, já que o marcador vem desligado por padrão')
-    parser.add_argument('--land-marker', type=float, default=None,
-                        help='Valor do marcador de terra em K (padrão: '
-                             '271.35, só usado com --legacy-land-marker)')
+    # Passos para plotagem
+    parser.add_argument('--step',      nargs='+', type=int, default=None)
+    parser.add_argument('--all-steps', action='store_true', dest='all_steps')
 
     args = parser.parse_args()
 
@@ -1326,43 +1253,26 @@ def main():
         args.all = True
     if args.all:
         args.stats = args.check = args.csv = args.plot = True
-    if args.stride < 1:
-        sys.exit("ERRO: --stride deve ser >= 1.")
 
     print()
     print('═' * 70)
     print('  MONAN-A 2.0 — Validação de campos importados MOM6 (ATM→OCN)')
-    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v9.1)')
+    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.3)')
     print('═' * 70)
     print(f"  Diagnósticos : {os.path.abspath(args.diagdir)}")
     print(f"  Saída        : {os.path.abspath(args.outdir)}")
-
-    timestamps_all, files_all = find_diag_files(args.diagdir)
-    timestamps, files = filtrar_arquivos(
-        timestamps_all, files_all,
-        parse_datahora(args.tmin), parse_datahora(args.tmax), args.stride)
-
-    if args.all_fields:
-        args.field = descobrir_campos(files[0])
-        novos = [f for f in args.field if f not in FIELD_META]
-        if novos:
-            print(f"  Campos não catalogados incluídos por --all-fields: "
-                  f"{', '.join(novos)}")
     print(f"  Campos       : {', '.join(args.field)}")
     print()
 
-    print(f"  Arquivos MOM6 diag : {len(files_all)} encontrado(s), "
-          f"{len(files)} selecionado(s)")
+    files = find_diag_files(args.diagdir)
+    print(f"  Arquivos MOM6 diag : {len(files)}")
     print(f"  Primeiro           : {os.path.basename(files[0])}")
     print(f"  Último             : {os.path.basename(files[-1])}")
-    if args.stride > 1:
-        print(f"  Amostragem         : 1 a cada {args.stride} arquivo(s)")
     print()
 
-    nsteps = len(files)
-    step_indices = (selecionar_passos_mapa(nsteps, args.step, args.max_maps)
-                    if args.plot else [])
+    timestamps, fields, lat, lon, attrs = load_diag_files(files, args.field)
 
+    # O significado de "passo N" depende do coupling_mode (ver consumption_note).
     coupling_mode = read_coupling_mode(args.diagdir)
     if coupling_mode:
         print(f"  coupling_mode      : {coupling_mode}")
@@ -1375,29 +1285,22 @@ def main():
     else:
         print("  coupling_mode      : nao identificado (nuopc.input nao encontrada)")
     print()
-
-    renderer = None
-    if args.plot and step_indices:
-        print(f"  [--plot] {len(step_indices)} figura(s) de mapa serão geradas "
-              f"em {os.path.abspath(args.outdir)}")
-        if len(step_indices) > 200:
-            print(f"           Volume estimado: ~{len(step_indices)*1.5:.0f} MB "
-                  f"e alguns minutos de desenho. Use --max-maps ou --step "
-                  f"para reduzir.")
-        renderer = RenderizadorMapas(args.field, args.outdir,
-                                     coupling_mode=coupling_mode, dpi=args.dpi)
-
-    # Uma única passagem: estatísticas de todos os passos e, para os passos
-    # selecionados, a figura desenhada com o campo ainda em memória.
-    stats, agg, lat, lon, attrs, marc_passo = scan_diag_files(
-        files, timestamps, args.field, step_indices, renderer=renderer,
-        usar_marcador=args.land_marker_on, marcador_valor=args.land_marker)
-
-    print(f"  {nsteps} passo(s) processado(s)"
-          + (f"; {renderer.n_geradas} figura(s) de mapa gerada(s)."
-             if renderer is not None else "."))
     print()
 
+    # Passos para plotagem
+    nsteps = len(timestamps)
+    if args.step:
+        step_indices = [s - 1 for s in args.step]
+    elif args.all_steps:
+        step_indices = list(range(nsteps))
+    else:
+        step_every = max(1, nsteps // 8)
+        step_indices = list(range(0, nsteps, step_every))
+        if (nsteps - 1) not in step_indices:
+            step_indices.append(nsteps - 1)
+    step_indices = sorted(set(min(max(s, 0), nsteps - 1) for s in step_indices))
+
+    # Exibir atributos globais registrados pelo mediador
     if attrs:
         print("  ┌─ Metadados CF registrados pelo MED_cap_MONAN ─────────────────────")
         for key in ['Conventions', 'title', 'institution', 'source',
@@ -1408,19 +1311,24 @@ def main():
 
     if args.stats:
         print("  [--stats] Calculando estatísticas...")
-        print_stats(timestamps, stats, args.field, max_rows=args.max_rows)
+        print_stats(timestamps, fields, args.field)
 
     if args.check:
         print("  [--check] Verificando limites físicos...")
-        check_physics(agg, args.field, args.land_marker_on)
+        check_physics(timestamps, fields, args.field)
 
     if args.csv:
         print("  [--csv] Exportando CSV...")
-        export_csv(timestamps, stats, args.field, args.outdir)
+        os.makedirs(args.outdir, exist_ok=True)
+        export_csv(timestamps, fields, args.field, args.outdir)
         print()
 
     if args.plot:
-        plot_timeseries(timestamps, stats, args.field, args.outdir)
+        n_steps_plot = len(step_indices)
+        print(f"  [--plot] Gerando figuras ({n_steps_plot} passo(s))...")
+        plot_maps(timestamps, fields, args.field, lat, lon, step_indices,
+                  args.outdir, coupling_mode=coupling_mode)
+        plot_timeseries(timestamps, fields, args.field, args.outdir)
         print()
 
     print('═' * 70)

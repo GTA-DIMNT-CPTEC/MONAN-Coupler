@@ -145,14 +145,21 @@ module mpas_cap_MONAN_mod
   ! O NUOPC só cria RouteHandle para campos MUTUAMENTE anunciados: o MED
   ! anuncia So_t, Si_ifrac, So_u, So_v, Sf_zorl no exportState; o MPAS precisa
   ! anunciá-los espelhadamente no importState (este array).
-  integer, parameter :: N_IMP = 5
+  ! Fase 4b (B-TSFC-DUALEXPORT-01, Set/2026): trocado de 'So_t' para
+  ! 'Sx_tsfc'. So_t e' SST pura do MOM6 — o SIS2 tambem a importa e precisa
+  ! dela pura para o fluxo de calor basal do gelo (ICE_KMELT). Sx_tsfc e' o
+  ! composto (1-Si_ifrac)*So_t + Si_ifrac*Si_t_sis2, calculado no MED
+  ! (MED_cap.F90) especificamente para a atmosfera, que enxerga uma unica
+  ! celula mista agua+gelo — index 1 continua alimentando atm_bnd%sst.
+  integer, parameter :: N_IMP = 6
   character(len=20), parameter :: IMP_NAMES(N_IMP) = [ &
     character(len=20) ::  &
-    'So_t    ',          &  ! SST [K]                    → atm_bnd%sst
+    'Sx_tsfc ',          &  ! Temp. de pele composta [K] → atm_bnd%sst
     'Si_ifrac',          &  ! Fração de gelo [0-1]       → atm_bnd%ice_fraction
     'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
     'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
-    'Sf_zorl ' ]            ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
+    'Sf_zorl ',          &  ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
+    'Sf_albedo' ]           ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
 
   integer, parameter :: N_EXP = 13
   character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
@@ -440,16 +447,10 @@ contains
     ! BUG-FIX-01: usar nCellsSolve (células próprias sem halos) em vez de nCells.
     ! nCells inclui células halo de PETs vizinhos, que podem conter valores não
     ! inicializados ou de outra região geográfica, corrompendo os campos importados.
-    ! MASCARA-CONT-02: g_atm_public%xland (subpool sfc_input, ver
-    ! mpas_atm_model.F90::mpas_atm_init) segue junto para que
-    ! write_mpas_import_diag possa mascarar continentes em monan2_import_*.nc
-    ! com a mascara nativa do MPAS, em vez do limiar de faixa fisica usado
-    ! ate aqui. Optional: se xland nao estiver associado (AVISO no log de
-    ! mpas_atm_init), o diagnostico simplesmente sai sem mascara, como antes.
     call mpas_import(importState, g_atm_bnd, &
          merge(g_atm_public%nCellsSolve, g_atm_public%nCells, &
                g_atm_public%nCellsSolve > 0), rc, &
-         g_atm_public%lonCell, g_atm_public%latCell, g_atm_public%xland)
+         g_atm_public%lonCell, g_atm_public%latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (write_diag) then
       call state_diagnose(importState, 'importState@Advance', rc)
@@ -528,7 +529,8 @@ contains
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
   !!
   !! Sprint A Fase 2: defaults estendidos para 4 campos (era 1).
-  !!   1: So_t     → SST padrão tropical (cfg_sst_default ≈ 298 K)
+  !!   1: Sx_tsfc  → temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
+  !!                 (Fase 4b, B-TSFC-DUALEXPORT-01 — era So_t; ver IMP_NAMES)
   !!   2: Si_ifrac → fração de gelo (cfg_ice_fraction_default = 0.0)
   !!   3: So_u     → corrente zonal (0.0 m/s — oceano em repouso)
   !!   4: So_v     → corrente meridional (0.0 m/s — oceano em repouso)
@@ -546,7 +548,7 @@ contains
     rc = ESMF_SUCCESS
 
     ! Sprint A: defaults alinhados com IMP_NAMES (5 elementos):
-    defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! So_t      [K]
+    defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! Sx_tsfc   [K]
     defaults(2) = real(cfg_ice_fraction_default, ESMF_KIND_R8)  ! Si_ifrac  [0-1]
     defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
     defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
