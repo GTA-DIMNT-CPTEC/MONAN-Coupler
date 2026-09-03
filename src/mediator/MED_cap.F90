@@ -3284,6 +3284,15 @@ contains
       end if
     end block
     call RegridOrCopy(is%f_duu10n_atm, exportState, "So_duu10n",      is, rc)
+    ! FIX B-DIAGMASK-01 (Set/2026): mascara terra/oceano REAL do MOM6 no
+    ! exportState. is%f_omask_atm ja' esta' pronta neste ponto (regridada
+    ! uma unica vez logo acima, B-LANDMASK-01). Aqui ela segue para o
+    ! conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
+    ! mom6_import_*.nc NAO passa por este caminho — le is%f_omask_atm
+    ! diretamente na grade ATM (med_cap_netcdf.F90), evitando o ida-e-volta
+    ! ATM->OCN->Voronoi. O corte binario fica sempre no consumidor final,
+    ! nunca no meio do caminho, para nao criar escadinha na linha de costa.
+    call RegridOrCopy(is%f_omask_atm,  exportState, "Sx_omask",       is, rc)
     call RegridOrCopy(is%f_coszen_atm, exportState, "Faxa_coszen",    is, rc)  ! Fase 2.5
     call RegridOrCopy(is%f_albedo_atm, exportState, "Sf_albedo",      is, rc)  ! Fase 2.6
     ! Fase 3 (B-ICE-FLUX-DIFF-01)

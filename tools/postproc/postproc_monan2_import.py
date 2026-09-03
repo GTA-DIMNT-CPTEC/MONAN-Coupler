@@ -291,6 +291,29 @@ def _field_key(label):
 
 # ─── FONTE 1: mpas_import_step????.nc ────────────────────────────────────────
 
+# Nome da variável de máscara gravada pelo acoplador (B-DIAGMASK-01).
+# 'omask' é aceito como alias para arquivos de versões intermediárias.
+OMASK_VARS = ('Sx_omask', 'omask')
+
+
+def ler_omask(nc):
+    """
+    Máscara terra/oceano do MOM6 gravada no arquivo (B-DIAGMASK-01).
+
+    Retorna array booleano True=oceano na orientação (nlat, nlon), ou None
+    quando a variável não existe — caso dos arquivos anteriores a essa
+    correção, em que o continente saía como valor válido e entrava nas
+    estatísticas.
+    """
+    for nome in OMASK_VARS:
+        if nome in nc.variables:
+            m = np.asarray(nc.variables[nome][:], dtype=float)
+            if m.ndim == 2 and m.shape[0] > m.shape[1]:
+                m = m.T
+            return np.isfinite(m) & (np.abs(m) < 1e19) & (m >= 0.5)
+    return None
+
+
 def _load_fonte1(diagdir):
     """
     Carrega mpas_import_step????.nc — escrita direta do importState MPAS.
@@ -306,8 +329,17 @@ def _load_fonte1(diagdir):
     Retorna (steps, data, timestamps, coords) ou (None, None, None, None).
       coords = {'lat': array 1D, 'lon': array 1D}
     """
-    pattern = os.path.join(diagdir, 'mpas_import_step????.nc')
-    files   = sorted(glob.glob(pattern))
+    # B-DIAGMASK-01: o cap do MPAS grava monan2_import_YYYYMMDD_HHMMSS.nc
+    # desde a v4.19; o padrão mpas_import_step????.nc é o nome legado, que
+    # continuava sendo o único procurado aqui. Consequência silenciosa: a
+    # FONTE 1 nunca encontrava nada e o script caía sempre na FONTE 2, que
+    # INFERE Sf_zorl por Charnock em vez de ler o valor real. Aceita os dois.
+    files = sorted(glob.glob(os.path.join(diagdir,
+                                          'monan2_import_????????_??????.nc')))
+    legado = False
+    if not files:
+        files  = sorted(glob.glob(os.path.join(diagdir, 'mpas_import_step????.nc')))
+        legado = True
     if not files:
         return None, None, None, None
 
@@ -319,10 +351,19 @@ def _load_fonte1(diagdir):
     _FILL_THR = 1e19   # limiar defensivo para fill values do Fortran (-9.99e+20)
 
     for fpath in files:
-        step = int(os.path.basename(fpath)
-                   .replace('mpas_import_step', '').replace('.nc', ''))
+        base = os.path.basename(fpath)
+        if legado:
+            step = int(base.replace('mpas_import_step', '').replace('.nc', ''))
+            ts   = None
+        else:
+            step = len(steps) + 1
+            try:
+                ts = datetime.strptime(base[len('monan2_import_'):-3],
+                                       '%Y%m%d_%H%M%S')
+            except ValueError:
+                ts = None
         steps.append(step)
-        tss.append(None)   # timestamps não disponíveis neste formato
+        tss.append(ts)
 
         with Dataset(fpath) as nc:
             # BUG-03: ler coordenadas do arquivo (lat/lon com half-offset Fortran)
@@ -335,12 +376,21 @@ def _load_fonte1(diagdir):
                     coords = {'lat': np.asarray(lat_nc),
                               'lon': np.asarray(lon_nc)}
 
+            # B-DIAGMASK-01: máscara terra/oceano REAL do MOM6, gravada
+            # pelo próprio cap. Redundante para os arquivos novos (a terra
+            # já sai como _FillValue), necessária apenas se algum campo
+            # escapar do mascaramento no Fortran.
+            omask = ler_omask(nc)
+
             for fname in FIELDS:
                 if fname in nc.variables:
                     arr = nc.variables[fname][:]
 
                     # BUG-04: mascaramento defensivo do fill_value Fortran
                     arr = np.ma.masked_where(np.abs(arr) > _FILL_THR, arr)
+
+                    if omask is not None and arr.shape == omask.shape:
+                        arr = np.ma.masked_where(~omask, arr)
 
                     # BUG-03: garantir orientação (lat, lon) — (nlat, nlon)
                     # O Fortran define var com [dimid_lon, dimid_lat], então
@@ -438,6 +488,13 @@ def _load_fonte2(diagdir):
                     coords = {'lat': np.asarray(lat_nc),
                               'lon': np.asarray(lon_nc)}
 
+            # B-DIAGMASK-01: máscara REAL do MOM6, quando o arquivo a traz.
+            # Ela substitui o marcador de 271,35 K usado abaixo, que sempre
+            # foi uma heurística frágil: água aberta genuína no ponto de
+            # congelamento — justamente a borda do gelo marinho — cai no
+            # mesmo valor e era apagada do mapa junto com o continente.
+            omask = ler_omask(nc)
+
             # ── So_t ────────────────────────────────────────────────────────
             # BUG-LAND-FONTE2: mascarar fill de terra ANTES de armazenar.
             # A máscara gerada aqui é reutilizada para Sf_zorl (mesmo passo).
@@ -447,8 +504,11 @@ def _load_fonte2(diagdir):
                 if arr.ndim == 2 and arr.shape[0] > arr.shape[1]:
                     arr = arr.T
                 arr_raw = np.asarray(arr, dtype=float)
-                # Células com So_t ≈ 271.35 K são terra (marcador Sprint A.5).
-                so_t_land_mask = np.abs(arr_raw - _LAND_FILL_K) < _LAND_FILL_TOL
+                if omask is not None and omask.shape == arr_raw.shape:
+                    so_t_land_mask = ~omask
+                else:
+                    # Retaguarda para arquivos anteriores ao B-DIAGMASK-01.
+                    so_t_land_mask = np.abs(arr_raw - _LAND_FILL_K) < _LAND_FILL_TOL
                 arr = np.ma.masked_where(so_t_land_mask, arr)
                 arr = np.ma.masked_invalid(arr)
                 data['So_t'].append(arr)
@@ -460,7 +520,10 @@ def _load_fonte2(diagdir):
                 arr = nc.variables['Si_ifrac'][:]
                 if arr.ndim == 2 and arr.shape[0] > arr.shape[1]:
                     arr = arr.T
-                data['Si_ifrac'].append(np.ma.masked_invalid(arr))
+                arr = np.ma.masked_invalid(arr)
+                if so_t_land_mask is not None and arr.shape == so_t_land_mask.shape:
+                    arr = np.ma.masked_where(so_t_land_mask, arr)
+                data['Si_ifrac'].append(arr)
             else:
                 data['Si_ifrac'].append(None)
 

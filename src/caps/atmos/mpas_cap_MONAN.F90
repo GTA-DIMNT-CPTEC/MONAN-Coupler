@@ -151,7 +151,14 @@ module mpas_cap_MONAN_mod
   ! composto (1-Si_ifrac)*So_t + Si_ifrac*Si_t_sis2, calculado no MED
   ! (MED_cap.F90) especificamente para a atmosfera, que enxerga uma unica
   ! celula mista agua+gelo — index 1 continua alimentando atm_bnd%sst.
-  integer, parameter :: N_IMP = 6
+  !
+  ! FIX B-DIAGMASK-01 (Set/2026): N_IMP=7 — adiciona Sx_omask, a mascara
+  ! terra/oceano REAL do MOM6 (ocean_grid%mask2dT). Nao alimenta a fisica do
+  ! MONAN-A, que tem a propria landmask; serve para mascarar continentes no
+  ! diagnostico monan2_import_*.nc, que ate' aqui so' contava com o filtro
+  ! ocean_frac_min do binning Voronoi — um criterio de COBERTURA de celula
+  ! Voronoi por bin, sem nenhuma relacao com terra/oceano.
+  integer, parameter :: N_IMP = 7
   character(len=20), parameter :: IMP_NAMES(N_IMP) = [ &
     character(len=20) ::  &
     'Sx_tsfc ',          &  ! Temp. de pele composta [K] → atm_bnd%sst
@@ -159,7 +166,8 @@ module mpas_cap_MONAN_mod
     'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
     'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
     'Sf_zorl ',          &  ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
-    'Sf_albedo' ]           ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
+    'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
+    'Sx_omask' ]            ! Máscara 1=oceano/0=terra   → atm_bnd%omask (B-DIAGMASK-01)
 
   integer, parameter :: N_EXP = 13
   character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
@@ -553,6 +561,13 @@ contains
     defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
     defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
     defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl   [m]  (Sprint C)
+    ! FIX B-DIAGMASK-01: defaults(6) estava faltando desde a Fase 2.6 —
+    ! o array e' dimensionado por N_IMP e o laco abaixo percorre 1..N_IMP,
+    ! entao Sf_albedo era inicializado com o que houvesse na pilha. Corrigido
+    ! junto com a entrada nova, para o mesmo valor de agua aberta usado em
+    ! mpas_cap_methods.F90 e mpas_atm_model.F90.
+    defaults(6) = 0.08_ESMF_KIND_R8                             ! Sf_albedo [0-1] (Fase 2.6)
+    defaults(7) = 1.0_ESMF_KIND_R8                              ! Sx_omask  [0-1] — tudo oceano
 
     do i = 1, N_IMP
       nullify(fptr1d, fptr2d)

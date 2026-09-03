@@ -776,8 +776,8 @@ estão em `docs/domain-mom6.md`; a incompatibilidade, em `docs/mascara-cap-nuopc
 | `bin/esmApp`                     | Executável                               |
 | `logs/PET*.esmApp.log`           | Logs ESMF por PET                        |
 | `diag_export/monan_export_*.nc`  | Campos ATM exportados                    |
-| `diag_import/mom6_import_*.nc`   | `exportState` do MED: 14 fluxos + `So_t`, `So_u`, `So_v`, `Sf_zorl` |
-| `diag_import/monan2_import_*.nc` | Campos OCN→ATM importados pelo MPAS      |
+| `diag_import/mom6_import_*.nc`   | `exportState` do MED: 14 fluxos + `So_t`, `So_u`, `So_v`, `Sf_zorl` + `Sx_omask`; continentes como `_FillValue` |
+| `diag_import/monan2_import_*.nc` | Campos OCN→ATM importados pelo MPAS + `Sx_omask`; continentes como `_FillValue` |
 | `diag_import/docn_import_*.nc`   | SST/gelo interpolados pelo DOCN (Fase 1) |
 | `diag_import/sst_ifrac_diag/`    | Evolução temporal de SST e Si_ifrac      |
 
@@ -791,6 +791,31 @@ python3 tools/postproc/analisa_comparacao.py         # comparação entre experi
 python3 tools/postproc/analisa_sst_ifrac.py          # evolução de SST/Si_ifrac
 python3 tools/animation/anim_monan2_import.py        # animações
 ```
+
+> **Máscara de continentes (`B-DIAGMASK-01`).** Os dois arquivos de importação
+> passam a mascarar os continentes com a máscara **real** do MOM6
+> (`ocean_grid%mask2dT`), a mesma que o oceano usa internamente. Ela sai do MOM6
+> como `So_omask`, é regridada para a grade ATM do mediador em `is%f_omask_atm`
+> (`B-LANDMASK-01`) e chega ao MPAS pelo conector MED→MPAS sob o nome
+> `Sx_omask`. Célula de terra agora sai como `_FillValue`, e não mais como zero
+> — zero é um valor físico legítimo de fluxo, e o pós-processamento não tinha
+> como distinguir "fluxo nulo sobre oceano calmo" de "aqui não há oceano". A
+> própria máscara vai gravada na variável `Sx_omask` (1 = oceano, 0 = terra),
+> para que os scripts não precisem readivinhá-la a partir do `_FillValue`.
+>
+> O corte binário fica sempre no consumidor final (0,5 no MED e no cap do MPAS,
+> depois do binning), nunca no meio do caminho: binarizar entre dois regrids
+> produz escadinha na linha de costa. **A máscara age apenas nos buffers de
+> escrita**; o `exportState` continua com os zeros do Sprint A.5.1, porque um
+> `_FillValue` que vazasse para lá viraria forçante do MOM6.
+>
+> **Isso quebra a linha de base por construção**: as células de terra mudam de
+> `0.0` para `-9,99e20` e o `nccmp -d` acusa diferença em todos os campos. O
+> procedimento é comparar somente as células de oceano contra a base congelada,
+> exigir identidade exata ali, e só então recongelar com um rótulo novo.
+> Diferença em célula de oceano indica máscara deslocada — provavelmente
+> convenção de longitude, já que o `mom6_import` usa 0 a 360 e o
+> `monan2_import` usa −180 a +180.
 
 > **Campos novos no `mom6_import` (v14.22).** `So_u`, `So_v` e `Sf_zorl` faziam parte de `export_names` e por isso ganhavam variável no arquivo, mas não constavam de nenhum dos dois `select case` de `med_cap_netcdf.F90`. Caíam no `case default`, eram puladas pelo `cycle` e ficavam gravadas apenas com `_FillValue`: o GrADS as mostrava como *all undefined values*, o que é diferente de valor zerado. Corrigido; o `case default` passou a registrar aviso no log, para que a próxima lacuna do gênero apareça na compilação de diagnósticos em vez de só na hora de plotar.
 

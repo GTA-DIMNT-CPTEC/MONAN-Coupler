@@ -380,15 +380,39 @@ def parse_timestamp_from_filename(fname):
         return None
 
 
+# Nome da variável de máscara gravada pelo acoplador (B-DIAGMASK-01).
+# 'omask' é aceito como alias para arquivos de versões intermediárias.
+OMASK_VARS = ('Sx_omask', 'omask')
+
+
+def ler_omask(ds):
+    """
+    Máscara terra/oceano do MOM6 gravada no arquivo (B-DIAGMASK-01).
+
+    Retorna um array booleano True=oceano na orientação nativa do arquivo,
+    ou None quando a variável não existe — caso dos arquivos gerados antes
+    dessa correção, em que o continente saía como zero e não havia como
+    distingui-lo de fluxo nulo sobre oceano calmo.
+    """
+    for nome in OMASK_VARS:
+        if nome in ds.variables:
+            m = np.array(ds.variables[nome][:], dtype=np.float64)
+            m = np.where(np.abs(m) > 1.0e10, np.nan, m)
+            return np.isfinite(m) & (m >= 0.5)
+    return None
+
+
 def load_diag_files(files, field_names):
     """
     Carrega todos os arquivos de diagnóstico.
-    Retorna: timestamps, fields{name: (nsteps, nlat, nlon)}, lat, lon, attrs
+    Retorna: timestamps, fields{name: (nsteps, nlat, nlon)}, lat, lon, attrs,
+             ocean_mask (nlat, nlon) booleana ou None
     """
     timestamps = []
     all_data   = {f: [] for f in field_names}
     lat = lon  = None
     attrs_sample = {}
+    omask_nativo = None      # B-DIAGMASK-01 — orientação do arquivo
 
     print(f"  Carregando {len(files)} arquivos de diagnóstico...")
 
@@ -407,6 +431,10 @@ def load_diag_files(files, field_names):
                 # Salvar atributos globais do primeiro arquivo
                 for attr in ds.ncattrs():
                     attrs_sample[attr] = getattr(ds, attr)
+
+            # B-DIAGMASK-01: a máscara é estática, basta lê-la uma vez.
+            if omask_nativo is None:
+                omask_nativo = ler_omask(ds)
 
             timestamps.append(ts)
             for fname in field_names:
@@ -437,6 +465,15 @@ def load_diag_files(files, field_names):
                     fill_min = FIELD_META.get(fname, {}).get('fill_min_threshold', None)
                     if fill_min is not None:
                         arr = np.where(arr < fill_min, np.nan, arr)
+
+                    # Máscara 5 (B-DIAGMASK-01): continentes, pela máscara
+                    # REAL do MOM6. Redundante para os arquivos novos, em que
+                    # o próprio acoplador já grava _FillValue sobre terra;
+                    # necessária apenas se algum campo escapar do mascaramento
+                    # no Fortran. Nunca aplicada à própria máscara.
+                    if omask_nativo is not None and fname not in OMASK_VARS \
+                       and arr.shape == omask_nativo.shape:
+                        arr = np.where(omask_nativo, arr, np.nan)
 
                     all_data[fname].append(arr)
                 else:
@@ -469,8 +506,27 @@ def load_diag_files(files, field_names):
             arr_3d = np.transpose(arr_3d, (0, 2, 1))
         fields[fname] = arr_3d
 
+    # B-DIAGMASK-01: devolver a máscara já na orientação (nlat, nlon) usada
+    # pelo resto do script — mesma regra de transposição dos campos.
+    ocean_mask = omask_nativo
+    if ocean_mask is not None and ocean_mask.ndim == 2 \
+       and ocean_mask.shape[0] > ocean_mask.shape[1]:
+        ocean_mask = ocean_mask.T
+
+    if ocean_mask is not None:
+        frac = 100.0 * ocean_mask.sum() / ocean_mask.size
+        print(f"  Máscara MOM6 encontrada no arquivo: {frac:.1f}% de oceano "
+              f"(continentes mascarados).")
+    else:
+        print("  AVISO: variável Sx_omask ausente — arquivo gerado antes do "
+              "B-DIAGMASK-01.\n"
+              "         Sobre terra os fluxos aparecem como ZERO, não como "
+              "ausência de dado,\n"
+              "         e entram nas estatísticas. Regerar o diagnóstico com "
+              "o acoplador atual.")
+
     print(f"  {len(timestamps)} passos carregados.")
-    return timestamps, fields, lat, lon, attrs_sample
+    return timestamps, fields, lat, lon, attrs_sample, ocean_mask
 
 
 # ─── Estatísticas ─────────────────────────────────────────────────────────────
@@ -1270,7 +1326,7 @@ def main():
     print(f"  Último             : {os.path.basename(files[-1])}")
     print()
 
-    timestamps, fields, lat, lon, attrs = load_diag_files(files, args.field)
+    timestamps, fields, lat, lon, attrs, ocean_mask = load_diag_files(files, args.field)
 
     # O significado de "passo N" depende do coupling_mode (ver consumption_note).
     coupling_mode = read_coupling_mode(args.diagdir)
@@ -1304,7 +1360,8 @@ def main():
     if attrs:
         print("  ┌─ Metadados CF registrados pelo MED_cap_MONAN ─────────────────────")
         for key in ['Conventions', 'title', 'institution', 'source',
-                    'valid_time', 'nx_global', 'ny_global', 'petCount']:
+                    'valid_time', 'nx_global', 'ny_global', 'petCount',
+                    'land_mask_source']:
             if key in attrs:
                 print(f"  │  {key:15s} = {attrs[key]}")
         print(f"  └{'─'*67}\n")

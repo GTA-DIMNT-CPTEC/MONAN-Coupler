@@ -200,7 +200,17 @@ module med_cap_types_mod
   !! Sprint A (Mai/2026): +So_t; Sprint B: +So_u, So_v; Sprint C: +Sf_zorl.
   !! Fase 2.5 (B-ZENITH-01): +Faxa_coszen — angulo zenital solar real p/ SIS2
   !! (antes zerado em is%aib%coszen, ver sis_cap_MONAN.F90::import_forcing).
-  integer, parameter :: n_export = 30
+  !! FIX B-DIAGMASK-01 (Set/2026): +Sx_omask — mascara terra/oceano REAL do
+  !! MOM6 (ocean_grid%mask2dT, importada como So_omask e regridada para a
+  !! grade ATM em is%f_omask_atm pelo B-LANDMASK-01). Exportada sob um
+  !! StandardName NOVO, no mesmo espirito do Sx_tsfc: e' um campo produzido
+  !! pelo MED para consumo do lado atmosferico/diagnostico, e nao o campo
+  !! So_omask original do oceano — reusar o mesmo nome no exportState
+  !! criaria um par import/export homonimo no mesmo componente. Serve a dois
+  !! consumidores: (a) a variavel de mascara gravada em mom6_import_*.nc
+  !! (med_cap_netcdf.F90) e (b) o cap do MPAS, que a recebe pelo conector
+  !! MED->MPAS e mascara os continentes em monan2_import_*.nc.
+  integer, parameter :: n_export = 31
   character(len=32), parameter :: export_names(n_export) = [ &
     "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", "Foxx_lwnet    ", &
     "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", "Foxx_swnet_idf", &
@@ -213,7 +223,8 @@ module med_cap_types_mod
     "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! Fase 3
     "Fioi_lwnet    ", &                      ! Fase 3 — fluxos calc. c/ T_gelo → SIS2
     "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", "Fioi_swnet_idf", & ! Fase 4 — B-ICE-SWNET-01
-    "Sx_tsfc       " ]                      ! Fase 4b — B-TSFC-DUALEXPORT-01 — composto p/ MPAS-A
+    "Sx_tsfc       ", &                     ! Fase 4b — B-TSFC-DUALEXPORT-01 — composto p/ MPAS-A
+    "Sx_omask      " ]                      ! B-DIAGMASK-01 — mascara terra/oceano MOM6 → diag + MPAS
 
   !----------------------------------------------------------------------------
   ! Variáveis de módulo para diagnóstico de importação NetCDF (save)

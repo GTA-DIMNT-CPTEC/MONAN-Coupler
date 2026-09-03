@@ -9,6 +9,26 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Máscara de continentes nos diagnósticos de importação (`B-DIAGMASK-01`).** Os arquivos `mom6_import_*.nc` e `monan2_import_*.nc` passam a mascarar os continentes com a máscara **real** do MOM6 (`ocean_grid%mask2dT`), e não mais com substitutos.
+
+  Até aqui, o continente saía do `mom6_import` como **zero** — os fluxos eram zerados pelo Sprint A.5.1 antes do export. Zero é um valor físico legítimo de fluxo: nem o GrADS nem o pós-processamento tinham como distinguir "fluxo nulo sobre oceano calmo" de "aqui não há oceano", e as células de terra entravam nas estatísticas. No `monan2_import` a situação era pior: só havia o filtro `ocean_frac_min` do binning Voronoi, que mede **cobertura de célula Voronoi por bin** e nada diz sobre terra ou oceano.
+
+  A máscara já existia no mediador desde o `B-LANDMASK-01` (`is%f_omask_atm`, regridada de `So_omask`); o que faltava era levá-la aos dois escritores NetCDF. Ela é exportada sob o StandardName novo `Sx_omask` — prefixo `Sx_` porque o MED já *importa* `So_omask` do oceano, e repetir o nome no `exportState` criaria um par homônimo no mesmo componente; mesmo precedente do `Sx_tsfc`. O cap do MPAS a recebe pelo conector MED→MPAS em `atm_bnd%omask`.
+
+  Célula de terra agora sai como `_FillValue`. A própria máscara é gravada na variável `Sx_omask` (1 = oceano, 0 = terra), para que os scripts não precisem readivinhá-la. O corte binário fica sempre no consumidor final — 0,5 no MED e no cap do MPAS, este depois do binning — e nunca no meio do caminho: binarizar entre dois regrids produz escadinha na linha de costa. No mediador o `MPI_Allreduce(MAX)` opera sobre 0/1, que é inequívoco, ao contrário do MAX sobre `FILL_IMP` usado nos campos.
+
+  **A máscara age apenas nos buffers de escrita.** O `exportState` continua com os zeros do Sprint A.5.1: um `_FillValue` que vazasse para lá viraria forçante do MOM6.
+
+  Corrigidos no mesmo passo dois defeitos encontrados durante o trabalho:
+  - `mpas_cap_MONAN.F90::init_import_defaults` — `defaults` é dimensionado por `N_IMP` e o laço percorre `1..N_IMP`, mas `defaults(6)` (`Sf_albedo`, Fase 2.6) nunca foi atribuído: o campo era inicializado com o que houvesse na pilha. Agora vale 0,08, o mesmo default de água aberta usado em `mpas_cap_methods.F90` e `mpas_atm_model.F90`.
+  - `postproc_monan2_import.py` — a FONTE 1 procurava apenas `mpas_import_step????.nc`, nome legado que o cap não escreve desde a v4.19. O efeito era silencioso: a FONTE 1 nunca encontrava nada e o script caía sempre na FONTE 2, que **infere** `Sf_zorl` por Charnock em vez de ler o valor real. Passa a aceitar `monan2_import_YYYYMMDD_HHMMSS.nc`, com o padrão antigo como retaguarda.
+
+  Na FONTE 2 do mesmo script, a máscara real substitui o marcador de 271,35 K quando o arquivo a traz. Aquela heurística sempre foi frágil: água aberta genuína no ponto de congelamento — justamente a borda do gelo marinho — cai no mesmo valor e era apagada do mapa junto com o continente.
+
+  **Quebra a linha de base por construção:** células de terra mudam de `0.0` para `-9,99e20` e o `nccmp -d` acusa diferença em todos os campos. Comparar somente as células de oceano contra a base congelada, exigir identidade exata ali, e só então recongelar com rótulo novo. Diferença em célula de oceano indica máscara deslocada — provavelmente convenção de longitude, já que o `mom6_import` usa 0 a 360 e o `monan2_import` usa −180 a +180.
+
+  **Não compilado nem executado.** As modificações foram revisadas, não construídas: falta rodar `make` e conferir a fração de oceano registrada no log contra os ~69,2% que o `domain-mom6.bash` reporta para a grade atual.
+
 - **Componente de gelo marinho (SIS2) integrado ao acoplador.** O SIS2 passa a existir como componente NUOPC próprio (`src/caps/ice/sis_cap_MONAN.F90`), com os conectores `MED -> ICE` e `ICE -> MED`, e não como subcomponente embutido no oceano via `combined_ice_ocean_driver`. Controlado por `use_sis2_dynamic` em `&nuopc_petlayout`; com a chave desligada (o padrão) nada é criado e o sistema é idêntico ao anterior.
 
   A lógica de partição de PETs foi **reescrita**, e não copiada da origem. Lá o gelo só existia dentro do ramo `if (is_concurrent)`, porque os eixos temporal e espacial ainda estavam colapsados em um só. Aqui ela vive sobre o eixo `pet_layout`, o que faz duas combinações passarem a funcionar: `shared` com gelo, e a sequência sequencial com gelo. Quando o gelo está desligado, `nIce` vale 0 e as contas recaem exatamente na divisão em dois blocos anterior, o que permite exigir saída NetCDF byte-idêntica ao baseline como teste de regressão.

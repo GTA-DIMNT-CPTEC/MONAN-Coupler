@@ -902,6 +902,13 @@ contains
   !!   Si_ifrac — fração de gelo    — atm_bnd%ice_fraction
   !!   Sf_zorl  — rugosidade [m]    — atm_bnd%zorl
   !!
+  !! FIX B-DIAGMASK-01 (Set/2026): continentes mascarados com a máscara REAL
+  !!   do MOM6 (ocean_grid%mask2dT → So_omask → Sx_omask → atm_bnd%omask).
+  !!   Antes havia apenas o filtro ocean_frac_min do binning, que mede
+  !!   cobertura de célula Voronoi por bin e nada diz sobre terra/oceano.
+  !!   A máscara é binada pela mesma rotina dos campos e gravada como
+  !!   Sx_omask (1=oceano, 0=terra); célula de terra sai como _FillValue.
+  !!
   !! Ativado por: write_import_diag=.true. em &nuopc_docn do nuopc.input
   !!
   !! Requer que set_mpas_diag_clock seja chamada em ModelAdvance antes de
@@ -919,14 +926,23 @@ contains
     integer :: dimid_lat, dimid_lon
     integer :: varid_lat, varid_lon
     integer :: varid_sot, varid_ifrac, varid_zorl
+    integer :: varid_omask                      ! B-DIAGMASK-01
     integer :: nlat, nlon, i, j
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
+    real(ESMF_KIND_R8), allocatable :: mask_2d(:,:)   ! B-DIAGMASK-01
     real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
     integer, allocatable  :: allCounts(:), displs(:)
     real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf_sot(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_ifrac(:), recvBuf_zorl(:)
+    real(ESMF_KIND_R8), allocatable :: recvBuf_omask(:)   ! B-DIAGMASK-01
+    ! Limiar de corte da mascara ja' binada. 0,5 e' o mesmo criterio usado
+    ! no MED (B-LANDMASK-01) e o mesmo ocean_frac_min do binning abaixo —
+    ! os tres precisam concordar, senao a linha de costa do diagnostico do
+    ! MPAS nao bate com a do diagnostico do MED.
+    real(ESMF_KIND_R8), parameter :: OMASK_MIN = 0.5_ESMF_KIND_R8
+    real(ESMF_KIND_R8), parameter :: FILL_DIAG = -9.99e+20_ESMF_KIND_R8
     real(ESMF_KIND_R8), allocatable :: lon_global(:), lat_global(:)
     integer :: nGlobal, nLocal
     real(ESMF_KIND_R8) :: res_deg, dlon, dlat
@@ -958,9 +974,11 @@ contains
     if (localPet == 0) then
       allocate(lon_global(nGlobal), lat_global(nGlobal))
       allocate(recvBuf_sot(nGlobal), recvBuf_ifrac(nGlobal), recvBuf_zorl(nGlobal))
+      allocate(recvBuf_omask(nGlobal))
     else
       allocate(lon_global(1), lat_global(1))
       allocate(recvBuf_sot(1), recvBuf_ifrac(1), recvBuf_zorl(1))
+      allocate(recvBuf_omask(1))
     end if
 
     if (present(lonCell) .and. present(latCell)) then
@@ -1005,12 +1023,24 @@ contains
     call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
                      recvBuf_zorl, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
+
+    ! B-DIAGMASK-01: mascara terra/oceano do MOM6. Fallback 1,0 (tudo
+    ! oceano) quando o campo nao existe — nao mascara nada, que e' o
+    ! comportamento anterior a esta correcao.
+    if (allocated(atm_bnd%omask)) then
+      sendBuf(1:nLocal) = real(atm_bnd%omask(1:nLocal), ESMF_KIND_R8)
+    else
+      sendBuf = 1.0_ESMF_KIND_R8
+    end if
+    call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                     recvBuf_omask, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     0, mpiComm, mpi_ierr)
     deallocate(sendBuf, allCounts, displs)
 
     ! ── 3. Escrita NetCDF (somente PET 0) ─────────────────────────────────
     if (localPet /= 0) then
       deallocate(lon_global, lat_global)
-      deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl)
+      deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_omask)
       return
     end if
 
@@ -1038,6 +1068,7 @@ contains
 
     ! Binning Voronoi → grade lat/lon
     allocate(grid_2d(nlon, nlat))
+    allocate(mask_2d(nlon, nlat))
     allocate(lat_axis(nlat), lon_axis(nlon))
     do i = 1, nlat
       lat_axis(i) = -90.0_ESMF_KIND_R8 + (i - 0.5_ESMF_KIND_R8) * dlat
@@ -1074,46 +1105,106 @@ contains
     ios = nf90_put_att(ncid, varid_zorl,  'standard_name', 'surface_roughness_length')
     ios = nf90_put_att(ncid, varid_zorl,  '_FillValue',    -9.99e+20_ESMF_KIND_R8)
 
+    ! B-DIAGMASK-01: a propria mascara vira variavel do arquivo, para que o
+    ! pos-processamento nao precise readivinha-la a partir de _FillValue.
+    ios = nf90_def_var(ncid, 'Sx_omask', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_omask)
+    ios = nf90_put_att(ncid, varid_omask, 'units',         '1')
+    ios = nf90_put_att(ncid, varid_omask, 'long_name',     'Mascara oceano/terra do MOM6 (1=oceano, 0=terra)')
+    ios = nf90_put_att(ncid, varid_omask, 'standard_name', 'sea_binary_mask')
+    ios = nf90_put_att(ncid, varid_omask, '_FillValue',    FILL_DIAG)
+
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions',  'CF-1.8')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'title', &
       'MONAN-A 2.0 importState (= MED exportState MED->MPAS) — Campos OCN->ATM')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'institution',  'INPE/CGCT/DIMNT')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'source', &
-      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + Sf_zorl)')
+      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + Sf_zorl + Sx_omask)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'code_version', &
       'v3.0-2026-05 (migrado de mpas_cap_methods para mpas_cap_netcdf)')
+    ios = nf90_put_att(ncid, NF90_GLOBAL, 'land_mask_source', &
+      'MOM6 ocean_grid%mask2dT (So_omask -> Sx_omask, regridada MED->MPAS); '// &
+      'celulas de terra gravadas como _FillValue; mascara na variavel Sx_omask')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'step',         g_diag_step)
     ios = nf90_enddef(ncid)
 
     ios = nf90_put_var(ncid, varid_lat, lat_axis)
     ios = nf90_put_var(ncid, varid_lon, lon_axis)
 
+    ! B-DIAGMASK-01: a mascara e' binada PRIMEIRO, pela mesma rotina dos
+    ! campos, para viver exatamente na mesma grade. ocean_frac_min=0.0 aqui
+    ! de proposito: a mascara nao deve ser pre-filtrada, precisa cobrir todo
+    ! bin que tenha ao menos uma celula Voronoi. Bin sem nenhuma celula sai
+    ! em FILL_DIAG e e' capturado pela comparacao com OMASK_MIN abaixo (que
+    ! e' negativa para FILL_DIAG), ou seja, tratado como terra — correto,
+    ! porque ali nao ha dado de oceano nenhum.
+    call voronoi_to_grid(recvBuf_omask, lon_global, lat_global, nGlobal, &
+                         mask_2d, nlon, nlat, dlon, dlat, &
+                         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.0_ESMF_KIND_R8)
+
     ! Binning Voronoi → lat/lon (ocean_frac_min=0.5: elimina artefatos costeiros)
     call voronoi_to_grid(recvBuf_sot,   lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
     ios = nf90_put_var(ncid, varid_sot, grid_2d)
 
     call voronoi_to_grid(recvBuf_ifrac, lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
     ios = nf90_put_var(ncid, varid_ifrac, grid_2d)
 
     call voronoi_to_grid(recvBuf_zorl,  lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=1.0e-5_ESMF_KIND_R8, vmax=0.1_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
     ios = nf90_put_var(ncid, varid_zorl, grid_2d)
 
+    ! A mascara vai binaria e sem mascarar a si mesma: e' ela que diz onde
+    ! a terra fica. Bin sem celula Voronoi permanece FILL_DIAG.
+    ! Feito com mascaras logicas explicitas (e nao com ELSEWHERE encadeado)
+    ! porque aqui o array de controle e' o proprio array atribuido — a
+    ! ordem de avaliacao passaria a importar para quem for reler isto.
+    block
+      logical, allocatable :: is_ocean(:,:), is_land(:,:)
+      allocate(is_ocean(nlon, nlat), is_land(nlon, nlat))
+      is_ocean = (mask_2d >= OMASK_MIN)
+      is_land  = (.not. is_ocean) .and. (mask_2d > 0.5_ESMF_KIND_R8 * FILL_DIAG)
+      where (is_ocean) mask_2d = 1.0_ESMF_KIND_R8
+      where (is_land)  mask_2d = 0.0_ESMF_KIND_R8
+      deallocate(is_ocean, is_land)
+    end block
+    ios = nf90_put_var(ncid, varid_omask, mask_2d)
+
+    block
+      character(len=200) :: logmsg_mask
+      integer :: n_ocn_b
+      n_ocn_b = count(mask_2d >= OMASK_MIN)
+      write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
+        'B-DIAGMASK-01: monan2_import mascarado — oceano ', &
+        100.0*real(n_ocn_b)/real(nlon*nlat), '% (', n_ocn_b, ' de ', &
+        nlon*nlat, ' bins)'
+      call ESMF_LogWrite(trim(logmsg_mask), ESMF_LOGMSG_INFO)
+    end block
+
     ios = nf90_close(ncid)
-    deallocate(grid_2d, lat_axis, lon_axis)
+    deallocate(grid_2d, mask_2d, lat_axis, lon_axis)
 
     call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
 
-999 deallocate(lon_global, lat_global)
-    deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl)
+999 continue
+    ! B-DIAGMASK-01: o desvio para 999 (falha do nf90_create) ocorre DEPOIS
+    ! das alocacoes dos buffers de grade — vazavam em silencio. Guardados.
+    if (allocated(grid_2d))  deallocate(grid_2d)
+    if (allocated(mask_2d))  deallocate(mask_2d)
+    if (allocated(lat_axis)) deallocate(lat_axis)
+    if (allocated(lon_axis)) deallocate(lon_axis)
+    deallocate(lon_global, lat_global)
+    deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_omask)
 
   end subroutine write_mpas_import_diag
 

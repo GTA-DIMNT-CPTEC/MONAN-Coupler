@@ -264,8 +264,32 @@ contains
       where (atm_bnd%alb /= atm_bnd%alb)   atm_bnd%alb = 0.08_MPAS_RKIND
     end if
 
+    ! -- Mascara terra/oceano Sx_omask [0-1] (B-DIAGMASK-01) ---------------
+    ! Mascara REAL do MOM6 (ocean_grid%mask2dT), vinda do mediador. Chega
+    ! fracionaria porque atravessou dois regrids (OCN->ATM no MED, ATM->
+    ! Voronoi no conector); NAO e' binarizada aqui de proposito — o corte
+    ! fica no consumidor final (write_mpas_import_diag), depois do binning
+    ! para a grade regular. Binarizar no meio do caminho produz escadinha
+    ! na linha de costa.
+    !
+    ! Este campo NAO alimenta a fisica do MONAN-A: o modelo tem a propria
+    ! landmask, e sobrepor a do oceano seria mudar o modelo, nao diagnostica-lo.
+    if (allocated(atm_bnd%omask)) then
+      atm_bnd%omask = 1.0_MPAS_RKIND   ! default tudo oceano, mesmo padrao de zorl/alb
+      call state_get_field_1d(importState, 'Sx_omask', nCells, atm_bnd%omask, rc, &
+                              lonCell, latCell)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+      ! Clamps [0,1] + NaN guard. Celula sem mapeamento geografico mantem
+      ! 1,0 (oceano) — falha para o lado de NAO mascarar, preservando o
+      ! comportamento anterior em vez de apagar dado bom.
+      where (atm_bnd%omask < 0.0_MPAS_RKIND) atm_bnd%omask = 1.0_MPAS_RKIND
+      where (atm_bnd%omask > 1.0_MPAS_RKIND) atm_bnd%omask = 1.0_MPAS_RKIND
+      where (atm_bnd%omask /= atm_bnd%omask)  atm_bnd%omask = 1.0_MPAS_RKIND
+    end if
+
     call ESMF_LogWrite(subname//': importacao Fase 2 concluida ' // &
-      '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl)', ESMF_LOGMSG_INFO)
+      '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl + Sf_albedo + Sx_omask)', &
+      ESMF_LOGMSG_INFO)
 
     ! ── Diagnóstico de importação MED→MPAS ──────────────────────────────
     ! Escrito quando write_import_diag=.true. em &nuopc_docn do nuopc.input

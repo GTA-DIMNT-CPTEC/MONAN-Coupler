@@ -757,7 +757,8 @@ contains
              atm_bnd%uocn        (n), &
              atm_bnd%vocn        (n), &
              atm_bnd%zorl        (n), &
-             atm_bnd%alb         (n))
+             atm_bnd%alb         (n), &
+             atm_bnd%omask       (n))
     atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
     atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
     atm_bnd%uocn         = 0.0_MPAS_RKIND   ! Sprint A: corrente zonal
@@ -767,6 +768,11 @@ contains
     ! do mediador. Sem config dedicado (cfg_alb_default) para nao adicionar
     ! mais uma dependencia de namelist so' para um valor de bootstrap.
     atm_bnd%alb          = 0.08_MPAS_RKIND
+    ! B-DIAGMASK-01: default 1,0 (tudo oceano) ate a 1a troca real com o
+    ! mediador. Mesmo criterio do fallback de is%f_omask_atm no MED: se a
+    ! mascara nao chegar, o diagnostico sai como saia antes (sem mascarar),
+    ! em vez de apagar o globo inteiro.
+    atm_bnd%omask        = 1.0_MPAS_RKIND
 
     atm_state%initialized = .true.
     ! B-32: nSolve = células próprias (sem halos); n = nCells total (com halos).
@@ -1242,6 +1248,7 @@ contains
     if (allocated(atm_bnd%vocn))          deallocate(atm_bnd%vocn)   ! Sprint A
     if (allocated(atm_bnd%zorl))          deallocate(atm_bnd%zorl)
     if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)     ! Fase 2.6
+    if (allocated(atm_bnd%omask))         deallocate(atm_bnd%omask)   ! B-DIAGMASK-01
     ! Buffers de saída computados (propriedade deste módulo)
     if (allocated(g_prev_acswdnb)) deallocate(g_prev_acswdnb)
     if (allocated(g_prev_aclwdnb)) deallocate(g_prev_aclwdnb)
@@ -1298,6 +1305,7 @@ contains
     if (allocated(atm_bnd%vocn))         deallocate(atm_bnd%vocn)
     if (allocated(atm_bnd%zorl))         deallocate(atm_bnd%zorl)
     if (allocated(atm_bnd%alb))          deallocate(atm_bnd%alb)      ! Fase 2.6
+    if (allocated(atm_bnd%omask))        deallocate(atm_bnd%omask)    ! B-DIAGMASK-01
 
     allocate(atm_bnd%sst         (nCells_new))
     allocate(atm_bnd%ice_fraction(nCells_new))
@@ -1305,12 +1313,14 @@ contains
     allocate(atm_bnd%vocn        (nCells_new))     ! Sprint A
     allocate(atm_bnd%zorl        (nCells_new))
     allocate(atm_bnd%alb         (nCells_new))     ! Fase 2.6
+    allocate(atm_bnd%omask       (nCells_new))     ! B-DIAGMASK-01
     atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
     atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
     atm_bnd%uocn         = 0.0_MPAS_RKIND
     atm_bnd%vocn         = 0.0_MPAS_RKIND
     atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
     atm_bnd%alb          = 0.08_MPAS_RKIND    ! Fase 2.6 — default agua aberta
+    atm_bnd%omask        = 1.0_MPAS_RKIND     ! B-DIAGMASK-01 — default tudo oceano
 
     ! ── Redimensiona buffers de módulo (acumulados e stress) ─────────────
     ! Estes arrays são alocados em mpas_atm_init com tamanho = MPAS nCells.

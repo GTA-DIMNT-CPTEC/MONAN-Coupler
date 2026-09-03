@@ -110,6 +110,13 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), allocatable :: vocn(:)         !< corrente meridional 0 m  [m/s]
     real(MPAS_RKIND), allocatable :: zorl(:)         !< rugosidade               [m]
     real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície (Fase 2.6) [0–1]
+    !> FIX B-DIAGMASK-01 (Set/2026): máscara terra/oceano REAL do MOM6
+    !! (ocean_grid%mask2dT), recebida do mediador como Sx_omask. Chega
+    !! fracionária, porque atravessou dois regrids (OCN→ATM no MED e
+    !! ATM→Voronoi no conector); o corte binário fica no consumidor final.
+    !! Usada hoje apenas para mascarar continentes em monan2_import_*.nc —
+    !! NÃO alimenta a física do MONAN-A, que tem a própria landmask.
+    real(MPAS_RKIND), allocatable :: omask(:)        !< 1=oceano, 0=terra       [0–1]
   end type atm_ocean_boundary_type
 
 end module mpas_atm_types_mod

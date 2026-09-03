@@ -101,9 +101,14 @@ contains
   !!   FIX-IMP-06: valid_time em ISO 8601.
   !!   FIX-IMP-07: Atributos globais revisados para clareza semântica.
   !!
+  !! FIX B-DIAGMASK-01 (Set/2026): continentes mascarados com a máscara REAL
+  !!   do MOM6 (ocean_grid%mask2dT → So_omask → is%f_omask_atm). Célula de
+  !!   terra passa a sair como _FillValue em vez de zero, e a própria máscara
+  !!   é gravada na variável Sx_omask (1=oceano, 0=terra).
+  !!
   !! Saída: <med_import_diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
   !!   Dimensões: lat(180), lon(360)  [grade MED interna ATM]
-  !!   Variáveis: lat, lon, time + 14 campos Foxx_*/Faxa_*/Sa_*/So_*
+  !!   Variáveis: lat, lon, time + campos Foxx_*/Faxa_*/Sa_*/So_*/Fioi_*/Sx_*
   !!
   !! @param[inout] state     exportState MED→OCN
   !! @param[in]   currTime  Tempo corrente (para nome do arquivo e atributo time)
@@ -122,6 +127,10 @@ contains
     real(ESMF_KIND_R8), pointer     :: fptr2d(:,:)
     real(ESMF_KIND_R8), pointer     :: xcoord(:,:), ycoord(:,:)
     real(ESMF_KIND_R8), allocatable :: grid_local(:,:), grid_global(:,:)
+    ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6 na grade de saida.
+    real(ESMF_KIND_R8), allocatable :: mask_local(:,:), mask_global(:,:)
+    real(ESMF_KIND_R8), pointer     :: pmask2d(:,:)
+    logical :: mask_ok
     integer :: fieldCount, n, ncid, varid, ios, mpi_ierr
     integer :: dimid_lat, dimid_lon
     integer :: varid_lat, varid_lon, varid_t
@@ -223,6 +232,11 @@ contains
           yy,'-',mm,'-',dd,'T',hh,':',mn,':',ss
         ios = nf90_put_att(ncid, NF90_GLOBAL, 'valid_time', trim(iso_time))
       end block
+      ! FIX B-DIAGMASK-01 (Set/2026)
+      ios = nf90_put_att(ncid, NF90_GLOBAL, 'land_mask_source', &
+        'MOM6 ocean_grid%mask2dT (So_omask, regridada para a grade ATM); '// &
+        'celulas de terra gravadas como _FillValue; a mascara vai na '// &
+        'variavel Sx_omask (1=oceano, 0=terra)')
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'nx_global', nx_global)
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'ny_global', ny_global)
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'petCount',  med_pet_count)
@@ -293,6 +307,10 @@ contains
               case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
               case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
               case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
+              ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6. E' a UNICA
+              ! variavel do arquivo que nao recebe _FillValue sobre terra —
+              ! e' justamente ela que diz onde a terra fica.
+              case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'
               case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
             end select
             ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
@@ -326,6 +344,81 @@ contains
     allocate(grid_local(nx_global, ny_global))
     allocate(grid_global(nx_global, ny_global))
 
+    !--------------------------------------------------------------------------
+    ! FIX B-DIAGMASK-01 (Set/2026): mascara terra/oceano REAL do MOM6 montada
+    ! UMA vez por arquivo, pelo mesmo caminho de gather usado nos campos.
+    !
+    ! Ate' aqui o continente saia do diagnostico como ZERO (fluxos zerados
+    ! pelo Sprint A.5.1 antes do export). Zero e' um valor fisico legitimo de
+    ! fluxo — o GrADS e o pos-processamento nao tinham como distinguir "fluxo
+    ! nulo sobre oceano calmo" de "aqui nao ha oceano". Agora a celula de
+    ! terra sai como _FillValue, que e' exatamente o que o mask2dT do MOM6
+    ! afirma sobre ela.
+    !
+    ! MPI_MAX sobre 0/1 e' inequivoco (ao contrario do MAX sobre FILL_IMP
+    ! usado nos campos): PET que nao possui a celula contribui com 0, o PET
+    ! dono contribui com o valor real. Terra continua 0, oceano vira 1.
+    !
+    ! IMPORTANTE: a mascara e' aplicada em grid_global, buffer LOCAL deste
+    ! escritor. O exportState permanece com os zeros do Sprint A.5.1 — se
+    ! -9,99e20 vazasse para la', viraria forcante do MOM6.
+    !--------------------------------------------------------------------------
+    allocate(mask_local(nx_global, ny_global))
+    allocate(mask_global(nx_global, ny_global))
+    mask_local = 0.0_ESMF_KIND_R8
+    mask_ok    = .false.
+    nullify(pmask2d)
+    ! B-45: ESMF_FieldGet(farrayPtr) falha em PET sem DE local. Verificar
+    ! antes de acessar, como ja' e' feito no resto do mediador — senao o
+    ! ERROR do ESMF poluiria o log a cada passo nesses PETs.
+    block
+      integer :: ldec_mask, rc_mask
+      ldec_mask = 0
+      call ESMF_FieldGet(is%f_omask_atm, localDeCount=ldec_mask, rc=rc_mask)
+      if (rc_mask == ESMF_SUCCESS .and. ldec_mask > 0) then
+        call ESMF_FieldGet(is%f_omask_atm, farrayPtr=pmask2d, rc=rc_mask)
+        if (rc_mask /= ESMF_SUCCESS) nullify(pmask2d)
+      end if
+    end block
+    if (associated(pmask2d)) then
+      block
+        integer :: i1m, i2m, j1m, j2m
+        i1m = max(1, lbound(pmask2d,1));  i2m = min(nx_global, ubound(pmask2d,1))
+        j1m = max(1, lbound(pmask2d,2));  j2m = min(ny_global, ubound(pmask2d,2))
+        if (i2m >= i1m .and. j2m >= j1m) &
+          mask_local(i1m:i2m, j1m:j2m) = pmask2d(i1m:i2m, j1m:j2m)
+      end block
+    end if
+    rc = ESMF_SUCCESS
+
+    call MPI_Allreduce(mask_local, mask_global, nx_global*ny_global, &
+                       MPI_DOUBLE_PRECISION, MPI_MAX, med_mpi_comm, mpi_ierr)
+
+    ! mask_ok e' decidido DEPOIS do gather, e nao por PET: um PET sem DE
+    ! local nao ve mascara nenhuma, mas isso nao significa que ela faltou.
+    ! Mascara toda zerada = nao chegou de lugar nenhum -> nao mascarar, que
+    ! e' o comportamento anterior. Falhar para o lado de nao apagar dado.
+    mask_ok = any(mask_global >= 0.5_ESMF_KIND_R8)
+
+    if (med_local_pet == 0) then
+      block
+        character(len=160) :: logmsg_mask
+        integer :: n_ocn_g
+        if (mask_ok) then
+          n_ocn_g = count(mask_global >= 0.5_ESMF_KIND_R8)
+          write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
+            'MED B-DIAGMASK-01: mascara do diagnostico — oceano ', &
+            100.0*real(n_ocn_g)/real(nx_global*ny_global), '% (', n_ocn_g, &
+            ' de ', nx_global*ny_global, ' celulas)'
+          call ESMF_LogWrite(trim(logmsg_mask), ESMF_LOGMSG_INFO)
+        else
+          call ESMF_LogWrite(subname//': AVISO — mascara So_omask vazia ou '// &
+            'indisponivel; continentes NAO serao mascarados neste arquivo', &
+            ESMF_LOGMSG_WARNING)
+        end if
+      end block
+    end if
+
     do n = 1, fieldCount
       ! BUG-WRITE-OCN: ler dos campos ATM internos (grade 360×180 global)
       nullify(fptr2d)
@@ -358,6 +451,8 @@ contains
         case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
         case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
         case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
+        ! FIX B-DIAGMASK-01: a propria mascara vira variavel do arquivo.
+        case ('Sx_omask');       call ESMF_FieldGet(is%f_omask_atm,  farrayPtr=fptr2d, rc=rc)
         case default
           ! Um campo do exportState sem mapeamento aqui vira variavel vazia no
           ! arquivo, sem nenhum sinal. Registrar o aviso para que a proxima
@@ -411,6 +506,13 @@ contains
         grid_global = FILL_IMP
       end where
 
+      ! FIX B-DIAGMASK-01: continentes saem como _FillValue. A propria
+      ! mascara e' a excecao obvia — mascara-la apagaria a informacao de
+      ! onde a terra fica, que e' o unico conteudo dela.
+      if (mask_ok .and. trim(fieldNameList(n)) /= 'Sx_omask') then
+        where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_IMP
+      end if
+
       if (med_local_pet == 0) then
         ios = nf90_inq_varid(ncid, trim(fieldNameList(n)), varid)
         if (ios == NF90_NOERR) ios = nf90_put_var(ncid, varid, real(grid_global, 4))
@@ -420,6 +522,7 @@ contains
     first_write_diag = .false.
 
     deallocate(grid_local, grid_global, fieldNameList)
+    deallocate(mask_local, mask_global)
 
     if (med_local_pet == 0) then
       ios = nf90_close(ncid)
@@ -431,6 +534,8 @@ contains
     if (med_local_pet == 0) ios = nf90_close(ncid)
     if (allocated(grid_local))    deallocate(grid_local)
     if (allocated(grid_global))   deallocate(grid_global)
+    if (allocated(mask_local))    deallocate(mask_local)
+    if (allocated(mask_global))   deallocate(mask_global)
     if (allocated(fieldNameList)) deallocate(fieldNameList)
     call ESMF_LogWrite(subname//': ERRO NetCDF '//trim(fname), ESMF_LOGMSG_WARNING)
     rc = ESMF_SUCCESS
