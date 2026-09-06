@@ -100,6 +100,11 @@
 #   -n, --np N            Total de PETs                     (padrão: 8)
 #       --atm K           PETs do ATM (MPAS)                (padrão: metade)
 #       --ocn K           PETs do OCN (MOM6/DOCN)           (padrão: resto)
+#       --ice K           PETs do ICE (SIS2). >0 liga use_sis2_dynamic.
+#                         (padrão: herda use_sis2_dynamic da nuopc.input base;
+#                          se ligado lá e --ice não for dado, usa 1/3 do resto)
+#       --no-ice          Força a rodada SEM componente ICE, mesmo que a
+#                         nuopc.input base tenha use_sis2_dynamic = .true.
 #   -w, --walltime HH:MM:SS  Walltime PBS                   (padrão: 00:30:00)
 #       --queue NOME      Fila PBS (-q)                     (padrão: default do sistema)
 #       --account NOME    Conta/projeto PBS (-A)            (padrão: nenhum)
@@ -135,6 +140,17 @@ export COUPLER_ROOT
 
 # ── Padrões (a maioria sobrescrevível por env ou flag) ───────────────────────
 NP=8; ATM=0; OCN=0
+# ── Componente ICE (SIS2 dinâmico) ───────────────────────────────────────────
+# BUG-SEQ-TEST-ICE-01 (Set/2026): até esta versão o teste não conhecia o gelo.
+# gen_config removia o grupo &nuopc_petlayout inteiro da nuopc.input base e
+# reinjetava um grupo SEM use_sis2_dynamic, de modo que uma configuração com
+# gelo ligado era testada sem gelo — silenciosamente, e com o veredito PASSOU.
+# Agora o valor é herdado da nuopc.input base e pode ser forçado nos dois
+# sentidos por --ice / --no-ice.
+#   ICE_REQ = -1 herdar da base | 0 forçar sem gelo | >0 nº de PETs do ICE
+ICE_REQ=-1
+ICE=0
+USE_ICE=0
 WALLTIME="00:30:00"
 QUEUE="${PBS_QUEUE:-}"
 ACCOUNT="${PBS_ACCOUNT:-}"
@@ -180,6 +196,8 @@ while [[ $# -gt 0 ]]; do
     -n|--np)          NP="$2"; shift 2;;
     --atm)            ATM="$2"; shift 2;;
     --ocn)            OCN="$2"; shift 2;;
+    --ice)            ICE_REQ="$2"; shift 2;;
+    --no-ice)         ICE_REQ=0; shift;;
     -w|--walltime)    WALLTIME="$2"; shift 2;;
     --queue)          QUEUE="$2"; shift 2;;
     --account)        ACCOUNT="$2"; shift 2;;
@@ -216,12 +234,57 @@ IMPORT_DIR="$RUNDIR/diag_import-$TAG"
 EXPORT_DIR="$RUNDIR/diag_export-$TAG"
 STDOUT_LOG="$RUNDIR/$LOG_DIR/stdout.log"
 
-if   [[ "$ATM" -le 0 && "$OCN" -le 0 ]]; then ATM=$(( (NP + 1) / 2 )); OCN=$(( NP - ATM ))
-elif [[ "$ATM" -le 0 ]]; then ATM=$(( NP - OCN ))
-elif [[ "$OCN" -le 0 ]]; then OCN=$(( NP - ATM ))
+# ── Herança de use_sis2_dynamic da nuopc.input base ──────────────────────────
+# Lê a chave ignorando comentários (tudo depois do '!') e maiúsculas/minúsculas.
+_base_sis2() {
+  [[ -f "$BASE_INPUT" ]] || { echo 0; return; }
+  local v
+  v="$(sed 's/!.*//' "$BASE_INPUT" \
+        | grep -iE '^[[:space:]]*use_sis2_dynamic[[:space:]]*=' \
+        | tail -1 | tr 'A-Z' 'a-z')"
+  [[ "$v" == *.true.* ]] && echo 1 || echo 0
+}
+_base_icepet() {
+  [[ -f "$BASE_INPUT" ]] || { echo 0; return; }
+  local v
+  v="$(sed 's/!.*//' "$BASE_INPUT" \
+        | grep -iE '^[[:space:]]*ice_pet_count[[:space:]]*=' \
+        | tail -1 | grep -oE '[0-9]+' | tail -1)"
+  [[ "$v" =~ ^[0-9]+$ ]] && echo "$v" || echo 0
+}
+
+if   [[ "$ICE_REQ" -gt 0 ]]; then USE_ICE=1; ICE="$ICE_REQ"
+elif [[ "$ICE_REQ" -eq 0 ]]; then USE_ICE=0; ICE=0
+else
+  USE_ICE="$(_base_sis2)"
+  if [[ "$USE_ICE" -eq 1 ]]; then
+    ICE="$(_base_icepet)"
+  else
+    ICE=0
+  fi
 fi
-[[ "$NP" -ge 2 && "$ATM" -ge 1 && "$OCN" -ge 1 && $((ATM + OCN)) -eq "$NP" ]] \
-  || die "partição inválida: atm=$ATM ocn=$OCN devem somar np=$NP (todos >=1)"
+
+# Partição em três blocos. Com USE_ICE=0 e ICE=0 as contas abaixo recaem
+# exatamente na divisão em dois blocos que existia antes, byte a byte.
+if [[ "$USE_ICE" -eq 1 && "$ICE" -le 0 ]]; then
+  if   [[ "$ATM" -le 0 && "$OCN" -le 0 ]]; then
+    ATM=$(( NP / 3 )); OCN=$(( NP / 3 )); ICE=$(( NP - ATM - OCN ))
+  elif [[ "$ATM" -le 0 ]]; then ATM=$(( (NP - OCN) / 2 )); ICE=$(( NP - ATM - OCN ))
+  elif [[ "$OCN" -le 0 ]]; then OCN=$(( (NP - ATM) / 2 )); ICE=$(( NP - ATM - OCN ))
+  else ICE=$(( NP - ATM - OCN ))
+  fi
+elif [[ "$ATM" -le 0 && "$OCN" -le 0 ]]; then
+  ATM=$(( (NP - ICE + 1) / 2 )); OCN=$(( NP - ATM - ICE ))
+elif [[ "$ATM" -le 0 ]]; then ATM=$(( NP - OCN - ICE ))
+elif [[ "$OCN" -le 0 ]]; then OCN=$(( NP - ATM - ICE ))
+fi
+
+[[ "$NP" -ge 2 && "$ATM" -ge 1 && "$OCN" -ge 1 && $((ATM + OCN + ICE)) -eq "$NP" ]] \
+  || die "partição inválida: atm=$ATM ocn=$OCN ice=$ICE devem somar np=$NP (atm e ocn >=1)"
+[[ "$USE_ICE" -eq 0 || "$ICE" -ge 1 ]] \
+  || die "componente ICE pedido mas ice=$ICE; use --ice K com K>=1 ou --no-ice"
+[[ "$USE_ICE" -eq 1 || "$ICE" -eq 0 ]] \
+  || die "ice=$ICE sem use_sis2_dynamic; mesma regra do driver (config_read)"
 
 # ── Decisão de fase: submeter (login) vs executar (dentro do job/interativo) ──
 #   PBS_O_WORKDIR definido ⇒ estamos dentro de um job PBS (batch ou interativo).
@@ -255,6 +318,7 @@ submit_phase() {
 
   # Argumentos repassados ao job (reexecuta este script em --local dentro dele)
   local run_args=( -n "$NP" --atm "$ATM" --ocn "$OCN"
+                   --ice "$( [[ "$USE_ICE" -eq 1 ]] && echo "$ICE" || echo 0 )"
                    --steps "$STEPS_TARGET" --timeout "$TIMEOUT"
                    --stall "$STALL" --interval "$INTERVAL"
                    --rundir "$RUNDIR" --input "$BASE_INPUT"
@@ -291,7 +355,7 @@ submit_phase() {
   log "COUPLER_ROOT = $COUPLER_ROOT"
   log "experimento  = $RUNDIR"
   log "executável   = $EXE"
-  log "PETs         = $NP (ATM=$ATM | OCN=$OCN)"
+  log "PETs         = $NP (ATM=$ATM | OCN=$OCN | ICE=$ICE)"
   log "recursos     = select=${select_line}  walltime=${WALLTIME}${QUEUE:+  fila=$QUEUE}${ACCOUNT:+  conta=$ACCOUNT}"
   log "script PBS   = $pbs"
   log "saída do job = $joblog"
@@ -384,6 +448,21 @@ gen_config() {
       echo "  atm_pet_count = 0"
       echo "  ocn_pet_count = 0"
     fi
+    # BUG-SEQ-TEST-ICE-01: sem estas duas linhas o grupo reinjetado ficava sem
+    # use_sis2_dynamic, o default Fortran .false. valia, e uma configuração com
+    # gelo era testada sem gelo. Em layout 'shared' o ICE fica em todos os PETs
+    # e ice_pet_count DEVE ser 0 (config_read rejeita contagem com shared).
+    if [[ "$USE_ICE" -eq 1 ]]; then
+      echo "  use_sis2_dynamic = .true."
+      if [[ "$layout" == "split" ]]; then
+        echo "  ice_pet_count = $ICE"
+      else
+        echo "  ice_pet_count = 0"
+      fi
+    else
+      echo "  use_sis2_dynamic = .false."
+      echo "  ice_pet_count = 0"
+    fi
     echo "/"
   } >> "$out"
 }
@@ -472,18 +551,41 @@ _diag_tail() {
 # A união é necessária porque os PETs irmãos de um mesmo componente rodam ao
 # mesmo tempo (isso é esperado e não é sobreposição ATM×OCN); o que interessa
 # é a interseção entre a união do bloco ATM e a união do bloco OCN.
+# BUG-SEQ-TEST-ICE-01: passou a medir os TRÊS blocos. Devolve, no stdout, seis
+# campos:
+#   <ov_atm_ocn> <ov_atm_ice> <ov_ocn_ice> <span_atm> <span_ocn> <span_ice>
+# Campos do ICE saem 0 quando o componente não está ativo.
+#
+# A leitura muda de sentido conforme o par:
+#   ATM x OCN e ATM x ICE  devem ser ~0. Sobreposição aqui significa que a
+#     RunSequence concorrente foi montada por engano.
+#   OCN x ICE              também deve ser ~0: a linha 'MED -> ICE' fica entre
+#     'OCN' e 'ICE' e, por ser conector de um componente registrado em todos os
+#     PETs, é ponto de encontro obrigatório. Sobreposição aqui indicaria que
+#     essa linha saiu do lugar na RunSequence.
 measure_overlap() {
   command -v python3 >/dev/null 2>&1 || return 1
-  python3 - "$RUNDIR/$LOG_DIR" "$ATM" <<'PYEOF' 2>/dev/null
+  python3 - "$RUNDIR/$LOG_DIR" "$ATM" "$OCN" "$ICE" <<'PYEOF' 2>/dev/null
 import re, sys, glob, os
 from datetime import datetime
 
-logdir, n_atm = sys.argv[1], int(sys.argv[2])
+logdir = sys.argv[1]
+n_atm, n_ocn, n_ice = int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4])
+
+# Faixa de PET de cada bloco, na MESMA ordem em que esm.F90 monta as petList:
+# ATM = [0, n_atm), OCN = [n_atm, n_atm+n_ocn), ICE = [n_atm+n_ocn, ...).
+RANGE = {
+    "MPAS": (0, n_atm),
+    "OCN":  (n_atm, n_atm + n_ocn),
+    "ICE":  (n_atm + n_ocn, n_atm + n_ocn + n_ice),
+}
+
 RE_LINE = re.compile(
     r"^(?P<d>\d{8})\s+(?P<t>\d{6}\.\d+)\s+\S+\s+PET(?P<pet>\d+)\s+(?P<msg>.*)$")
-RE_RUN = re.compile(r"^(?P<comp>MPAS|OCN):\s*Run\s+(?P<edge>intro|extro)\.?\s*$")
+RE_RUN = re.compile(
+    r"^(?P<comp>MPAS|OCN|ICE):\s*Run\s+(?P<edge>intro|extro)\.?\s*$")
 
-spans = {"MPAS": [], "OCN": []}
+spans = {"MPAS": [], "OCN": [], "ICE": []}
 for f in sorted(glob.glob(os.path.join(logdir, "PET*.esmApp.log"))):
     pending = {}
     for raw in open(f, errors="replace"):
@@ -496,9 +598,8 @@ for f in sorted(glob.glob(os.path.join(logdir, "PET*.esmApp.log"))):
         pet, comp = int(m.group("pet")), rm.group("comp")
         # Só conta janelas no bloco esperado: um PET do bloco OCN que
         # reportasse MPAS já seria, por si, falha de particionamento.
-        if comp == "MPAS" and pet >= n_atm:
-            continue
-        if comp == "OCN" and pet < n_atm:
+        lo, hi = RANGE[comp]
+        if not (lo <= pet < hi):
             continue
         ts = datetime.strptime(m.group("d") + " " + m.group("t"),
                                "%Y%m%d %H%M%S.%f").timestamp()
@@ -519,23 +620,27 @@ def merge(iv):
             out.append([a, b])
     return out
 
-atm, ocn = merge(spans["MPAS"]), merge(spans["OCN"])
+def overlap(u, v):
+    ov = 0.0
+    i = j = 0
+    while i < len(u) and j < len(v):
+        lo, hi = max(u[i][0], v[j][0]), min(u[i][1], v[j][1])
+        if hi > lo:
+            ov += hi - lo
+        if u[i][1] < v[j][1]:
+            i += 1
+        else:
+            j += 1
+    return ov
+
+atm, ocn, ice = (merge(spans["MPAS"]), merge(spans["OCN"]), merge(spans["ICE"]))
 if not atm or not ocn:
     sys.exit(1)
 
-ov = 0.0
-i = j = 0
-while i < len(atm) and j < len(ocn):
-    lo, hi = max(atm[i][0], ocn[j][0]), min(atm[i][1], ocn[j][1])
-    if hi > lo:
-        ov += hi - lo
-    if atm[i][1] < ocn[j][1]:
-        i += 1
-    else:
-        j += 1
-
-print("%.3f %.3f %.3f" % (ov,
-      sum(b - a for a, b in atm), sum(b - a for a, b in ocn)))
+span = lambda u: sum(b - a for a, b in u)
+print("%.3f %.3f %.3f %.3f %.3f %.3f" % (
+    overlap(atm, ocn), overlap(atm, ice), overlap(ocn, ice),
+    span(atm), span(ocn), span(ice)))
 PYEOF
 }
 
@@ -556,6 +661,33 @@ analyze() {
     NFAIL=$((NFAIL+1))
   else
     bad "marcador de layout ausente nos logs"; NFAIL=$((NFAIL+1))
+  fi
+
+  # (1b) Componente ICE (SIS2): registrado e com o terceiro bloco de PET.
+  if [[ "$USE_ICE" -eq 1 ]]; then
+    if grep_any "layout SPLIT.*ICE=PET\[$((ATM+OCN))\.\.$((NP-1))\]"; then
+      ok "terceiro bloco de PET do ICE aplicado (ICE=$ICE)"
+    else
+      bad "bloco de PET do ICE ausente ou com faixa diferente da pedida"
+      grep -hoE "layout SPLIT.*" "$RUNDIR/$LOG_DIR"/PET*.esmApp.log 2>/dev/null \
+        | head -1 | sed 's/^/        /'
+      NFAIL=$((NFAIL+1))
+    fi
+    if grep_any "componente ICE \(SIS2\) registrado"; then
+      ok "componente ICE registrado no driver"
+    else bad "componente ICE NÃO registrado (use_sis2_dynamic chegou ao driver?)"
+      NFAIL=$((NFAIL+1)); fi
+    if grep_any "RunSequence Fase 2 SEQUENCIAL \+ ICE \(SIS2\)"; then
+      ok "RunSequence sequencial COM gelo selecionada"
+    else
+      bad "RunSequence com gelo não selecionada — o SIS2 ficaria inerte"
+      NFAIL=$((NFAIL+1))
+    fi
+  else
+    if grep_any "componente ICE \(SIS2\) registrado"; then
+      bad "componente ICE registrado, mas o teste pediu execução SEM gelo"
+      NFAIL=$((NFAIL+1))
+    else ok "execução sem componente ICE, como pedido"; fi
   fi
 
   # (2) Execução sequencial: a RunSequence NÃO pode ser a concorrente.
@@ -630,18 +762,44 @@ analyze() {
   #     não há janelas Run suficientes, e o resultado seria ruído.
   case "$VERDICT" in
     completed|progress)
-      local ovline ov span_atm span_ocn
+      local ovline ov_ao ov_ai ov_oi span_atm span_ocn span_ice
       if ! ovline="$(measure_overlap)" || [[ -z "$ovline" ]]; then
-        warn "sobreposição ATM×OCN não medida (python3 ausente ou sem janelas Run nos logs)"
+        warn "sobreposição entre componentes não medida (python3 ausente ou sem janelas Run nos logs)"
       else
-        read -r ov span_atm span_ocn <<< "$ovline"
-        log "janelas Run: ATM=${span_atm}s  OCN=${span_ocn}s  sobreposição=${ov}s"
-        if awk -v o="$ov" -v t="$OVERLAP_TOL" 'BEGIN{exit !(o<=t)}'; then
-          ok "ATM e OCN não se sobrepõem no tempo (${ov}s <= tolerância ${OVERLAP_TOL}s)"
+        read -r ov_ao ov_ai ov_oi span_atm span_ocn span_ice <<< "$ovline"
+        log "janelas Run: ATM=${span_atm}s  OCN=${span_ocn}s  ICE=${span_ice}s"
+        log "sobreposições: ATM×OCN=${ov_ao}s  ATM×ICE=${ov_ai}s  OCN×ICE=${ov_oi}s"
+
+        if awk -v o="$ov_ao" -v t="$OVERLAP_TOL" 'BEGIN{exit !(o<=t)}'; then
+          ok "ATM e OCN não se sobrepõem no tempo (${ov_ao}s <= tolerância ${OVERLAP_TOL}s)"
         else
-          bad "ATM e OCN SE SOBREPÕEM por ${ov}s (tolerância ${OVERLAP_TOL}s)"
+          bad "ATM e OCN SE SOBREPÕEM por ${ov_ao}s (tolerância ${OVERLAP_TOL}s)"
           bad "  execução concorrente onde se esperava sequencial — conferir SetRunSequence"
           NFAIL=$((NFAIL+1))
+        fi
+
+        if [[ "$USE_ICE" -eq 1 ]]; then
+          # O gelo pertence à mesma fase do oceano, DEPOIS do ATM: a barreira
+          # 'MED -> OCN' separa o ATM dos dois. Sobreposição ATM×ICE tem a
+          # mesma leitura de ATM×OCN.
+          if awk -v o="$ov_ai" -v t="$OVERLAP_TOL" 'BEGIN{exit !(o<=t)}'; then
+            ok "ATM e ICE não se sobrepõem no tempo (${ov_ai}s <= tolerância ${OVERLAP_TOL}s)"
+          else
+            bad "ATM e ICE SE SOBREPÕEM por ${ov_ai}s (tolerância ${OVERLAP_TOL}s)"
+            NFAIL=$((NFAIL+1))
+          fi
+
+          # OCN e ICE também são fases distintas: a linha 'MED -> ICE' fica
+          # entre 'OCN' e 'ICE' e, por ser conector de um componente presente
+          # em todos os PETs, é ponto de encontro obrigatório. Em execução
+          # sequencial os três pares devem ter interseção praticamente nula.
+          if awk -v o="$ov_oi" -v t="$OVERLAP_TOL" 'BEGIN{exit !(o<=t)}'; then
+            ok "OCN e ICE não se sobrepõem no tempo (${ov_oi}s <= tolerância ${OVERLAP_TOL}s)"
+          else
+            bad "OCN e ICE SE SOBREPÕEM por ${ov_oi}s (tolerância ${OVERLAP_TOL}s)"
+            bad "  a barreira 'MED -> ICE' entre 'OCN' e 'ICE' sumiu da RunSequence?"
+            NFAIL=$((NFAIL+1))
+          fi
         fi
       fi
       ;;
@@ -665,8 +823,8 @@ run_phase() {
   log "COUPLER_ROOT = $COUPLER_ROOT"
   log "experimento  = $RUNDIR"
   log "executável   = $EXE"
-  log "PETs         = $NP  (ATM=$ATM | OCN=$OCN)"
-  log "configuração = coupling_mode=sequential  pet_layout=split"
+  log "PETs         = $NP  (ATM=$ATM | OCN=$OCN | ICE=$ICE)"
+  log "configuração = coupling_mode=sequential  pet_layout=split  use_sis2_dynamic=$( [[ "$USE_ICE" -eq 1 ]] && echo .true. || echo .false. )"
   log "encerra em   = $STEPS_TARGET passo(s) | timeout=${TIMEOUT}s | stall=${STALL}s"
   log "tolerância de sobreposição ATM×OCN = ${OVERLAP_TOL}s"
   echo ""

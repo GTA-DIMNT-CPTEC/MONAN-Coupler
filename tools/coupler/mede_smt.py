@@ -4,7 +4,32 @@
 mede_smt.py - Comparacao controlada do efeito do SMT no sistema acoplado
               MONAN-A 2.0 x MOM6+SIS2 (NUOPC/ESMF) no supercomputador Jaci.
 
-INPE / CGCT / DIMNT - GT Acoplamento de Modelos.
+INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos.
+
+ALTERACOES (Set/2026)
+---------------------
+1. O reconhecimento do modo de acoplamento estava quebrado com binario atual.
+   O padrao procurado era "ESM: modo SEQUENTIAL|CONCURRENT", formato ANTERIOR a
+   v14.20. Desde a separacao dos dois eixos o driver grava
+   "ESM: layout SPLIT (execucao SEQUENTIAL) - ...", que nao casava. Tres
+   verificacoes eram puladas em silencio: consistencia de modo entre rodadas,
+   igualdade de modo entre A e B, e o aviso de modo concorrente. Os dois
+   formatos passaram a ser aceitos.
+2. O componente de gelo (SIS2) entrou na ordem de exibicao. O leitor de logs
+   sempre foi generico e ja' capturava o rotulo ICE, mas sem estar na lista ele
+   caia no rabo alfabetico e vinha antes de MPAS e OCN.
+3. Nova verificacao do CONJUNTO DE COMPONENTES entre A e B. Sem ela, uma
+   configuracao com gelo comparada contra outra sem gelo passava sem sinal: as
+   linhas de componente ausente eram puladas, e a linha TOTAL comparava somas
+   de conjuntos diferentes. Num caso de teste com quatro componentes em A e
+   tres em B, o custo de maquina saiu 0,977 em vez de 1,062, ou seja, o
+   veredito anunciaria melhora de 2,3% onde havia degradacao de 6,2%.
+4. Nova verificacao do EIXO ESPACIAL. O experimento exige layout SHARED; com
+   split o 'select' e' heterogeneo, cada bloco fecha em nos inteiros e a
+   configuracao B nao ocupa um no' so'.
+5. A agregacao entre repeticoes passou a usar a intersecao das chaves, para
+   que uma divergencia de componentes chegue a' mensagem de erro em vez de
+   estourar antes com KeyError.
 
 CONTEXTO
 --------
@@ -20,6 +45,9 @@ alocar o mesmo numero de PETs:
 
 Este script le os logs de PET das duas configuracoes e responde se B e mais
 lento, igual ou mais rapido que A, e em qual componente a diferenca aparece.
+Os componentes reconhecidos sao MED, MPAS, OCN e ICE; o de gelo aparece apenas
+quando use_sis2_dynamic esta' ligado, e precisa estar ligado (ou desligado) nas
+DUAS configuracoes.
 
 METODOLOGIA
 -----------
@@ -45,7 +73,13 @@ METODOLOGIA
    avanca quando o ultimo termina, e o tempo ocioso dos PETs rapidos e
    desperdicio, nao economia.
 
-5. O primeiro passo e descartado por padrao (--descartar). Ele carrega alocacao
+5. O EXPERIMENTO EXIGE MODO SEQUENTIAL E LAYOUT SHARED. Em concurrent o tempo
+   por passo e o MAIOR dos avancos, e o balanceamento entre os blocos muda
+   entre as configuracoes. Em layout split o 'select' e' heterogeneo, com um
+   chunk por componente, e a configuracao B nao cai num no' so': a razao de nos
+   deixa de ser a que o teste supoe. A autoverificacao avisa nos dois casos.
+
+6. O primeiro passo e descartado por padrao (--descartar). Ele carrega alocacao
    preguicosa, primeiro toque de paginas de memoria e o custo inicial dos
    conectores, e nao e representativo do regime permanente.
 
@@ -76,7 +110,11 @@ PADRAO = re.compile(
     re.MULTILINE,
 )
 
-ORDEM_PADRAO = ["MED", "MPAS", "OCN"]
+# Ordem de exibicao. O leitor de logs e generico (o padrao casa qualquer
+# rotulo de componente), entao o ICE ja aparecia; sem estar nesta lista, porem,
+# caia no rabo alfabetico e vinha antes de MPAS e OCN, sugerindo uma
+# importancia que nao tem.
+ORDEM_PADRAO = ["MED", "MPAS", "OCN", "ICE"]
 
 # ── Autoverificacao ─────────────────────────────────────────────────────────
 # O script nao pode confiar apenas no NOME do diretorio: trocar logs.A por
@@ -84,7 +122,21 @@ ORDEM_PADRAO = ["MED", "MPAS", "OCN"]
 # proprio conteudo o modo de acoplamento (log de PET) e a topologia com o
 # regime de ocupacao do core (banner do job), permitindo conferir que cada
 # configuracao e o que se supoe que seja.
-MODO_RE   = re.compile(rb"ESM:\s*modo\s+(SEQUENTIAL|CONCURRENT)", re.I)
+# ATENCAO AO FORMATO DA LINHA (corrigido em Set/2026). Ate' esta revisao o
+# padrao era apenas "ESM: modo SEQUENTIAL|CONCURRENT", que e' o formato ANTERIOR
+# a' v14.20. Desde a separacao dos dois eixos o driver grava
+#   "ESM: layout SPLIT (execucao SEQUENTIAL) - ATM=PET[...] ..."
+# que nao casava. O efeito era que o conjunto de modos ficava vazio com binario
+# atual e TRES verificacoes eram puladas em silencio: a de consistencia entre
+# rodadas, a de igualdade entre A e B, e o aviso de modo concorrente. Justamente
+# as que protegem contra o erro mais grave do experimento, medir no modo errado.
+MODO_RE   = re.compile(
+    rb"ESM:\s*(?:modo\s+(?P<antigo>SEQUENTIAL|CONCURRENT)"
+    rb"|layout\s+\w+\s*\(\s*execucao\s+(?P<novo>SEQUENTIAL|CONCURRENT)\s*\))",
+    re.I)
+# Eixo espacial, disponivel apenas no formato v14.20+. O teste de SMT precisa
+# rodar em layout SHARED; ver a checagem em autoverifica().
+LAYOUT_RE = re.compile(rb"ESM:\s*layout\s+(SPLIT|SHARED)", re.I)
 TOPO_RE   = re.compile(r"TOPO\s*[:=]\s*(\d+)\s*n[oó]", re.I)
 REGIME_RE = re.compile(r"REGIME\s*[:=]\s*(.+)")
 BANNERS   = ("esmApp_run.log", "*.pbs", "*.o[0-9]*")
@@ -154,13 +206,23 @@ def le_meta(diretorio, arquivos):
     ausentes vem como None, e nesse caso a checagem correspondente e apenas
     pulada, nunca inventada.
     """
-    meta = {"modo": None, "nos": None, "regime": None}
+    meta = {"modo": None, "layout": None, "nos": None, "regime": None}
 
     if arquivos:
         with open(arquivos[0], "rb") as fh:
-            m = MODO_RE.search(fh.read())
+            bruto = fh.read()
+        m = MODO_RE.search(bruto)
         if m:
-            meta["modo"] = m.group(1).decode().upper()
+            achado = m.group("antigo") or m.group("novo")
+            meta["modo"] = achado.decode().upper()
+        ml = LAYOUT_RE.search(bruto)
+        if ml:
+            meta["layout"] = ml.group(1).decode().upper()
+        elif meta["modo"] and not ml:
+            # Formato <= v14.19: os dois eixos eram um so'. 'CONCURRENT'
+            # implicava PETs disjuntos, 'SEQUENTIAL' implicava compartilhados.
+            meta["layout"] = ("SPLIT" if meta["modo"] == "CONCURRENT"
+                              else "SHARED")
 
     for alvo in BANNERS:
         for caminho in sorted(glob.glob(os.path.join(diretorio, alvo))):
@@ -260,8 +322,18 @@ def resume_rodada(custos, descartar):
 
 
 def agrega(rodadas):
-    """Media e desvio-padrao amostral entre as repeticoes de uma configuracao."""
-    chaves = rodadas[0].keys()
+    """Media e desvio-padrao amostral entre as repeticoes de uma configuracao.
+
+    Usa a INTERSECAO das chaves das repeticoes. Antes usava as chaves da
+    primeira, o que estourava com KeyError caso uma repeticao tivesse um
+    componente a mais (por exemplo, uma das tres rodadas feita com o gelo
+    ligado). A divergencia em si e' apanhada pela autoverificacao, que
+    interrompe a comparacao; a intersecao aqui evita que o erro apareca como
+    excecao antes de a mensagem util ser impressa.
+    """
+    chaves = set(rodadas[0])
+    for r in rodadas[1:]:
+        chaves &= set(r)
     saida = {}
     for k in chaves:
         vals = [r[k] for r in rodadas]
@@ -436,7 +508,7 @@ def grava_grafico(caminho, cfgA, cfgB, comps):
 
 
 # ───────────────────────────── autoverificacao ─────────────────────────────
-def autoverifica(metas, petcount, args):
+def autoverifica(metas, petcount, args, comps_por_cfg=None):
     """Confere, a partir do CONTEUDO dos logs, que A e B sao o que se supoe.
 
     Sem isso, trocar os diretorios logs.A por logs.B inverteria a conclusao sem
@@ -450,6 +522,35 @@ def autoverifica(metas, petcount, args):
         erros.append(
             f"A tem {petcount['A']} PETs e B tem {petcount['B']}. A comparacao "
             f"exige o mesmo numero de PETs nas duas configuracoes.")
+
+    # 1b) Mesmo CONJUNTO DE COMPONENTES em A e B, e entre as repeticoes de cada
+    # configuracao. Sem isso, uma rodada com use_sis2_dynamic ligado e outra
+    # sem seriam comparadas assim mesmo: o ICE simplesmente nao apareceria na
+    # tabela (as linhas so' saem quando o componente existe nas duas), e a
+    # linha TOTAL, que soma os componentes, compararia somas de conjuntos
+    # diferentes. O numero sairia menor em quem tem menos componentes, e a
+    # conclusao seria atribuida ao SMT.
+    if comps_por_cfg:
+        for n in "AB":
+            conjuntos = [frozenset(c) for c in comps_por_cfg.get(n, [])]
+            if len(set(conjuntos)) > 1:
+                erros.append(
+                    f"as repeticoes de {n} nao tem os mesmos componentes: "
+                    + " vs ".join(sorted("/".join(sorted(c)) for c in set(conjuntos))))
+        cA = comps_por_cfg.get("A") or [[]]
+        cB = comps_por_cfg.get("B") or [[]]
+        sA, sB = frozenset(cA[0]), frozenset(cB[0])
+        if sA and sB and sA != sB:
+            falta_b = sorted(sA - sB)
+            falta_a = sorted(sB - sA)
+            detalhe = []
+            if falta_b:
+                detalhe.append("presente(s) so' em A: " + ", ".join(falta_b))
+            if falta_a:
+                detalhe.append("presente(s) so' em B: " + ", ".join(falta_a))
+            erros.append("A e B nao tem os mesmos componentes ("
+                         + "; ".join(detalhe)
+                         + "). A comparacao exige a mesma configuracao.")
 
     # 2) Mesmo modo de acoplamento, e de preferencia sequential.
     modos = {n: {m["modo"] for _d, m in metas[n] if m["modo"]} for n in "AB"}
@@ -466,6 +567,29 @@ def autoverifica(metas, petcount, args):
             "em SEQUENTIAL: em concurrent o tempo por passo e max(t_ATM, t_OCN) "
             "e o balanceamento entre os blocos muda entre as configuracoes, "
             "confundindo o resultado.")
+
+    # 2b) Eixo espacial. O experimento de SMT exige layout SHARED.
+    #
+    # Com pet_layout='split' o run_esmApp.jaci monta um 'select' HETEROGENEO,
+    # com um chunk por componente, e cada bloco fecha em nos inteiros. A
+    # configuracao B nao cai num no' so': ela usa pelo menos um no' por bloco,
+    # e a razao de nos entre A e B deixa de ser a que o teste supoe. O numero
+    # lido do banner corrige a conta (item 4 abaixo), mas o experimento ja' nao
+    # e' o que se queria: A e B passam a diferir tambem na topologia dos
+    # blocos, e nao apenas na ocupacao do core.
+    layouts = {n: {m["layout"] for _d, m in metas[n] if m["layout"]}
+               for n in "AB"}
+    todos_lay = layouts["A"] | layouts["B"]
+    if "SPLIT" in todos_lay:
+        avisos.append(
+            "ha' rodada(s) em layout SPLIT. O teste do SMT deve ser feito em "
+            "SHARED: com split o 'select' e' heterogeneo, cada bloco fecha em "
+            "nos inteiros, e a configuracao B nao ocupa um no' so'. Confira o "
+            "numero de nos no banner antes de citar qualquer razao.")
+    if layouts["A"] and layouts["B"] and layouts["A"] != layouts["B"]:
+        erros.append(
+            f"A roda em layout {'/'.join(sorted(layouts['A']))} e B em "
+            f"{'/'.join(sorted(layouts['B']))}. O layout precisa ser o mesmo.")
 
     # 3) Regime de ocupacao do core, quando o banner do job estiver presente.
     for n, esperado, rotulo in (("A", False, "1 rank por core fisico"),
@@ -545,6 +669,7 @@ def main():
 
     resultados, comps_ref, meta = {}, None, {}
     metas = {"A": [], "B": []}
+    comps_por_cfg = {"A": [], "B": []}
     petcount = {}
     for nome, dirs in (("A", args.a), ("B", args.b)):
         rodadas, npassos, npets = [], [], []
@@ -562,7 +687,14 @@ def main():
             npassos.append(np_)
             npets.append(n)
             metas[nome].append((d, meta_dir))
-            comps_ref = comps_ref or comps
+            comps_por_cfg[nome].append(list(comps))
+            # Uniao ordenada, e nao "a primeira que aparecer": um componente
+            # presente so' em B (ou so' na segunda repeticao) precisa constar
+            # da lista para que a autoverificacao possa reclamar dele.
+            if comps_ref is None:
+                comps_ref = list(comps)
+            else:
+                comps_ref += [c for c in comps if c not in comps_ref]
         if len(set(npets)) > 1:
             print(f"  AVISO: numero de PETs difere entre as rodadas de {nome}: "
                   f"{npets}", file=sys.stderr)
@@ -574,7 +706,12 @@ def main():
         meta["npassos"] = min(npassos)
         petcount[nome] = npets[0]
 
-    if autoverifica(metas, petcount, args):
+    # Reordena a uniao pela ordem de exibicao, para que MED/MPAS/OCN/ICE saiam
+    # sempre na mesma sequencia, independentemente de onde cada um apareceu.
+    comps_ref = ([c for c in ORDEM_PADRAO if c in comps_ref]
+                 + sorted(c for c in comps_ref if c not in ORDEM_PADRAO))
+
+    if autoverifica(metas, petcount, args, comps_por_cfg):
         return 1
 
     cfgA, cfgB = resultados["A"], resultados["B"]

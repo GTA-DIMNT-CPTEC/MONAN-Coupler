@@ -4,8 +4,34 @@
 > Jaci (Cray XD2000) · ESMF/NUOPC 8.9.1
 
 Este guia cobre a execução em **mais de um nó** no `run_esmApp.jaci`, a
-**consolidação por componente** no modo *concurrent* e o planejador
+**consolidação por componente** em `pet_layout = 'split'` e o planejador
 `plan-layout.py`.
+
+---
+
+## 0. Dois eixos, não um
+
+Antes de tudo, uma distinção que atravessa este documento inteiro e que a v14.20
+tornou explícita no `&nuopc_petlayout`.
+
+**`pet_layout`** é o eixo **espacial**: `shared` põe todos os componentes em
+todos os PETs; `split` dá a cada um o seu bloco disjunto. É **este** eixo que
+determina a topologia de nós, e portanto é o único que importa para o `select`
+do PBS.
+
+**`coupling_mode`** é o eixo **temporal**: `sequential` faz os componentes
+avançarem um de cada vez dentro do passo; `concurrent` faz avançarem ao mesmo
+tempo. Este eixo **não altera a topologia**: `sequential+split` e
+`concurrent+split` pedem exatamente o mesmo `select`.
+
+Os quatro pares são válidos. Até a v14.19 os dois eixos eram um só, e
+`atm_pet_count`/`ocn_pet_count` eram descartados em silêncio quando
+`coupling_mode = 'sequential'`; quem pedia 2048 PETs para o MPAS e 128 para o
+MOM6 recebia os dois componentes em todos os PETs, sem qualquer aviso.
+
+Versões anteriores deste guia falavam em "modo sequential" para a topologia
+uniforme e "modo concurrent" para a consolidação por componente. Onde este
+documento diz isso, leia `pet_layout = 'shared'` e `pet_layout = 'split'`.
 
 ---
 
@@ -68,10 +94,11 @@ dentro de um job (ou o `topo-nos-jaci.sh`) para a topologia real de cada nó.
 
 ---
 
-## 3. Topologia multinó (modo *sequential*)
+## 3. Topologia multinó (`pet_layout = 'shared'`)
 
-No modo `sequential` (padrão), MPAS, MED e OCN ocupam todos os PETs. A diretiva de
-recurso é derivada de `-n` e do número de PETs por nó (`PPN`):
+Em `pet_layout = 'shared'` (padrão), MPAS, MED, OCN e, quando ativo, o ICE
+ocupam todos os PETs. Vale com qualquer `coupling_mode`. A diretiva de recurso é
+derivada de `-n` e do número de PETs por nó (`PPN`):
 
 ```
 NNODES = NPES / PPN, arredondado para cima
@@ -104,7 +131,11 @@ Constantes de sítio (topo do script): `PPN_MAX=256`, `PPN=256`,
 
 ---
 
-## 4. Modo *concurrent*: consolidação por componente
+## 4. `pet_layout = 'split'`: consolidação por componente
+
+Esta seção vale igualmente para `coupling_mode = 'sequential'` e para
+`concurrent`: o que muda entre os dois é quando cada componente avança, não onde
+ele mora. O `select` é o mesmo.
 
 Em `pet_layout = 'split'`, o **ATM (MPAS-A)** e o **OCN (MOM6)** ocupam blocos
 disjuntos de PET (mais o **ICE (SIS2)**, quando `use_sis2_dynamic` está ligado). Se os blocos não coincidirem com as fronteiras de nó, um nó
@@ -194,8 +225,8 @@ Todas em `run_esmApp.jaci -h`. As principais:
 | `--no-mem`                       | (padrão)             | garante sem reserva de memória         |
 | `--ppn-atm` / `--ppn-ocn`        | 256 / 256            | limite de PET/nó por componente (*split*) |
 | `--ppn-ice`                      | 256                  | limite de PET/nó do ICE (*split* + SIS2) |
-| `--mem-per-pet-atm N`            | 0                    | reserva opcional por PET do ATM (*concurrent*) |
-| `--pet-order ORDEM`              | atm-first            | ordem dos blocos (*concurrent*)        |
+| `--mem-per-pet-atm N`            | 0                    | reserva opcional por PET do ATM (*split*) |
+| `--pet-order ORDEM`              | atm-first            | ordem dos dois primeiros blocos (*split*); o ICE vem sempre por último |
 | `--check` / `--compile`          | (off)                | valida e mostra a topologia / `make rebuild` |
 
 ```bash
@@ -203,7 +234,7 @@ bash run_esmApp.jaci -n 512 -w 02:00:00        # 2 nós × 256
 bash run_esmApp.jaci -n 512 --ppn 128          # 4 nós × 128 (mais RAM/PET)
 bash run_esmApp.jaci -n 256 --mem 700gb        # reserva fixa por nó
 bash run_esmApp.jaci -n 512 --place scatter        # permite nó compartilhado
-bash run_esmApp.jaci -n 384 --check            # concurrent: valida e mostra o select
+bash run_esmApp.jaci -n 384 --check            # split: valida e mostra o select
 bash run_esmApp.jaci -n 384 --pet-order ocn-first
 ```
 
@@ -245,15 +276,36 @@ repetições e emite a tabela comparativa:
 python3 tools/coupler/mede_smt.py --jobs 16
 ```
 
+**O experimento exige `shared`.** Com `pet_layout = 'split'` o `select` é
+heterogêneo, cada bloco fecha em nós inteiros, e a configuração B não cai num nó
+só: ela usa pelo menos um nó por bloco, e a razão de nós entre A e B deixa de ser
+a que o teste supõe. Use `pet_layout = 'shared'` e `coupling_mode = 'sequential'`.
+
 **Autoverificação.** O script não confia no nome do diretório: trocar `logs.A`
-por `logs.B` inverteria a conclusão sem qualquer sinal. Ele extrai do conteúdo
-o modo de acoplamento (linha `ESM: modo ...` do log de PET) e, do
-`esmApp_run.log` gravado pela diretiva `#PBS -o`, as linhas `TOPO` e `REGIME`
-do banner do job. Com isso aborta quando A e B têm números de PETs diferentes,
-quando os modos divergem, quando as rodadas de uma configuração usam números de
-nós distintos e, sobretudo, quando o `REGIME` declarado contradiz a
-configuração. O número de nós lido do banner prevalece sobre `--nos-a` e
-`--nos-b`, com aviso.
+por `logs.B` inverteria a conclusão sem qualquer sinal. Ele extrai do conteúdo o
+modo de acoplamento e o layout (linha `ESM: layout ... (execucao ...)` do log de
+PET, e o formato anterior `ESM: modo ...` para logs arquivados) e, do
+`esmApp_run.log` gravado pela diretiva `#PBS -o`, as linhas `TOPO` e `REGIME` do
+banner do job. Com isso aborta quando A e B têm números de PETs diferentes,
+quando o **conjunto de componentes** difere, quando os modos ou os layouts
+divergem, quando as rodadas de uma configuração usam números de nós distintos e,
+sobretudo, quando o `REGIME` declarado contradiz a configuração. Avisa quando
+detecta `concurrent` ou `split`. O número de nós lido do banner prevalece sobre
+`--nos-a` e `--nos-b`, com aviso.
+
+> **Atenção a medições antigas.** Até setembro de 2026 o script procurava apenas
+> o formato `ESM: modo ...`, anterior à v14.20, e por isso três verificações
+> (consistência de modo entre repetições, igualdade entre A e B, e o aviso de
+> `concurrent`) eram puladas em silêncio com binário atual. Resultado obtido
+> nesse intervalo merece reprocessamento dos logs antes de ser citado.
+
+> **Por que o conjunto de componentes importa.** As linhas da tabela só saem
+> quando o componente existe nas duas configurações. Uma rodada com gelo
+> comparada contra outra sem gelo perderia a linha do ICE, e a linha `TOTAL`,
+> que soma os componentes, compararia somas de conjuntos diferentes. Num caso de
+> teste com quatro componentes em A e três em B, o custo de máquina saiu 0,977
+> em vez de 1,062: o veredito anunciaria melhora de 2,3% onde havia degradação
+> de 6,2%. Hoje isso é erro que interrompe a comparação.
 
 Para que isso funcione, o `esmApp_run.log` precisa acompanhar os `PET*.log` no
 mesmo diretório. Como a diretiva `#PBS -o` já o grava em `logs/`, basta
@@ -270,7 +322,8 @@ nunca substituída por suposição.
 ### Resultado medido (06/08/2026)
 
 Três repetições de cada configuração, 512 PETs, 24 passos de acoplamento com o
-primeiro descartado, malha `x1.40962`, modo `sequential`, fila `pesqextra`.
+primeiro descartado, malha `x1.40962`, `coupling_mode = 'sequential'` com
+`pet_layout = 'shared'`, fila `pesqextra`. Sem componente de gelo.
 
 **Atenção ao confundimento.** Com o mesmo número de PETs, B usa metade dos nós
 e, portanto, metade dos cores físicos. O *wall-clock time* de B seria 2,00 vezes
@@ -313,8 +366,9 @@ como instrumento de medição, não como opção de produção.
 #### Escopo do resultado
 
 Os 11,2% valem para **este ponto de operação**: 512 PETs, malha `x1.40962`,
-modo `sequential`, na fila `pesqextra`. Não é uma propriedade do sistema
-acoplado, e sim uma medida em uma configuração.
+`sequential` com `shared`, sem gelo, na fila `pesqextra`. Não é uma propriedade
+do sistema acoplado, e sim uma medida em uma configuração. Com o SIS2 ativo há
+um quarto componente disputando o mesmo core, e a medição precisa ser refeita.
 
 A razão é o mecanismo. A penalidade do SMT vem em boa parte da disputa pelo
 cache L2, que não dobra quando duas threads ocupam o mesmo core. Quanto maior o
@@ -330,10 +384,12 @@ Antes de transportar o número para outra configuração, refaça a medição:
 python3 tools/coupler/mede_smt.py --jobs 16
 ```
 
-Fica também em aberto o modo `concurrent`. O resultado por componente sugere que
+Fica também em aberto o caso `split`. O resultado por componente sugere que
 `--ppn-atm 256` com `--ppn-ocn 512` poderia render, já que o OCN se beneficia do
 SMT enquanto o ATM é penalizado, mas a diferença esperada é de poucos por cento
-do total, provavelmente abaixo do ruído atual. É observação, não recomendação.
+do total, provavelmente abaixo do ruído atual. É observação, não recomendação, e
+exigiria outro desenho experimental: com `split` a comparação A contra B não
+isola a ocupação do core, pelo motivo da seção anterior.
 
 ---
 
@@ -429,14 +485,23 @@ escolher os *counts* **antes** de editar a `nuopc.input`. O `select` impresso é
 **idêntico** ao do job. Todas as opções estão em `--help`.
 
 ```bash
-python3 plan-layout.py --atm 256 --ocn 128        # layout de um par ATM/OCN
-python3 plan-layout.py --total 384 --ratio 2:1    # divide um total por razão
+python3 plan-layout.py --atm 256 --ocn 128            # dois blocos
+python3 plan-layout.py --atm 64 --ocn 4 --ice 4       # três blocos
+python3 plan-layout.py --total 384 --ratio 2:1        # divide um total por razão
+python3 plan-layout.py --total 288 --ratio 16:1:1     # razão de três termos
+python3 plan-layout.py --total 72 --ice 4 --ratio 2:1 # reserva o gelo e reparte o resto
 python3 plan-layout.py --sweep 384 1536 --step 384 --ratio 2:1   # tabela
-python3 plan-layout.py --suggest --atm 250 --ocn 130   # counts "limpos"
-python3 plan-layout.py --sequential --npes 512 --ppn 128
+python3 plan-layout.py --suggest --atm 250 --ocn 130  # counts "limpos"
+python3 plan-layout.py --shared --npes 512 --ppn 128  # layout uniforme
 ```
 
-Saída da varredura (`--sweep`):
+O planejador trata do eixo **espacial**. `--atm/--ocn/--ice` planejam um
+`split`; `--shared` planeja um `shared`. O eixo temporal não entra: os dois
+`coupling_mode` pedem o mesmo `select`. Por isso o cabeçalho da saída diz
+`Layout SPLIT`, e não o modo de acoplamento. (`--sequential` continua aceito
+como sinônimo histórico de `--shared`.)
+
+Saída da varredura (`--sweep`) com dois blocos:
 
 ```text
   NPES   atm   ocn | bloco ATM      bloco OCN      | nós | status
@@ -446,13 +511,36 @@ Saída da varredura (`--sweep`):
   1536  1024   512 | 4x256          2x256          |  6  | OK
 ```
 
+Com uma razão de três termos, a tabela ganha as colunas do gelo:
+
+```text
+  NPES   atm   ocn   ice | bloco ATM      bloco OCN      bloco ICE      | nós | status
+   288   256    16    16 | 1x256          1x16           1x16           |  3  | OK
+   576   512    32    32 | 2x256          1x32           1x32           |  4  | OK
+   864   768    48    48 | 3x256          1x48           1x48           |  5  | OK
+  1152  1024    64    64 | 4x256          1x64           1x64           |  6  | OK
+```
+
 (sem coluna de GB porque não há reserva de memória por padrão; com
 `--mem-per-pet N` aparece a memória por nó.)
 
 Significado do *status*: **`OK`** (cada componente cabe num nó ou é múltiplo do
 limite); **`quebrado`** (count maior que o limite e não múltiplo, gerando PET/nó
 torto como `2×192`; revise com `--suggest`); **`mem>nó padrão`** (só quando você
-reserva memória e ela passa de ~754 GB, indo p/ os nós de ~1,5 TB).
+reserva memória e ela passa de ~754 GB, indo p/ os nós de ~1,5 TB); **`excede
+fila`** (NPES ou número de nós acima do `resources_max` da fila consultada com
+`--queue`).
+
+> **Duas convenções do bloco de gelo**, copiadas do `run_esmApp.jaci`. O SIS2
+> vive na grade do oceano, então o orçamento de memória por PET do gelo é o
+> mesmo do oceano (`--mem-per-pet`), sem opção separada. E o chunk do gelo vem
+> sempre por último, mesmo com `--pet-order ocn-first`, pelo motivo da seção 4.
+
+> **Um bloco pequeno ainda toma um nó inteiro**, por causa do
+> `place=scatter:excl`: quatro PETs de SIS2 ocupam um nó de 256 cores. É
+> intencional, para não misturar componentes num nó, mas significa que o
+> terceiro bloco custa pelo menos um nó a mais no consumo de fila, medido em
+> nós × walltime. Confira contra o limite de nós da fila antes de submeter.
 
 ---
 
@@ -460,10 +548,30 @@ reserva memória e ela passa de ~754 GB, indo p/ os nós de ~1,5 TB).
 
 ```
 1. PLANEJAR    python3 plan-layout.py --atm 256 --ocn 128   (use --suggest se "quebrado")
-2. CONFIGURAR  nuopc.input: coupling_mode=concurrent, atm_pet_count=256, ocn_pet_count=128
+2. CONFIGURAR  nuopc.input: pet_layout=split, coupling_mode=concurrent,
+                            atm_pet_count=256, ocn_pet_count=128
 3. VERIFICAR   bash run_esmApp.jaci -n 384 --check           (pré-requisitos, METIS, select)
 4. SUBMETER    bash run_esmApp.jaci -n 384
 ```
+
+Com o gelo ativo, o passo 1 ganha `--ice K` e o passo 2 ganha
+`use_sis2_dynamic = .true.` e `ice_pet_count = K`:
+
+```
+1. PLANEJAR    python3 plan-layout.py --atm 64 --ocn 4 --ice 4 --queue longtime
+2. CONFIGURAR  nuopc.input: pet_layout=split, coupling_mode=concurrent,
+                            atm_pet_count=64, ocn_pet_count=4,
+                            use_sis2_dynamic=.true., ice_pet_count=4
+3. VERIFICAR   bash run_esmApp.jaci -n 72 --check
+4. SUBMETER    bash run_esmApp.jaci -n 72
+```
+
+A partição METIS acompanha `atm_pet_count`, e não o total: com 64, 4 e 4, o
+arquivo necessário é `.part.64`, e não `.part.72`.
+
+Depois da primeira execução, o `analisa_balanceamento_pets.py` lê os logs e
+sugere as contagens a partir do tempo medido, em vez da razão arbitrária usada
+no planejamento. O ciclo natural é planejar, executar, medir, replanejar.
 
 ---
 
@@ -474,12 +582,15 @@ reserva memória e ela passa de ~754 GB, indo p/ os nós de ~1,5 TB).
   exemplo, 384) geram blocos tortos como `2×192`.
 - **Reaja ao OOM, não o antecipe:** o padrão não reserva memória. Se um job
   estourar (`exit 137/143`), reduza os PETs por nó (`--ppn 128`, mais RAM/PET) ou
-  reserve com `--mem`; no concurrent, reduza o limite do OCN (`--ppn-ocn 128`).
+  reserve com `--mem`; em `split`, reduza o limite do OCN (`--ppn-ocn 128`).
 - **Não remova o `:excl` sem motivo:** com `ncpus=256` num nó de 512 lógicos, o
   `place=scatter` puro autoriza o PBS a colocar outro job na outra metade.
-- **Alinhe a partição concorrente aos sockets:** cada nó tem 2 domínios NUMA de
-  128 cores. Cortes de `atm_pet_count`/`ocn_pet_count` em múltiplos de 128 mantêm
-  cada componente dentro de sockets inteiros.
+- **Alinhe os blocos aos sockets:** cada nó tem 2 domínios NUMA de 128 cores.
+  Cortes de `atm_pet_count`, `ocn_pet_count` e `ice_pet_count` em múltiplos de
+  128 mantêm cada componente dentro de sockets inteiros.
+- **Conte o bloco de gelo no orçamento de nós:** com `place=scatter:excl` um
+  bloco pequeno ainda toma um nó inteiro. O terceiro componente custa pelo menos
+  um nó a mais, e o limite de nós da fila é conferido antes da submissão.
 - **Rode `--check` antes de submeter:** ele mostra a topologia e o `select`, e
   gera a partição METIS que faltar.
 
@@ -502,8 +613,8 @@ estende essa mesma lógica ao planejamento prévio da topologia, e a guarda de
 fila recusa pedidos inválidos em segundos, no nó de login.
 
 Fica em aberto validar este comportamento em outros pontos de operação,
-sobretudo no modo `concurrent` e em malhas maiores, e repetir a medição do SMT
-sempre que a máquina ou o código mudarem.
+sobretudo em `pet_layout = 'split'`, com o componente de gelo ativo e em malhas
+maiores, e repetir a medição do SMT sempre que a máquina ou o código mudarem.
 
 ---
 
@@ -547,9 +658,14 @@ sempre que a máquina ou o código mudarem.
 |:-------------|:------------|
 | PALS         | *Parallel Application Launch Service* da Cray; fornece o `mpiexec` usado no lançamento. |
 | METIS        | Biblioteca de particionamento de grafos; decompõe a malha do MPAS em N partes (`x1.*.graph.info.part.N`). |
-| `sequential` | Modo em que MPAS, MED e OCN usam todos os PETs, em série. |
-| `concurrent` | Modo em que ATM e OCN ocupam blocos disjuntos de PET e avançam em paralelo (MED em todos). |
-| ATM/OCN/MED  | Componentes: atmosfera (MPAS-A), oceano (MOM6+SIS2) e mediador (fluxos *bulk*). |
+| `pet_layout`  | Eixo **espacial** do `&nuopc_petlayout`. Decide **onde** cada componente mora. |
+| `shared`      | Valor de `pet_layout`: todos os componentes em todos os PETs. Topologia uniforme. |
+| `split`       | Valor de `pet_layout`: cada componente num bloco disjunto de PET. Gera `select` heterogêneo. |
+| `coupling_mode` | Eixo **temporal** do `&nuopc_petlayout`. Decide **quando** cada componente avança. Não altera a topologia de nós. |
+| `sequential`  | Valor de `coupling_mode`: os componentes avançam um de cada vez dentro do passo. |
+| `concurrent`  | Valor de `coupling_mode`: os componentes avançam ao mesmo tempo. Exige blocos disjuntos para render tempo de parede. |
+| ATM/OCN/ICE/MED | Componentes: atmosfera (MPAS-A), oceano (MOM6), gelo marinho (SIS2) e mediador (fluxos *bulk*). |
+| `use_sis2_dynamic` | Liga o componente de gelo. Em `split` exige `ice_pet_count` explícito, e o `select` ganha um terceiro bloco. |
 
 **Hardware da Jaci**
 
@@ -559,3 +675,25 @@ sempre que a máquina ou o código mudarem.
 | CPU lógico × físico | Com SMT on, `ncpus` do PBS conta threads (512); os cores físicos são 256. |
 | Nó auxiliar (`aux*`) | 10 nós com `ncpus = 256` e ~1,5 TB, na fila `aux`; usados para pré e pós-processamento. |
 | *socket* / NUMA   | Cada nó tem 2 *sockets* AMD EPYC (Zen5) de 128 cores. |
+
+---
+
+## 11. Documentos relacionados
+
+`docs/SMT-Jaci.md`, com a caracterização do hardware, a contabilidade das filas e
+o resultado completo da medição de SMT.
+
+`docs/uso-plan-layout.md`, manual do planejador de topologia.
+
+`docs/uso-analisa-balanceamento.md`, manual da ferramenta que lê os logs de uma
+execução e sugere as contagens de PET a partir do tempo medido.
+
+`docs/uso-mede-smt.md`, manual da ferramenta de comparação controlada do SMT.
+
+`docs/uso-smoke-tests.md`, manual dos testes que verificam se uma combinação de
+`coupling_mode` e `pet_layout` chega ao primeiro passo sem travar.
+
+`docs/uso-linha-base.md`, manual das linhas de base para comparação de resultado
+numérico entre execuções.
+
+`docs/integracao-componente-gelo.md`, sobre a integração do SIS2.
