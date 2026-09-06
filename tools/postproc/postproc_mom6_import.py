@@ -4,9 +4,38 @@ postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
                               (14 fluxos ATM→OCN calculados pelo mediador NCAR
                                bulk em MED_cap.F90)
 
-Versão 8.3 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+Versão 8.5 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
 
 HISTÓRICO DE CORREÇÕES
+  v8.5 — Diagnóstico ponderado por área (Set 2026):
+    • BUG-ICE-MEAN-LABEL: a linha "média sobre células c/ gelo" do --check
+      mostrava, na verdade, a média sobre TODO o oceano (oceano sem gelo é 0.0,
+      não fill), dando ~0,16. Agora calcula a média REAL só sobre células com
+      gelo (conc≥0,15).
+    • BUG-AREA-WEIGHT: numa grade lat/lon, médias/contagens simples super-
+      representam os polos (células pequenas e numerosas), inflando SST fria e
+      cobertura de gelo. O --check passa a reportar, com peso cos(lat): a SST
+      média por área e a cobertura de gelo em % de ÁREA do oceano (≥15% e ≥50%),
+      ao lado dos valores por célula. check_physics agora recebe 'lat'.
+
+  v8.4 — Revisão dos scripts de diagnóstico/animação (Set 2026):
+    • BUG-PY-16: So_t deixava BURACOS BRANCOS nos polos. O mascaramento usava
+                 fill_min_threshold=271.4 K, que apagava água do mar real perto
+                 do congelamento (sob o gelo marinho, SST ~271,2–271,4 K) —
+                 justamente a borda do gelo. Agora mascara APENAS o marcador-
+                 stub pontual (271,35 K ± tol); a terra já vem da máscara real
+                 do MOM6 (Sx_omask). vmin_phys recuado 271,4 → 271,0 K.
+    • BUG-PY-17: --plot ABORTAVA (URLError) em nó HPC sem internet, pois
+                 cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth no
+                 desenho. Agora testa a disponibilidade uma vez e, se offline,
+                 gera os mapas sem contornos em vez de abortar.
+    • BUG-PY-18: escala de cor recalculada POR PASSO (percentis do passo) —
+                 causa raiz do GIF "pulsante" e incomparável. Agora vmin/vmax
+                 são GLOBAIS (calculados uma vez sobre todos os passos) e a
+                 mesma cor significa o mesmo valor em toda a animação.
+    • BUG-PY-19: savefig(bbox_inches='tight') gerava PNGs de tamanhos distintos
+                 entre passos, fazendo a animação tremer. Removido (figsize fixo
+                 + constrained_layout → quadros idênticos).
   v8.2 — BUG-PY-15 (Maio 2026):
     • BUG-PY-15 (A/C): cfeature.LAND ausente em plot_maps.
                  A função adicionava apenas COASTLINE e BORDERS, sem preencher
@@ -332,17 +361,24 @@ FIELD_META = {
         'long_name': 'SST dinâmica MOM6 (So_t)',
         'units': 'K', 'scale': 1.0, 'scale_units': 'K',
         'cmap': 'RdYlBu_r', 'vperc': [2, 98], 'symmetric': False,
-        'vmin_phys': 271.4, 'vmax_phys': 310.0,
-        # BUG-PY-12 fix: threshold elevado de 200 K para 270 K.
-        # BUG-PY-15 fix: threshold elevado de 270 K para 271.4 K.
-        #   O marcador-stub do Sprint A.5 coloca pontos de terra/gelo
-        #   em 271.35 K — valor ACIMA do limiar anterior (270 K) e
-        #   portanto não mascarado, gerando patches azuis retangulares
-        #   em áreas oceânicas.
-        #   271.4 K captura 271.35 K (stub) como NaN sem mascarar SST
-        #   oceânica real, cujo mínimo observado é ≈ 271.8 K.
-        'fill_min_threshold': 271.4,  # SST < 271.4 K → stub/fill (NaN)
-        'check_msg': 'SST fora de [271.4, 310] K',
+        'vmin_phys': 271.0, 'vmax_phys': 310.0,
+        # BUG-PY-16 (correção): o mascaramento anterior usava
+        #   fill_min_threshold = 271.4 K, que APAGAVA água do mar real perto
+        #   do congelamento (S≈35 congela a ~271,35 K; sob o gelo marinho a
+        #   SST fica em ~271,2–271,4 K). Isso produzia BURACOS BRANCOS nos
+        #   mapas polares de SST — justamente a borda do gelo, o dado mais
+        #   relevante para o acoplamento. Além disso, era inconsistente com o
+        #   postproc_monan2_import.py, que trata SST < 271,35 K como física
+        #   normal (oceano sob gelo).
+        #   Correção: mascarar APENAS o marcador-stub do Sprint A.5, que é o
+        #   valor pontual 271,35 K (±tol), em vez de tudo abaixo de 271,4 K.
+        #   A terra já é removida pela máscara real do MOM6 (Sx_omask); onde
+        #   ela existe, este stub-mask é redundante e inofensivo. vmin_phys
+        #   recuado para 271,0 K para não sinalizar falso-positivo em água
+        #   sub-congelamento legítima.
+        'fill_stub_value': 271.35,  # marcador de terra/gelo do Sprint A.5
+        'fill_stub_tol':   0.05,    # ±50 mK cobre arredondamento float32
+        'check_msg': 'SST fora de [271.0, 310] K',
     },
     'So_duu10n': {
         'long_name': 'Vento relativo ao oceano² (So_duu10n)',
@@ -465,6 +501,14 @@ def load_diag_files(files, field_names):
                     fill_min = FIELD_META.get(fname, {}).get('fill_min_threshold', None)
                     if fill_min is not None:
                         arr = np.where(arr < fill_min, np.nan, arr)
+                    # Máscara 4b (BUG-PY-16): stub PONTUAL — mascara só o valor
+                    # do marcador (ex.: So_t=271,35 K de terra/gelo do Sprint A.5),
+                    # preservando água do mar real perto do congelamento. Ao
+                    # contrário do fill_min, NÃO apaga toda a cauda fria do campo.
+                    stub_v = FIELD_META.get(fname, {}).get('fill_stub_value', None)
+                    if stub_v is not None:
+                        stub_tol = FIELD_META.get(fname, {}).get('fill_stub_tol', 0.05)
+                        arr = np.where(np.abs(arr - stub_v) <= stub_tol, np.nan, arr)
 
                     # Máscara 5 (B-DIAGMASK-01): continentes, pela máscara
                     # REAL do MOM6. Redundante para os arquivos novos, em que
@@ -577,7 +621,25 @@ def print_stats(timestamps, fields, field_names):
 
 # ─── Verificação de limites físicos ───────────────────────────────────────────
 
-def check_physics(timestamps, fields, field_names):
+def _area_weights(lat, shape):
+    """Pesos de área ∝ cos(lat) para médias ponderadas numa grade regular
+    lat/lon (BUG-AREA-WEIGHT).
+
+    Numa grade 1°×1°, as células polares são minúsculas em área mas numerosas
+    em contagem — uma média/contagem simples SUPER-representa os polos e infla
+    estatísticas de SST fria e de gelo. A ponderação por cos(lat) devolve
+    números comparáveis com observação (cobertura em % de ÁREA, não de células).
+    Retorna array (nlat,nlon) ou None se lat for incompatível com a grade."""
+    if lat is None:
+        return None
+    lat = np.asarray(lat, dtype=float)
+    if lat.ndim != 1 or lat.size != shape[0]:
+        return None
+    w = np.clip(np.cos(np.deg2rad(lat)), 0.0, None)
+    return np.broadcast_to(w[:, None], shape).copy()
+
+
+def check_physics(timestamps, fields, field_names, lat=None):
     print("\n  ┌─ VERIFICAÇÃO FÍSICA ─────────────────────────────────────────────────")
     ok_count = 0
     warn_count = 0
@@ -634,6 +696,20 @@ def check_physics(timestamps, fields, field_names):
                 print(f"  │  ✓ So_t em °C (={flat_c.mean():.2f}±{flat_c.std():.2f}) — "
                       f"conversão °C→K consistente (offset≈273.15)")
                 ok_count += 1
+        # BUG-AREA-WEIGHT: média de SST ponderada por área (cos-lat). A "Média"
+        # da tabela de estatísticas é por célula e, numa grade lat/lon, é puxada
+        # para baixo pelas muitas células polares pequenas. A média ponderada por
+        # área é a comparável com a climatologia (~288–292 K global).
+        w2d = _area_weights(lat, sst_k.shape[-2:]) if sst_k.ndim >= 2 else None
+        if w2d is not None:
+            last = sst_k[-1] if sst_k.ndim == 3 else sst_k
+            okm  = ~np.isnan(last)
+            wsum = float(np.sum(w2d[okm]))
+            if wsum > 0:
+                sst_aw = float(np.sum(last[okm] * w2d[okm]) / wsum)
+                print(f"  │  ℹ So_t: média ponderada por área = {sst_aw:.2f} K "
+                      f"({sst_aw - SST_CELSIUS_OFFSET:.2f} °C)  "
+                      f"[vs. {float(np.nanmean(last)):.2f} K por célula]")
 
     # Verificação do gelo: não deve haver valores > 1 (clamping deve ter atuado)
     if 'Si_ifrac' in fields:
@@ -655,8 +731,14 @@ def check_physics(timestamps, fields, field_names):
         #   max > 1.05 → falta de divisão (dados em %, datocn_ice_pct=.false. errado)
         if flat_ice.size > 0:
             ice_max  = float(flat_ice.max())
-            ice_mean = float(flat_ice.mean())
-            n_total  = flat_ice.size
+            # BUG-ICE-MEAN-LABEL (correção): antes a linha rotulada "média sobre
+            # células c/ gelo" mostrava, na verdade, a média sobre TODO o oceano
+            # (o oceano sem gelo é 0.0 neste dado, não fill), dando ~0.16. Aqui
+            # calculamos a média REAL apenas sobre células com gelo (conc≥0.15).
+            ICE_THR = 0.15
+            ice_present = flat_ice[flat_ice >= ICE_THR]
+            ice_mean_over_ice = (float(ice_present.mean())
+                                 if ice_present.size > 0 else float('nan'))
             if ice_max < 0.05:
                 print(f"  │  ⚠ Si_ifrac: max={ice_max:.4f} < 0.05 — DUPLA divisão por 100.")
                 print(f"  │     Definir datocn_ice_pct=.false. em nuopc.input")
@@ -667,9 +749,29 @@ def check_physics(timestamps, fields, field_names):
                 print(f"  │     Definir datocn_ice_pct=.true. em nuopc.input")
                 warn_count += 1
             else:
+                mo = (f'{ice_mean_over_ice:.4f}'
+                      if not np.isnan(ice_mean_over_ice) else 'n/d')
                 print(f"  │  ✓ Si_ifrac: max={ice_max:.4f} — escala [0,1] correta"
-                      f"  (média sobre células c/ gelo: {ice_mean:.4f})")
+                      f"  (média sobre células c/ gelo, conc≥{ICE_THR:g}: {mo})")
                 ok_count += 1
+
+            # BUG-AREA-WEIGHT: cobertura de gelo em % de ÁREA (cos-lat), não em
+            # % de células. Numa grade lat/lon a contagem simples de células
+            # super-representa os polos (muitas células pequenas), inflando a
+            # "cobertura". A fração de ÁREA é a comparável com observação.
+            ice3d = fields['Si_ifrac']
+            w2d = _area_weights(lat, ice3d.shape[-2:]) if ice3d.ndim >= 2 else None
+            if w2d is not None:
+                last = ice3d[-1] if ice3d.ndim == 3 else ice3d
+                okm  = ~np.isnan(last)
+                atot = float(np.sum(w2d[okm]))
+                if atot > 0:
+                    a15 = float(np.sum(w2d[okm & (last >= 0.15)])) / atot * 100.0
+                    a50 = float(np.sum(w2d[okm & (last >= 0.50)])) / atot * 100.0
+                    ncell50 = 100.0 * float(np.sum(last[okm] >= 0.50)) / int(np.sum(okm))
+                    print(f"  │  ℹ Si_ifrac: cobertura por ÁREA (último passo) = "
+                          f"{a15:.1f}% do oceano com conc≥15%  |  {a50:.1f}% com "
+                          f"conc≥50%  [contagem de células ≥50%: {ncell50:.1f}%]")
 
     # Verificação de So_u e So_v: esses campos não fazem parte do exportState
     # MED→OCN — o MOM6 importState contém fluxos calculados, não correntes OCN.
@@ -861,6 +963,110 @@ def export_csv(timestamps, fields, field_names, outdir):
 
 # ─── Plotagem ─────────────────────────────────────────────────────────────────
 
+# ─── Auxiliares de plotagem ─────────────────────────────────────────────────
+
+# BUG-PY-17 (correção): em nós de computação SEM acesso à internet (o caso do
+# supercomputador Jaci e da maioria dos clusters HPC), cfeature.LAND/COASTLINE
+# tentam BAIXAR os shapefiles Natural Earth na primeira chamada e o script
+# ABORTAVA com urllib.error.URLError, não gerando figura alguma. A função
+# abaixo tenta desenhar os contornos; se o download falhar (ou cartopy não
+# tiver os dados em cache), emite um aviso ÚNICO e segue sem os contornos —
+# o dado científico é preservado, apenas a decoração geográfica é omitida.
+_GEO_CACHE = {'ok': None}
+
+
+def _geo_features_available(cfeature):
+    """Testa UMA vez se os shapefiles Natural Earth estão disponíveis.
+
+    cartopy baixa os dados de forma PREGUIÇOSA (só no momento do desenho/
+    savefig), então envolver add_feature em try/except não captura a falha.
+    Aqui forçamos o carregamento das geometrias uma única vez: se falhar
+    (nó HPC offline, como o Jaci, sem cache local), devolvemos False e o
+    resto do script desenha os mapas SEM os contornos, em vez de abortar."""
+    if _GEO_CACHE['ok'] is None:
+        try:
+            list(cfeature.COASTLINE.geometries())
+            _GEO_CACHE['ok'] = True
+        except Exception as exc:                  # noqa: BLE001 (download/IO)
+            _GEO_CACHE['ok'] = False
+            print("  AVISO: contornos Natural Earth indisponíveis "
+                  f"({type(exc).__name__}) — mapas gerados SEM linha de costa.\n"
+                  "         Em nós HPC offline, pré-baixe os dados com acesso à\n"
+                  "         internet (uma vez): python3 -c \"import cartopy.feature "
+                  "as cf; [list(f.geometries()) for f in (cf.LAND, cf.COASTLINE, "
+                  "cf.BORDERS)]\"")
+    return _GEO_CACHE['ok']
+
+
+def _safe_add_geo_features(ax, cfeature, ccrs, with_borders=True):
+    """Adiciona LAND/COASTLINE/BORDERS de forma resiliente a ambiente offline
+    (BUG-PY-17). Se os dados não estiverem acessíveis, apenas fixa a extensão
+    do mapa e retorna, sem abortar o script."""
+    if _geo_features_available(cfeature):
+        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
+                       edgecolor='black', zorder=6)
+        if with_borders:
+            ax.add_feature(cfeature.BORDERS, linewidth=0.3, linestyle=':',
+                           edgecolor='gray', zorder=6)
+    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+
+
+def _field_scale(flat, meta):
+    """Calcula (vmin, vmax) robustos para um campo, a partir de um vetor 1-D
+    de valores válidos JÁ escalado para as unidades de exibição.
+
+    Aplica a mesma política de antes (percentis vperc + simetria + clamp aos
+    limites físicos), mas agora é chamada UMA vez sobre a série inteira, para
+    que o mesmo par vmin/vmax seja usado em todos os passos — condição
+    indispensável para uma animação comparável (BUG-PY-18)."""
+    phys_min = meta.get('vmin_phys')
+    phys_max = meta.get('vmax_phys')
+    if flat is None or flat.size == 0:
+        return (phys_min if phys_min is not None else -1.0,
+                phys_max if phys_max is not None else 1.0)
+
+    # Campo binário (Si_ifrac): escala adaptativa global para tornar o gelo
+    # (poucos % da área) visível, mantendo a interpretação física [0–1].
+    if meta.get('binary_field', False) and float(np.nanmax(flat)) > 0.9:
+        perc95 = float(np.nanpercentile(flat, 95))
+        mean_f = float(np.nanmean(flat))
+        if perc95 < 0.01 and mean_f > 0:
+            perc98 = float(np.nanpercentile(flat, 98))
+            vmax = min(max(mean_f * 30, 0.005, perc98 * 2.0, 0.002), 1.0)
+            return 0.0, vmax
+        return 0.0, 1.0
+
+    arr_for_perc = (np.where(flat == 0.0, np.nan, flat)
+                    if meta.get('symmetric', False) else flat)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        try:
+            vmin = float(np.nanpercentile(arr_for_perc, meta.get('vperc', [2, 98])[0]))
+            vmax = float(np.nanpercentile(arr_for_perc, meta.get('vperc', [2, 98])[1]))
+        except (ValueError, IndexError):
+            vmin, vmax = np.nan, np.nan
+    if not (np.isfinite(vmin) and np.isfinite(vmax)):
+        vmin = phys_min if phys_min is not None else -1.0
+        vmax = phys_max if phys_max is not None else 1.0
+
+    if meta.get('symmetric', False):
+        v = max(abs(vmin), abs(vmax))
+        if phys_max is not None:
+            v = min(v, phys_max)
+        if v < 1e-12:
+            v = phys_max if phys_max is not None else 1.0
+        return -v, v
+    if phys_min is not None:
+        vmin = max(vmin, phys_min)
+    if phys_max is not None:
+        vmax = min(vmax, phys_max)
+    if abs(vmax - vmin) < 1e-12:
+        vmax = (phys_max if (phys_max is not None and phys_max > vmin)
+                else vmin + max(abs(vmin) * 0.01, 1e-6))
+    return vmin, vmax
+
+
 def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
               coupling_mode=None):
     try:
@@ -901,6 +1107,29 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
         idx_sorted = np.arange(len(lon_plot))
 
     LON2D, LAT2D = np.meshgrid(lon_plot, lat)
+
+    # BUG-PY-18 (correção principal p/ animação): escala de cor GLOBAL, igual
+    # em todos os passos. Antes, cada figura recalculava vmin/vmax a partir dos
+    # percentis DAQUELE passo — então, ao empilhar os PNGs no GIF, a mesma cor
+    # significava valores diferentes a cada quadro (a animação "pulsava" e não
+    # permitia comparação temporal). Agora vmin/vmax são calculados UMA vez
+    # sobre todos os passos plotados e reutilizados em cada quadro.
+    global_scale = {}
+    for fname in field_names:
+        if fname not in fields:
+            continue
+        meta_g = FIELD_META.get(fname, {})
+        sc_g   = meta_g.get('scale', 1.0)
+        chunks = []
+        for kk in step_indices:
+            if kk >= len(timestamps):
+                continue
+            lyr = fields[fname][kk]
+            vv  = lyr[~np.isnan(lyr)]
+            if vv.size:
+                chunks.append(vv * sc_g)
+        flat_all = np.concatenate(chunks) if chunks else np.array([])
+        global_scale[fname] = _field_scale(flat_all, meta_g)
 
     for k in step_indices:
         if k >= len(timestamps):
@@ -958,10 +1187,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                              f"{ts.strftime('%Y-%m-%d %H:%M')}  (passo {k+1})",
                              fontsize=9)
                 if USE_CARTOPY:
-                    ax.add_feature(cfeature.LAND,      facecolor='lightgray', zorder=5)
-                    ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
-                                                       edgecolor='black', zorder=6)
-                    ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+                    _safe_add_geo_features(ax, cfeature, ccrs, with_borders=False)
                 ax_i += 1
                 continue
 
@@ -1015,68 +1241,22 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                             layer_plt[:, col] = interp
                             break
 
-            # BUG-PY-10-A: máscara para percentil — zeros em campos simétricos
-            # provavelmente são fill; em campos não-simétricos são física legítima.
-            if meta.get('symmetric', False):
-                arr_for_perc = np.where(layer_plt == 0.0, np.nan, layer_plt)
-            else:
-                arr_for_perc = layer_plt
+            # BUG-PY-18: usar a escala GLOBAL pré-calculada (mesma em todos os
+            # passos), em vez de percentis por passo. Garante que uma mesma cor
+            # signifique sempre o mesmo valor ao longo da animação.
+            vmin, vmax = global_scale.get(fname, (phys_min, phys_max))
+            if vmin is None or vmax is None:
+                vmin = phys_min if phys_min is not None else float(np.nanmin(flat))
+                vmax = phys_max if phys_max is not None else float(np.nanmax(flat))
 
-            # BUG-PY-14 (A): escala adaptativa para campos binários (0 ou 1).
-            # Si_ifrac tem p95=0 e max=1: células de gelo são ~0.05% da área.
-            # Com vmax=1, o sinal polar é invisível na paleta global.
-            # Estratégia: se max > 0.9 e p95 ≈ 0 → campo quase-binário;
-            #   vmax_efetivo = max(mean_não_zero * 30, 0.005, vperc98 * 2)
-            # Isso estica a colorbar para tornar o gelo visível mantendo
-            # a interpretação física da escala [0–1].
-            is_binary = meta.get('binary_field', False)
+            # Anotação por passo com a área de gelo (só informativa; a ESCALA
+            # continua global). Mantida para acompanhar a evolução do gelo.
             ice_area_info = ''
-            if is_binary and flat.max() > 0.9:
-                # Detecta se o campo é predominantemente zero com pico em 1
-                perc95 = float(np.nanpercentile(flat, 95))
-                mean_f = float(np.nanmean(flat))
-                if perc95 < 0.01 and mean_f > 0:
-                    # Escala adaptativa: estica suficientemente para ver o gelo
-                    perc98 = float(np.nanpercentile(flat, 98))
-                    vmax_ada = max(mean_f * 30, 0.005, perc98 * 2.0, 0.002)
-                    vmax_ada = min(vmax_ada, 1.0)  # nunca ultrapassa 1
-                    vmin = 0.0
-                    vmax = vmax_ada
-                    # Estimar fração de área com gelo (em % do oceano)
-                    n_ice   = int(np.sum(flat >= 0.5))
-                    n_total = flat.size
-                    ice_area_info = (f" | ~{n_ice} cél. ({100*n_ice/max(n_total,1):.3f}%)")
-                else:
-                    # Campo binário mas com gelo suficiente para escala normal
-                    vmin, vmax = 0.0, 1.0
-            else:
-                # Caminho normal: percentis robustos
-                try:
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", RuntimeWarning)
-                        vmin = float(np.nanpercentile(arr_for_perc, meta['vperc'][0]))
-                        vmax = float(np.nanpercentile(arr_for_perc, meta['vperc'][1]))
-                    if not (np.isfinite(vmin) and np.isfinite(vmax)):
-                        raise ValueError
-                except (ValueError, RuntimeWarning):
-                    vmin = phys_min if phys_min is not None else -1.0
-                    vmax = phys_max if phys_max is not None else  1.0
-
-                if meta.get('symmetric', False):
-                    v = max(abs(vmin), abs(vmax))
-                    if phys_max is not None:
-                        v = min(v, phys_max)
-                    if v < 1e-12:
-                        v = phys_max if phys_max is not None else 1.0
-                    vmin, vmax = -v, v
-                else:
-                    if phys_min is not None: vmin = max(vmin, phys_min)
-                    if phys_max is not None: vmax = min(vmax, phys_max)
-                    if abs(vmax - vmin) < 1e-12:
-                        if phys_max is not None and phys_max > vmin:
-                            vmax = phys_max
-                        else:
-                            vmax = vmin + max(abs(vmin)*0.01, 1e-6)
+            if meta.get('binary_field', False) and flat.size and flat.max() > 0.9:
+                n_ice   = int(np.sum(flat >= 0.5))
+                n_total = flat.size
+                ice_area_info = (f" | ~{n_ice} cél. "
+                                 f"({100*n_ice/max(n_total,1):.3f}%)")
 
             if USE_CARTOPY:
                 im = ax.pcolormesh(LON2D, LAT2D, layer_plt,
@@ -1093,13 +1273,8 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                 #     a exibição de informação fisicamente sem sentido.
                 # COASTLINE e BORDERS em zorder 6 ficam visíveis acima
                 # da máscara de terra.
-                ax.add_feature(cfeature.LAND,      facecolor='lightgray',
-                                                   zorder=5)
-                ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
-                                                   edgecolor='black', zorder=6)
-                ax.add_feature(cfeature.BORDERS,   linewidth=0.3, linestyle=':',
-                                                   edgecolor='gray',  zorder=6)
-                ax.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+                # BUG-PY-17: resiliente a ambiente offline (ver helper).
+                _safe_add_geo_features(ax, cfeature, ccrs, with_borders=True)
             else:
                 im = ax.pcolormesh(LON2D, LAT2D, layer_plt,
                                    cmap=meta['cmap'], vmin=vmin, vmax=vmax)
@@ -1127,7 +1302,12 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                  ha='center', va='bottom', fontsize=8, color='0.35')
 
         outfile = os.path.join(outdir, f'mom6_import_{ts_str}.png')
-        fig.savefig(outfile, dpi=130, bbox_inches='tight', facecolor='white')
+        # BUG-PY-19: NÃO usar bbox_inches='tight'. O recorte ajustado produz
+        # PNGs de dimensões LIGEIRAMENTE diferentes entre passos (dependendo do
+        # texto/colorbar), o que faz o GIF/MP4 "tremer" (quadros de tamanhos
+        # distintos são reposicionados no canto). Com figsize fixo +
+        # constrained_layout, todos os quadros saem idênticos em tamanho.
+        fig.savefig(outfile, dpi=130, facecolor='white')
         plt.close(fig)
         print(f"  Figura: {outfile}")
 
@@ -1313,7 +1493,7 @@ def main():
     print()
     print('═' * 70)
     print('  MONAN-A 2.0 — Validação de campos importados MOM6 (ATM→OCN)')
-    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.3)')
+    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.5)')
     print('═' * 70)
     print(f"  Diagnósticos : {os.path.abspath(args.diagdir)}")
     print(f"  Saída        : {os.path.abspath(args.outdir)}")
@@ -1372,7 +1552,7 @@ def main():
 
     if args.check:
         print("  [--check] Verificando limites físicos...")
-        check_physics(timestamps, fields, args.field)
+        check_physics(timestamps, fields, args.field, lat=lat)
 
     if args.csv:
         print("  [--csv] Exportando CSV...")

@@ -3,7 +3,20 @@
 anim_mom6_import.py  —  Animação da evolução dos passos de acoplamento ATM→OCN
                          a partir dos mapas PNG gerados por postproc_mom6_import.py
 
-Versão 1.1 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+Versão 1.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+
+CORREÇÕES v1.2
+  • BUG-ANIM-SIZE: quadros de tamanhos diferentes (PNGs com bbox_inches='tight')
+    faziam o GIF "tremer" e quebravam o MP4. Todos os quadros passam a ser
+    normalizados à MESMA dimensão (compostos sobre tela branca) antes de montar.
+  • BUG-ANIM-MP4: o MP4 usava o concat demuxer com os PNGs originais (falhava
+    com quadros de dimensão variável). Agora normaliza e codifica uma sequência
+    numerada via image2 — dimensão constante e ordem determinística.
+  • Novos parâmetros: --max-width (reduz o tamanho do arquivo) e --no-optimize.
+  Observação 1: a ESCALA de cor consistente entre quadros é responsabilidade do
+  postproc (v8.4). Observação 2: para uma animação COMPLETA, rode antes
+  postproc_mom6_import.py --plot --all-steps (sem isso, o postproc plota apenas
+  ~8 passos amostrados e a animação fica com poucos quadros e "saltos").
 
 ═══════════════════════════════════════════════════════════════════════════════
 Contexto
@@ -59,7 +72,7 @@ from datetime import datetime
 
 # ─── Metadados do script ───────────────────────────────────────────────────────
 
-PROG_VERSION = '1.1'
+PROG_VERSION = '1.2'
 
 # Padrão de nome dos PNGs gerados por postproc_mom6_import.py (v8.1+):
 #   mom6_import_YYYYMMDD_HHMMSS.png
@@ -178,19 +191,62 @@ def select_frames(all_frames, step_list, every_n):
 
 # ─── Geração de GIF ───────────────────────────────────────────────────────────
 
-def make_gif(frames, outfile, fps, loop):
+def _load_frames_normalized(frames, max_width=0):
+    """Carrega os PNGs e devolve imagens PIL TODAS do mesmo tamanho.
+
+    BUG-ANIM-SIZE (correção): quadros de dimensões diferentes (ex.: PNGs
+    antigos gerados com bbox_inches='tight') faziam o GIF "tremer" — Pillow
+    fixa o tamanho da tela pelo 1º quadro e reposiciona os demais no canto — e
+    QUEBRAVAM a codificação MP4 (libx264 exige dimensão constante). Aqui todos
+    os quadros são compostos sobre uma tela branca do MAIOR tamanho encontrado.
+    Opcionalmente reduz a largura para max_width (mantém proporção)."""
+    from PIL import Image
+    loaded = []
+    for i, (fpath, ts) in enumerate(frames, start=1):
+        print_progress(i, len(frames), ts)
+        try:
+            loaded.append(Image.open(fpath).convert('RGB'))
+        except Exception as exc:
+            print(f"\n  AVISO: falha ao carregar '{os.path.basename(fpath)}': "
+                  f"{exc} — quadro ignorado.")
+    print()
+    if not loaded:
+        sys.exit("\nERRO: nenhuma imagem carregada com sucesso.\n")
+
+    W = max(im.width for im in loaded)
+    H = max(im.height for im in loaded)
+    norm = []
+    for im in loaded:
+        if im.size != (W, H):
+            canvas = Image.new('RGB', (W, H), 'white')
+            canvas.paste(im, (0, 0))
+            im = canvas
+        norm.append(im)
+
+    if max_width and W > max_width:
+        newW = int(max_width)
+        newH = int(round(H * newW / W))
+        newH -= newH % 2
+        norm = [im.resize((newW, newH), Image.LANCZOS) for im in norm]
+        print(f"  Redimensionado: {W}x{H} → {newW}x{newH}")
+    return norm
+
+
+def make_gif(frames, outfile, fps, loop, max_width=0, optimize=True):
     """
     Gera um GIF animado a partir dos quadros PNG usando Pillow.
 
     Parâmetros
     ----------
-    frames  : lista de (filepath, datetime)
-    outfile : caminho do arquivo GIF de saída
-    fps     : quadros por segundo
-    loop    : número de repetições (0 = infinito)
+    frames    : lista de (filepath, datetime)
+    outfile   : caminho do arquivo GIF de saída
+    fps       : quadros por segundo
+    loop      : número de repetições (0 = infinito)
+    max_width : largura máxima em px (0 = sem redução)
+    optimize  : otimização de paleta do Pillow (reduz o tamanho do arquivo)
     """
     try:
-        from PIL import Image
+        from PIL import Image  # noqa: F401  (valida a dependência cedo)
     except ImportError:
         sys.exit(
             "\nERRO: Pillow não encontrado.\n"
@@ -201,25 +257,9 @@ def make_gif(frames, outfile, fps, loop):
     duration_ms = max(1, int(round(1000.0 / fps)))   # ms por quadro
 
     print(f"  Carregando {len(frames)} quadros em memória...")
-    images = []
-    for i, (fpath, ts) in enumerate(frames, start=1):
-        print_progress(i, len(frames), ts)
-        try:
-            img = Image.open(fpath).convert('RGB')
-            images.append(img)
-        except Exception as exc:
-            print(f"\n  AVISO: falha ao carregar '{os.path.basename(fpath)}': "
-                  f"{exc} — quadro ignorado.")
-
-    print()   # finaliza a linha da barra de progresso
-
-    if not images:
-        sys.exit("\nERRO: nenhuma imagem carregada com sucesso.\n")
+    images = _load_frames_normalized(frames, max_width=max_width)
 
     print(f"  Gravando GIF ({duration_ms} ms/quadro, loop={loop})...")
-
-    # Pillow: o primeiro quadro define paleta e metadados; os demais são annexados.
-    # optimize=False: evita redução de paleta que pode degradar campos coloridos.
     images[0].save(
         outfile,
         format='GIF',
@@ -227,12 +267,16 @@ def make_gif(frames, outfile, fps, loop):
         save_all=True,
         duration=duration_ms,
         loop=loop,
-        optimize=False,
+        optimize=optimize,
     )
 
     size_mb = os.path.getsize(outfile) / 1024 ** 2
     print(f"  ✓ GIF gravado  |  {len(images)} quadros  |  "
-          f"{fps} FPS  |  {size_mb:.1f} MB\n")
+          f"{fps} FPS  |  {size_mb:.1f} MB")
+    if size_mb > 20:
+        print("  ⚠ GIF grande (>20 MB). Use --max-width 1400 para reduzir, "
+              "ou --format mp4 (bem menor).")
+    print()
 
 
 # ─── Geração de MP4 ───────────────────────────────────────────────────────────
@@ -260,76 +304,59 @@ def check_ffmpeg():
         sys.exit(f"\nERRO: ffmpeg retornou código {exc.returncode}.\n")
 
 
-def make_mp4(frames, outfile, fps):
+def make_mp4(frames, outfile, fps, max_width=0):
     """
     Gera um vídeo MP4 (H.264) a partir dos quadros PNG usando ffmpeg.
 
-    Estratégia: o concat demuxer do ffmpeg lê uma lista de arquivos e durações,
-    evitando cópia/renomeação temporária dos PNGs.  O codec libx264 com
-    pix_fmt yuv420p garante compatibilidade máxima com players e
-    visualizadores científicos (JupyterLab, VLC, navegadores).
+    BUG-ANIM-MP4 (correção): a versão anterior usava o concat demuxer com os
+    PNGs originais. Quando os quadros tinham tamanhos diferentes (o caso com
+    bbox_inches='tight'), o libx264 falhava ou gerava vídeo corrompido. Agora
+    os quadros são NORMALIZADOS ao mesmo tamanho (via Pillow) e gravados em uma
+    sequência temporária numerada, codificada com o demuxer image2 — garantindo
+    dimensão constante e ordem determinística.
 
     Parâmetros
     ----------
-    frames  : lista de (filepath, datetime)
-    outfile : caminho do arquivo MP4 de saída
-    fps     : quadros por segundo
+    frames    : lista de (filepath, datetime)
+    outfile   : caminho do arquivo MP4 de saída
+    fps       : quadros por segundo
+    max_width : largura máxima em px (0 = sem redução)
     """
     check_ffmpeg()
 
-    duration_s = 1.0 / max(fps, 0.01)   # duração por quadro em segundos
-
-    # O concat demuxer exige um arquivo de lista com pares "file / duration"
-    # O último arquivo deve ser repetido sem "duration" (requisito do ffmpeg).
-    with tempfile.NamedTemporaryFile(
-            mode='w', suffix='_concat.txt',
-            delete=False, encoding='utf-8') as tmp:
-        list_path = tmp.name
-        for fpath, _ in frames:
-            abs_path = os.path.abspath(fpath).replace("'", r"'\''")
-            tmp.write(f"file '{abs_path}'\n")
-            tmp.write(f"duration {duration_s:.6f}\n")
-        # Último quadro repetido sem duration (obrigatório pelo demuxer)
-        if frames:
-            abs_last = os.path.abspath(frames[-1][0]).replace("'", r"'\''")
-            tmp.write(f"file '{abs_last}'\n")
-
+    images = _load_frames_normalized(frames, max_width=max_width)
+    tmpdir = tempfile.mkdtemp(prefix='anim_mp4_')
     try:
+        for idx, im in enumerate(images):
+            im.save(os.path.join(tmpdir, f'frame_{idx:05d}.png'))
+
         print(f"  Codificando MP4 com ffmpeg (CRF=20, H.264)...")
         cmd = [
-            'ffmpeg',
-            '-y',                              # sobrescrever arquivo de saída sem perguntar
-            '-f', 'concat',                    # entrada via lista de arquivos
-            '-safe', '0',                      # permitir caminhos absolutos na lista
-            '-i', list_path,
-            # Garantir dimensões pares: H.264 exige largura e altura pares
+            'ffmpeg', '-y',
+            '-framerate', f'{fps}',
+            '-i', os.path.join(tmpdir, 'frame_%05d.png'),
             '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
             '-c:v', 'libx264',
-            '-crf',  '20',                     # qualidade: 0=lossless … 51=péssimo
-            '-preset', 'medium',               # velocidade de codificação vs compressão
-            '-pix_fmt', 'yuv420p',             # compatibilidade com players não-científicos
-            '-movflags', '+faststart',         # mover índice para o início (streaming web)
-            '-loglevel', 'error',              # suprimir saída verbosa; mostrar apenas erros
+            '-crf', '20',
+            '-preset', 'medium',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-loglevel', 'error',
             outfile,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"\nERRO ffmpeg (código {result.returncode}):")
-            # Exibir as últimas 30 linhas do stderr para diagnóstico
             for line in result.stderr.strip().splitlines()[-30:]:
                 print(f"  {line}")
             sys.exit(1)
 
         size_mb = os.path.getsize(outfile) / 1024 ** 2
-        print(f"  ✓ MP4 gravado  |  {len(frames)} quadros  |  "
+        print(f"  ✓ MP4 gravado  |  {len(images)} quadros  |  "
               f"{fps} FPS  |  {size_mb:.1f} MB\n")
-
     finally:
-        # Remover arquivo de lista temporário independentemente de erros
-        try:
-            os.unlink(list_path)
-        except OSError:
-            pass
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
@@ -399,6 +426,15 @@ def main():
             'Exemplo: --every 3 usa quadros 1, 4, 7, ...'
         ),
     )
+    parser.add_argument(
+        '--max-width', type=int, default=0, dest='max_width', metavar='PX',
+        help=('Largura máxima em pixels (0 = sem redução). Reduz bastante o '
+              'tamanho do GIF/MP4. Ex.: --max-width 1400'),
+    )
+    parser.add_argument(
+        '--no-optimize', action='store_false', dest='optimize',
+        help='Desativa a otimização de paleta do GIF (arquivos maiores).',
+    )
 
     args = parser.parse_args()
 
@@ -443,9 +479,10 @@ def main():
 
     # ── Geração da animação ───────────────────────────────────────────────────
     if args.fmt == 'gif':
-        make_gif(frames, outfile, args.fps, args.loop)
+        make_gif(frames, outfile, args.fps, args.loop,
+                 max_width=args.max_width, optimize=args.optimize)
     else:
-        make_mp4(frames, outfile, args.fps)
+        make_mp4(frames, outfile, args.fps, max_width=args.max_width)
 
     # ── Rodapé ───────────────────────────────────────────────────────────────
     print('═' * 70)

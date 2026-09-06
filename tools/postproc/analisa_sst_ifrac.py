@@ -3,7 +3,39 @@
 analisa_sst_ifrac.py  —  Diagnóstico de evolução temporal de SST e fração de gelo
                           marinho (Si_ifrac) ao longo da integração do modelo.
 
-Versão 1.4 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+Versão 1.5 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+
+═══════════════════════════════════════════════════════════════════════════════
+Correções v1.5 (revisão diagnóstico/animação)
+═══════════════════════════════════════════════════════════════════════════════
+  BUG-COLORBAR (colorbar desconectada dos mapas — viridis 0–1)
+    A colorbar era obtida raspando ax.collections (_get_scalar_mappable). Em
+    algumas versões de matplotlib/cartopy isso devolvia a coleção da FEIÇÃO de
+    terra/costa (adicionada após o pcolormesh) em vez do dado, produzindo uma
+    barra "viridis 0–1" que NÃO correspondia às cores RdBu_r/BrBG plotadas —
+    o leitor não conseguia interpretar os valores de δ/Δ. Agora _plot_field
+    RETORNA o mappable (QuadMesh) e a colorbar é feita a partir dele.
+
+  BUG-SCALE (escala de cor incoerente entre quadros da animação)
+    Cada mapa de δ/Δ usava o percentil 99,5 DAQUELE passo como limite de cor,
+    então a escala mudava a cada quadro do GIF e a evolução ficava incomparável.
+    Agora o limite é GLOBAL: calculado uma vez sobre todos os passos e reutilizado
+    em todos os quadros (o máx|δ| de cada passo continua anotado no título).
+
+  BUG-OFFLINE (--anomaly/--diff abortavam em nó HPC sem internet)
+    cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth no desenho; em nó
+    de computação sem internet o script abortava com URLError (só funcionava no
+    nó de login). Agora testa a disponibilidade uma vez e, se offline, gera os
+    mapas sem contornos em vez de abortar.
+
+  BUG-RAWSTATS (linha "SST bruta" contaminada pelo _FillValue)
+    min/média saíam como -9,99e20 porque o valor de preenchimento entrava na
+    conta. Agora descarta preenchimento/NaN (|v|>1e19, máscara netCDF) e reporta
+    quantas células foram descartadas.
+
+  BUG-FRAME-SIZE (quadros de tamanhos diferentes tremiam na animação)
+    savefig(bbox_inches='tight') nos mapas de δ/Δ gerava PNGs de tamanhos
+    distintos. Removido (figsize fixo → quadros idênticos).
 
 ═══════════════════════════════════════════════════════════════════════════════
 Correções v1.4
@@ -132,7 +164,7 @@ except ImportError:
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
-VERSION        = '1.4'
+VERSION        = '1.5'
 T_FILL_LAND    = 271.35     # valor-padrão de terra/default para SST [K]
 T_FILL_TOL     = 2.0        # tolerância ampla para detectar células default [K]
 IFRAC_MIN_ICE  = 0.15       # limiar mínimo para considerar célula com gelo
@@ -400,14 +432,28 @@ def load_data(diagdir, debug=False):
     if ts_list[-1]:
         print(f'  Último             : {ts_list[-1].strftime("%Y-%m-%d %H:%M")}')
 
-    # Informações sobre o campo bruto (antes do mascaramento)
-    raw0 = np.ma.getdata(sst_list[0]).ravel()
+    # Informações sobre o campo bruto (antes do mascaramento de terra).
+    # BUG-RAWSTATS (correção): descartar o valor de preenchimento antes das
+    # estatísticas. Antes, min/média saíam como -9,99e20 (o _FillValue do
+    # Fortran vazava para a linha "SST bruta"), o que parecia um erro grave e
+    # escondia o intervalo físico real. Consideramos "preenchimento" a máscara
+    # do netCDF, |v| > 1e19 e NaN/Inf.
+    raw0_full = np.ma.getdata(sst_list[0]).ravel()
+    nc_mask0  = np.ma.getmaskarray(sst_list[0]).ravel()
+    finite    = np.isfinite(raw0_full) & (np.abs(raw0_full) < 1e19) & (~nc_mask0)
+    n_fill    = int(np.sum(~finite))
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        print(f'  SST bruta passo 1  : min={raw0.min():.3f} K  '
-              f'max={raw0.max():.3f} K  '
-              f'média={raw0.mean():.3f} K  '
-              f'[{raw0.size} células]')
+        if np.any(finite):
+            vals = raw0_full[finite]
+            print(f'  SST bruta passo 1  : min={vals.min():.3f} K  '
+                  f'max={vals.max():.3f} K  '
+                  f'média={vals.mean():.3f} K  '
+                  f'[{vals.size}/{raw0_full.size} células; '
+                  f'{n_fill} de preenchimento descartadas]')
+        else:
+            print(f'  SST bruta passo 1  : todas as {raw0_full.size} células '
+                  f'são preenchimento/NaN (campo não preenchido).')
     print()
 
     # Construir máscara de terra
@@ -469,6 +515,27 @@ def _robust_limit(field, percentile=None):
     if compressed.size == 0:
         return float('nan')
     return float(np.percentile(compressed, percentile))
+
+
+def _global_robust_limit(fields, lim_min, percentile=None):
+    """Limite de colormap GLOBAL (mesmo em todos os quadros de uma animação).
+
+    BUG-SCALE (correção): antes, cada mapa de diferença/anomalia calculava seu
+    próprio limite (percentil 99,5 DAQUELE passo). Ao montar o GIF, a escala de
+    cor mudava a cada quadro e a evolução ficava incomparável ("pulsava"). Aqui
+    o percentil é calculado UMA vez sobre TODOS os passos juntos e reutilizado.
+
+    Retorna (limite_global, lim_abs_global)."""
+    if percentile is None:
+        percentile = ROBUST_PERCENTILE
+    pooled = [np.ma.compressed(np.ma.abs(f)) for f in fields]
+    pooled = [p for p in pooled if p.size > 0]
+    if not pooled:
+        return lim_min, float('nan')
+    allv = np.concatenate(pooled)
+    lim_rob = float(np.percentile(allv, percentile))
+    lim_abs = float(allv.max())
+    return max(lim_min, lim_rob), lim_abs
 
 
 # ─── Análise 1: Série temporal de estatísticas ───────────────────────────────
@@ -620,11 +687,19 @@ def analise_anomalia(sst_list, ice_list, ts_list, lat, lon, outdir, idx0=0):
         HAS_CARTOPY = False
         use_cartopy = False
 
+    # BUG-SCALE: limite de cor GLOBAL para toda a série de anomalias, para que
+    # os quadros da animação sejam comparáveis (mesma escala em todos).
+    passos = list(range(idx0 + 1, len(sst_list)))
+    d_sst_all = [sst_list[i] - sst0 for i in passos]
+    d_ice_all = [ice_list[i] - ice0 for i in passos]
+    limite_sst, _ = _global_robust_limit(d_sst_all, 0.01)
+    limite_ice, _ = _global_robust_limit(d_ice_all, 1e-4)
+
     n_frozen_sst = 0
     n_frozen_ice = 0
-    for i in range(idx0 + 1, len(sst_list)):
-        d_sst = sst_list[i] - sst0
-        d_ice = ice_list[i] - ice0
+    for j, i in enumerate(passos):
+        d_sst = d_sst_all[j]
+        d_ice = d_ice_all[j]
         ts_str = ts_list[i].strftime('%Y-%m-%d %H:%M') if ts_list[i] else f'passo {i+1}'
 
         sst_frozen = _is_frozen(d_sst)
@@ -638,38 +713,28 @@ def analise_anomalia(sst_list, ice_list, ts_list, lat, lon, outdir, idx0=0):
             constrained_layout=True,
         )
 
-        for ax, d_field, titulo, unidade, cmap, lim_min, frozen in [
-            (axes_row[0], d_sst, 'ΔSST  (So_t)', 'K',     'RdBu_r', 0.01, sst_frozen),
-            (axes_row[1], d_ice, 'ΔSi_ifrac',    '[0-1]', 'BrBG',   1e-4, ice_frozen),
+        for ax, d_field, titulo, unidade, cmap, frozen, limite in [
+            (axes_row[0], d_sst, 'ΔSST  (So_t)', 'K',     'RdBu_r', sst_frozen, limite_sst),
+            (axes_row[1], d_ice, 'ΔSi_ifrac',    '[0-1]', 'BrBG',   ice_frozen, limite_ice),
         ]:
-            # Limite absoluto (informativo) e limite robusto (escala visual)
-            lim_abs = _safe_stat(lambda a: float(np.ma.abs(a).max()), d_field)
-            lim_rob = _robust_limit(d_field)
-            if np.isnan(lim_rob):
-                lim_rob = lim_abs
-            limite = max(lim_min, lim_rob if not np.isnan(lim_rob) else lim_min)
-            if np.isnan(limite):
-                limite = lim_min
-
-            # Aviso de outlier: exibido no título quando lim_abs >> escala visual
+            frame_absmax = _safe_stat(lambda a: float(np.ma.abs(a).max()), d_field)
             outlier_str = ''
-            if (not np.isnan(lim_abs) and not np.isnan(lim_rob)
-                    and lim_abs > 2.0 * max(lim_rob, lim_min)):
-                outlier_str = f'  ⚠ outlier: máx|Δ|={lim_abs:.4g} {unidade}'
+            if not np.isnan(frame_absmax) and frame_absmax > 2.0 * limite:
+                outlier_str = f'  ⚠ outlier: máx|Δ|={frame_absmax:.4g} {unidade}'
 
             norm = TwoSlopeNorm(vcenter=0.0, vmin=-limite, vmax=limite)
-            _plot_field(ax, d_field, lon2d, lat2d, norm, cmap,
-                        use_cartopy and HAS_CARTOPY)
+            mesh = _plot_field(ax, d_field, lon2d, lat2d, norm, cmap,
+                               use_cartopy and HAS_CARTOPY)
             if frozen:
                 _annotate_frozen(ax, f'campo congelado\nmáx|Δ| < {FROZEN_THRESHOLD:.0e} {unidade}')
+            fa = f'{frame_absmax:.4g}' if not np.isnan(frame_absmax) else 'nan'
             ax.set_title(
                 f'{titulo}  —  {ts_str}\n'
-                f'(relativo a t₀ = {ts0_str};  máx|Δ| = {limite:.4g} {unidade})'
-                f'{outlier_str}',
+                f'(t₀ = {ts0_str}; escala global ±{limite:.3g} {unidade}; '
+                f'máx|Δ| deste passo = {fa} {unidade}){outlier_str}',
                 fontsize=8,
             )
-            plt.colorbar(_get_scalar_mappable(ax), ax=ax,
-                         shrink=0.75, pad=0.02, label=unidade)
+            plt.colorbar(mesh, ax=ax, shrink=0.75, pad=0.02, label=unidade)
 
         fig.suptitle(
             f'Anomalia em relação a t₀ = {ts0_str}  |  {ts_str}\n'
@@ -678,7 +743,8 @@ def analise_anomalia(sst_list, ice_list, ts_list, lat, lon, outdir, idx0=0):
         )
         tag = ts_list[i].strftime('%Y%m%d_%H%M%S') if ts_list[i] else f'step{i+1:04d}'
         outfile = os.path.join(outdir, f'anomalia_{tag}.png')
-        fig.savefig(outfile, dpi=120, bbox_inches='tight', facecolor='white')
+        # BUG-FRAME-SIZE: sem bbox_inches='tight' (quadros de tamanho uniforme).
+        fig.savefig(outfile, dpi=120, facecolor='white')
         plt.close(fig)
         print(f'  Anomalia passo {i+1:>3}: {outfile}')
     if n_frozen_sst > 0:
@@ -722,11 +788,20 @@ def analise_diff_consecutiva(sst_list, ice_list, ts_list, lat, lon, outdir, idx0
 
     # Ignorar pares que envolvam passos com sst_default (i-1 < idx0)
     primeiro_par = max(1, idx0 + 1)
+
+    # BUG-SCALE: pré-calcular os campos de diferença e o LIMITE GLOBAL de cor,
+    # para que TODOS os quadros da animação compartilhem a mesma escala.
+    pares = list(range(primeiro_par, len(sst_list)))
+    d_sst_all = [sst_list[i] - sst_list[i - 1] for i in pares]
+    d_ice_all = [ice_list[i] - ice_list[i - 1] for i in pares]
+    limite_sst, absmax_sst = _global_robust_limit(d_sst_all, 1e-6)
+    limite_ice, absmax_ice = _global_robust_limit(d_ice_all, 1e-4)
+
     n_frozen_sst = 0
     n_frozen_ice = 0
-    for i in range(primeiro_par, len(sst_list)):
-        d_sst = sst_list[i] - sst_list[i - 1]
-        d_ice = ice_list[i] - ice_list[i - 1]
+    for j, i in enumerate(pares):
+        d_sst = d_sst_all[j]
+        d_ice = d_ice_all[j]
 
         ts_prev = ts_list[i-1].strftime('%Y-%m-%d %H:%M') if ts_list[i-1] else f'passo {i}'
         ts_cur  = ts_list[i].strftime('%Y-%m-%d %H:%M')   if ts_list[i]   else f'passo {i+1}'
@@ -742,36 +817,31 @@ def analise_diff_consecutiva(sst_list, ice_list, ts_list, lat, lon, outdir, idx0
         if sst_frozen: n_frozen_sst += 1
         if ice_frozen: n_frozen_ice += 1
 
-        for ax, d_field, titulo, unidade, cmap, frozen in [
-            (axes_row[0], d_sst, 'δSST  (So_t)', 'K',     'RdBu_r', sst_frozen),
-            (axes_row[1], d_ice, 'δSi_ifrac',    '[0-1]', 'BrBG',   ice_frozen),
+        for ax, d_field, titulo, unidade, cmap, frozen, limite, absmax in [
+            (axes_row[0], d_sst, 'δSST  (So_t)', 'K',     'RdBu_r', sst_frozen,
+             limite_sst, absmax_sst),
+            (axes_row[1], d_ice, 'δSi_ifrac',    '[0-1]', 'BrBG',   ice_frozen,
+             limite_ice, absmax_ice),
         ]:
-            # Limite absoluto (informativo) e limite robusto (escala visual)
-            lim_abs = _safe_stat(lambda a: float(np.ma.abs(a).max()), d_field)
-            lim_rob = _robust_limit(d_field)
-            if np.isnan(lim_rob):
-                lim_rob = lim_abs
-            limite = max(1e-6, lim_rob if not np.isnan(lim_rob) else 1e-6)
-            if np.isnan(limite):
-                limite = 1e-6
-
-            # Aviso de outlier no título quando lim_abs >> escala visual
+            # máx|δ| DESTE passo (informativo); a ESCALA de cor é global.
+            frame_absmax = _safe_stat(lambda a: float(np.ma.abs(a).max()), d_field)
             outlier_str = ''
-            if (not np.isnan(lim_abs) and not np.isnan(lim_rob)
-                    and lim_abs > 2.0 * max(lim_rob, 1e-6)):
-                outlier_str = f'\n⚠ outlier: máx|δ|={lim_abs:.4g} {unidade}'
+            if not np.isnan(frame_absmax) and frame_absmax > 2.0 * limite:
+                outlier_str = f'\n⚠ outlier: máx|δ|={frame_absmax:.4g} {unidade}'
 
             norm = TwoSlopeNorm(vcenter=0.0, vmin=-limite, vmax=limite)
-            _plot_field(ax, d_field, lon2d, lat2d, norm, cmap,
-                        use_cartopy and HAS_CARTOPY)
+            mesh = _plot_field(ax, d_field, lon2d, lat2d, norm, cmap,
+                               use_cartopy and HAS_CARTOPY)
             if frozen:
                 _annotate_frozen(ax, f'campo congelado\nmáx|δ| < {FROZEN_THRESHOLD:.0e} {unidade}')
+            fa = f'{frame_absmax:.4g}' if not np.isnan(frame_absmax) else 'nan'
             ax.set_title(
-                f'{titulo}  —  passo {i+1}\nmáx|δ| = {limite:.4g} {unidade}{outlier_str}',
+                f'{titulo}  —  passo {i+1}\n'
+                f'escala global ±{limite:.3g} {unidade}  |  máx|δ| deste passo = '
+                f'{fa} {unidade}{outlier_str}',
                 fontsize=8,
             )
-            plt.colorbar(_get_scalar_mappable(ax), ax=ax,
-                         shrink=0.75, pad=0.02, label=unidade)
+            plt.colorbar(mesh, ax=ax, shrink=0.75, pad=0.02, label=unidade)
 
         fig.suptitle(
             f'Diferença consecutiva  δ(t) = campo(t) − campo(t−1)\n'
@@ -780,7 +850,9 @@ def analise_diff_consecutiva(sst_list, ice_list, ts_list, lat, lon, outdir, idx0
         )
         tag = ts_list[i].strftime('%Y%m%d_%H%M%S') if ts_list[i] else f'step{i+1:04d}'
         outfile = os.path.join(outdir, f'diff_consec_{tag}.png')
-        fig.savefig(outfile, dpi=120, bbox_inches='tight', facecolor='white')
+        # BUG-FRAME-SIZE: sem bbox_inches='tight' — quadros de tamanhos
+        # diferentes fazem a animação "tremer". figsize fixo → quadros idênticos.
+        fig.savefig(outfile, dpi=120, facecolor='white')
         plt.close(fig)
         print(f'  Diff passo {i}→{i+1:>3}: {outfile}')
     if n_frozen_sst > 0:
@@ -931,8 +1003,38 @@ def _prep_grid(lat, lon):
     return None, None, False
 
 
+# BUG-OFFLINE (correção): em nó HPC sem internet (nós de computação do Jaci),
+# cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth de forma
+# preguiçosa (no desenho) e o script ABORTAVA com URLError — só funcionava no
+# nó de login (ian05), que tem internet. Testa-se a disponibilidade uma vez;
+# se indisponível, os mapas saem sem contornos, sem abortar.
+_GEO_CACHE = {'ok': None}
+
+
+def _geo_features_available(cfeature):
+    if _GEO_CACHE['ok'] is None:
+        try:
+            list(cfeature.COASTLINE.geometries())
+            _GEO_CACHE['ok'] = True
+        except Exception as exc:                  # noqa: BLE001 (download/IO)
+            _GEO_CACHE['ok'] = False
+            print('  AVISO: contornos Natural Earth indisponíveis '
+                  f'({type(exc).__name__}) — mapas SEM linha de costa.\n'
+                  '         Em nó HPC offline, pré-baixe (uma vez, com internet):\n'
+                  '         python3 -c "import cartopy.feature as cf; '
+                  '[list(f.geometries()) for f in (cf.LAND, cf.COASTLINE)]"')
+    return _GEO_CACHE['ok']
+
+
 def _plot_field(ax, field, lon2d, lat2d, norm, cmap, use_cartopy):
-    """Plota campo 2D no eixo ax com ou sem projeção Cartopy."""
+    """Plota campo 2D no eixo ax com ou sem projeção Cartopy.
+
+    BUG-COLORBAR (correção): agora RETORNA o mappable (QuadMesh/AxesImage). Antes,
+    a colorbar era obtida raspando ax.collections (_get_scalar_mappable), que em
+    algumas versões de matplotlib/cartopy devolvia a coleção da FEIÇÃO de terra/
+    costa (adicionada depois do pcolormesh) em vez do dado — gerando uma colorbar
+    'viridis 0–1' desconectada dos mapas RdBu_r/BrBG. Usar o mappable retornado
+    elimina essa ambiguidade."""
     try:
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature
@@ -942,25 +1044,19 @@ def _plot_field(ax, field, lon2d, lat2d, norm, cmap, use_cartopy):
     if use_cartopy and lon2d is not None:
         # Fundo azul-claro para o oceano (evita branco invisível quando δ≈0)
         ax.set_facecolor('#d0e8f5')
-        cf = ax.pcolormesh(lon2d, lat2d, field,
-                           norm=norm, cmap=cmap,
-                           transform=ccrs.PlateCarree(), shading='auto')
-        ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
-        ax.add_feature(cfeature.COASTLINE, linewidth=0.4, edgecolor='black', zorder=6)
+        mesh = ax.pcolormesh(lon2d, lat2d, field,
+                             norm=norm, cmap=cmap,
+                             transform=ccrs.PlateCarree(), shading='auto')
+        if _geo_features_available(cfeature):
+            ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
+            ax.add_feature(cfeature.COASTLINE, linewidth=0.4,
+                           edgecolor='black', zorder=6)
         ax.set_global()
-    elif lon2d is not None:
-        ax.pcolormesh(lon2d, lat2d, field, norm=norm, cmap=cmap, shading='auto')
-    else:
-        ax.imshow(field, norm=norm, cmap=cmap, origin='lower', aspect='auto')
-
-
-def _get_scalar_mappable(ax):
-    """Retorna o último ScalarMappable do eixo para colorbar."""
-    import matplotlib.cm as cm
-    for c in reversed(ax.collections):
-        if hasattr(c, 'get_array'):
-            return c
-    return cm.ScalarMappable()
+        return mesh
+    if lon2d is not None:
+        return ax.pcolormesh(lon2d, lat2d, field, norm=norm, cmap=cmap,
+                             shading='auto')
+    return ax.imshow(field, norm=norm, cmap=cmap, origin='lower', aspect='auto')
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────

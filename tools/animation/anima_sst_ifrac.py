@@ -8,7 +8,14 @@ Gera um GIF animado a partir das figuras produzidas por analisa_sst_ifrac.py:
   • diff_consec_*.png  — Diferença entre passos consecutivos δ(t) = campo(t) − campo(t−1)
   • anomalia_*.png     — Anomalia em relação ao instante inicial Δ(t) = campo(t) − campo(t₀)
 
-INPE / CGCT / DIMNT — GT Acoplamento MONAN — Maio 2026
+INPE / CGCT / DIMNT — GT Acoplamento MONAN — Set 2026 (v1.1)
+
+Correções v1.1
+  • BUG-ANIM-SIZE: quadros de tamanhos diferentes faziam o GIF "tremer".
+    Agora todos os quadros são normalizados à mesma dimensão antes de montar.
+  Observação: a ESCALA de cor consistente entre quadros (colorbar) e a correção
+  da colorbar desconectada são responsabilidade do analisa_sst_ifrac.py (v1.5);
+  rode-o antes deste script.
 
 Dependências:
   pip install Pillow          (leitura/escrita de GIF — obrigatório)
@@ -45,7 +52,7 @@ except ImportError:
 
 # ─── Constantes ──────────────────────────────────────────────────────────────
 
-VERSION = '1.0'
+VERSION = '1.1'
 
 # Padrões de nome de arquivo gerados por analisa_sst_ifrac.py
 PADROES = {
@@ -153,18 +160,20 @@ def gerar_gif(
     duracao_ms = int(1000.0 / fps)  # Pillow usa milissegundos por frame
 
     print(f'  Carregando {len(caminhos)} frame(s)...', end='', flush=True)
+    # BUG-ANIM-SIZE (correção): normalizar TODOS os quadros ao mesmo tamanho.
+    # Quadros de dimensões diferentes (ex.: PNGs antigos com bbox_inches='tight')
+    # fazem o GIF "tremer" — o Pillow fixa a tela pelo 1º quadro e reposiciona os
+    # demais no canto. Compomos cada quadro sobre uma tela branca do maior tamanho.
+    rgb = [_redimensionar(Image.open(c).convert('RGB'), escala) for c in caminhos]
+    W = max(im.width for im in rgb)
+    H = max(im.height for im in rgb)
     frames = []
-    for caminho in caminhos:
-        img = Image.open(caminho).convert('RGBA')
-        img = _redimensionar(img, escala)
-        # GIF suporta paleta de 256 cores; converter de RGBA → P (paleta)
-        # com dithering mínimo para manter qualidade científica.
-        img_p = img.convert(
-            'P',
-            palette=Image.ADAPTIVE,
-            colors=256,
-        )
-        frames.append(img_p)
+    for im in rgb:
+        if im.size != (W, H):
+            canvas = Image.new('RGB', (W, H), 'white')
+            canvas.paste(im, (0, 0))
+            im = canvas
+        frames.append(im.convert('P', palette=Image.ADAPTIVE, colors=256))
 
     print(f' OK  ({frames[0].width}×{frames[0].height} px)')
 

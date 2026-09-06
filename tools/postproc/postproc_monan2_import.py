@@ -3,7 +3,47 @@
 postproc_monan2_import.py — Diagnóstico dos campos importados pelo MONAN-A 2.0
                            via conector MED→MPAS (So_t, Si_ifrac, Sf_zorl)
 
-INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v2.3 (Maio 2026)
+INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v2.5 (Set 2026)
+
+CORREÇÕES v2.5 (diagnóstico ponderado por área)
+═══════════════════════════════════════════════════════════════════════════════
+  BUG-AREA-WEIGHT: numa grade lat/lon, a fração de gelo por CONTAGEM de células
+    super-representa os polos (muitas células pequenas) e infla a "cobertura de
+    gelo" (dava ~14–16% das células). A verificação física agora reporta também,
+    com peso cos(lat): a cobertura de gelo em % de ÁREA do oceano (>50%), a
+    concentração média onde há gelo (≥0,15) e a SST média ponderada por área
+    (comparável com a climatologia, ~288–292 K), ao lado dos valores por célula.
+
+CORREÇÕES v2.4 (revisão dos scripts de diagnóstico/animação)
+═══════════════════════════════════════════════════════════════════════════════
+  BUG-GEO-OFFLINE (mapas abortavam em nó HPC sem internet)
+    cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth de forma
+    PREGUIÇOSA (só no desenho), então --plot ABORTAVA com URLError em nós de
+    computação sem acesso à rede (o caso do Jaci). Agora a disponibilidade é
+    testada uma vez; se indisponível, os mapas saem SEM contornos, sem abortar.
+
+  BUG-SCALE-PERSTEP (animação com escala de cor incoerente)
+    O reajuste robusto de vmin/vmax de So_t usava os percentis DE CADA PASSO —
+    cada quadro do GIF tinha uma escala de cor diferente e a evolução ficava
+    incomparável. Agora a decisão e os percentis são calculados UMA vez, sobre
+    todos os passos, e reutilizados em todos os quadros.
+
+  BUG-PERSIST-DEFAULT (diagnóstico fabricava o campo de gelo)
+    A "persistência simulada" de Si_ifrac (max com decaimento entre passos)
+    era aplicada POR PADRÃO e plotada como se fosse o campo importado, com
+    apenas um discreto "[acc]" na anotação. Um diagnóstico não deve fabricar
+    dado: agora o padrão mostra o Si_ifrac REALMENTE importado; a persistência
+    simulada passou a ser opt-in via --simulate-persistence.
+
+  BUG-LABEL-FONTE1 (provenância errada no título)
+    O rótulo da FONTE 1 dizia sempre "mpas_import_stepNNNN.nc", mesmo quando os
+    dados vinham dos arquivos novos monan2_import_YYYYMMDD_HHMMSS.nc. Agora o
+    rótulo reflete o nome real dos arquivos lidos.
+
+  BUG-FRAME-SIZE (quadros de tamanhos diferentes)
+    savefig(bbox_inches='tight') gerava PNGs de tamanhos ligeiramente distintos
+    entre passos, fazendo a animação "tremer". Removido: com figsize fixo os
+    quadros saem idênticos.
 
 CORREÇÕES v2.3
 ═══════════════════════════════════════════════════════════════════════════════
@@ -341,7 +381,7 @@ def _load_fonte1(diagdir):
         files  = sorted(glob.glob(os.path.join(diagdir, 'mpas_import_step????.nc')))
         legado = True
     if not files:
-        return None, None, None, None
+        return None, None, None, None, None
 
     steps  = []
     data   = {f: [] for f in FIELDS}
@@ -411,7 +451,20 @@ def _load_fonte1(diagdir):
         valid = [d for d in data[fname] if d is not None]
         result[fname] = np.ma.stack(valid, axis=0) if valid else None
 
-    return steps, result, tss, coords
+    # BUG-LABEL-FONTE1 (corrigido): devolver também o nome-base do 1º e do
+    # último arquivo e se é o padrão legado, para que load_data rotule a FONTE
+    # com o NOME REAL dos arquivos. Antes o rótulo era sempre
+    # "mpas_import_stepNNNN.nc", mesmo quando os dados vinham dos arquivos novos
+    # monan2_import_YYYYMMDD_HHMMSS.nc — a provenância exibida na figura ficava
+    # errada (dizia "mpas_import_step0001..0024.nc" com timestamps reais nos
+    # painéis).
+    src_info = {
+        'legado': legado,
+        'first':  os.path.basename(files[0]),
+        'last':   os.path.basename(files[-1]),
+        'n':      len(files),
+    }
+    return steps, result, tss, coords, src_info
 
 
 # ─── FONTE 2: mom6_import_*.nc (inferência) ──────────────────────────────────
@@ -563,13 +616,23 @@ def load_data(diagdir):
     Retorna (steps, data, timestamps, fonte_label, coords).
     BUG-01 (corrigido): label com nome real dos passos.
     """
-    steps, data, tss, coords = _load_fonte1(diagdir)
+    steps, data, tss, coords, src_info = _load_fonte1(diagdir)
     if steps is not None:
-        if len(steps) == 1:
-            label = f'FONTE 1 (mpas_import_step{steps[0]:04d}.nc)'
+        # BUG-LABEL-FONTE1: rotular com o NOME REAL dos arquivos lidos.
+        if src_info and not src_info.get('legado', True):
+            # Padrão novo: monan2_import_YYYYMMDD_HHMMSS.nc
+            if src_info['n'] == 1:
+                label = f"FONTE 1 ({src_info['first']})"
+            else:
+                label = (f"FONTE 1 ({src_info['first']}..{src_info['last']}, "
+                         f"{src_info['n']} passos)")
         else:
-            label = (f'FONTE 1 (mpas_import_step{steps[0]:04d}'
-                     f'..{steps[-1]:04d}.nc, {len(steps)} passos)')
+            # Padrão legado: mpas_import_stepNNNN.nc
+            if len(steps) == 1:
+                label = f'FONTE 1 (mpas_import_step{steps[0]:04d}.nc)'
+            else:
+                label = (f'FONTE 1 (mpas_import_step{steps[0]:04d}'
+                         f'..{steps[-1]:04d}.nc, {len(steps)} passos)')
         return steps, data, tss, label, coords
 
     steps, data, tss, coords = _load_fonte2(diagdir)
@@ -766,10 +829,52 @@ def check_physics(steps, data, fonte_label, coords=None):
                           f"({frac_cold:.1f}%) < {FREEZE_K} K — esperado nas "
                           f"calotas polares (oceano sob gelo).")
 
+        if fname == 'So_t' and ok:
+            # BUG-AREA-WEIGHT: média de SST ponderada por área (cos-lat), a
+            # comparável com a climatologia (~288–292 K). A média por célula é
+            # puxada para baixo pelas muitas células polares pequenas.
+            layer_last = arr[-1] if arr.ndim == 3 else arr
+            if (lat_axis is not None and hasattr(layer_last, 'shape')
+                    and layer_last.ndim == 2
+                    and lat_axis.size == layer_last.shape[0]):
+                w = np.clip(np.cos(np.deg2rad(lat_axis)), 0.0, None)
+                w2d = np.broadcast_to(w[:, None], layer_last.shape)
+                okm = ~np.ma.getmaskarray(layer_last)
+                atot = float(np.sum(w2d[okm]))
+                if atot > 0:
+                    vals = np.ma.getdata(layer_last)[okm] * scale
+                    sst_aw = float(np.sum(vals * w2d[okm]) / atot)
+                    print(f"  │  ℹ So_t: média ponderada por área = {sst_aw:.2f} K "
+                          f"({sst_aw - 273.15:.2f} °C)  [vs. {gmean:.2f} K por célula]")
+
         if fname == 'Si_ifrac' and ok:
             frac_ice = float(np.mean(arr.compressed() * scale > 0.5))
-            print(f"  │  ✓ Si_ifrac: {frac_ice*100:.3f}% das células com gelo > 50%  "
-                  f"(média={gmean:.4f})")
+            # BUG-AREA-WEIGHT: acrescentar cobertura/média ponderadas por ÁREA
+            # (cos-lat). Numa grade lat/lon, a fração por CONTAGEM de células
+            # super-representa os polos (muitas células pequenas) e infla a
+            # "cobertura de gelo"; a fração por área é a comparável com obs.
+            aw_txt = ''
+            layer_last = arr[-1] if arr.ndim == 3 else arr
+            if (lat_axis is not None and hasattr(layer_last, 'shape')
+                    and layer_last.ndim == 2
+                    and lat_axis.size == layer_last.shape[0]):
+                w = np.clip(np.cos(np.deg2rad(lat_axis)), 0.0, None)
+                w2d = np.broadcast_to(w[:, None], layer_last.shape)
+                okm = ~np.ma.getmaskarray(layer_last)
+                atot = float(np.sum(w2d[okm]))
+                if atot > 0:
+                    vals = np.ma.getdata(layer_last)[okm] * scale
+                    wts  = w2d[okm]
+                    a50  = float(np.sum(wts[vals > 0.5])) / atot * 100.0
+                    ice_present = vals >= 0.15
+                    mean_ice = (float(np.sum(vals[ice_present]*wts[ice_present])
+                                      / np.sum(wts[ice_present]))
+                                if np.any(ice_present) else float('nan'))
+                    mi = f'{mean_ice:.4f}' if not np.isnan(mean_ice) else 'n/d'
+                    aw_txt = (f'  |  por ÁREA: {a50:.2f}% do oceano c/ conc>50%, '
+                              f'conc média onde há gelo (≥0.15) = {mi}')
+            print(f"  │  ✓ Si_ifrac: {frac_ice*100:.3f}% das células com gelo > 50% "
+                  f"(por contagem){aw_txt}")
 
         if fname == 'Sf_zorl' and ok:
             calm_frac  = float(np.mean(flat < meta['calm_max']))
@@ -850,8 +955,37 @@ def check_physics(steps, data, fonte_label, coords=None):
 
 # ─── Mapas ────────────────────────────────────────────────────────────────────
 
-def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=False):
-    """Gera mapas para cada passo. BUG-02: escala Si_ifrac adaptativa. BUG-03: coords do NetCDF."""
+# BUG-GEO-OFFLINE (correção): em nós HPC sem internet (Jaci), cfeature.LAND/
+# COASTLINE baixam os shapefiles Natural Earth de forma preguiçosa (só no
+# desenho/savefig) e o script ABORTAVA com URLError. Testamos a disponibilidade
+# uma única vez; se indisponível, os mapas saem sem os contornos, sem abortar.
+_GEO_CACHE = {'ok': None}
+
+
+def _geo_features_available(cfeature):
+    if _GEO_CACHE['ok'] is None:
+        try:
+            list(cfeature.COASTLINE.geometries())
+            _GEO_CACHE['ok'] = True
+        except Exception as exc:                  # noqa: BLE001 (download/IO)
+            _GEO_CACHE['ok'] = False
+            print("  AVISO: contornos Natural Earth indisponíveis "
+                  f"({type(exc).__name__}) — mapas gerados SEM linha de costa.\n"
+                  "         Em nós HPC offline, pré-baixe os dados (uma vez, com\n"
+                  "         internet): python3 -c \"import cartopy.feature as cf; "
+                  "[list(f.geometries()) for f in (cf.LAND, cf.COASTLINE)]\"")
+    return _GEO_CACHE['ok']
+
+
+def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
+              mask_default=False, simulate_persistence=False):
+    """Gera mapas para cada passo.
+
+    simulate_persistence : quando True, o campo Si_ifrac exibido é uma
+        PERSISTÊNCIA SIMULADA no pós-processamento (max com decaimento entre
+        passos), usada para pré-visualizar o comportamento esperado APÓS a
+        correção do BUG-MEM no Fortran. Por padrão é False: exibe-se o campo
+        Si_ifrac REALMENTE importado (um diagnóstico não deve fabricar dado)."""
     try:
         import matplotlib
         matplotlib.use('Agg')
@@ -915,7 +1049,7 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=F
     # O campo do passo de bootstrap (t=0) inicializa a memória.
     SI_IFRAC_VIS_DECAY = 0.95924    # ≈ exp(-1/24)  — mesmo valor do Fortran
     si_display = None               # lista de arrays acumulados por passo
-    if _si_arr is not None:
+    if simulate_persistence and _si_arr is not None:
         si_acc_list  = []
         si_acc_prev  = None
         for _t in range(len(steps)):
@@ -938,6 +1072,38 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=F
                      else np.asarray(si_display[_t]).ravel())
             if _flat.size > 0:
                 vmax_si_global = max(vmax_si_global, float(np.max(_flat)), 0.01)
+
+    # ── Pré-cálculo: override de escala GLOBAL (consistente entre passos) ─────
+    # BUG-SCALE-PERSTEP (corrigido): o reajuste robusto de vmin/vmax (quando
+    # >20% das células saturam nos limites fixos) era feito COM OS PERCENTIS DE
+    # CADA PASSO — então cada quadro do GIF tinha uma escala de cor diferente e
+    # a animação ficava incomparável. Agora a decisão (e os percentis 2–98) é
+    # tomada UMA vez, sobre todos os passos com dado dinâmico, e reutilizada.
+    global_override = {}
+    for fname in campos_disponiveis:
+        if fname in ('Sf_zorl', 'Si_ifrac'):
+            continue                     # Sf_zorl: LogNorm fixo; Si_ifrac: vmax global
+        meta_g = FIELD_META[fname]
+        vmin_f = meta_g['vmin_plot'] * meta_g['scale']
+        vmax_f = meta_g['vmax_plot'] * meta_g['scale']
+        chunks = []
+        for _i in range(len(steps)):
+            lyr = data[fname][_i] * meta_g['scale']
+            if is_uniform(lyr, fname):
+                continue
+            fv = (lyr.compressed() if hasattr(lyr, 'compressed')
+                  else np.asarray(lyr).ravel())
+            if fv.size:
+                chunks.append(fv)
+        if not chunks:
+            continue
+        allv = np.concatenate(chunks)
+        sat_lo = float(np.mean(allv <= vmin_f))
+        sat_hi = float(np.mean(allv >= vmax_f))
+        if sat_lo > 0.20 or sat_hi > 0.20:
+            p2, p98 = np.percentile(allv, [2, 98])
+            if p98 > p2:
+                global_override[fname] = (float(p2), float(p98))
 
     ncols = 2
     nrows = (len(campos_disponiveis) + 1) // ncols
@@ -988,21 +1154,12 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=F
             vmin = meta['vmin_plot'] * meta['scale']
             vmax = meta['vmax_plot'] * meta['scale']
 
-            # Escala robusta: se o passo tem dado dinâmico e a fração de células
-            # saturadas nos limites fixos for alta (>20% em qualquer extremo),
-            # reajusta vmin/vmax aos percentis 2–98 dos dados válidos. Evita o
-            # mapa "tudo no extremo" (ex.: passo bootstrap ou campo concentrado),
-            # revelando o gradiente real. Não altera dados nem limites físicos.
-            flat_v = layer.compressed() if hasattr(layer, 'compressed') \
-                     else np.asarray(layer).ravel()
+            # Escala robusta GLOBAL (BUG-SCALE-PERSTEP): usa o override calculado
+            # uma vez sobre todos os passos, garantindo a MESMA escala de cor em
+            # todos os quadros da animação. Não altera dados nem limites físicos.
             uniforme = is_uniform(layer, fname)
-            if (not uniforme and flat_v.size > 0 and fname != 'Sf_zorl'):
-                sat_lo = float(np.mean(flat_v <= vmin))
-                sat_hi = float(np.mean(flat_v >= vmax))
-                if sat_lo > 0.20 or sat_hi > 0.20:
-                    p2, p98 = np.percentile(flat_v, [2, 98])
-                    if p98 > p2:
-                        vmin, vmax = float(p2), float(p98)
+            if fname in global_override:
+                vmin, vmax = global_override[fname]
 
             # BUG-10 (corrigido): escala Si_ifrac consistente entre passos.
             # BUG-02 (v2.2) usava vmax adaptativo por passo; isso tornava
@@ -1022,9 +1179,11 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=F
                                    cmap=meta['cmap'], transform=ccrs.PlateCarree(),
                                    shading='auto', zorder=1)
                 # BUG-PLOT-LAND: terra DESENHADA ACIMA do dado (zorder alto).
-                ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
-                ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
-                               edgecolor='black', zorder=6)
+                # BUG-GEO-OFFLINE: resiliente a nó HPC sem internet.
+                if _geo_features_available(cfeature):
+                    ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
+                    ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
+                                   edgecolor='black', zorder=6)
                 ax.set_global()
 
                 # ── Scatter overlay para Si_ifrac esparso ──────────────────
@@ -1126,12 +1285,16 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None, mask_default=F
 
         ts_tag = tss[i].strftime('%Y%m%d_%H%M%S') if tss[i] else f'step{step:04d}'
         outfile = os.path.join(outdir, f'monan2_import_{ts_tag}.png')
-        fig.savefig(outfile, dpi=120, bbox_inches='tight', facecolor='white')
+        # BUG-FRAME-SIZE: sem bbox_inches='tight' — recorte ajustado produz
+        # quadros de tamanhos diferentes e faz a animação "tremer". figsize fixo
+        # garante PNGs idênticos, condição para um GIF/MP4 estável.
+        fig.savefig(outfile, dpi=120, facecolor='white')
         plt.close(fig)
         print(f"  Figura: {outfile}")
 
 
-def plot_timeseries(steps, data, tss, outdir, fonte_label):
+def plot_timeseries(steps, data, tss, outdir, fonte_label,
+                    simulate_persistence=False):
     """Gera série temporal das médias globais."""
     try:
         import matplotlib
@@ -1157,9 +1320,10 @@ def plot_timeseries(steps, data, tss, outdir, fonte_label):
         meta   = FIELD_META[fname]
         scale  = meta['scale']
 
-        # Para Si_ifrac, aplicar a mesma persistência simulada do plot_maps,
-        # para que a série temporal reflita o comportamento esperado com BUG-MEM fix.
-        if fname == 'Si_ifrac':
+        # Para Si_ifrac, aplicar a persistência simulada SOMENTE quando pedido
+        # explicitamente (--simulate-persistence); por padrão a série mostra o
+        # campo REAL importado (um diagnóstico não deve fabricar dado).
+        if fname == 'Si_ifrac' and simulate_persistence:
             SI_IFRAC_VIS_DECAY = 0.95924
             arr_acc = []
             prev    = None
@@ -1210,7 +1374,7 @@ def plot_timeseries(steps, data, tss, outdir, fonte_label):
     fig.tight_layout()
 
     outfile = os.path.join(outdir, 'monan2_import_timeseries.png')
-    fig.savefig(outfile, dpi=120, bbox_inches='tight', facecolor='white')
+    fig.savefig(outfile, dpi=120, facecolor='white')
     plt.close(fig)
     print(f"  Série temporal: {outfile}")
 
@@ -1324,6 +1488,13 @@ def main():
     parser.add_argument('--mask-default', dest='mask_default', action='store_true',
                         help='Oculta células no valor default nos mapas '
                              '(evidencia cobertura parcial / bug de import)')
+    parser.add_argument('--simulate-persistence', dest='simulate_persistence',
+                        action='store_true',
+                        help='Exibe Si_ifrac com PERSISTÊNCIA SIMULADA no '
+                             'pós-processamento (pré-visualiza o comportamento '
+                             'esperado após a correção do BUG-MEM no Fortran). '
+                             'Por padrão desligado: mostra o campo REALMENTE '
+                             'importado.')
     args = parser.parse_args()
 
     run_all = not (args.stats or args.check or args.plot or args.log)
@@ -1331,7 +1502,7 @@ def main():
     print()
     print('══' * 36)
     print('  Diagnóstico MED→MPAS: So_t | Si_ifrac | Sf_zorl')
-    print('  INPE / CGCT / DIMNT — GT Acoplamento MONAN  (v2.0)')
+    print('  INPE / CGCT / DIMNT — GT Acoplamento MONAN  (v2.5)')
     print('══' * 36)
 
     # FONTE 3 primeiro: verifica log independentemente dos dados
@@ -1363,8 +1534,10 @@ def main():
             print(f"\n  Gerando figuras ({len(steps)} passo(s))...")
             os.makedirs(args.outdir, exist_ok=True)
             plot_maps(steps, data, tss, args.outdir, fonte_label, coords,
-                      mask_default=args.mask_default)
-            plot_timeseries(steps, data, tss, args.outdir, fonte_label)
+                      mask_default=args.mask_default,
+                      simulate_persistence=args.simulate_persistence)
+            plot_timeseries(steps, data, tss, args.outdir, fonte_label,
+                            simulate_persistence=args.simulate_persistence)
 
     print()
     print('══' * 36)
