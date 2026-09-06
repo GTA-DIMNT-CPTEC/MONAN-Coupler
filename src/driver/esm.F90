@@ -39,8 +39,21 @@
 !!   6. MED  → OCN   14 fluxos Foxx_*/Faxa_*
 !!   7. OCN           avança DOCN (OISST netcdf)
 !!
-!! NUOPC/ESMF 8.9.1 — INPE / CGCT / DIMNT — GT Acoplamento de Modelos
-!! Cachoeira Paulista, SP — Maio 2026.
+!! Alterações (Set/2026):
+!!   Acrescentada ao log, no ramo pet_layout='split' com coupling_mode=
+!!   'sequential', uma linha que nomeia quantos PETs ficam parados em cada
+!!   fase do passo. Nenhuma mudança de comportamento; é diagnóstico para
+!!   interpretar o consumo de fila (nós × walltime) sem cronometrar as
+!!   janelas de execução componente a componente.
+!!
+!!   Documentado em SetRunSequence o mecanismo de sincronização da
+!!   RunSequence (linha de Model não sincroniza; conector de/para o MED
+!!   sincroniza, porque o MED está em todos os PETs) e o registro de que a
+!!   reordenação de 'MED -> ICE' foi avaliada e descartada. Ver
+!!   docs/analise-sequential-split-sis2.md.
+!!
+!! NUOPC/ESMF 8.9.1 — INPE / CGCT / DIMNT — Grupo de Trabalho para
+!! Acoplamento de Modelos. Cachoeira Paulista, SP — Maio 2026.
 
 module ESM_MONAN
 
@@ -421,6 +434,28 @@ contains
           nAtm, '..', petCount-1, '] MED=todos (ICE desativado)'
       end if
       call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+
+      ! Modelo de ocupação de sequential+split, explícito no log (Set/2026).
+      ! Não é erro nem aviso de defeito: é a informação de que uma fração
+      ! conhecida dos PETs fica parada em cada fase, para que quem lê o log
+      ! saiba interpretar o consumo de fila (nós × walltime) sem precisar
+      ! cronometrar as janelas de execução componente a componente.
+      ! As fases são executadas EM SÉRIE; ver o comentário em SetRunSequence
+      ! sobre o que sincroniza a RunSequence.
+      if (.not. is_concurrent) then
+        if (use_ice) then
+          write(msg,'(A,I0,A,I0,A,I0,A,I0,A)') &
+            'ESM: sequential+split: fases em serie MED, ATM, OCN, ICE. ' // &
+            'Parados: ', nOcn+nIce, ' PET no ATM, ', nAtm+nIce, &
+            ' no OCN, ', nAtm+nOcn, ' no ICE (de ', petCount, ').'
+        else
+          write(msg,'(A,I0,A,I0,A,I0,A)') &
+            'ESM: sequential+split: fases em serie MED, ATM, OCN. ' // &
+            'Parados: ', nOcn, ' PET no ATM, ', &
+            nAtm, ' no OCN (de ', petCount, ').'
+        end if
+        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+      end if
     else
       allocate(atmPetList(petCount)); atmPetList = medPetList
       allocate(ocnPetList(petCount)); ocnPetList = medPetList
@@ -892,15 +927,51 @@ contains
         ! ociosos durante a fase alheia. O que 'sequential' determina é a ORDEM
         ! no tempo, não a ocupação de PETs; os dois eixos são independentes.
         !
-        ! Sobre a posição de 'MED -> ICE': ela vem depois de 'OCN' porque essa é
-        ! a ordenação já exercitada em execução. Note que a escolha NÃO muda o
-        ! dado entregue ao gelo: o mediador executou uma única vez, na linha
-        ! 'MED' acima, e não roda de novo entre 'OCN' e 'MED -> ICE'. Portanto o
-        ! SIS2 recebe o estado oceânico que o mediador capturou ANTES de o OCN
-        ! avançar, e não o do mesmo passo. Essa defasagem de meio passo é da
-        ! mesma natureza das demais do acoplamento sequencial. Para o gelo ver o
-        ! oceano já avançado seria preciso um segundo 'OCN -> MED' seguido de
-        ! nova execução do 'MED', o que dobraria o custo do mediador.
+        ! COMO O DRIVER NUOPC SINCRONIZA ESTA LISTA (Set/2026)
+        !
+        ! Os PETs percorrem a lista abaixo juntos, linha por linha. Ao chegar
+        ! numa linha de Model ('MPAS', 'OCN', 'ICE'), o PET executa se for
+        ! membro do componente e ATRAVESSA a linha sem fazer nada se não for.
+        ! Linha de Model, portanto, não sincroniza ninguém.
+        !
+        ! Quem sincroniza são os conectores de/para o MED. Um conector roda na
+        ! UNIÃO dos PETs de origem e destino e, como o MED está registrado em
+        ! TODOS os PETs, toda linha 'MED -> X' ou 'X -> MED' é ponto de
+        ! encontro obrigatório para os 100% dos PETs. É isso, e só isso, que
+        ! separa uma fase da outra nesta RunSequence.
+        !
+        ! Consequência para o gelo: é a linha 'MED -> ICE', entre 'OCN' e
+        ! 'ICE', que impede o bloco de PET do SIS2 de entrar no seu avanço
+        ! enquanto o MOM6 não terminar. Tempo por passo =
+        ! t_MED + t_ATM + t_OCN + t_ICE.
+        !
+        ! POR QUE A ORDEM É ESTA, E NÃO OUTRA
+        !
+        ! Mover 'MED -> ICE' para junto de 'MED -> OCN' deixaria 'OCN' e 'ICE'
+        ! consecutivos, sem encontro entre eles, e os dois blocos avançariam ao
+        ! mesmo tempo (t_MED + t_ATM + max(t_OCN, t_ICE)). O dado entregue
+        ! seria bit a bit o mesmo: o mediador executa uma única vez por passo,
+        ! na linha 'MED' acima, e não roda de novo entre 'OCN' e 'ICE'; além
+        ! disso o SIS2 não importa nada diretamente do MOM6 — as três entradas
+        ! oceânicas do gelo (So_t, So_u, So_v) vêm do exportState do MED, não
+        ! do OCN (ver import_names_ocn em sis_cap_MONAN.F90).
+        !
+        ! Essa reordenação foi implementada, avaliada e DESCARTADA em Set/2026.
+        ! Motivos, para não ser reproposta sem dado novo:
+        !
+        !   1. O ganho é limitado a min(t_OCN, t_ICE), e o SIS2 custa uma
+        !      fração do MOM6 na mesma grade. Não toca no termo dominante
+        !      deste modo, que é o bloco OCN+ICE parado durante todo o t_ATM.
+        !   2. sequential+split existe, por definição do projeto (ver grupo 7
+        !      da nuopc.input), para contornar restrição de decomposição e de
+        !      memória, NÃO para reduzir tempo de parede.
+        !   3. A chave chama-se 'sequential'. Fazer dois componentes avançarem
+        !      ao mesmo tempo sem que nada na nuopc.input diga isso é o modo
+        !      entregando comportamento que não foi pedido.
+        !
+        ! Se uma calibração mostrar t_ICE comparável a t_OCN, a reordenação
+        ! volta à mesa, porém como CHAVE EXPLÍCITA em &nuopc_petlayout, com
+        ! padrão nesta ordem, e não como comportamento implícito.
         runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
           line1,              &  ! "@<dt_coupling>    "
           "  OCN -> MED      ", &  ! So_t, So_u, So_v -> mediador
@@ -915,6 +986,9 @@ contains
           "  ICE             ", &  ! avanca SIS2
           "@                 " /), rc=rc)
         call ESMF_LogWrite('ESM: RunSequence Fase 2 SEQUENCIAL + ICE (SIS2)', &
+          ESMF_LOGMSG_INFO)
+        call ESMF_LogWrite('ESM: fases por passo = MED, ATM, OCN, ICE ' // &
+          '(uma de cada vez; ver comentario em SetRunSequence)', &
           ESMF_LOGMSG_INFO)
       else if (use_med_to_mpas) then
         ! ── Fase 2: MOM6 dinâmico — OCN e ATM exportam ao MED primeiro ───────

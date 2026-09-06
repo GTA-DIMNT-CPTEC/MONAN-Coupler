@@ -2,6 +2,12 @@
 ! MED_cap_MONAN.F90 — Orquestrador NUOPC do mediador ATM-OCN do MONAN         !
 !==============================================================================!
 !                                                                              !
+! Versão 2.6 (Set/2026) — BUG-SEQ-STAMP-01: em coupling_mode='sequential' o
+!   elemento 'MED' roda ANTES dos avanços, logo o importState descreve o estado
+!   em t, não em t+dt. O mediador carimbava o exportState e nomeava os arquivos
+!   de diagnóstico com nextTime nos dois modos, adiantando em um dt_coupling
+!   todo mom6_import_*.nc / monan2_import_*.nc do modo sequencial. Introduzido
+!   stampTime (= currTime em sequential, = nextTime em concurrent).
 ! Versão 2.5 (Mai/2026) — BUG-MED-ZERO: is%f_ifrac_atm era zerado antes de
 !   fill_ifrac_from_oisst em Sprint B.1.1, destruindo o campo OISST de t=0.
 !   O campo retém agora os valores entre passos e decai com τ=24h.
@@ -38,7 +44,8 @@ module MED_cap_MONAN_mod
                                   cfg_docn_epoch_month,             &
                                   cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  & ! FIX B-OCNGRID-01
-                                  cfg_use_sis2_dynamic                ! FIX SIS2-ATIVACAO
+                                  cfg_use_sis2_dynamic,             & ! FIX SIS2-ATIVACAO
+                                  cfg_coupling_mode                   ! BUG-SEQ-STAMP-01
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -1757,6 +1764,11 @@ contains
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
     type(ESMF_Time)          :: currTime, nextTime
+    ! BUG-SEQ-STAMP-01 (Set/2026): instante que representa o CONTEUDO desta
+    ! execucao do mediador. Ver a justificativa completa junto da atribuicao,
+    ! logo apos o calculo de nextTime.
+    type(ESMF_Time)          :: stampTime
+    logical                  :: med_runs_before_advance
     type(ESMF_TimeInterval)  :: dt
     type(ESMF_Field)         :: field
     type(MED_InternalStateWrapper) :: iswrap
@@ -1837,6 +1849,48 @@ contains
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
     nextTime = currTime + dt
 
+    !--------------------------------------------------------------------------
+    ! BUG-SEQ-STAMP-01 (Set/2026): o instante que rotula o resultado do
+    ! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
+    !
+    ! O relogio do mediador marca currTime = t durante toda a execucao do passo,
+    ! nos dois modos: o NUOPC so' avanca o relogio depois que o Advance retorna.
+    ! O que muda e' o conteudo que chega ao importState:
+    !
+    !   concurrent : 'MED' e' o ULTIMO elemento do passo. Os conectores
+    !                'MPAS -> MED', 'OCN -> MED' e 'ICE -> MED' ja' rodaram
+    !                DEPOIS dos avancos, entao os campos importados descrevem o
+    !                estado em t+dt. O rotulo correto e' nextTime.
+    !
+    !   sequential : 'MED' e' o QUARTO elemento, ANTES de 'MPAS', 'OCN' e 'ICE'.
+    !                Os conectores que o alimentam rodaram no inicio do passo, e
+    !                os campos importados descrevem o estado em t (o que cada
+    !                componente escreveu no fim do passo anterior). O rotulo
+    !                correto e' currTime.
+    !
+    ! Ate' esta correcao nextTime era usado nos dois modos. Consequencias no
+    ! modo sequencial:
+    !
+    !   (a) Todo arquivo de diagnostico mom6_import_YYYYMMDD_HHMMSS.nc e
+    !       monan2_import_YYYYMMDD_HHMMSS.nc saia com o nome e a variavel de
+    !       tempo adiantados em um dt_coupling em relacao ao dado que continha.
+    !       Comparar uma rodada sequential com uma concurrent mostrava as duas
+    !       deslocadas de um passo, e as animacoes ficavam fora de fase.
+    !   (b) O exportState era carimbado com t+dt e entregue a componentes cujo
+    !       relogio marcava t. Os tres caps usam CheckImport tolerante (janela
+    !       de +/- dt_coupling) ou no-op, entao isso nao abortava a execucao;
+    !       passava sem sinal nenhum. Com currTime o carimbo passa a coincidir
+    !       exatamente com o relogio do consumidor.
+    !
+    ! O modo concorrente nao muda: stampTime = nextTime, byte a byte como antes.
+    !--------------------------------------------------------------------------
+    med_runs_before_advance = (trim(cfg_coupling_mode) == 'sequential')
+    if (med_runs_before_advance) then
+      stampTime = currTime
+    else
+      stampTime = nextTime
+    end if
+
     ! B-45: com regDecomp(2)=min(petCount,ny_atm/2), PETs acima de ny_atm/2
     ! têm localDeCount=0 para o atm_grid interno do MED. Esses PETs não têm
     ! dados locais — nenhum campo interno pode ser acessado via farrayPtr.
@@ -1847,7 +1901,7 @@ contains
       ! PET sem DE local: participar nas operações MPI coletivas dentro de
       ! med_write_import_fields antes de retornar (evita deadlock BUG-NC-02).
       ! Contribuição local = FILL_IMP (neutro no MPI_Reduce MAX).
-      call med_write_import_fields(exportState, nextTime, is, rc)
+      call med_write_import_fields(exportState, stampTime, is, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
       return
     end if
@@ -3467,7 +3521,7 @@ contains
     do k = 1, fieldCount
       call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
         field=field, rc=rc)
-      call NUOPC_SetTimestamp(field, nextTime, rc=rc)
+      call NUOPC_SetTimestamp(field, stampTime, rc=rc)   ! BUG-SEQ-STAMP-01
     end do
     deallocate(fieldNameList)
 
@@ -3493,7 +3547,7 @@ contains
       end if
     end if
 
-    call med_write_import_fields(exportState, nextTime, is, rc)
+    call med_write_import_fields(exportState, stampTime, is, rc)
     if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
     ! Liberar arrays temporarios de defaults Fase 2 (se alocados)
     if (associated(shum_local)) then
