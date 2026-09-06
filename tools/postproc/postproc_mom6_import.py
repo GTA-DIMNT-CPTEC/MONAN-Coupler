@@ -4,9 +4,18 @@ postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
                               (14 fluxos ATM→OCN calculados pelo mediador NCAR
                                bulk em MED_cap.F90)
 
-Versão 8.5 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+Versão 8.6 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
 
 HISTÓRICO DE CORREÇÕES
+  v8.6 — Limiares de sen/evap alinhados ao fluxo nativo do MPAS-A (Set 2026):
+    • BUG-PY-20: Foxx_sen e Foxx_evap entregues ao MOM6 são os fluxos de
+      superfície NATIVOS do MPAS-A (MED_cap.F90 Fase 3 sobrescreve o bulk NCAR
+      SEM reaplicar clamp), e legitimamente atingem −400…−600 W/m² (sensível) e
+      ~25–40 mm/d (latente) em células de corrente de contorno oeste sob ar
+      frio. Os limiares antigos (±500 W/m², [−15,200] mm/d) marcavam esses
+      extremos físicos como avisos. Alargados para ±800 W/m² e [−40,200] mm/d.
+      (Não é clamp de física — apenas o limiar do diagnóstico.)
+
   v8.5 — Diagnóstico ponderado por área (Set 2026):
     • BUG-ICE-MEAN-LABEL: a linha "média sobre células c/ gelo" do --check
       mostrava, na verdade, a média sobre TODO o oceano (oceano sem gelo é 0.0,
@@ -268,16 +277,26 @@ FIELD_META = {
         'long_name': 'Fluxo de calor sensível (Foxx_sen)',
         'units': 'W m-2', 'scale': 1.0, 'scale_units': 'W m⁻²',
         'cmap': 'RdBu_r', 'vperc': [2, 98], 'symmetric': True,
-        'vmin_phys': -500.0, 'vmax_phys': 500.0,
-        'check_msg': 'Fluxo sensível fora de [-500, 500] W m⁻²',
+        # BUG-PY-20 (Set/2026): limite alargado de ±500 para ±800 W/m². Em
+        # modo acoplado o Foxx_sen entregue ao MOM6 é o fluxo de superfície
+        # NATIVO do MPAS-A (MED_cap.F90 Fase 3, sobrescreve o bulk NCAR sem
+        # clamp), não o bulk clampado a ±500. Sobre correntes de contorno
+        # oeste (Kuroshio/Gulf Stream) em surto de ar frio, o calor sensível
+        # instantâneo alcança −400…−600 W/m² em células isoladas — física
+        # legítima na cauda, não artefato. ±500 gerava falso-positivo.
+        'vmin_phys': -800.0, 'vmax_phys': 800.0,
+        'check_msg': 'Fluxo sensível fora de [-800, 800] W m⁻² (extremo de corrente de contorno oeste; se >~800 verificar artefato)',
     },
     'Foxx_evap': {
         'long_name': 'Fluxo de evaporação (Foxx_evap)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'RdBu_r', 'vperc': [2, 98], 'symmetric': True,
-        # BUG-PY-09: limites em mm/d
-        'vmin_phys': -15.0, 'vmax_phys': 200.0,
-        'check_msg': 'Evaporação fora de [-15, 200] mm/d',
+        # BUG-PY-20: limite inferior alargado de −15 para −40 mm/d. Mesmo motivo
+        # do Foxx_sen: a evaporação entregue é o fluxo latente nativo do MPAS-A
+        # (Fase 3, sem clamp). Latente ~700–1000 W/m² sobre Kuroshio/Gulf Stream
+        # no inverno ⇒ ~25–40 mm/d instantâneos em células isoladas (física).
+        'vmin_phys': -40.0, 'vmax_phys': 200.0,
+        'check_msg': 'Evaporação fora de [-40, 200] mm/d (extremo de corrente de contorno oeste)',
     },
     # ── Radiação ──────────────────────────────────────────────────────────────
     'Foxx_lwnet': {
@@ -1493,7 +1512,7 @@ def main():
     print()
     print('═' * 70)
     print('  MONAN-A 2.0 — Validação de campos importados MOM6 (ATM→OCN)')
-    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.5)')
+    print('  INPE / CGCT / DIMNT — GT Acoplamento de Modelos  (v8.6)')
     print('═' * 70)
     print(f"  Diagnósticos : {os.path.abspath(args.diagdir)}")
     print(f"  Saída        : {os.path.abspath(args.outdir)}")
