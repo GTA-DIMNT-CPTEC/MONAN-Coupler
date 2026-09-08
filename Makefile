@@ -167,16 +167,30 @@ F90FLAGS := $(ESMF_F90COMPILEOPTS)      \
             -Wno-unused-dummy-argument  \
             -Wno-unused-variable
 
+# inc_if_exists — expande para '-I<dir>' apenas se <dir> existir; caso
+# contrário, para vazio. Evita o aviso do gfortran
+#   Warning: Nonexistent include directory '.../include/...' [-Wmissing-include-dirs]
+# O sufixo '/.' força o $(wildcard) a casar somente diretórios existentes.
+inc_if_exists = $(if $(wildcard $(1)/.),-I$(1))
+
 # Flags adicionais quando MOM6 está disponível: caminhos de módulos e cabeçalhos
+#
+# Os .mod de MOM6/FMS/NUOPC vêm de *_MODDIR (obrigatórios: -I direto). Já os
+# diretórios include/{mom6,fms,nuopc} NÃO são criados por 2-install-mom.bash
+# nesta instalação — os cabeçalhos C (MOM_memory.h, version_variable.h) ficam
+# na árvore de fontes do MOM6 e são supridos por MOM6_HDR_INC. Por isso os
+# -I$(*_INCDIR) passam por inc_if_exists: só entram se o diretório existir,
+# eliminando os avisos -Wmissing-include-dirs sem perder o suporte a layouts
+# que porventura populem include/.
 ifdef HAS_MOM6
-F90FLAGS += -I$(MOM6_MODDIR)         \
-            -I$(MOM6_INCDIR)         \
-            -I$(FMS_MODDIR)          \
-            -I$(FMS_INCDIR)          \
-            -I$(NUOPC_MODDIR)        \
-            -I$(NUOPC_INCDIR)        \
-            $(MOAB_INC)              \
-            -I$(PNETCDF_DIR)/include \
+F90FLAGS += -I$(MOM6_MODDIR)                  \
+            $(call inc_if_exists,$(MOM6_INCDIR))  \
+            -I$(FMS_MODDIR)                   \
+            $(call inc_if_exists,$(FMS_INCDIR))   \
+            -I$(NUOPC_MODDIR)                 \
+            $(call inc_if_exists,$(NUOPC_INCDIR)) \
+            $(MOAB_INC)                       \
+            -I$(PNETCDF_DIR)/include          \
             $(MOM6_HDR_INC)
 # MOM6_HDR_INC fornece -I para MOM_memory.h e version_variable.h
 # (cabeçalhos na árvore de fontes do MOM6). Exportado por setenv-gnu.bash.
