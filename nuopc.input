@@ -430,4 +430,11 @@
   ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
   use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
   ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)
+  seq_repro     = .true.        ! .true. → sequential+split+SIS2 REPRODUTIVEL
+                                 !   (fluxo de dados idêntico ao concurrent+split,
+                                 !   bit-a-bit). Só efetivo com coupling_mode=
+                                 !   'sequential' + use_med_to_mpas + use_sis2_
+                                 !   dynamic + pet_layout='split'. Default .false.
+                                 !   preserva o arranque com SST real no passo 1.
+                                 !   NÃO altera o modo concurrent.
 /

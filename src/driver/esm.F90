@@ -91,7 +91,8 @@ module ESM_MONAN
                                    cfg_use_med_to_mpas, config_read, &
                                    cfg_coupling_mode, cfg_pet_layout, &
                                    cfg_atm_pet_count, cfg_ocn_pet_count, &
-                                   cfg_ice_pet_count, cfg_use_sis2_dynamic
+                                   cfg_ice_pet_count, cfg_use_sis2_dynamic, &
+                                   cfg_seq_repro
 
   implicit none
   private
@@ -920,6 +921,51 @@ contains
       end if
     else
       if (use_med_to_mpas .and. cfg_use_sis2_dynamic) then
+        if (cfg_seq_repro) then
+          ! ── Fase 2 SEQUENCIAL REPRODUTIVEL (bit-a-bit == concurrent) + ICE ──
+          ! Variante selecionada por seq_repro=.true. em &nuopc_petlayout.
+          ! Reproduz o fluxo de dados do concurrent+split, porem SERIALIZADO:
+          ! as entregas MED->MPAS, MED->OCN e MED->ICE ficam ANTES de cada
+          ! avanco e carregam sempre o resultado do ULTIMO calculo do mediador
+          ! (a linha 'MED' do fim do ciclo anterior); o mediador NAO recalcula
+          ! entre os avancos. Assim cada componente recebe exatamente a mesma
+          ! entrada que receberia no concurrent, e o 'MED' fecha no fim a partir
+          ! dos avancos deste passo — identico ao concurrent. As barreiras
+          ! MED->OCN e MED->ICE entre os avancos preservam a execucao
+          ! um-de-cada-vez (razao de existir do sequential); a unica diferenca
+          ! para o concurrent e' o relogio de parede, que nao afeta o numero.
+          !
+          ! Consequencias (todas alinham ao concurrent; NADA muda no concurrent):
+          !   - arranque: no passo 1 o MED ainda nao calculou nada, entao o MPAS
+          !     avanca com o default (Sx_tsfc ~298 K), como no concurrent. A
+          !     inicializacao publica apenas So_t (MED_cap InitializeDataComplete),
+          !     entao os dois modos partem do MESMO ponto no passo 1.
+          !   - carimbo de tempo: com 'MED' no fim o rotulo correto e' nextTime;
+          !     MED_cap.F90 ja' trata isso via cfg_seq_repro (BUG-SEQ-STAMP-01).
+          !   - inicializacao: fecha em 1 passagem (produtor OCN antes do gate),
+          !     como o concurrent, em vez das 2 do sequential classico.
+          !
+          ! Para igualdade bit-a-bit, alem desta ordem, garantir nas DUAS rodadas:
+          ! mesma condicao inicial, mesmo dt_coupling, mesmas contagens de PET,
+          ! somas globais reprodutiveis no MOM6/SIS2, MPAS deterministico, mesmo
+          ! numero de nucleos e mesmas opcoes de compilacao.
+          runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
+            line1,              &  ! "@<dt_coupling>    "
+            "  MED -> MPAS     ", &  ! resultado do passo anterior -> ATM (regrid)
+            "  MPAS            ", &  ! avanca MPAS
+            "  MED -> OCN      ", &  ! mesmo resultado anterior (barreira serializa)
+            "  OCN             ", &  ! avanca MOM6 dinamico
+            "  MED -> ICE      ", &  ! mesmo resultado anterior (barreira serializa)
+            "  ICE             ", &  ! avanca SIS2
+            "  MPAS -> MED     ", &  ! 9 campos _mpas (estado t+dt) -> mediador
+            "  OCN -> MED      ", &  ! So_t, So_u, So_v (t+dt) -> mediador
+            "  ICE -> MED      ", &  ! Si_ifrac real (t+dt) -> mediador
+            "  MED             ", &  ! RouteOcnToAtm + bulk NCAR (calcula no fim)
+            "@                 " /), rc=rc)
+          call ESMF_LogWrite('ESM: RunSequence Fase 2 SEQUENCIAL REPRODUTIVEL '// &
+            '+ ICE (SIS2) — fluxo de dados identico ao concurrent+split '// &
+            '(seq_repro=.true.)', ESMF_LOGMSG_INFO)
+        else
         ! ── Fase 2 SEQUENCIAL (MOM6 dinâmico) + ICE (SIS2) ──────────────────
         ! Equivalente sequencial da variante concorrente com gelo. Vale com
         ! QUALQUER pet_layout: em 'shared' os três componentes dividem todos os
@@ -990,6 +1036,7 @@ contains
         call ESMF_LogWrite('ESM: fases por passo = MED, ATM, OCN, ICE ' // &
           '(uma de cada vez; ver comentario em SetRunSequence)', &
           ESMF_LOGMSG_INFO)
+        end if   ! cfg_seq_repro
       else if (use_med_to_mpas) then
         ! ── Fase 2: MOM6 dinâmico — OCN e ATM exportam ao MED primeiro ───────
         ! O MED aplica RouteOcnToAtm (regrid conservativo) e entrega ao MPAS.

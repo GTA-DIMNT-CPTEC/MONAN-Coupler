@@ -206,6 +206,17 @@ module mpas_cap_config_mod
   ! Componente ICE (SIS2 dinâmico)
   integer,           public, protected :: cfg_ice_pet_count    = 0
   logical,           public, protected :: cfg_use_sis2_dynamic = .false.
+  ! cfg_seq_repro  .true.  → variante REPRODUTIVEL do sequential+split+SIS2:
+  !   a RunSequence sequencial passa a emitir o MESMO fluxo de dados do
+  !   concurrent (mediador no fim do passo, entregas defasadas de um passo,
+  !   serializadas por barreiras de entrega MED->OCN / MED->ICE entre os
+  !   avancos). Torna as rodadas sequential+split e concurrent+split bit-a-bit
+  !   identicas (com SIS2 dinamico), sem alterar em nada o modo concurrent.
+  !   Só tem efeito com coupling_mode='sequential', use_med_to_mpas=.true.,
+  !   use_sis2_dynamic=.true. e pet_layout='split'; fora disso e' ignorado.
+  !   Default .false. preserva o sequential recomendado (arranque com SST real
+  !   do oceano no passo 1). Ver src/driver/esm.F90::SetRunSequence.
+  logical,           public, protected :: cfg_seq_repro        = .false.
 
   ! ── Grupo &nuopc_mode — seleção de componentes ────────────────────────────
   !   cfg_use_datm  .true.  → usa DATM (JRA55) como ATM
@@ -322,9 +333,11 @@ contains
     ! Componente ICE (SIS2 dinâmico)
     integer           :: ice_pet_count    = 0
     logical           :: use_sis2_dynamic = .false.
+    logical           :: seq_repro        = .false.
     namelist /nuopc_petlayout/ coupling_mode, pet_layout,   &
                                atm_pet_count, ocn_pet_count, &
-                               ice_pet_count, use_sis2_dynamic
+                               ice_pet_count, use_sis2_dynamic, &
+                               seq_repro
 
     rc = 0
 
@@ -367,6 +380,7 @@ contains
     ocn_pet_count        = cfg_ocn_pet_count
     ice_pet_count        = cfg_ice_pet_count
     use_sis2_dynamic     = cfg_use_sis2_dynamic
+    seq_repro            = cfg_seq_repro
     ! pet_layout NÃO recebe cfg_pet_layout aqui, de propósito: o sentinela ''
     ! precisa sobreviver à leitura para que a ausência da chave seja
     ! distinguível de um valor explícito. A derivação a partir do
@@ -587,12 +601,37 @@ contains
       rc = 2; return
     end if
 
+    ! ── seq_repro — variante reprodutivel do sequential+split+SIS2 ─────────
+    ! So faz sentido no sequential Fase 2 com gelo e layout split (o alvo e' o
+    ! concurrent+split). Fora desse contexto seria lido e descartado em
+    ! silencio; seguindo a disciplina da v14.20 (nada de descarte mudo), aqui
+    ! e' AVISO com neutralizacao explicita, nao aborto — a chave simplesmente
+    ! nao tem efeito e a rodada segue no modo pedido.
+    if (seq_repro) then
+      if (trim(coupling_mode) /= 'sequential') then
+        write(*,'(A)') '[mpas_cap_config] AVISO: seq_repro=.true. so tem ' // &
+          'efeito com coupling_mode=sequential — ignorado.'
+        seq_repro = .false.
+      else if (.not. (use_med_to_mpas .and. use_sis2_dynamic)) then
+        write(*,'(A)') '[mpas_cap_config] AVISO: seq_repro=.true. exige ' // &
+          'use_med_to_mpas=.true. e use_sis2_dynamic=.true. (Fase 2 com ' // &
+          'gelo) — ignorado.'
+        seq_repro = .false.
+      else if (trim(pet_layout) /= 'split') then
+        write(*,'(A)') '[mpas_cap_config] AVISO: seq_repro=.true. exige ' // &
+          'pet_layout=split (o alvo da reprodutibilidade e o ' // &
+          'concurrent+split) — ignorado.'
+        seq_repro = .false.
+      end if
+    end if
+
     cfg_coupling_mode = trim(coupling_mode)
     cfg_pet_layout    = trim(pet_layout)
     cfg_atm_pet_count = atm_pet_count
     cfg_ocn_pet_count = ocn_pet_count
     cfg_ice_pet_count = ice_pet_count
     cfg_use_sis2_dynamic = use_sis2_dynamic
+    cfg_seq_repro     = seq_repro
 
     ! ── Validação: Alternativa 1 — Si_ifrac via arquivo OISST ────────────
     ! cfg_use_docn_ice=.true. exige cfg_docn_ice_file configurado.
@@ -718,6 +757,7 @@ contains
     write(*,'(2X,A,I0)') 'cfg_ocn_pet_count    = ', cfg_ocn_pet_count
     write(*,'(2X,A,L1)') 'cfg_use_sis2_dynamic = ', cfg_use_sis2_dynamic
     write(*,'(2X,A,I0)') 'cfg_ice_pet_count    = ', cfg_ice_pet_count
+    write(*,'(2X,A,L1)') 'cfg_seq_repro        = ', cfg_seq_repro
   end subroutine config_print
 
   !> @brief Converte string 'YYYY-MM-DD' para componentes inteiros.

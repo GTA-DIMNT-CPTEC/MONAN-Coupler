@@ -45,7 +45,8 @@ module MED_cap_MONAN_mod
                                   cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  & ! FIX B-OCNGRID-01
                                   cfg_use_sis2_dynamic,             & ! FIX SIS2-ATIVACAO
-                                  cfg_coupling_mode                   ! BUG-SEQ-STAMP-01
+                                  cfg_coupling_mode,                & ! BUG-SEQ-STAMP-01
+                                  cfg_seq_repro                       ! seq_repro (reprodutibilidade)
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -1884,7 +1885,16 @@ contains
     !
     ! O modo concorrente nao muda: stampTime = nextTime, byte a byte como antes.
     !--------------------------------------------------------------------------
-    med_runs_before_advance = (trim(cfg_coupling_mode) == 'sequential')
+    ! seq_repro: na variante REPRODUTIVEL do sequential+split+SIS2 o elemento
+    ! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
+    ! campos importados descrevem o estado em t+dt e o rotulo correto e'
+    ! nextTime — nao currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
+    ! sairia adiantado de um dt e quebraria a comparacao bit-a-bit contra o
+    ! concurrent. O sequential classico (cfg_seq_repro=.false.) continua com
+    ! 'MED' cedo -> currTime; o concurrent continua nextTime. Nenhum dos dois
+    ! muda de comportamento.
+    med_runs_before_advance = (trim(cfg_coupling_mode) == 'sequential' &
+                               .and. .not. cfg_seq_repro)
     if (med_runs_before_advance) then
       stampTime = currTime
     else
