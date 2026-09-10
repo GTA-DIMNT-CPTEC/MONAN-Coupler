@@ -1048,7 +1048,15 @@ contains
     dlon    = res_deg
     dlat    = res_deg
     nlon    = nint(360.0_ESMF_KIND_R8 / dlon)
-    nlat    = nint(180.0_ESMF_KIND_R8 / dlat) + 1
+    ! BUG-LATGRID (correcao): a grade e' CENTRADA em celulas — lat_axis(i) =
+    ! -90 + (i-0.5)*dlat (ver loop abaixo). Para dlat=1 isso da' 180 celulas
+    ! cobrindo -89,5..+89,5, exatamente como o lado do MOM6. O "+1" anterior
+    ! criava uma linha ESPURIA (nlat=181) cujo centro caia em +90,5 N (alem do
+    ! polo); o binning (floor((lat+90)/dlat)+1) despejava a calota polar do
+    ! Artico nessa linha fantasma. Sem o "+1", o ponto em lat=+90 e' clampado
+    ! ao bin 180 (89,5) pelo min(...,nlat) em voronoi_to_grid, e as duas
+    ! grades de diagnostico (MED->MPAS e MED->OCN) passam a coincidir.
+    nlat    = nint(180.0_ESMF_KIND_R8 / dlat)
 
     g_diag_step = g_diag_step + 1
 
