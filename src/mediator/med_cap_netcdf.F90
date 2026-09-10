@@ -307,6 +307,15 @@ contains
               case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
               case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
               case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
+              ! FIX B-NC-UNITS-01 (Set/2026): Fioi_swnet_* e Sx_tsfc caiam no
+              ! case default e saiam com units='1'/standard_name='unknown' — os
+              ! quatro Fioi_swnet_* sao fluxos de onda curta (W m-2) e Sx_tsfc e'
+              ! a temperatura de superficie (pele) usada pelo bulk sobre gelo (K).
+              case ('Fioi_swnet_vdr'); f_units='W m-2';       f_long='Onda curta vis. direto (gelo)';   f_std='surface_net_downward_shortwave_flux'
+              case ('Fioi_swnet_vdf'); f_units='W m-2';       f_long='Onda curta vis. difuso (gelo)';   f_std='surface_net_downward_shortwave_flux'
+              case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
+              case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
+              case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
               ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6. E' a UNICA
               ! variavel do arquivo que nao recebe _FillValue sobre terra —
               ! e' justamente ela que diz onde a terra fica.
@@ -451,6 +460,17 @@ contains
         case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
         case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
         case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
+        ! FIX B-NC-ICESW-01 (Set/2026): mesma causa raiz do BUG-NC-06 — os quatro
+        ! Fioi_swnet_* e o Sx_tsfc estavam em export_names (viravam variavel no
+        ! arquivo) mas NAO tinham mapeamento aqui: caiam no case default/'cycle'
+        ! e sim gravados APENAS com _FillValue (nunca preenchidos). Os campos
+        ! internos ja existem (f_sw*_ice, computados na Fase 4 do med_bulk_ncar;
+        ! f_tsfc_atm) — basta mapea-los.
+        case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%f_swvdr_ice,  farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%f_swvdf_ice,  farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%f_swidr_ice,  farrayPtr=fptr2d, rc=rc)
+        case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%f_swidf_ice,  farrayPtr=fptr2d, rc=rc)
+        case ('Sx_tsfc');        call ESMF_FieldGet(is%f_tsfc_atm,   farrayPtr=fptr2d, rc=rc)
         ! FIX B-DIAGMASK-01: a propria mascara vira variavel do arquivo.
         case ('Sx_omask');       call ESMF_FieldGet(is%f_omask_atm,  farrayPtr=fptr2d, rc=rc)
         case default
