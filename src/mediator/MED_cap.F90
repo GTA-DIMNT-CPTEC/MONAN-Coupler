@@ -27,10 +27,191 @@
 ! Ver também cabeçalho do arquivo original para histórico de correções.      !
 !==============================================================================!
 
+!==============================================================================!
+! diag_bitsum_mod — FIX-DIAG-BITSUM-01 (Set/2026)                              !
+!==============================================================================!
+! Checksum EXATO de campos reais, POR PET, para diagnostico de
+! reprodutibilidade bit a bit.
+!
+! POR QUE. Os diagnosticos FIX-DIAG-ICESRC-01/-02 imprimem 17 algarismos,
+! precisao suficiente, mas so' o PET 0 e' recolhido. A bateria de 22/09/2026
+! achou diferencas de exatamente 1 ulp no Si_ifrac recebido pelo MPAS
+! (1573 pontos, r1 x r4, 01h) fora da fatia do PET 0.
+!
+! COMO. Cada valor e' lido como inteiro de 64 bits (transfer), separado em
+! duas metades de 32 bits, e as metades sao somadas em inteiro. Soma de
+! inteiros e' exata e nao depende da ordem: o resultado so' muda se algum
+! bit de algum ponto mudar.
+!
+! POR QUE NAO HA REDUCAO ENTRE PETs. No MediatorAdvance, os PETs sem pedaco
+! da grade atmosferica retornam cedo (bloco localDeCount_med == 0). Uma
+! chamada coletiva depois desse ponto travaria o job. Aqui cada PET grava a
+! sua parte no proprio log (logs/PETnn.esmApp.log), e o mede-taxa-repro.sh
+! junta as linhas de todos os PETs. Bonus: a diferenca aparece localizada
+! por PET, isto e', por regiao do dominio.
+!
+! LIMITES.
+!  - Seguro ate' 2**31 pontos por pedaco (cada metade < 2**32).
+!  - Nao detecta dois pontos que TROCAM de valor entre si. Entre execucoes
+!    com a mesma decomposicao isso nao ocorre na pratica.
+!
+! SAIDA. Uma linha por chamada, no log de cada PET que chega ao ponto:
+!   FIX-DIAG-BITSUM-01: <rotulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
+! com " ERRO=<k>" no fim se algum pedaco local nao pode ser lido.
+!==============================================================================!
+module diag_bitsum_mod
+
+  use, intrinsic :: iso_fortran_env, only: int64, real64
+  use ESMF
+
+  implicit none
+  private
+
+  public :: diag_bitsum_log
+
+  interface diag_bitsum_log
+    module procedure bitsum_log_1d
+    module procedure bitsum_log_2d
+    module procedure bitsum_log_field
+  end interface diag_bitsum_log
+
+  character(len=*), parameter :: PREFIXO = 'FIX-DIAG-BITSUM-01'
+
+contains
+
+  ! --------------------------------------------------------------------------
+  !> Acumula contagem e as duas somas de 32 bits de um trecho contiguo.
+  pure subroutine acumula(x, n, s_hi, s_lo)
+    real(real64),   intent(in)    :: x(:)
+    integer(int64), intent(inout) :: n, s_hi, s_lo
+
+    integer(int64), parameter :: MASK32 = int(z'FFFFFFFF', int64)
+    integer(int64) :: b
+    integer        :: i
+
+    do i = 1, size(x)
+      b    = transfer(x(i), b)
+      s_lo = s_lo + iand(b, MASK32)
+      s_hi = s_hi + iand(shiftr(b, 32), MASK32)
+    end do
+    n = n + size(x, kind=int64)
+  end subroutine acumula
+
+  ! --------------------------------------------------------------------------
+  pure subroutine acumula_2d(x, n, s_hi, s_lo)
+    real(real64),   intent(in)    :: x(:,:)
+    integer(int64), intent(inout) :: n, s_hi, s_lo
+    integer :: j
+    do j = 1, size(x, 2)
+      call acumula(x(:, j), n, s_hi, s_lo)
+    end do
+  end subroutine acumula_2d
+
+  ! --------------------------------------------------------------------------
+  !> Grava a linha no log deste PET.
+  subroutine grava(rotulo, n, s_hi, s_lo, n_err)
+    character(len=*), intent(in) :: rotulo
+    integer(int64),   intent(in) :: n, s_hi, s_lo
+    integer,          intent(in) :: n_err
+
+    character(len=512) :: msg
+
+    if (n_err == 0) then
+      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0)') &
+            PREFIXO, trim(rotulo), n, s_hi, s_lo
+    else
+      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0," ERRO=",i0)') &
+            PREFIXO, trim(rotulo), n, s_hi, s_lo, n_err
+    end if
+    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+  end subroutine grava
+
+  ! --------------------------------------------------------------------------
+  subroutine bitsum_log_1d(rotulo, x, rc)
+    character(len=*), intent(in)  :: rotulo
+    real(real64),     intent(in)  :: x(:)
+    integer,          intent(out) :: rc
+    integer(int64) :: n, s_hi, s_lo
+    n = 0 ; s_hi = 0 ; s_lo = 0
+    call acumula(x, n, s_hi, s_lo)
+    call grava(rotulo, n, s_hi, s_lo, 0)
+    rc = ESMF_SUCCESS
+  end subroutine bitsum_log_1d
+
+  ! --------------------------------------------------------------------------
+  subroutine bitsum_log_2d(rotulo, x, rc)
+    character(len=*), intent(in)  :: rotulo
+    real(real64),     intent(in)  :: x(:,:)
+    integer,          intent(out) :: rc
+    integer(int64) :: n, s_hi, s_lo
+    n = 0 ; s_hi = 0 ; s_lo = 0
+    call acumula_2d(x, n, s_hi, s_lo)
+    call grava(rotulo, n, s_hi, s_lo, 0)
+    rc = ESMF_SUCCESS
+  end subroutine bitsum_log_2d
+
+  ! --------------------------------------------------------------------------
+  !> ESMF_Field real(8) de posto 1 ou 2, com qualquer numero de pedacos
+  !! locais (localDeCount pode ser 0, 1 ou mais). Soma a regiao exclusiva.
+  subroutine bitsum_log_field(rotulo, field, rc)
+    character(len=*), intent(in)  :: rotulo
+    type(ESMF_Field), intent(in)  :: field
+    integer,          intent(out) :: rc
+
+    integer                  :: rank, ldec, lde, rc_loc, n_err
+    type(ESMF_TypeKind_Flag) :: tk
+    real(real64), pointer    :: p1(:), p2(:,:)
+    integer(int64)           :: n, s_hi, s_lo
+
+    n = 0 ; s_hi = 0 ; s_lo = 0 ; n_err = 0
+    rank = 0 ; ldec = 0
+
+    call ESMF_FieldGet(field, rank=rank, typekind=tk, localDeCount=ldec, rc=rc_loc)
+    if (rc_loc /= ESMF_SUCCESS) then
+      n_err = n_err + 1
+      ldec  = 0
+    else if (tk /= ESMF_TYPEKIND_R8 .or. (rank /= 1 .and. rank /= 2)) then
+      n_err = n_err + 1
+      ldec  = 0
+    end if
+
+    do lde = 0, ldec - 1
+      if (rank == 1) then
+        nullify(p1)
+        call ESMF_FieldGet(field, localDe=lde, farrayPtr=p1, rc=rc_loc)
+        if (rc_loc == ESMF_SUCCESS .and. associated(p1)) then
+          call acumula(p1, n, s_hi, s_lo)
+        else
+          n_err = n_err + 1
+        end if
+      else
+        nullify(p2)
+        call ESMF_FieldGet(field, localDe=lde, farrayPtr=p2, rc=rc_loc)
+        if (rc_loc == ESMF_SUCCESS .and. associated(p2)) then
+          call acumula_2d(p2, n, s_hi, s_lo)
+        else
+          n_err = n_err + 1
+        end if
+      end if
+    end do
+
+    call grava(rotulo, n, s_hi, s_lo, n_err)
+    rc = ESMF_SUCCESS
+  end subroutine bitsum_log_field
+
+end module diag_bitsum_mod
+
+!------------------------------------------------------------------------------
+! FIX-DIAG-BITSUM-01: o modulo acima foi colado neste arquivo para dispensar
+! mudanca no Makefile. Diagnostico temporario: remover junto com as chamadas
+! marcadas FIX-DIAG-BITSUM-01 quando a investigacao terminar.
+!------------------------------------------------------------------------------
+
 module MED_cap_MONAN_mod
   use ESMF
   use ESMF, only: ESMF_State, ESMF_StateGet
   use mpi
+  use diag_bitsum_mod, only: diag_bitsum_log   ! FIX-DIAG-BITSUM-01
   use netcdf   ! FIX B-OCNGRID-01: leitura direta de ocean_hgrid.nc (grade T real MOM6)
   use mpas_cap_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn_ice,                 &
@@ -95,6 +276,43 @@ module MED_cap_MONAN_mod
   !   Sincronizado com SI_IFRAC_DECAY em mom_cap_MONAN.F90.
   logical,                         save :: med_ifrac_init_done = .false.
   real(ESMF_KIND_R8),  parameter        :: SI_IFRAC_DECAY_MED  = 0.95924_ESMF_KIND_R8
+
+  !--------------------------------------------------------------------------
+  ! MED_TERMORDER : ordem de soma dos termos do produto matriz-esparsa que o
+  !   ESMF executa em CADA ESMF_FieldRegrid.
+  !
+  ! FIX B-REGRID-TERMORDER-01 (Set/2026).
+  !
+  ! Um regrid e', por baixo, uma soma ponderada: cada celula de destino
+  ! recebe a soma das contribuicoes de varias celulas de origem, e essas
+  ! contribuicoes chegam de PETs diferentes. O ESMF aceita escolher a ordem
+  ! dessa soma pelo argumento termorderflag, e o DEFAULT e'
+  ! ESMF_TERMORDER_FREE: soma na ordem em que as mensagens chegam, o que da'
+  ! o melhor desempenho e NAO e' reproduzivel entre execucoes, porque a ordem
+  ! de chegada varia. Soma de ponto flutuante nao e' associativa, entao
+  ! trocar a ordem troca o ultimo bit.
+  !
+  ! ESMF_TERMORDER_SRCSEQ soma na ordem do indice de sequencia da origem,
+  ! que e' fixo. Custa desempenho em tempo de execucao e devolve resultado
+  ! bit a bit igual entre execucoes.
+  !
+  ! Nenhuma das 18 chamadas de ESMF_FieldRegrid deste arquivo passava
+  ! termorderflag, ou seja, todas usavam FREE. Isso explica a assinatura
+  ! observada na bateria de reprodutibilidade: o MPAS-A isolado reproduz,
+  ! o estado interno do oceano e do gelo e' identico no instante da primeira
+  ! divergencia, e ainda assim o campo ENTREGUE a atmosfera ja' difere. O
+  ! que existe entre o estado e o campo entregue e' exatamente este regrid.
+  !
+  ! Para voltar ao comportamento de desempenho, troque por
+  ! ESMF_TERMORDER_FREE aqui, em uma linha, e recompile.
+  !--------------------------------------------------------------------------
+  type(ESMF_TermOrder_Flag), parameter  :: MED_TERMORDER = ESMF_TERMORDER_SRCSEQ
+
+  ! B-SRCTERM-01: srcTermProcessing e' intent(inout) em ESMF_FieldRegridStore
+  ! (o ESMF devolve nele o valor escolhido quando faz auto-ajuste), entao nao
+  ! aceita literal. Esta variavel e' zerada imediatamente antes de cada
+  ! chamada, para que nenhuma herde valor de outra.
+  integer, save :: stp_b_srcterm = 0
 
 contains
 
@@ -1489,12 +1707,14 @@ contains
     if (.not. is%rh_created) then
 
       ! Criar routehandle ATM -> OCN
+      stp_b_srcterm = 0   ! B-SRCTERM-01
       call ESMF_FieldRegridStore( &
         srcField       = is%f_taux_atm,   &
         dstField       = exp_field,       &
         routehandle    = is%rh_atm2ocn,   &
         regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
         unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+        srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
         rc             = rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="MED: falha FieldRegridStore ATM->OCN", &
@@ -1506,12 +1726,14 @@ contains
       if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha So_t", &
         line=__LINE__, file=__FILE__)) return
 
+      stp_b_srcterm = 0   ! B-SRCTERM-01
       call ESMF_FieldRegridStore( &
         srcField       = ocn_field,       &
         dstField       = is%f_sst_atm,    &
         routehandle    = is%rh_ocn2atm,   &
         regridmethod   = ESMF_REGRIDMETHOD_BILINEAR, &
         unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+        srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
         rc             = rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="MED: falha FieldRegridStore OCN->ATM", &
@@ -1528,13 +1750,13 @@ contains
         call ESMF_StateGet(importState, itemName="So_u", field=f_uocn_src, rc=rc_uv)
         if (rc_uv == ESMF_SUCCESS) then
           call ESMF_FieldRegrid(f_uocn_src, is%f_uocn_atm, is%rh_ocn2atm, &
-            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
           if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_uocn_atm, rc_uv)
         end if
         call ESMF_StateGet(importState, itemName="So_v", field=f_vocn_src, rc=rc_uv)
         if (rc_uv == ESMF_SUCCESS) then
           call ESMF_FieldRegrid(f_vocn_src, is%f_vocn_atm, is%rh_ocn2atm, &
-            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
           if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_vocn_atm, rc_uv)
         end if
       end block
@@ -1705,13 +1927,13 @@ contains
       call ESMF_StateGet(importState, itemName="So_u", field=f_uocn_src, rc=rc_uv)
       if (rc_uv == ESMF_SUCCESS) then
         call ESMF_FieldRegrid(f_uocn_src, is%f_uocn_atm, is%rh_ocn2atm, &
-          zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+          termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
         if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_uocn_atm, rc_uv)
       end if
       call ESMF_StateGet(importState, itemName="So_v", field=f_vocn_src, rc=rc_uv)
       if (rc_uv == ESMF_SUCCESS) then
         call ESMF_FieldRegrid(f_vocn_src, is%f_vocn_atm, is%rh_ocn2atm, &
-          zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+          termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
         if (rc_uv /= ESMF_SUCCESS) call ZeroInternalField(is%f_vocn_atm, rc_uv)
       end if
     end block
@@ -1720,7 +1942,7 @@ contains
     ! bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
     ! conector MED -> MPAS entregaria essa constante ao MPAS na inicializacao.
     call ESMF_FieldRegrid(ocn_field, is%f_sst_atm, is%rh_ocn2atm, &
-      zeroregion=ESMF_REGION_TOTAL, rc=localrc)
+      termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=localrc)
     if (localrc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
         'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)
@@ -2436,6 +2658,7 @@ contains
             ! o store falhar, e para rh_ocn2atm puro como ultimo recurso
             ! (via is%rh_sst_masked = .false. abaixo, tratado no bloco que
             ! chama ESMF_FieldRegrid mais adiante).
+            stp_b_srcterm = 0   ! B-SRCTERM-01
             call ESMF_FieldRegridStore( &
               srcField        = field,              &
               dstField        = is%f_sst_atm,       &
@@ -2443,6 +2666,7 @@ contains
               regridmethod    = ESMF_REGRIDMETHOD_CONSERVE, &
               srcMaskValues   = (/ 0_ESMF_KIND_I4 /), &
               unmappedaction  = ESMF_UNMAPPEDACTION_IGNORE, &
+              srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
               rc              = rc)
             if (ESMF_LogFoundError(rcToCheck=rc, &
               msg="MED B-CONSERVE-06: falha FieldRegridStore SST " // &
@@ -2450,6 +2674,7 @@ contains
               line=__LINE__, file=__FILE__)) then
               call ESMF_LogWrite('MED B-CONSERVE-06: tentando BILINEAR ' // &
                 'mascarado como fallback de CONSERVE (So_t)', ESMF_LOGMSG_WARNING)
+              stp_b_srcterm = 0   ! B-SRCTERM-01
               call ESMF_FieldRegridStore( &
                 srcField        = field,              &
                 dstField        = is%f_sst_atm,       &
@@ -2457,6 +2682,7 @@ contains
                 regridmethod    = ESMF_REGRIDMETHOD_BILINEAR, &
                 srcMaskValues   = (/ 0_ESMF_KIND_I4 /), &
                 unmappedaction  = ESMF_UNMAPPEDACTION_IGNORE, &
+                srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
                 rc              = rc)
               if (rc /= ESMF_SUCCESS) then
                 is%rh_ocn2atm_sst = is%rh_ocn2atm
@@ -2476,7 +2702,7 @@ contains
       end if
 
       call ESMF_FieldRegrid(field, is%f_sst_atm, is%rh_ocn2atm_sst, &
-        zeroregion=ESMF_REGION_TOTAL, rc=rc)
+        termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc)
       call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
 
       ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
@@ -2607,11 +2833,11 @@ contains
         call ESMF_StateGet(importState, itemName="So_u", field=f_uocn_src, rc=rc_uv)
         if (rc_uv == ESMF_SUCCESS) &
           call ESMF_FieldRegrid(f_uocn_src, is%f_uocn_atm, is%rh_ocn2atm, &
-            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
         call ESMF_StateGet(importState, itemName="So_v", field=f_vocn_src, rc=rc_uv)
         if (rc_uv == ESMF_SUCCESS) &
           call ESMF_FieldRegrid(f_vocn_src, is%f_vocn_atm, is%rh_ocn2atm, &
-            zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_uv)
       end block
 
       ! ── Sprint B.2 (Set/2026) + FIX B-ICEREGRID-01: Si_ifrac_sis2 real +
@@ -2697,6 +2923,7 @@ contains
               ! independente do metodo. Com a causa raiz corrigida,
               ! reativa CONSERVE (fisica de conservacao de area, mais
               ! apropriado para fracao de gelo que bilinear pontual).
+              stp_b_srcterm = 0   ! B-SRCTERM-01
               call ESMF_FieldRegridStore( &
                 srcField        = f_ifrac_src,        &
                 dstField        = is%f_ifrac_atm,     &
@@ -2704,6 +2931,7 @@ contains
                 regridmethod    = ESMF_REGRIDMETHOD_CONSERVE, &
                 srcMaskValues   = (/ 0_ESMF_KIND_I4 /), &
                 unmappedaction  = ESMF_UNMAPPEDACTION_IGNORE, &
+                srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
                 rc              = rc_store)
               if (ESMF_LogFoundError(rcToCheck=rc_store, &
                 msg="MED B-ICEREGRID-01: falha FieldRegridStore gelo " // &
@@ -2711,6 +2939,7 @@ contains
                 line=__LINE__, file=__FILE__)) then
                 call ESMF_LogWrite('MED B-ICEREGRID-01: tentando BILINEAR ' // &
                   'mascarado como fallback de CONSERVE', ESMF_LOGMSG_WARNING)
+                stp_b_srcterm = 0   ! B-SRCTERM-01
                 call ESMF_FieldRegridStore( &
                   srcField        = f_ifrac_src,        &
                   dstField        = is%f_ifrac_atm,     &
@@ -2718,6 +2947,7 @@ contains
                   regridmethod    = ESMF_REGRIDMETHOD_BILINEAR, &
                   srcMaskValues   = (/ 0_ESMF_KIND_I4 /), &
                   unmappedaction  = ESMF_UNMAPPEDACTION_IGNORE, &
+                  srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
                   rc              = rc_store)
                 if (rc_store /= ESMF_SUCCESS) is%rh_ocn2atm_ice = is%rh_ocn2atm
               else
@@ -2748,9 +2978,114 @@ contains
           call FillInternalField(is%f_alb_idf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
           call FillInternalField(is%f_tice_atm,     -999.0_ESMF_KIND_R8, rc_ice)
 
+          !--------------------------------------------------------------------
+          ! FIX-DIAG-ICESRC-01 (Set/2026): o campo de ORIGEM, antes do regrid.
+          !
+          ! PARA QUE SERVE. A bateria de 18/09/2026 localizou a divergencia
+          ! entre duas etapas: a mascara do regrid do gelo e' IDENTICA nas
+          ! quatro execucoes (n_land=45 n_sea=355), e o ifrac de DESTINO, medido
+          ! pelo FIX-DIAG-ICEMASK-02 logo apos o regrid e antes da
+          ! extrapolacao, JA' diverge. Faltava saber de que lado da seta esta' a
+          ! origem: se o Si_ifrac_sis2 que o SIS2 entrega ja' difere, o regrid
+          ! e' mensageiro e o alvo e' o gelo; se ele e' identico e o destino
+          ! difere, o alvo e' o regrid CONSERVE mascarado. Nao havia nenhum
+          ! diagnostico do lado da origem: o FIX-DIAG-SPRINTB2-01, apesar do
+          ! nome sugestivo, imprime f_ifrac_atm, que e' o DESTINO.
+          !
+          ! FORMATO. Quinze digitos significativos, e nao os quatro do
+          ! ICEMASK-02. Com quatro digitos a divergencia so' apareceu na 12a
+          ! troca de acoplamento, o que sugeria acumulo gradual; com quinze,
+          ! sabe-se se ela comeca antes e estava apenas escondida pelo
+          ! arredondamento da impressao. A SOMA global entra porque min e max
+          ! nao detectam divergencia no meio da distribuicao.
+          !
+          ! ESCOPO. p_ifrac_in aponta para a fatia do DE local, entao os
+          ! valores sao locais ao PET, nao globais. Divergencia aqui e'
+          ! conclusiva; ausencia de divergencia neste PET nao exclui
+          ! divergencia em outro, e os PETs polares sao os que importam para
+          ! gelo. Comparar o mesmo PET entre execucoes, nunca PETs diferentes.
+          !
+          ! CUSTO. Tres reducoes locais sobre um campo 2D, uma vez por troca de
+          ! acoplamento, atras de cfg_write_fixdiag. Nao altera comportamento.
+          !--------------------------------------------------------------------
+          if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+            block
+              real(ESMF_KIND_R8), pointer :: p_ifrac_in(:,:)
+              character(len=300) :: diag_msg_src
+              integer            :: rc_src
+              call ESMF_FieldGet(f_ifrac_src, farrayPtr=p_ifrac_in, rc=rc_src)
+              if (rc_src == ESMF_SUCCESS .and. associated(p_ifrac_in)) then
+                write(diag_msg_src,'(A,ES24.16,A,ES24.16,A,ES24.16,A,I0)') &
+                  'FIX-DIAG-ICESRC-01: Si_ifrac_sis2 (ORIGEM, pre-regrid)' // &
+                  ' min=', minval(p_ifrac_in), &
+                  ' max=', maxval(p_ifrac_in), &
+                  ' soma=', sum(p_ifrac_in),   &
+                  ' n_local=', size(p_ifrac_in)
+                call ESMF_LogWrite(trim(diag_msg_src), ESMF_LOGMSG_INFO)
+              else
+                call ESMF_LogWrite('FIX-DIAG-ICESRC-01: farrayPtr de ' // &
+                  'Si_ifrac_sis2 indisponivel; origem NAO medida', &
+                  ESMF_LOGMSG_WARNING)
+              end if
+            end block
+          end if
+
+          ! FIX-DIAG-BITSUM-01 (etapa 1 de 4): checksum exato, por PET, da
+          ! ORIGEM (Si_ifrac_sis2 na grade do oceano), antes do regrid.
+          if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+            block
+              integer :: rc_bs
+              call diag_bitsum_log('etapa1 Si_ifrac_sis2 ORIGEM pre-regrid', &
+                                   f_ifrac_src, rc_bs)
+            end block
+          end if
+
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_ifrac_src, is%f_ifrac_atm, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+
+          !--------------------------------------------------------------------
+          ! FIX-DIAG-ICESRC-02: o campo de DESTINO com quinze digitos.
+          !
+          ! Par do ICESRC-01, medido no mesmo instante e no mesmo PET, logo
+          ! apos o regrid e antes da extrapolacao. Existe porque o
+          ! FIX-DIAG-ICEMASK-02, que mede o mesmo ponto, imprime quatro
+          ! digitos e por isso nao permite comparar origem e destino na mesma
+          ! precisao. Mantido separado do ICEMASK-02 para nao alterar o formato
+          ! de um diagnostico que ja' tem historico de leitura.
+          !--------------------------------------------------------------------
+          if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+            block
+              real(ESMF_KIND_R8), pointer :: p_ifrac_dst(:,:)
+              character(len=300) :: diag_msg_dst
+              integer            :: rc_dst, n_sent
+              call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_dst, rc=rc_dst)
+              if (rc_dst == ESMF_SUCCESS .and. associated(p_ifrac_dst)) then
+                ! A sentinela -999 marca celula nao mapeada pelo regrid; ela
+                ! domina min e soma, entao entra contada a parte para que o
+                ! numero de nao mapeadas seja comparavel entre execucoes.
+                n_sent = count(p_ifrac_dst < -900.0_ESMF_KIND_R8)
+                write(diag_msg_dst,'(A,ES24.16,A,ES24.16,A,I0,A,I0)') &
+                  'FIX-DIAG-ICESRC-02: f_ifrac_atm (DESTINO, pos-regrid)' // &
+                  ' max=', maxval(p_ifrac_dst), &
+                  ' soma_validos=', &
+                  sum(p_ifrac_dst, mask=(p_ifrac_dst > -900.0_ESMF_KIND_R8)), &
+                  ' n_sentinela=', n_sent, &
+                  ' n_local=', size(p_ifrac_dst)
+                call ESMF_LogWrite(trim(diag_msg_dst), ESMF_LOGMSG_INFO)
+              end if
+            end block
+          end if
+
+          ! FIX-DIAG-BITSUM-01 (etapa 2 de 4): f_ifrac_atm logo apos o regrid,
+          ! antes da extrapolacao (celulas nao mapeadas ainda com -999).
+          if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+            block
+              integer :: rc_bs
+              call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
+                                   is%f_ifrac_atm, rc_bs)
+            end block
+          end if
 
           ! FIX-DIAG-ICEMASK-02: ifrac LOGO APOS o regrid bruto, ANTES da
           ! extrapolacao — conta celulas exatamente = 0.0 (candidato a
@@ -2782,32 +3117,32 @@ contains
             field=f_avsdr_src, rc=rc_ice)
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_avsdr_src, is%f_alb_vdr_ice, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
 
           call ESMF_StateGet(importState, itemName="Si_avsdf_sis2", &
             field=f_avsdf_src, rc=rc_ice)
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_avsdf_src, is%f_alb_vdf_ice, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
 
           call ESMF_StateGet(importState, itemName="Si_anidr_sis2", &
             field=f_anidr_src, rc=rc_ice)
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_anidr_src, is%f_alb_idr_ice, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
 
           call ESMF_StateGet(importState, itemName="Si_anidf_sis2", &
             field=f_anidf_src, rc=rc_ice)
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_anidf_src, is%f_alb_idf_ice, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
 
           ! Fase 3 (B-ICE-FLUX-DIFF-01)
           call ESMF_StateGet(importState, itemName="Si_t_sis2", &
             field=f_tice_src, rc=rc_ice)
           if (rc_ice == ESMF_SUCCESS) &
             call ESMF_FieldRegrid(f_tice_src, is%f_tice_atm, is%rh_ocn2atm_ice, &
-              zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
+              termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ice)
 
           ! ── FIX B-ICEREGRID-01: extrapolacao por vizinhanca pos-regrid ────
           ! Fecha buracos/costura na regiao de deformacao tripolar, mesmo
@@ -2817,6 +3152,16 @@ contains
           if (associated(p_ifrac_out)) &
             call NeighborFillExtrapolate(p_ifrac_out, 0.0_ESMF_KIND_R8, 1.0_ESMF_KIND_R8, &
               0.0_ESMF_KIND_R8, rc_nfe)
+
+          ! FIX-DIAG-BITSUM-01 (etapa 3 de 4): f_ifrac_atm depois da
+          ! extrapolacao por vizinhanca.
+          if (cfg_write_fixdiag) then
+            block
+              integer :: rc_bs
+              call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
+                                   is%f_ifrac_atm, rc_bs)
+            end block
+          end if
 
           ! FIX-DIAG-ICEGEO-01 (Set/2026): checagem de plausibilidade fisica
           ! independente de qual PET/componente e' dono de qual pedaco do
@@ -3145,12 +3490,14 @@ contains
         call ESMF_StateGet(importState, itemName="So_omask", &
           field=omask_src_field, rc=rc_lm)
         if (rc_lm == ESMF_SUCCESS) then
+          stp_b_srcterm = 0   ! B-SRCTERM-01
           call ESMF_FieldRegridStore( &
             srcField       = omask_src_field,     &
             dstField       = is%f_omask_atm,      &
             routehandle    = is%rh_ocn2atm_landmask, &
             regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
             unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+            srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
             rc             = rc_lm)
           if (ESMF_LogFoundError(rcToCheck=rc_lm, &
             msg="MED B-LANDMASK-01: falha FieldRegridStore mascara -- " // &
@@ -3159,7 +3506,7 @@ contains
             continue   ! is%f_omask_atm ja' inicializado em 1.0 (oceano)
           else
             call ESMF_FieldRegrid(omask_src_field, is%f_omask_atm, &
-              is%rh_ocn2atm_landmask, zeroregion=ESMF_REGION_SELECT, rc=rc_lm)
+              is%rh_ocn2atm_landmask, termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_lm)
             call ESMF_LogWrite('MED B-LANDMASK-01: mascara terra/oceano ' // &
               'real regridada para a grade ATM com sucesso', ESMF_LOGMSG_INFO)
           end if
@@ -3287,23 +3634,27 @@ contains
         if (.not. is%rh_atm2ocn_ice_created .and. is%rh_created) then
           block
             integer :: rc_store2
+            stp_b_srcterm = 0   ! B-SRCTERM-01
             call ESMF_FieldRegridStore( &
               srcField       = is%f_ifrac_atm, &
               dstField       = f_ifrac_exp,    &
               routehandle    = is%rh_atm2ocn_ice, &
               regridmethod   = ESMF_REGRIDMETHOD_CONSERVE, &
               unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+              srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
               rc             = rc_store2)
             if (ESMF_LogFoundError(rcToCheck=rc_store2, &
               msg="MED B-CONSERVE-03: falha FieldRegridStore Si_ifrac " // &
                   "CONSERVE (ATM->OCN) -- caindo para NEAREST_STOD", &
               line=__LINE__, file=__FILE__)) then
+              stp_b_srcterm = 0   ! B-SRCTERM-01
               call ESMF_FieldRegridStore( &
                 srcField       = is%f_ifrac_atm, &
                 dstField       = f_ifrac_exp,    &
                 routehandle    = is%rh_atm2ocn_ice, &
                 regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
                 unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+                srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
                 rc             = rc_store2)
               if (rc_store2 /= ESMF_SUCCESS) is%rh_atm2ocn_ice = is%rh_atm2ocn
             else
@@ -3317,16 +3668,16 @@ contains
 
         if (is%rh_atm2ocn_ice_created) then
           call ESMF_FieldRegrid(is%f_ifrac_atm, f_ifrac_exp, is%rh_atm2ocn_ice, &
-            zeroregion=ESMF_REGION_SELECT, rc=rc_ifrac2)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ifrac2)
         else if (is%rh_created) then
           ! RouteHandle dedicado ainda nao criado nesta chamada (1o passo
           ! com is%rh_created recem-verdadeiro) -- usa o compartilhado como
           ! ponte, sera substituido pelo dedicado na proxima chamada.
           call ESMF_FieldRegrid(is%f_ifrac_atm, f_ifrac_exp, is%rh_atm2ocn, &
-            zeroregion=ESMF_REGION_SELECT, rc=rc_ifrac2)
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_SELECT, rc=rc_ifrac2)
         else
           call ESMF_FieldRegrid(is%f_ifrac_atm, f_ifrac_exp, is%rh_atm2ocn, &
-            zeroregion=ESMF_REGION_TOTAL, rc=rc_ifrac2)  ! 1o passo: sem fallback ainda
+            termorderflag=MED_TERMORDER, zeroregion=ESMF_REGION_TOTAL, rc=rc_ifrac2)  ! 1o passo: sem fallback ainda
         end if
         call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
         if (associated(p_ifrac_exp)) &
@@ -3555,6 +3906,23 @@ contains
           ESMF_LOGMSG_WARNING)
         rc = ESMF_SUCCESS
       end if
+    end if
+
+    ! FIX-DIAG-BITSUM-01 (etapa 4 de 4): Si_ifrac como sai do mediador,
+    ! no exportState, depois do RouteOcnToAtm. E' o que o conector entrega
+    ! ao MPAS e o que aparece no monan2_import_*.nc.
+    if (cfg_write_fixdiag) then
+      block
+        type(ESMF_Field) :: f_bs
+        integer          :: rc_bs
+        call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_bs, rc=rc_bs)
+        if (rc_bs == ESMF_SUCCESS) then
+          call diag_bitsum_log('etapa4 Si_ifrac exportState para MPAS', f_bs, rc_bs)
+        else
+          call ESMF_LogWrite('FIX-DIAG-BITSUM-01: etapa4 Si_ifrac ausente do ' // &
+            'exportState; etapa NAO medida', ESMF_LOGMSG_WARNING)
+        end if
+      end block
     end if
 
     call med_write_import_fields(exportState, stampTime, is, rc)

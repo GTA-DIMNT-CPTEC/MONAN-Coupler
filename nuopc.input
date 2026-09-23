@@ -426,7 +426,7 @@
 &nuopc_petlayout
   coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
   pet_layout    = 'split'        ! 'shared' | 'split'
-  atm_pet_count = 64             ! split: nº PETs do ATM (0 = auto: metade)
+  atm_pet_count = 32             ! split: nº PETs do ATM (0 = auto: metade)
   ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
   use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
   ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)

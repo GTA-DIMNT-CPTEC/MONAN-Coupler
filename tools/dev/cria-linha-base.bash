@@ -10,7 +10,10 @@
 #   config/        nuopc.input e demais namelists usados
 #   entrada/       lista de arquivos de entrada com soma de verificação
 #   saida/         monan_export_*.nc, mom6_import_*.nc, monan2_import_*.nc
-#                  (e mpas_import_*.nc, nome legado, se ainda existir)
+#                  (e mpas_import_*.nc, nome legado, se ainda existir),
+#                  mais as saidas NetCDF gravadas na RAIZ do experimento
+#                  (reprodiag.nc e o que BASE_SAIDA_RAIZ_EXTRA acrescentar;
+#                   ver B-BASE-RAIZ-NC-01)
 #   logs/          o primeiro PET de CADA bloco (ATM, OCN, ICE) e o log de
 #                  execução. Com layout shared, apenas o PET0.
 #   SHA256SUMS     soma de verificação de tudo o que foi guardado
@@ -120,6 +123,47 @@ _n_monan2c=$(_conta  diag_import 'monan2_import_????.nc')
 _n_monan2=$(( _n_monan2 + _n_monan2c ))
 _n_legado=$(_conta diag_import 'mpas_import_step????.nc')
 
+#-----------------------------------------------------------------------------
+# B-BASE-RAIZ-NC-01 (Set/2026): saídas NetCDF gravadas na RAIZ do experimento.
+#
+# Até aqui só diag_export/ e diag_import/ eram congelados. Qualquer stream que
+# grave na raiz ficava fora da linha de base, e o compara-linha-base.bash nunca
+# chegava a comparar o arquivo, embora ele já saiba procurá-lo ali (terceira
+# alternativa do laço de localização). O sintoma é o pior possível: a
+# comparação passa em silêncio sobre um arquivo que ninguém verificou.
+#
+# Foi exatamente o que aconteceu com o reprodiag.nc, criado para localizar em
+# que passo de tempo o estado do MPAS diverge: a dupla rodada foi executada, o
+# arquivo foi gravado, e a pergunta continuou sem resposta porque ele não
+# entrou na base.
+#
+# A lista é uma ALLOWLIST explícita, e não *.nc, porque a raiz também contém
+# ENTRADAS grandes (x1.*.init.nc, mpas_mesh.nc). Entradas são verificadas por
+# soma em entrada/CHECKSUMS.txt e não devem ser copiadas.
+#
+# Para acrescentar um stream novo sem editar este script:
+#   export BASE_SAIDA_RAIZ_EXTRA='meu_stream.nc outro_*.nc'
+#
+# A definição e a CONTAGEM ficam aqui, antes do MANIFEST, porque o MANIFEST é
+# escrito antes do bloco de cópia; contar junto da cópia faria o relatório
+# imprimir zero sempre.
+#-----------------------------------------------------------------------------
+_PADROES_RAIZ=( 'reprodiag.nc' 'reprodiag_*.nc' )
+# shellcheck disable=SC2206
+[[ -n "${BASE_SAIDA_RAIZ_EXTRA:-}" ]] && _PADROES_RAIZ+=( ${BASE_SAIDA_RAIZ_EXTRA} )
+
+# Entradas conhecidas da raiz: nunca copiar para saida/.
+_PADROES_ENTRADA_RAIZ=( 'x1.*.nc' 'mpas_mesh.nc' 'ocean_*.nc' 'OISST*.nc' \
+                        '*_init.nc' 'grid_spec*.nc' )
+
+_ARQS_RAIZ=()
+for _pat in "${_PADROES_RAIZ[@]}"; do
+  for _f in ${_pat}; do
+    [[ -f "${_f}" ]] && _ARQS_RAIZ+=( "${_f}" )
+  done
+done
+_n_raiz=${#_ARQS_RAIZ[@]}
+
 # ── Estrutura ────────────────────────────────────────────────────────────────
 mkdir -p "${DESTINO}"/{config,entrada,saida,logs}
 
@@ -219,6 +263,7 @@ _nuopc_get() {
   echo "mom6_import_*.nc   : ${_n_mom6} arquivo(s)"
   echo "monan2_import_*.nc : ${_n_monan2} arquivo(s)"
   echo "mpas_import_step*.nc: ${_n_legado} arquivo(s)  (nome legado, pré-v4.19)"
+  echo "NetCDF da raiz      : ${_n_raiz:-0} arquivo(s)  (B-BASE-RAIZ-NC-01)"
   if [[ "${_n_mom6}" -eq 0 && "${_n_monan2}" -eq 0 ]]; then
     echo ""
     echo "AVISO: nenhum diagnóstico de importação foi congelado."
@@ -257,6 +302,36 @@ cp -p diag_import/monan2_import_????.nc             "${DESTINO}/saida/" 2>/dev/n
 # Legado: mantido para que uma linha de base gerada a partir de uma execução
 # antiga continue completa. Execuções atuais não produzem este arquivo.
 cp -p diag_import/mpas_import_step????.nc           "${DESTINO}/saida/" 2>/dev/null || true
+
+# B-BASE-RAIZ-NC-01: cópia das saídas da raiz (lista montada acima).
+for _f in "${_ARQS_RAIZ[@]:-}"; do
+  [[ -n "${_f}" && -f "${_f}" ]] || continue
+  cp -p "${_f}" "${DESTINO}/saida/" 2>/dev/null || true
+done
+
+# Relatório do que NÃO foi classificado. Sem isto, um stream novo gravando na
+# raiz voltaria a cair no mesmo ponto cego, só que mais tarde e mais difícil de
+# notar. Aqui ele aparece como aviso no momento em que a base é criada.
+_nao_classificados=()
+for _f in *.nc; do
+  [[ -f "${_f}" ]] || continue
+  _classificado=0
+  for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_ENTRADA_RAIZ[@]}"; do
+    # shellcheck disable=SC2053
+    [[ "${_f}" == ${_pat} ]] && { _classificado=1; break; }
+  done
+  [[ ${_classificado} -eq 0 ]] && _nao_classificados+=( "${_f}" )
+done
+
+if [[ ${#_nao_classificados[@]} -gt 0 ]]; then
+  echo ""
+  echo "AVISO (B-BASE-RAIZ-NC-01): NetCDF na raiz sem classificacao:"
+  printf '           %s\n' "${_nao_classificados[@]}"
+  echo "           Se for SAIDA, acrescente o padrao em BASE_SAIDA_RAIZ_EXTRA"
+  echo "           para que entre na linha de base; se for ENTRADA, ela ja' esta'"
+  echo "           verificada por soma em entrada/CHECKSUMS.txt."
+  echo ""
+fi
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 #-----------------------------------------------------------------------------

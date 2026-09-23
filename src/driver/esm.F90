@@ -66,7 +66,8 @@ module ESM_MONAN
   use NUOPC_Driver, &
     driver_routine_SS             => SetServices,            &
     driver_label_SetModelServices => label_SetModelServices, &
-    driver_label_SetRunSequence   => label_SetRunSequence
+    driver_label_SetRunSequence   => label_SetRunSequence,   &
+    driver_label_ModifyCplLists   => label_ModifyCplLists    ! B-CPL-TERMORDER-01
 
   ! Conector NUOPC padrão
   use NUOPC_Connector, only : CPL_SetServices => SetServices
@@ -128,6 +129,13 @@ contains
     call NUOPC_CompSpecialize(driver, &
       specLabel=driver_label_SetModelServices, &
       specRoutine=SetModelServices, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, file=__FILE__)) return
+
+    ! B-CPL-TERMORDER-01: fixa a ordem de soma dos conectores NUOPC.
+    call NUOPC_CompSpecialize(driver, &
+      specLabel=driver_label_ModifyCplLists, &
+      specRoutine=ModifyCplLists, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
       line=__LINE__, file=__FILE__)) return
 
@@ -278,6 +286,141 @@ contains
       trim(dstCompLabel), line=__LINE__, file=__FILE__)) return
 
   end subroutine AddConnectorWithClock
+
+  ! ============================================================================
+  !> @brief Acrescenta ':termorder=srcseq' a toda entrada de CplList.
+  !!
+  !! FIX B-CPL-TERMORDER-01 (Set/2026).
+  !!
+  !! O PROBLEMA. Um conector NUOPC executa, por baixo, um produto
+  !! matriz-esparsa: cada ponto de destino recebe a SOMA das contribuicoes de
+  !! varios pontos de origem, que chegam de PETs diferentes. A ordem dessa
+  !! soma vem da opcao 'termorder=' de cada entrada da CplList, e o DEFAULT do
+  !! NUOPC_Connector e' ESMF_TERMORDER_FREE: soma na ordem de chegada das
+  !! mensagens, que varia entre execucoes. Soma de ponto flutuante nao e'
+  !! associativa, entao o ultimo bit muda de uma rodada para outra.
+  !!
+  !! POR QUE O CONSERTO NO MEDIADOR NAO BASTOU. O B-REGRID-TERMORDER-01 fixou
+  !! SRCSEQ nas 18 chamadas de ESMF_FieldRegrid do MED_cap.F90. Mas os quatro
+  !! conectores deste driver sao componentes NUOPC_Connector genericos,
+  !! registrados por NUOPC_DriverAddComp com src/dstCompLabel: o regrid deles
+  !! acontece DENTRO do conector, nao no MED_cap. O caminho MED->MPAS, que e'
+  !! por onde a condicao de contorno chega ao MPAS, e' justamente um desses.
+  !!
+  !! A EVIDENCIA. Medicao de 17/09/2026, quatro execucoes, dt_coupling=43200
+  !! (uma unica injecao, na segunda janela): o monan_export de t=0 e' identico
+  !! nos seis pares, ou seja, a exportacao ja' esta' reproduzivel depois do
+  !! B-EXPORT-ALLREDUCE-01; e ainda assim o estado do MPAS diverge nos seis
+  !! pares, sempre no registro 73, que e' o passo da injecao. O caminho de
+  !! importacao nao tem nenhuma coletiva propria (state_get_field_1d faz
+  !! ESMF_FieldGather ordenado por indice global e escolha de vizinho mais
+  !! proximo, sem soma). A unica soma nao determinstica que resta entre o
+  !! mediador e o MPAS e' a do conector.
+  !!
+  !! COMO. O NUOPC monta a CplList sozinho, uma entrada por campo acoplado.
+  !! Esta especializacao roda depois disso e antes de os RouteHandles serem
+  !! computados, que e' a janela em que a lista ainda pode ser alterada. Cada
+  !! entrada ganha o sufixo ':termorder=srcseq'. O parser do NUOPC_Connector
+  !! aceita 'srcseq', 'srcpet' e 'free', e rejeita com mensagem de erro
+  !! qualquer outro valor: opcao desconhecida nao passa em silencio.
+  !!
+  !! CUSTO. SRCSEQ ordena os termos pelo indice de sequencia da origem antes
+  !! de somar. O custo em tempo de execucao aparece em cada troca de
+  !! acoplamento, nao a cada passo do modelo. Nas medicoes com o mediador ja'
+  !! em SRCSEQ o tempo de parede nao mudou de forma perceptivel.
+  !!
+  !! IDEMPOTENTE. Entradas que ja' tragam 'termorder=' sao deixadas como
+  !! estao, para que uma escolha explicita feita em outro lugar nao seja
+  !! sobrescrita aqui sem aviso.
+  subroutine ModifyCplLists(driver, rc)
+    type(ESMF_GridComp)  :: driver
+    integer, intent(out) :: rc
+
+    ! B-SRCTERM-01: 160 -> 512. Cada entrada recebe ate' 37 caracteres a mais
+    ! (':termorder=srcseq' e ':srcTermProcessing=0'); com 160, uma entrada
+    ! original acima de 123 caracteres seria cortada em silencio.
+    character(len=512), allocatable :: cplList(:)
+    type(ESMF_CplComp),     pointer :: connectorList(:)
+    integer            :: i, j, cplListSize, n_mod, n_ja
+    integer            :: n_src   ! B-SRCTERM-01
+    integer            :: n_trunc ! B-SRCTERM-01: entradas sem espaco
+    ! B-SRCTERM-01: 160 -> 256. A mensagem com as duas contagens tem 174
+    ! caracteres; com 160 o write interno falhava com "End of record".
+    character(len=256) :: msg
+
+    rc = ESMF_SUCCESS
+    nullify(connectorList)
+    n_mod = 0
+    n_src = 0   ! B-SRCTERM-01
+    n_trunc = 0 ! B-SRCTERM-01
+    n_ja  = 0
+
+    call NUOPC_DriverGetComp(driver, compList=connectorList, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+      line=__LINE__, file=__FILE__)) return
+
+    do i = 1, size(connectorList)
+      ! Tamanho primeiro: a consulta com valueList exige o vetor ja' alocado.
+      call NUOPC_CompAttributeGet(connectorList(i), name='CplList', &
+        itemCount=cplListSize, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+        line=__LINE__, file=__FILE__)) return
+
+      if (cplListSize > 0) then
+        allocate(cplList(cplListSize))
+        call NUOPC_CompAttributeGet(connectorList(i), name='CplList', &
+          valueList=cplList, rc=rc)
+        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+          line=__LINE__, file=__FILE__)) return
+
+        do j = 1, cplListSize
+          if (index(cplList(j), 'termorder=') > 0) then
+            n_ja = n_ja + 1
+          else if (len_trim(cplList(j)) + len(':termorder=srcseq') > len(cplList(j))) then
+            n_trunc = n_trunc + 1
+          else
+            cplList(j) = trim(cplList(j))//':termorder=srcseq'
+            n_mod = n_mod + 1
+          end if
+          ! B-SRCTERM-01 (22/09/2026): termorder fixa apenas a ordem da soma
+          ! FINAL, no destino. As somas PARCIAIS do lado da origem sao
+          ! controladas por srcTermProcessing, que o ESMF escolhe por
+          ! auto-ajuste quando nao e' informado (mede desempenho em tempo de
+          ! execucao). Valores diferentes entre execucoes mudam o
+          ! agrupamento das parcelas e, com isso, o ultimo bit do resultado.
+          ! Zero manda fazer toda a aritmetica no destino.
+          if (index(cplList(j), 'srcTermProcessing=') <= 0) then
+            if (len_trim(cplList(j)) + len(':srcTermProcessing=0') > len(cplList(j))) then
+              n_trunc = n_trunc + 1
+            else
+              cplList(j) = trim(cplList(j))//':srcTermProcessing=0'
+              n_src = n_src + 1
+            end if
+          end if
+        end do
+
+        call NUOPC_CompAttributeSet(connectorList(i), name='CplList', &
+          valueList=cplList, rc=rc)
+        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
+          line=__LINE__, file=__FILE__)) return
+
+        deallocate(cplList)
+      end if
+    end do
+
+    deallocate(connectorList)
+
+    write(msg,'(A,I0,A,I0,A,I0,A,I0)') 'ESM: B-CPL-TERMORDER-01 - termorder=srcseq '// &
+      'aplicado a ', n_mod, ' entrada(s) de CplList; ', n_ja, &
+      ' ja possuiam termorder explicito; B-SRCTERM-01 - srcTermProcessing=0 '// &
+      'aplicado a ', n_src, ' entrada(s); sem espaco: ', n_trunc
+    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    if (n_trunc > 0) call ESMF_LogWrite('ESM: B-SRCTERM-01 - ATENCAO: ha entrada(s) '// &
+      'de CplList sem espaco para as opcoes de reprodutibilidade; aumentar len '// &
+      'de cplList em ModifyCplLists', ESMF_LOGMSG_WARNING)
+    write(*,'(A)') ' '//trim(msg)
+
+  end subroutine ModifyCplLists
 
   ! ============================================================================
   !> @brief Registra componentes (MPAS, MED, OCN) e conectores.

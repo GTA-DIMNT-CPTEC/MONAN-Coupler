@@ -35,6 +35,11 @@ module mpas_atm_model_mod
                                   atm_ocean_boundary_type
 
   use mpas_kind_types,    only : RKIND, StrKIND
+  ! B-INJECT-HALO-01: field1DReal (de mpas_field_types.inc, incluido em
+  ! mpas_derived_types) e mpas_dmpar_exch_halo_field sao necessarios para
+  ! propagar aos halos os campos de contorno injetados pelo acoplador.
+  use mpas_dmpar,         only : mpas_dmpar_exch_halo_field
+  use mpas_derived_types, only : field1DReal
   use mpas_derived_types, only : domain_type, mpas_pool_type, MPAS_LOG_CRIT, &
                                   MPAS_Pool_iterator_type,                    &
                                   MPAS_POOL_CONFIG,                           &
@@ -57,7 +62,8 @@ module mpas_atm_model_mod
                                   mpas_pool_get_subpool,      &
                                   mpas_pool_get_config,       &
                                   mpas_pool_begin_iteration,  &
-                                  mpas_pool_get_next_member
+                                  mpas_pool_get_next_member,  &
+                                  mpas_pool_get_field   ! B-INJECT-HALO-01
 
   use mpas_bootstrapping, only : mpas_bootstrap_framework_phase1, &
                                   mpas_bootstrap_framework_phase2
@@ -208,7 +214,22 @@ contains
     integer, pointer :: nCellsSolve_ptr => null()   ! B-32: células próprias (sem halos)
     integer, pointer :: nVertLev_ptr    => null()
     integer          :: n, nSolve, ierr
-    character(len=64) :: startTimeStamp
+    ! B-STARTSTAMP-LEN-01 (Set/2026): StrKIND (=512), nao 64.
+    !
+    ! Esta variavel e' passada a core_init, cujo dummy e' character(len=*),
+    ! logo o comprimento do ATUAL se propaga intacto. Dentro de atm_core_init
+    ! ela chega a mpas_get_time, cujo dummy dateTimeString e' declarado com
+    ! StrKIND. Com -fcheck=bounds no FFLAGS_OPT de producao, o gfortran
+    ! verifica comprimento de caractere em tempo de execucao e aborta:
+    !   "Actual string length is shorter than the declared one for dummy
+    !    argument 'datetimestring' (64/512)"
+    ! Os 64 PETs da atmosfera terminam em Error termination dentro do
+    ! mpas_atm_init, antes do primeiro ModelAdvance.
+    !
+    ! Sem -fcheck=bounds isto nao aborta, mas tambem nao e' inocuo: o
+    ! mpas_get_time escreveria ate 512 caracteres sobre um buffer de 64.
+    ! Nao ha custo em usar StrKIND: a variavel e' local e usada com trim.
+    character(len=StrKIND) :: startTimeStamp
     character(len=256) :: msg
 
     rc = 0
@@ -830,6 +851,9 @@ contains
     integer :: diag_alb_cell
     real(MPAS_RKIND) :: diag_alb_before
     integer :: n, ierr, iCell
+    ! B-INJECT-HALO-01: limite do laco de injecao. nCellsSolve vive em
+    ! atm_public (mpas_atm_types.F90), nao em atm_state.
+    integer :: nSolve_inj
     character(len=256) :: msg
     ! B-COLDSTART-01: na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
     ! (lag de 1 passo, ver driver/esm.F90). Na 1a chamada de acoplamento de
@@ -846,6 +870,20 @@ contains
 
     rc = 0
     n  = atm_state%nCells
+
+    ! B-INJECT-HALO-01: a injecao escreve SO nas celulas proprias. Se
+    ! nCellsSolve nao tiver sido preenchido em mpas_atm_init, cair para nCells
+    ! e' o comportamento antigo (escreve nos halos); isso e' um defeito, nao um
+    ! default aceitavel, entao registra em nivel de erro em vez de seguir calado.
+    nSolve_inj = atm_public%nCellsSolve
+    if (nSolve_inj <= 0 .or. nSolve_inj > n) then
+      write(msg,'(A,I0,A,I0,A)') 'mpas_atm_run: B-INJECT-HALO-01 ERRO - ' // &
+        'nCellsSolve=', nSolve_inj, ' invalido (nCells=', n, &
+        '); injetando ate nCells, halos ficarao inconsistentes'
+      write(*,'(A)') trim(msg)
+      call mpas_log_write(trim(msg))
+      nSolve_inj = n
+    end if
 
     if (.not. atm_state%initialized .or. .not. associated(g_domain)) then
       write(*,'(A)') 'ERRO mpas_atm_run: modelo nao inicializado'
@@ -896,7 +934,10 @@ contains
          end if
          if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
            ! so entre se nao utilizar dados de sst preescritos 
-            DO iCell =1, atm_state%nCells
+            ! B-INJECT-HALO-01: o laco vai ate nCellsSolve (celulas PROPRIAS),
+            ! nao ate nCells (que inclui os halos). Ver o bloco de troca de
+            ! halo logo apos o fim do laco para o motivo.
+            DO iCell =1, nSolve_inj
                if( xland_field(iCell) .gt. 1.5) then
                   if (.not. (first_coupling_call .and. is_cold_start)) then
                      if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
@@ -927,6 +968,88 @@ contains
                   end if
                endif 
             end do
+            !--------------------------------------------------------------
+            ! B-INJECT-HALO-01 (Set/2026): propaga aos halos os campos de
+            ! contorno que acabaram de ser injetados.
+            !
+            ! O PROBLEMA. Antes desta correcao o laco acima percorria
+            ! 1..nCells, que INCLUI as celulas de halo, e escrevia nelas
+            ! valores de atm_bnd. Nao havia troca de halo em seguida (a busca
+            ! por exch_halo em todo o src/caps nao retornava nada). Cada PET
+            ! ficava com uma copia de halo de sst/skintemp/xice/znt/sfc_albedo
+            ! inconsistente com o PET dono da celula, e o core_run integrava
+            ! sobre contorno inconsistente. No MPAS-A autonomo isso nao
+            ! ocorre, porque sst e xice chegam pelo stream manager, que faz a
+            ! troca de halo; a injecao do acoplador contornava esse caminho.
+            !
+            ! A EVIDENCIA. Medicao de 17/09/2026 com dt_coupling=43200, ou
+            ! seja, duas janelas de acoplamento, das quais apenas a segunda
+            ! injeta (a primeira e' pulada pela guarda B-COLDSTART-01):
+            ! quatro execucoes identicas, seis pares comparados, SEIS
+            ! divergentes, TODOS a partir do registro 73 do reprodiag, que e'
+            ! exatamente 12:00, o instante da injecao. Os 72 registros
+            ! anteriores, doze horas de integracao, sao bit a bit identicos.
+            ! Com zero injecoes (dt_coupling=86400) foram seis pares sem
+            ! nenhuma diferenca. Uma unica injecao basta para quebrar a
+            ! reprodutibilidade, e a quebra aparece no passo em que ela
+            ! ocorre, nao antes.
+            !
+            ! O CONSERTO. Escrever apenas nas celulas proprias (nCellsSolve,
+            ! ver o laco acima) e chamar a troca de halo, que e' a mesma
+            ! rotina do framework que o stream manager usa. Assim a copia de
+            ! halo de cada PET passa a ser, por construcao, igual ao valor do
+            ! dono.
+            !
+            ! CUSTO. Uma troca de halo por campo por janela de acoplamento,
+            ! sobre campos 1D de nCells. Desprezivel ao lado de um passo de
+            ! fisica, e paga uma vez por dt_coupling, nao por dt_atm.
+            !
+            ! LIMITE CONHECIDO. Isto NAO trata a duplicacao de celulas na
+            ! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
+            ! do mpas_cap_methods), em que a mesma celula fisica recebe
+            ! contribuicao do regrid em mais de um PET. Se a divergencia
+            ! persistir depois desta correcao, esse e' o alvo seguinte, e o
+            ! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
+            !--------------------------------------------------------------
+            if (.not. (first_coupling_call .and. is_cold_start)) then
+              block
+                type (field1DReal), pointer :: fld_halo => null()
+                integer :: i_halo
+                character(len=32), parameter :: campos_sfcinput(3) = &
+                  [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
+                character(len=32), parameter :: campos_diagphys(2) = &
+                  [ character(len=32) :: 'z0', 'sfc_albedo' ]
+
+                do i_halo = 1, size(campos_sfcinput)
+                  nullify(fld_halo)
+                  call mpas_pool_get_field(sfcInputPool, &
+                    trim(campos_sfcinput(i_halo)), fld_halo)
+                  if (associated(fld_halo)) then
+                    call mpas_dmpar_exch_halo_field(fld_halo)
+                  else
+                    call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+                      'campo '//trim(campos_sfcinput(i_halo))// &
+                      ' nao encontrado em sfc_input; halo NAO trocado')
+                  end if
+                end do
+
+                do i_halo = 1, size(campos_diagphys)
+                  nullify(fld_halo)
+                  call mpas_pool_get_field(diag_physicsPool, &
+                    trim(campos_diagphys(i_halo)), fld_halo)
+                  if (associated(fld_halo)) then
+                    call mpas_dmpar_exch_halo_field(fld_halo)
+                  else
+                    call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+                      'campo '//trim(campos_diagphys(i_halo))// &
+                      ' nao encontrado em diag_physics; halo NAO trocado')
+                  end if
+                end do
+
+                call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 - halos '// &
+                  'dos campos de contorno injetados trocados')
+              end block
+            end if
          endif
       end if
       first_coupling_call = .false.

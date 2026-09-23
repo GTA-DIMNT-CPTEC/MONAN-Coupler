@@ -162,7 +162,7 @@ F90FLAGS := $(ESMF_F90COMPILEOPTS)      \
             -fopenmp                    \
             -fallow-argument-mismatch   \
             -ffpe-summary=none          \
-            -O2 -g                      \
+            -O2 -g -fcheck=all -fbacktrace \
             -Wall                       \
             -Wno-unused-dummy-argument  \
             -Wno-unused-variable

@@ -897,10 +897,41 @@ contains
   !! Grava um arquivo NetCDF por passo de acoplamento em cfg_import_diag_dir,
   !! no mesmo formato dos arquivos monan_export_*.nc (grade lat/lon regular).
   !!
-  !! Campos escritos (os 3 campos OCN→ATM que chegam via conector MED→MPAS):
-  !!   So_t     — SST [K]           — atm_bnd%sst
-  !!   Si_ifrac — fração de gelo    — atm_bnd%ice_fraction
-  !!   Sf_zorl  — rugosidade [m]    — atm_bnd%zorl
+  !! Campos escritos — os 7 campos OCN→ATM do conector MED→MPAS, um por membro
+  !! de atm_ocean_boundary_type:
+  !!   So_t       — temp. de pele [K]        — atm_bnd%sst
+  !!   Si_ifrac   — fração de gelo [0–1]     — atm_bnd%ice_fraction
+  !!   So_u       — corrente zonal [m/s]     — atm_bnd%uocn
+  !!   So_v       — corrente meridional      — atm_bnd%vocn
+  !!   Sf_zorl    — rugosidade [m]           — atm_bnd%zorl
+  !!   Sf_albedo  — albedo de superfície     — atm_bnd%alb
+  !!   Sx_omask   — máscara oceano/terra     — atm_bnd%omask
+  !!
+  !! FIX B-DIAG-IMPORT-INCOMPLETO-01 (Set/2026): acrescentados So_u, So_v e
+  !!   Sf_albedo. Até aqui a rotina gravava 4 dos 7 campos importados, e a
+  !!   ausência era silenciosa: nada no código nem no arquivo indicava que
+  !!   três campos ficavam de fora. A consequência prática foi grave. A
+  !!   bateria de reprodutibilidade comparava monan2_import_*.nc para decidir
+  !!   se o MPAS recebia entrada idêntica entre duas rodadas; como as
+  !!   correntes e o albedo não estavam no arquivo, "entrada idêntica em t=0"
+  !!   nunca cobriu esses três, e a conclusão de que o MPAS era a fonte da
+  !!   não reprodutibilidade foi tirada de uma comparação cega em 3 de 7
+  !!   campos. O MPAS-A autônomo, testado fora do acoplador, é bit a bit
+  !!   reprodutível — logo a divergência entra por um campo importado.
+  !!
+  !! INVARIANTE A PRESERVAR: uma variável NetCDF por membro de
+  !!   atm_ocean_boundary_type. Ao acrescentar um membro ao tipo (em
+  !!   mpas_atm_types.F90) e ao IMP_NAMES (em mpas_cap_MONAN.F90),
+  !!   acrescente aqui também. Não há verificação automática: a rotina
+  !!   recebe atm_bnd, não o importState, e por isso não pode iterar sobre
+  !!   os campos anunciados. A conferência é visual, contando membros.
+  !!
+  !! NOTA SOBRE O RÓTULO So_t (ver B-DIAG-SOT-ROTULO-01): a variável se chama
+  !!   So_t por compatibilidade com o pós-processamento e as animações, mas o
+  !!   campo importado é Sx_tsfc, a temperatura de pele composta (ver
+  !!   IMP_NAMES em mpas_cap_MONAN.F90). O nome NÃO foi alterado aqui para
+  !!   não quebrar postproc_monan2_import.py e anim_monan2_import.py; a
+  !!   renomeação, se feita, tem de ser coordenada com essas ferramentas.
   !!
   !! FIX B-DIAGMASK-01 (Set/2026): continentes mascarados com a máscara REAL
   !!   do MOM6 (ocean_grid%mask2dT → So_omask → Sx_omask → atm_bnd%omask).
@@ -927,6 +958,7 @@ contains
     integer :: varid_lat, varid_lon
     integer :: varid_sot, varid_ifrac, varid_zorl
     integer :: varid_omask                      ! B-DIAGMASK-01
+    integer :: varid_uocn, varid_vocn, varid_alb ! B-DIAG-IMPORT-INCOMPLETO-01
     integer :: nlat, nlon, i, j
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
     real(ESMF_KIND_R8), allocatable :: mask_2d(:,:)   ! B-DIAGMASK-01
@@ -937,6 +969,10 @@ contains
     real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf_sot(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_ifrac(:), recvBuf_zorl(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_omask(:)   ! B-DIAGMASK-01
+    ! B-DIAG-IMPORT-INCOMPLETO-01: os tres campos que faltavam.
+    real(ESMF_KIND_R8), allocatable :: recvBuf_uocn(:)
+    real(ESMF_KIND_R8), allocatable :: recvBuf_vocn(:)
+    real(ESMF_KIND_R8), allocatable :: recvBuf_alb(:)
     ! Limiar de corte da mascara ja' binada. 0,5 e' o mesmo criterio usado
     ! no MED (B-LANDMASK-01) e o mesmo ocean_frac_min do binning abaixo —
     ! os tres precisam concordar, senao a linha de costa do diagnostico do
@@ -975,10 +1011,12 @@ contains
       allocate(lon_global(nGlobal), lat_global(nGlobal))
       allocate(recvBuf_sot(nGlobal), recvBuf_ifrac(nGlobal), recvBuf_zorl(nGlobal))
       allocate(recvBuf_omask(nGlobal))
+      allocate(recvBuf_uocn(nGlobal), recvBuf_vocn(nGlobal), recvBuf_alb(nGlobal))
     else
       allocate(lon_global(1), lat_global(1))
       allocate(recvBuf_sot(1), recvBuf_ifrac(1), recvBuf_zorl(1))
       allocate(recvBuf_omask(1))
+      allocate(recvBuf_uocn(1), recvBuf_vocn(1), recvBuf_alb(1))
     end if
 
     if (present(lonCell) .and. present(latCell)) then
@@ -1035,12 +1073,49 @@ contains
     call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
                      recvBuf_omask, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
+
+    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes e albedo.
+    !
+    ! O fallback 0,0 nas correntes reproduz o default anterior ao Sprint A,
+    ! quando uocn/vocn nao vinham do MOM6 e o MPAS assumia oceano parado.
+    ! No albedo o fallback 0,0 NAO e' um valor fisico plausivel (oceano
+    ! aberto fica em torno de 0,06): e' um marcador deliberado. Se um mapa
+    ! de Sf_albedo sair todo em zero, o campo nao chegou ao atm_bnd, e essa
+    ! leitura e' mais util do que um valor bonito que esconde a ausencia.
+    if (allocated(atm_bnd%uocn)) then
+      sendBuf(1:nLocal) = real(atm_bnd%uocn(1:nLocal), ESMF_KIND_R8)
+    else
+      sendBuf = 0.0_ESMF_KIND_R8
+    end if
+    call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                     recvBuf_uocn, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     0, mpiComm, mpi_ierr)
+
+    if (allocated(atm_bnd%vocn)) then
+      sendBuf(1:nLocal) = real(atm_bnd%vocn(1:nLocal), ESMF_KIND_R8)
+    else
+      sendBuf = 0.0_ESMF_KIND_R8
+    end if
+    call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                     recvBuf_vocn, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     0, mpiComm, mpi_ierr)
+
+    if (allocated(atm_bnd%alb)) then
+      sendBuf(1:nLocal) = real(atm_bnd%alb(1:nLocal), ESMF_KIND_R8)
+    else
+      sendBuf = 0.0_ESMF_KIND_R8
+    end if
+    call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                     recvBuf_alb, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     0, mpiComm, mpi_ierr)
+
     deallocate(sendBuf, allCounts, displs)
 
     ! ── 3. Escrita NetCDF (somente PET 0) ─────────────────────────────────
     if (localPet /= 0) then
       deallocate(lon_global, lat_global)
       deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_omask)
+      deallocate(recvBuf_uocn, recvBuf_vocn, recvBuf_alb)
       return
     end if
 
@@ -1113,6 +1188,25 @@ contains
     ios = nf90_put_att(ncid, varid_zorl,  'standard_name', 'surface_roughness_length')
     ios = nf90_put_att(ncid, varid_zorl,  '_FillValue',    -9.99e+20_ESMF_KIND_R8)
 
+    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes de superficie e albedo.
+    ios = nf90_def_var(ncid, 'So_u', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_uocn)
+    ios = nf90_put_att(ncid, varid_uocn,  'units',         'm s-1')
+    ios = nf90_put_att(ncid, varid_uocn,  'long_name',     'Corrente oceanica zonal importada pelo MPAS')
+    ios = nf90_put_att(ncid, varid_uocn,  'standard_name', 'eastward_sea_water_velocity')
+    ios = nf90_put_att(ncid, varid_uocn,  '_FillValue',    FILL_DIAG)
+
+    ios = nf90_def_var(ncid, 'So_v', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_vocn)
+    ios = nf90_put_att(ncid, varid_vocn,  'units',         'm s-1')
+    ios = nf90_put_att(ncid, varid_vocn,  'long_name',     'Corrente oceanica meridional importada pelo MPAS')
+    ios = nf90_put_att(ncid, varid_vocn,  'standard_name', 'northward_sea_water_velocity')
+    ios = nf90_put_att(ncid, varid_vocn,  '_FillValue',    FILL_DIAG)
+
+    ios = nf90_def_var(ncid, 'Sf_albedo', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_alb)
+    ios = nf90_put_att(ncid, varid_alb,   'units',         '1')
+    ios = nf90_put_att(ncid, varid_alb,   'long_name',     'Albedo de superficie importado pelo MPAS')
+    ios = nf90_put_att(ncid, varid_alb,   'standard_name', 'surface_albedo')
+    ios = nf90_put_att(ncid, varid_alb,   '_FillValue',    FILL_DIAG)
+
     ! B-DIAGMASK-01: a propria mascara vira variavel do arquivo, para que o
     ! pos-processamento nao precise readivinha-la a partir de _FillValue.
     ios = nf90_def_var(ncid, 'Sx_omask', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_omask)
@@ -1126,9 +1220,16 @@ contains
       'MONAN-A 2.0 importState (= MED exportState MED->MPAS) — Campos OCN->ATM')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'institution',  'INPE/CGCT/DIMNT')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'source', &
-      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + Sf_zorl + Sx_omask)')
+      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + So_u + '// &
+      'So_v + Sf_zorl + Sf_albedo + Sx_omask)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'code_version', &
-      'v3.0-2026-05 (migrado de mpas_cap_methods para mpas_cap_netcdf)')
+      'v3.1-2026-09 (B-DIAG-IMPORT-INCOMPLETO-01: 7 de 7 campos importados; '// &
+      'antes 4 de 7 — So_u, So_v e Sf_albedo ficavam de fora em silencio)')
+    ! Rotulo explicito da cobertura, para que uma comparacao de
+    ! reprodutibilidade feita sobre estes arquivos possa verificar, no proprio
+    ! arquivo, se ela cobre todos os campos que o MPAS importa.
+    ios = nf90_put_att(ncid, NF90_GLOBAL, 'import_fields_written', 7)
+    ios = nf90_put_att(ncid, NF90_GLOBAL, 'import_fields_total',  7)
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'land_mask_source', &
       'MOM6 ocean_grid%mask2dT (So_omask -> Sx_omask, regridada MED->MPAS); '// &
       'celulas de terra gravadas como _FillValue; mascara na variavel Sx_omask')
@@ -1172,6 +1273,39 @@ contains
     where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
     ios = nf90_put_var(ncid, varid_zorl, grid_2d)
 
+    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes e albedo, mesmo binning e mesma
+    ! mascara dos demais campos, para que as sete variaveis vivam na mesma
+    ! grade e sejam comparaveis entre si e com o diagnostico do MED.
+    !
+    ! Os limites [-5, +5] m/s nas correntes sao os MESMOS do clamp fisico
+    ! aplicado na importacao (mpas_cap_methods.F90: |u|>5 -> 0). Se os dois
+    ! divergirem, o diagnostico passa a descartar valor que a fisica aceitou,
+    ! ou a aceitar valor que a fisica zerou. Mantenha-os iguais.
+    call voronoi_to_grid(recvBuf_uocn,  lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=-5.0_ESMF_KIND_R8, vmax=5.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    ios = nf90_put_var(ncid, varid_uocn, grid_2d)
+
+    call voronoi_to_grid(recvBuf_vocn,  lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=-5.0_ESMF_KIND_R8, vmax=5.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    ios = nf90_put_var(ncid, varid_vocn, grid_2d)
+
+    ! Albedo em [0, 1]: faixa de definicao da grandeza, nao faixa esperada.
+    ! Oceano aberto fica por volta de 0,06 e gelo novo passa de 0,8; apertar
+    ! o intervalo aqui descartaria o contraste agua/gelo, que e' exatamente
+    ! o que se quer ver neste campo.
+    call voronoi_to_grid(recvBuf_alb,   lon_global, lat_global, nGlobal, &
+                         grid_2d, nlon, nlat, dlon, dlat, &
+                         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
+                         ocean_frac_min=0.5_ESMF_KIND_R8)
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    ios = nf90_put_var(ncid, varid_alb, grid_2d)
+
     ! A mascara vai binaria e sem mascarar a si mesma: e' ela que diz onde
     ! a terra fica. Bin sem celula Voronoi permanece FILL_DIAG.
     ! Feito com mascaras logicas explicitas (e nao com ELSEWHERE encadeado)
@@ -1213,6 +1347,7 @@ contains
     if (allocated(lon_axis)) deallocate(lon_axis)
     deallocate(lon_global, lat_global)
     deallocate(recvBuf_sot, recvBuf_ifrac, recvBuf_zorl, recvBuf_omask)
+    deallocate(recvBuf_uocn, recvBuf_vocn, recvBuf_alb)
 
   end subroutine write_mpas_import_diag
 

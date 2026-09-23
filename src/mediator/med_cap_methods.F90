@@ -36,6 +36,19 @@ module med_cap_methods_mod
   public :: RegridOptionalCurrent
   public :: NeighborFillExtrapolate
 
+  ! B-METHODS-TERMORDER-01 (22/09/2026): as chamadas de ESMF_FieldRegrid deste
+  ! arquivo nao passavam termorderflag e caiam no padrao do ESMF,
+  ! ESMF_TERMORDER_FREE, que soma na ordem de chegada das mensagens. O
+  ! B-REGRID-TERMORDER-01 (Set/2026) corrigiu apenas o MED_cap.F90; este
+  ! arquivo ficou de fora. Mesmo valor usado la' (MED_TERMORDER).
+  type(ESMF_TermOrder_Flag), parameter :: MET_TERMORDER = ESMF_TERMORDER_SRCSEQ
+
+  ! B-SRCTERM-01: srcTermProcessing e' intent(inout) em ESMF_FieldRegridStore
+  ! (o ESMF devolve nele o valor escolhido quando faz auto-ajuste), entao nao
+  ! aceita literal. Esta variavel e' zerada imediatamente antes de cada
+  ! chamada, para que nenhuma herde valor de outra.
+  integer, save :: stp_b_srcterm = 0
+
 contains
 
   !============================================================================
@@ -226,7 +239,8 @@ contains
 
     if (is%rh_created) then
       call ESMF_FieldRegrid(src_field, dst_field, is%rh_atm2ocn, &
-        zeroregion=ESMF_REGION_TOTAL, rc=rc)
+        zeroregion=ESMF_REGION_TOTAL, &
+        termorderflag=MET_TERMORDER, rc=rc)   ! B-METHODS-TERMORDER-01
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &
         line=__LINE__, file=__FILE__)) return
@@ -235,18 +249,21 @@ contains
       where (dst_ptr /= dst_ptr) dst_ptr = 0.0_ESMF_KIND_R8
     else
       ! Routehandle ainda não disponível: regrid temporário nearest-stod
+      stp_b_srcterm = 0   ! B-SRCTERM-01
       call ESMF_FieldRegridStore( &
         srcField       = src_field,    &
         dstField       = dst_field,    &
         routehandle    = rh_tmp,       &
         regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
         unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
+        srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
         rc             = rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="RegridOrCopy fallback: falha store "//trim(dst_name), &
         line=__LINE__, file=__FILE__)) return
       call ESMF_FieldRegrid(src_field, dst_field, rh_tmp, &
-        zeroregion=ESMF_REGION_TOTAL, rc=rc)
+        zeroregion=ESMF_REGION_TOTAL, &
+        termorderflag=MET_TERMORDER, rc=rc)   ! B-METHODS-TERMORDER-01
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="RegridOrCopy fallback: falha regrid "//trim(dst_name), &
         line=__LINE__, file=__FILE__)) return
@@ -378,7 +395,8 @@ contains
     if (rc_loc /= ESMF_SUCCESS) return
 
     call ESMF_FieldRegrid(f_ocn, f_atm, rh, &
-      zeroregion=ESMF_REGION_TOTAL, rc=rc_loc)
+      zeroregion=ESMF_REGION_TOTAL, &
+      termorderflag=MET_TERMORDER, rc=rc_loc)   ! B-METHODS-TERMORDER-01
 
     if (rc_loc == ESMF_SUCCESS) then
       call ESMF_LogWrite( &

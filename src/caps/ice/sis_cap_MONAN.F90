@@ -692,8 +692,76 @@ contains
     call update_ice_model_fast(is%aib, is%ice)
 
     ! ── Passo 2: avançar o SIS2 ───────────────────────────────────────────
-    call update_ice_slow_thermo(is%ice)
-    call update_ice_dynamics_trans(is%ice)
+    !
+    ! FIX-DIAG-SLOWSPLIT-01 (Set/2026): separa as duas sub-rotinas do passo
+    ! lento, que e' onde a nao reprodutibilidade nasce.
+    !
+    ! O QUE JA SE SABE. Bateria de 18/09/2026, quatro execucoes, seis pares.
+    ! Os checksums de IST%part_size que o proprio SIS2 emite (chaves
+    ! DEBUG_CHKSUMS/DEBUG_SLOW_ICE/DEBUG_FAST_ICE) mostram, na PRIMEIRA troca
+    ! de acoplamento:
+    !   Start set_ice_surface_state      334285  identico
+    !   End   set_ice_surface_state      334285  identico
+    !   Start do_update_ice_model_fast   334285  identico
+    !   End   do_update_ice_model_fast   334285  identico
+    !   Start update_ice_model_slow      334285  identico
+    !   End   ice_state_cleanup          348735 vs 348744   DIVERGE
+    ! O estado entra no passo lento identico e sai diferente, e a diferenca e'
+    ! de nove unidades no checksum inteiro, ou seja, varias celulas, nao uma.
+    ! O unico codigo entre esses dois pontos sao as duas chamadas abaixo.
+    !
+    ! O QUE ESTE DIAGNOSTICO RESPONDE. Se o checksum ja divergir depois de
+    ! update_ice_slow_thermo, o alvo e' slow_thermodynamics. Se so divergir
+    ! depois de update_ice_dynamics_trans, o alvo e' SIS_transport, que e'
+    ! justamente a rotina que abortou com GLOBAL_INDEXING=True reclamando de
+    ! "non-zero snow mass rests atop no ice" (B-SIS2-SNOW-NOICE-01). Os dois
+    ! indicios apontando para o mesmo lugar seria forte.
+    !
+    ! LIMITE DO INSTRUMENTO, E COMO ELE SE DENUNCIA. Aqui so' ha acesso a
+    ! FACHADA is%ice%part_size, nao ao sCS%IST%part_size que o SIS2 usa por
+    ! dentro. O B-ICE-TSKIN-SRC-01 ja mostrou que essa fachada pode ficar
+    ! DEFASADA em relacao ao estado interno. Por isso o diagnostico mede TRES
+    ! pontos, inclusive ANTES da primeira chamada: se os tres saírem iguais,
+    ! a fachada nao esta sendo atualizada por estas rotinas e o instrumento e'
+    ! CEGO — o que fica visivel na saida em vez de virar um falso "nao
+    ! diverge". Nesse caso a medicao precisa ir para dentro do SIS2.
+    !
+    ! CUSTO. Tres somas e tres reducoes sobre um arranjo 3D local, uma vez por
+    ! troca de acoplamento. O checksum e' inteiro, imune a arredondamento de
+    ! impressao, que ja enganou esta investigacao duas vezes.
+    block
+      character(len=200) :: msg_slow
+      integer(kind=8)    :: cks_ini, cks_ter, cks_din
+      logical            :: tem_ps
+
+      tem_ps = associated(is%ice%part_size)
+
+      if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
+      call update_ice_slow_thermo(is%ice)
+      if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
+      call update_ice_dynamics_trans(is%ice)
+      if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
+
+      if (tem_ps) then
+        write(msg_slow,'(A,I0,A,I0,A,I0)') &
+          'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
+          '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
+        call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
+        if (cks_ini == cks_ter .and. cks_ter == cks_din) then
+          call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
+            'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
+            'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
+            'diagnostico esta CEGO e nao permite concluir nada.', &
+            ESMF_LOGMSG_WARNING)
+        end if
+      else
+        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
+          'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
+        call update_ice_slow_thermo(is%ice)
+        call update_ice_dynamics_trans(is%ice)
+      end if
+    end block
+
     call ESMF_LogWrite('ICE(SIS2): update_ice_slow_thermo + ' // &
       'update_ice_dynamics_trans concluido', ESMF_LOGMSG_INFO)
 
@@ -1439,5 +1507,33 @@ contains
 
     ncstat = nf90_close(ncid)
   end subroutine ICE_FillMom6TGridCoords
+
+  !> @brief Checksum inteiro de part_size, no mesmo espirito do chksum do SIS2.
+  !!
+  !! FIX-DIAG-SLOWSPLIT-01. Inteiro, e nao mean/min/max, porque valor de ponto
+  !! flutuante impresso com poucos digitos ja escondeu divergencia duas vezes
+  !! nesta investigacao: com quatro digitos ela aparecia na 12a troca, com
+  !! quinze, na 3a. Um checksum inteiro nao tem esse problema.
+  !!
+  !! A transformacao para inteiro usa um fator grande e o padrao de bits do
+  !! valor, de modo que diferenca de ultimo bit altere o resultado. A soma
+  !! acumula em inteiro de 8 bytes para nao saturar.
+  !!
+  !! Escopo: arranjo do DE local, nao global. Comparar sempre o MESMO PET
+  !! entre execucoes.
+  function chksum_part_size(ps) result(cks)
+    real(ESMF_KIND_R8), pointer, intent(in) :: ps(:,:,:)
+    integer(kind=8) :: cks
+    integer :: i1, i2, i3
+    cks = 0_8
+    if (.not. associated(ps)) return
+    do i3 = lbound(ps,3), ubound(ps,3)
+      do i2 = lbound(ps,2), ubound(ps,2)
+        do i1 = lbound(ps,1), ubound(ps,1)
+          cks = cks + int(transfer(ps(i1,i2,i3), 1_8), 8)
+        end do
+      end do
+    end do
+  end function chksum_part_size
 
 end module sis_cap_MONAN_mod

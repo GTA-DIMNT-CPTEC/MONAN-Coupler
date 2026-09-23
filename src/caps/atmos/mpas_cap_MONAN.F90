@@ -33,7 +33,8 @@ module mpas_cap_MONAN_mod
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
-                           NUOPC_CompAttributeGet,  NUOPC_CompAttributeSet
+                           NUOPC_CompAttributeGet,  NUOPC_CompAttributeSet,  &
+                           NUOPC_IsConnected   ! B-IMPORT-DESCONECTADO-01
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
                            model_label_CheckImport    => label_CheckImport,  &
                            model_label_DataInitialize => label_DataInitialize, &
@@ -404,6 +405,12 @@ contains
          importState=importState, exportState=exportState, &
          modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
+    ! B-IMPORT-DESCONECTADO-01: barreira antes de qualquer leitura do
+    ! importState. Ver o cabecalho de verify_import_connected para o motivo.
+    call verify_import_connected(importState, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
     call init_import_defaults(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call mpas_atm_init_sfc(g_atm_public, g_atm_state, rc)
@@ -517,6 +524,105 @@ contains
   !!
   !! FIX v5.2: usa ESMF_FieldGet(dimCount=) antes de farrayPtr para campos rank-2
   !! (ESMF_Grid 360x180), evitando erro ESMF_LocalArrayGetData rank mismatch.
+  !> @brief Aborta se algum campo de IMP_NAMES nao estiver conectado.
+  !!
+  !! FIX B-IMPORT-DESCONECTADO-01 (Set/2026).
+  !!
+  !! O PROBLEMA. Quando o componente OCN nao oferece todos os campos que este
+  !! cap anuncia, o NUOPC registra no log de PET
+  !!     MPAS: Import Field not connected: <nome>
+  !!     ERROR ... NUOPC INCOMPATIBILITY DETECTED: Import Fields not all connected
+  !! e mesmo assim DEVOLVE ESMF_SUCCESS. O esmApp.F90 ja' confere o rc de
+  !! ESMF_GridCompInitialize com ChkErr e abortaria se ele viesse com erro;
+  !! como nao vem, a execucao segue. No primeiro passo o mpas_import le os
+  !! N_IMP campos assim mesmo, inclusive os que nunca foram realizados, e o
+  !! ponteiro do farrayPtr de um campo nao conectado leva a SIGSEGV dentro do
+  !! libesmf.so, com backtrace irresoluvel. Foi o que aconteceu no perfil
+  !! MPAS+DOCN (B-DOCN-FASE1-CAMPOS-01): tres campos faltando, morte sete
+  !! segundos depois, sem nenhuma pista no esmApp_run.log.
+  !!
+  !! O CONSERTO. Verificar explicitamente, antes de tocar no importState, e
+  !! abortar nomeando os campos ausentes. Custo: N_IMP chamadas a
+  !! NUOPC_IsConnected, uma vez por execucao.
+  !!
+  !! POR QUE AQUI E NAO NO DRIVER. A checagem precisa da lista IMP_NAMES, que
+  !! e' deste modulo. Um guarda equivalente no esm.F90 teria de percorrer os
+  !! cplLists de cada conector e reconstruir a mesma informacao de segunda mao.
+  !!
+  !! ATENCAO: nao confundir com CheckImportAlwaysOK, logo abaixo. Aquela
+  !! suprime a validacao de TIMESTAMP, que e' legitima porque o conector
+  !! OCN->MPAS entrega com lag de um passo. Esta aqui verifica CONECTIVIDADE,
+  !! que e' outra coisa: um campo desconectado nunca fica correto, em nenhum
+  !! passo. Suprimir a primeira nao pode implicar em suprimir a segunda.
+  subroutine verify_import_connected(importState, rc)
+    type(ESMF_State), intent(in)  :: importState
+    integer,          intent(out) :: rc
+
+    character(len=*), parameter :: subname = '(mpas_cap:verify_import_connected)'
+    integer            :: i, n_missing, localPet
+    logical            :: connected
+    character(len=512) :: missing
+    character(len=640) :: msg
+    type(ESMF_VM)      :: vm
+
+    rc = ESMF_SUCCESS
+    n_missing = 0
+    missing   = ''
+
+    call ESMF_VMGetCurrent(vm, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call ESMF_VMGet(vm, localPet=localPet, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
+    do i = 1, N_IMP
+      connected = NUOPC_IsConnected(importState, &
+                                    fieldName=trim(IMP_NAMES(i)), rc=rc)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+      if (.not. connected) then
+        n_missing = n_missing + 1
+        if (len_trim(missing) > 0) missing = trim(missing)//', '
+        missing = trim(missing)//trim(IMP_NAMES(i))
+        call ESMF_LogWrite(subname//': campo de importacao NAO conectado: '// &
+                           trim(IMP_NAMES(i)), ESMF_LOGMSG_ERROR)
+      end if
+    end do
+
+    if (n_missing > 0) then
+      write(msg,'(A,I0,A,I0,A)') subname//': ABORTANDO — ', n_missing, &
+        ' de ', N_IMP, ' campos de importacao nao estao conectados: '
+      msg = trim(msg)//trim(missing)
+      ! Tambem para a saida padrao: o log de PET nao e' lido quando o
+      ! sintoma aparece so' no esmApp_run.log, e foi exatamente esse o
+      ! ponto cego que custou dois jobs e um segfault opaco.
+      if (localPet == 0) then
+        write(*,'(A)') ''
+        write(*,'(A)') '=============================================================='
+        write(*,'(A)') ' ERRO FATAL: campos de importacao nao conectados'
+        write(*,'(A)') '=============================================================='
+        write(*,'(A)') ' '//trim(missing)
+        write(*,'(A)') ''
+        write(*,'(A)') ' O componente OCN configurado nao oferece todos os campos que'
+        write(*,'(A)') ' o cap do MPAS anuncia (IMP_NAMES em mpas_cap_MONAN.F90).'
+        write(*,'(A)') ' Prosseguir levaria a SIGSEGV no primeiro passo, ao ler um'
+        write(*,'(A)') ' campo nunca realizado.'
+        write(*,'(A)') ''
+        write(*,'(A)') ' Verifique a combinacao ATM x OCN em &nuopc_mode:'
+        write(*,'(A)') '   use_datm=F use_docn=F use_med=T -> MPAS + MOM6  (producao)'
+        write(*,'(A)') '   use_datm=F use_docn=T use_med=F -> MPAS + DOCN  (Fase 1)'
+        write(*,'(A)') '=============================================================='
+        write(*,'(A)') ''
+      end if
+      call ESMF_LogSetError(ESMF_FAILURE, msg=trim(msg), &
+           line=__LINE__, file=u_FILE_u, rcToReturn=rc)
+      return
+    end if
+
+    write(msg,'(A,I0,A)') subname//': todos os ', N_IMP, &
+      ' campos de importacao estao conectados'
+    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+
+  end subroutine verify_import_connected
+
   !> @brief Suprime validacao de timestamp dos campos de importacao.
   !!
   !! O conector OCN->MPAS fornece SST com lag de 1 passo (t-1), portanto

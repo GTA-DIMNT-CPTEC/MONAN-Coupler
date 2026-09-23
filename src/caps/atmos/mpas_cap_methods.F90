@@ -1007,11 +1007,88 @@ contains
             return
           end if
 
-          ! 3. Allreduce SUM dos valores e contagens (tiles Voronoi disjuntos por PET)
-          call MPI_Allreduce(sum_local,   sum_global,   NX_G*NY_G, &
-            MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_use, ierr_mpi)
-          call MPI_Allreduce(count_local, count_global, NX_G*NY_G, &
-            MPI_DOUBLE_PRECISION, MPI_SUM, mpi_comm_use, ierr_mpi)
+          !--------------------------------------------------------------------
+          ! 3. Reducao das somas e contagens (tiles Voronoi disjuntos por PET)
+          !
+          ! FIX B-EXPORT-ALLREDUCE-01 (Set/2026): Gather em ordem de rank mais
+          ! soma local, em lugar de MPI_Allreduce(MPI_SUM).
+          !
+          ! O PROBLEMA. Com avg_dup = 1,35 e max_dup = 2 (ver o diagnostico
+          ! MPAS-DIAG abaixo), e' comum que duas celulas Voronoi caiam na mesma
+          ! caixa de 1 grau da grade regular. Quando as duas estao em PETs
+          ! diferentes, a soma daquela caixa e' feita PELA coletiva. Soma de
+          ! ponto flutuante nao e' associativa, e o padrao MPI nao exige que a
+          ! arvore de reducao seja identica entre execucoes: o MPICH pode
+          ! escolher arvores diferentes conforme o momento. O resultado varia
+          ! no ultimo bit de uma execucao para outra.
+          !
+          ! POR QUE O REPRO_MPI NAO RESOLVEU. MPICH_ALLREDUCE_NO_SMP=1 desliga
+          ! a soma parcial por no, e MPICH_SHARED_MEM_COLL_OPT=0 desliga a
+          ! coletiva otimizada em memoria compartilhada, mas nenhuma das duas
+          ! promete reprodutibilidade bit a bit entre execucoes, porque o
+          ! padrao MPI nao a exige. O teste com REPRO_MPI=1 foi executado e
+          ! verificado (despejo do MPICH_ENV_DISPLAY em logs/esmApp_run.log) e
+          ! a divergencia persistiu: isso e' consistente com este mecanismo,
+          ! nao contra ele.
+          !
+          ! O CONSERTO. MPI_Gather traz os arranjos locais de TODOS os PETs a
+          ! um unico PET, que soma em ordem CRESCENTE DE RANK, ordem fixa e
+          ! independente de topologia e de tempo de chegada. O MPI_Bcast
+          ! devolve o resultado, de modo que todos os PETs ficam com o MESMO
+          ! valor, que era a garantia dada pelo Allreduce anterior.
+          !
+          ! CUSTO. Os arranjos sao NX_G*NY_G = 64800 dobros, cerca de 520 kB
+          ! cada. Com 64 PETs o buffer do gather chega a 33 MB por arranjo no
+          ! PET raiz, alocado e liberado a cada chamada. A soma no raiz e'
+          ! O(nPets * 64800). Tudo isso acontece uma vez por campo por janela
+          ! de acoplamento, nao por passo de tempo do modelo.
+          !
+          ! ALTERNATIVA DESCARTADA. MPI_Reduce mais MPI_Bcast seria mais
+          ! economico em memoria, mas o MPI_Reduce tem exatamente o mesmo
+          ! problema: a ordem da soma fica a cargo da implementacao. Trocar
+          ! Allreduce por Reduce nao consertaria nada.
+          !--------------------------------------------------------------------
+          block
+            integer :: nPets_red, myRank_red, iPet_red, ierr_red
+            real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
+            real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
+
+            call MPI_Comm_size(mpi_comm_use, nPets_red,  ierr_red)
+            call MPI_Comm_rank(mpi_comm_use, myRank_red, ierr_red)
+
+            if (myRank_red == 0) then
+              allocate(sum_gath(NX_G, NY_G, nPets_red))
+              allocate(cnt_gath(NX_G, NY_G, nPets_red))
+            else
+              ! Alocacao minima: o buffer de recepcao so' e' lido no raiz, mas
+              ! precisa existir como argumento valido em todos os ranks.
+              allocate(sum_gath(1,1,1), cnt_gath(1,1,1))
+            end if
+
+            call MPI_Gather(sum_local,  NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                            sum_gath,   NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                            0, mpi_comm_use, ierr_red)
+            call MPI_Gather(count_local, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                            cnt_gath,    NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                            0, mpi_comm_use, ierr_red)
+
+            if (myRank_red == 0) then
+              ! Soma em ordem crescente de rank: ordem fixa, reprodutivel.
+              sum_global   = 0.0_ESMF_KIND_R8
+              count_global = 0.0_ESMF_KIND_R8
+              do iPet_red = 1, nPets_red
+                sum_global   = sum_global   + sum_gath(:,:,iPet_red)
+                count_global = count_global + cnt_gath(:,:,iPet_red)
+              end do
+            end if
+
+            call MPI_Bcast(sum_global,   NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                           0, mpi_comm_use, ierr_red)
+            call MPI_Bcast(count_global, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+                           0, mpi_comm_use, ierr_red)
+
+            deallocate(sum_gath, cnt_gath)
+          end block
 
           ! 4. Média: dividir soma por contagem (preserva 0 onde contagem=0)
           where (count_global > 0.5_ESMF_KIND_R8)

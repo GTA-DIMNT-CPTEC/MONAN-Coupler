@@ -149,6 +149,28 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   export ESMF_RUNTIME_COMPLIANCECHECK=OFF
   export OMP_NUM_THREADS=1
 
+  # ── Modo de verificação de reprodutibilidade (REPRO_MPI=1) ──────────────────
+  # Força coletivas MPI determinísticas no Cray MPICH (jaci: cray-mpich 8.1.31),
+  # para comparar rodadas bit a bit (ex.: sequential+split x concurrent+split,
+  # ou duas rodadas do mesmo modo). Sem isto, o allreduce SMP-aware pode somar
+  # parciais em ordem que varia, gerando um bit de diferença que, ao cruzar um
+  # limiar de gelo, cresce em algumas horas.
+  #
+  # Ligue com 'export REPRO_MPI=1' antes de submeter. As coletivas ficam mais
+  # lentas, então use apenas em rodadas de verificação. O conserto portável de
+  # produção são as somas reprodutíveis do MOM6/SIS2 (não estas variáveis):
+  # com elas, a jaci fica reprodutível sem depender deste bloco.
+  if [[ "${REPRO_MPI:-0}" == "1" ]]; then
+    export MPICH_ENV_DISPLAY=1          # registra no log todas as variaveis MPICH efetivas
+    export MPICH_VERSION_DISPLAY=1      # registra a versao do cray-mpich
+    export MPICH_ALLREDUCE_NO_SMP=1     # allreduce plano (sem soma parcial por no)
+    export MPICH_REDUCE_NO_SMP=1        # idem para MPI_Reduce
+    export MPICH_SHARED_MEM_COLL_OPT=0  # desliga coletiva otimizada em memoria compartilhada
+    export MPICH_OFI_HWCOLL_OPT=0       # sem coletiva em hardware Slingshot
+    export MPICH_ENABLE_HCOLL=0         # sem HCOLL (Mellanox), caso esteja ativo
+    echo "REPRO_MPI=1: coletivas MPI determinísticas ativadas (cray-mpich 8.1.31)."
+  fi
+
   NPES="${MPAS_NPES:-4}"
 
   # ── Detecção de modo ATM/OCN ────────────────────────────────────────────────
@@ -1252,7 +1274,7 @@ cat > "${PBS_SCRIPT}" << HEREDOC
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
 #PBS -o ${WORKDIR}/logs/esmApp_run.log
-#PBS -v MPAS_NPES=${NPES}
+#PBS -v MPAS_NPES=${NPES},REPRO_MPI=${REPRO_MPI:-0}
 
 # Gerado por run_esmApp.jaci em $(date '+%Y-%m-%d %H:%M:%S')
 # NPES=${NPES}  nós=${NNODES}  layout=${TOPO_DESC}  place=${PLACE}
