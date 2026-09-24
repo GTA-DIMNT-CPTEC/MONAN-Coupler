@@ -8,7 +8,39 @@ ESMF (`logs/PET*.esmApp.log`) do sistema acoplado MONAN-A 2.0 x MOM6+SIS2, e
 sugere uma partição de PETs balanceada para o layout com split de comunicador
 (`&nuopc_petlayout`: `atm_pet_count` / `ocn_pet_count` / `ice_pet_count`).
 
-INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos - v14.21
+INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos - v14.22
+
+--------------------------------------------------------------------------
+ALTERAÇÕES (23/09/2026) - v14.22
+--------------------------------------------------------------------------
+Revisão depois da primeira análise com três componentes (144 PETs, 128 +
+8 + 8), que expôs três limitações:
+
+  - A métrica "Desbalanceamento" comparava o componente mais lento com o
+    mais rápido. Com dois componentes (atmosfera e oceano) isso media o
+    desequilíbrio que interessa; com o gelo presente, que é sempre muito
+    mais leve, o número explodia ("razão 55,71x", "5470,8% ocioso") e não
+    dizia nada. Foi substituída pelo tempo que CADA componente passa
+    esperando o gargalo (execução concorrente) ou pela participação de cada
+    um no tempo total (execução sequencial ou layout compartilhado).
+
+  - A divisão proporcional podia propor contagens que o modelo não
+    aproveita, como 17 ou 31 PETs para o oceano (números primos obrigam o
+    MOM6 a cortar o domínio em faixas finas). O relatório agora avalia cada
+    contagem, atual e sugerida, pelo tamanho dos blocos do oceano e do gelo
+    e pelo número de células MPAS por PET, e mostra um "ajuste prático" com
+    a contagem viável mais próxima. As grades são lidas de
+    MOM_parameter_doc.all, MOM_input ou MOM_override (NIGLOBAL, NJGLOBAL) e
+    do nome dos arquivos 'x1.<N>.*' do MPAS, ou informadas por --ocn-grid e
+    --atm-cells. Os limites são ajustáveis por --min-block e
+    --min-cells-per-pet.
+
+  - A coluna "Chamadas Run" somava todos os PETs (3072 = 128 PETs x 24
+    trocas, para a atmosfera). Passou a mostrar as chamadas por PET.
+
+O JSON ganhou os campos '<comp>_idle_frac' e
+'suggested_practical_<comp>_pet_count'; os campos anteriores não mudaram, e
+referências gravadas por versões anteriores continuam comparáveis.
 
 --------------------------------------------------------------------------
 ALTERAÇÕES (Set/2026) - COMPONENTE DE GELO
@@ -37,13 +69,13 @@ idêntico ao da fórmula anterior; verificado contra o caso de referência.
 POR QUE "TEMPO TOTAL", E NÃO "TEMPO POR CHAMADA x NÚMERO DE PASSOS"
 --------------------------------------------------------------------------
 Cada linha de log ESMF marca o início/fim de uma fase com "intro."/"extro.".
-A fase `Run` de um componente NÃO corresponde 1:1 a um passo de acoplamento:
-o MOM6 subcicla internamente (na prática observamos ~301 pares Run
-intro/extro do OCN para 24 passos de acoplamento), enquanto o MPAS costuma
-ter uma correspondência mais próxima de 1 chamada por passo. Por isso este
-script SEMPRE soma a duração de TODAS as chamadas Run de um componente
-(métrica robusta, independente de quantas sub-chamadas internas existirem) e
-só then divide pelo número de passos de acoplamento — que é lido do log de
+A fase `Run` de um componente não corresponde necessariamente 1:1 a um passo
+de acoplamento: versões anteriores do acoplador chegaram a registrar cerca de
+301 pares Run intro/extro do OCN para 24 passos; na versão atual, cada PET
+registra uma chamada por troca. Por isso este script SEMPRE soma a duração de
+TODAS as chamadas Run de um componente (métrica robusta, independente de
+quantas sub-chamadas internas existirem) e só então divide pelo número de
+passos de acoplamento — que é lido do log de
 execução (`esmApp_run.log`, campo "Passos (est.)") ou informado via
 `--steps`. Nunca assume que "contagem de intro/extro = passos".
 
@@ -117,6 +149,13 @@ USO
 
     # Com o gelo ativo, a saída traz uma terceira linha, ice_pet_count.
     # Nada precisa ser informado: o componente é detectado a partir dos logs.
+
+    # Logs arquivados fora de ./logs, rodando do diretório do experimento
+    # (para achar MOM_input e os arquivos x1.<N>.* do MPAS):
+    python3 analisa_balanceamento_pets.py --logdir teste2-decomp --target-pets 160
+
+    # Informando as grades à mão, quando não puderem ser detectadas:
+    python3 analisa_balanceamento_pets.py --ocn-grid 180x155 --atm-cells 40962
 
     # Comparando com uma calibração anterior (JSON salvo de uma rodada prévia):
     python3 analisa_balanceamento_pets.py --baseline-json calib_anterior.json
@@ -524,6 +563,167 @@ def suggest_partition(
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Viabilidade das contagens de PETs (v14.22)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# A divisão proporcional (suggest_partition) só olha o trabalho medido. Ela
+# pode propor contagens que o modelo não aproveita: um número primo de PETs
+# para o oceano obriga o MOM6 a cortar o domínio em faixas finas (1 x n ou
+# n x 1), e poucos pontos por PET fazem a troca de bordas custar mais que o
+# cálculo. As funções abaixo estimam o tamanho dos blocos e propõem, quando
+# preciso, uma contagem vizinha viável.
+
+@dataclass
+class Geometria:
+    """Tamanho das grades, quando conhecido. None desliga a checagem."""
+    ocn_ni: Optional[int] = None      # pontos em i da grade do oceano (e do gelo)
+    ocn_nj: Optional[int] = None
+    atm_cells: Optional[int] = None   # células da malha MPAS
+    origem_ocn: str = ""
+    origem_atm: str = ""
+
+
+@dataclass
+class Limites:
+    min_bloco: int = 20               # menor lado aceitável de um bloco do oceano/gelo
+    min_celulas_pet: int = 150        # menos células MPAS por PET que isso escala mal
+
+
+_RE_NIGLOBAL = re.compile(r"^\s*NIGLOBAL\s*=\s*(\d+)", re.MULTILINE)
+_RE_NJGLOBAL = re.compile(r"^\s*NJGLOBAL\s*=\s*(\d+)", re.MULTILINE)
+_RE_MPAS_CELLS = re.compile(r"^x1\.(\d+)\.")
+
+
+def detectar_geometria(dirs: List[Path]) -> Geometria:
+    """Procura NIGLOBAL/NJGLOBAL do MOM6 e o número de células do MPAS.
+
+    Oceano: primeira ocorrência em MOM_parameter_doc.all, MOM_input ou
+    MOM_override nos diretórios dados. Atmosfera: número no nome de arquivo
+    'x1.<N>.*' (malha quasi-uniforme do MPAS, ex.: x1.40962.graph.info).
+    """
+    geo = Geometria()
+    for d in dirs:
+        if geo.ocn_ni is not None:
+            break
+        for nome in ("MOM_parameter_doc.all", "MOM_input", "MOM_override"):
+            f = d / nome
+            if not f.is_file():
+                continue
+            txt = f.read_text(errors="replace")
+            mi, mj = _RE_NIGLOBAL.search(txt), _RE_NJGLOBAL.search(txt)
+            if mi and mj:
+                geo.ocn_ni, geo.ocn_nj = int(mi.group(1)), int(mj.group(1))
+                geo.origem_ocn = str(f)
+                break
+    for d in dirs:
+        if geo.atm_cells is not None:
+            break
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            m = _RE_MPAS_CELLS.match(f.name)
+            if m:
+                geo.atm_cells = int(m.group(1))
+                geo.origem_atm = str(f)
+                break
+    return geo
+
+
+def melhor_layout(n: int, ni: int, nj: int) -> Tuple[int, int, int, int]:
+    """Entre as fatorações n = a x b, a que dá o maior 'menor lado' de bloco.
+
+    Devolve (a, b, bloco_i, bloco_j), com a divisões em i e b em j. É uma
+    estimativa do melhor caso: o layout automático do MOM6/SIS2 pode escolher
+    outra fatoração, mas não consegue fazer melhor que esta.
+    """
+    melhor = (1, n, ni, nj // max(n, 1))
+    melhor_lado = -1
+    for a in range(1, n + 1):
+        if n % a:
+            continue
+        b = n // a
+        bi, bj = ni // a, nj // b
+        lado = min(bi, bj)
+        if lado > melhor_lado:
+            melhor_lado, melhor = lado, (a, b, bi, bj)
+    return melhor
+
+
+def eh_primo(n: int) -> bool:
+    if n < 2:
+        return False
+    k = 2
+    while k * k <= n:
+        if n % k == 0:
+            return False
+        k += 1
+    return True
+
+
+def avaliar_contagem(comp: str, n: int, geo: Geometria, lim: Limites) -> List[str]:
+    """Avisos sobre uma contagem de PETs; lista vazia quando está tudo bem."""
+    avisos: List[str] = []
+    if comp in ("OCN", "ICE") and geo.ocn_ni and geo.ocn_nj:
+        a, b, bi, bj = melhor_layout(n, geo.ocn_ni, geo.ocn_nj)
+        if min(bi, bj) < lim.min_bloco:
+            motivo = " (número primo: só há 1 x n ou n x 1)" if eh_primo(n) and n > 3 else ""
+            avisos.append(
+                f"{n} PETs: melhor layout {a} x {b}, blocos de {bi} x {bj} pontos, "
+                f"lado menor que {lim.min_bloco}{motivo}")
+    if comp == "MPAS" and geo.atm_cells:
+        por_pet = geo.atm_cells / max(n, 1)
+        if por_pet < lim.min_celulas_pet:
+            avisos.append(
+                f"{n} PETs: {por_pet:.0f} células por PET, menos que "
+                f"{lim.min_celulas_pet} (a troca de bordas passa a pesar)")
+    return avisos
+
+
+def ajuste_pratico(
+    sugestao: Dict[str, int],
+    resumos: Dict[str, "ComponentSummary"],
+    target_pets: int,
+    geo: Geometria,
+    lim: Limites,
+) -> Dict[str, int]:
+    """Troca contagens inviáveis de OCN/ICE pela vizinha viável mais próxima.
+
+    A atmosfera absorve a diferença, porque a malha do MPAS aceita qualquer
+    número de PETs. A vizinha escolhida é a de contagem mais próxima da quota
+    proporcional exata; em empate, a de blocos maiores. Sem geometria do
+    oceano conhecida, devolve a sugestão sem mudança.
+    """
+    if not (geo.ocn_ni and geo.ocn_nj) or "MPAS" not in sugestao:
+        return dict(sugestao)
+
+    pesos = {c: resumos[c].total_s * max(resumos[c].n_pets, 1) for c in sugestao}
+    total_w = sum(pesos.values()) or 1.0
+    quota = {c: target_pets * pesos[c] / total_w for c in sugestao}
+
+    ajustada = dict(sugestao)
+    for comp in ("OCN", "ICE"):
+        if comp not in ajustada:
+            continue
+        n0 = ajustada[comp]
+        if not avaliar_contagem(comp, n0, geo, lim):
+            continue
+        candidatos = []
+        for n in range(1, 2 * n0 + 9):
+            if avaliar_contagem(comp, n, geo, lim):
+                continue
+            _a, _b, bi, bj = melhor_layout(n, geo.ocn_ni, geo.ocn_nj)
+            candidatos.append((abs(n - quota[comp]), -min(bi, bj), n))
+        if candidatos:
+            ajustada[comp] = min(candidatos)[2]
+
+    outros = sum(v for c, v in ajustada.items() if c != "MPAS")
+    ajustada["MPAS"] = target_pets - outros
+    if ajustada["MPAS"] < 1:
+        return dict(sugestao)
+    return ajustada
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Saída (console, CSV, JSON, gráfico)
 # ──────────────────────────────────────────────────────────────────────────
 
@@ -531,6 +731,25 @@ def fmt_s(x: Optional[float]) -> str:
     if x is None:
         return "N/D"
     return f"{x:8.3f} s"
+
+
+def fracao_ociosa(mode: str, tempos: Dict[str, float]) -> Dict[str, float]:
+    """Fração do tempo em que cada componente fica parado.
+
+    Execução concorrente com layout split: cada troca termina quando o mais
+    lento (o gargalo) termina, e os outros esperam por ele; a fração ociosa de
+    um componente é 1 - t_c / t_max. Nos demais casos os componentes não se
+    sobrepõem no tempo, e a grandeza útil é a participação de cada um no
+    total, devolvida como fração NÃO ociosa com sinal trocado (negativa), para
+    o relatório saber qual das duas mostrar.
+    """
+    if not tempos:
+        return {}
+    if "concurrent" in mode and "split" in mode:
+        tmax = max(tempos.values())
+        return {c: (1.0 - t / tmax) if tmax > 0 else 0.0 for c, t in tempos.items()}
+    soma = sum(tempos.values())
+    return {c: -(t / soma) if soma > 0 else 0.0 for c, t in tempos.items()}
 
 
 # Rótulos de exibição e a chave usada no JSON e na sugestão, na ordem em que
@@ -541,6 +760,7 @@ COMPONENTES = (
     ("OCN",  "OCN (MOM6)", "ocn", "ocn_pet_count"),
     ("ICE",  "ICE (SIS2)", "ice", "ice_pet_count"),
 )
+COMP_ROTULO = tuple((c, r) for c, r, _k, _p in COMPONENTES)
 
 
 def print_report(
@@ -553,7 +773,12 @@ def print_report(
     sugestao: Dict[str, int],
     incomplete_pairs: int,
     baseline: Optional[dict],
+    geo: Optional["Geometria"] = None,
+    lim: Optional["Limites"] = None,
+    pratica: Optional[Dict[str, int]] = None,
 ) -> None:
+    geo = geo or Geometria()
+    lim = lim or Limites()
     bar = "=" * 70
     print(bar)
     print("  Análise de balanceamento de PETs - MONAN-A x MOM6+SIS2")
@@ -579,12 +804,12 @@ def print_report(
 
     print("-" * 70)
     print(f"  {'Componente':<12}{'PETs':>6}{'Tempo total':>16}"
-          f"{'Tempo/passo':>16}{'Chamadas Run':>16}")
+          f"{'Tempo/passo':>16}{'Run por PET':>16}")
     for comp, rot in ativos:
         r = resumos[comp]
         print(
             f"  {rot:<12}{r.n_pets:>6}{fmt_s(r.total_s):>16}"
-            f"{fmt_s(r.per_step_s):>16}{sum(r.run_calls_per_pet.values()):>16}"
+            f"{fmt_s(r.per_step_s):>16}{max(r.run_calls_per_pet.values(), default=0):>16}"
         )
     print(f"  {'MED':<12}{'todos':>6}{fmt_s(med_total_s):>16}{'':>16}{'':>16}")
     print("-" * 70)
@@ -593,24 +818,45 @@ def print_report(
     if len(medidos) >= 2:
         tempos = {comp: resumos[comp].total_s for comp, _r in medidos}
         rotulos = dict(medidos)
-        lento = max(tempos, key=tempos.get)
-        rapido = min(tempos, key=tempos.get)
-        ratio = tempos[lento] / tempos[rapido]
-        print(f"  Componente mais lento : {rotulos[lento]}  (razão {ratio:.2f}x)")
-        print(f"  Componente mais rápido: {rotulos[rapido]}")
-        print(f"  Desbalanceamento      : {(ratio - 1.0) * 100:5.1f}% "
-              f"de tempo ocioso no mais rápido")
-        if "concurrent" in mode:
-            # Com três componentes o tempo por passo continua sendo o MAIOR
-            # dos avanços, não a soma: em concurrent os três blocos avançam ao
-            # mesmo tempo. O ganho é medido contra a soma, que é o que custaria
-            # executá-los um de cada vez.
+        gargalo = max(tempos, key=tempos.get)
+        fr = fracao_ociosa(mode, tempos)
+        if "concurrent" in mode and "split" in mode:
+            print(f"  Gargalo (mais lento)  : {rotulos[gargalo]}, "
+                  f"{tempos[gargalo]:.1f} s")
+            print("  Tempo parado esperando o gargalo:")
+            for comp, rot in medidos:
+                marca = "  <- gargalo" if comp == gargalo else ""
+                print(f"    {rot:<12}{fr[comp] * 100:6.1f}%{marca}")
             paralelo = max(tempos.values())
             serial = sum(tempos.values())
             ganho_pct = (1 - paralelo / serial) * 100.0
             detalhe = ", ".join(f"{t:.1f}" for t in tempos.values())
             print(f"  Ganho vs. soma serial : {ganho_pct:5.1f}%  "
                   f"(max({detalhe}) vs. soma {serial:.1f} s)")
+        else:
+            print(f"  Componente mais caro  : {rotulos[gargalo]}, "
+                  f"{tempos[gargalo]:.1f} s")
+            print("  Participação no tempo total (componentes não se sobrepõem):")
+            for comp, rot in medidos:
+                print(f"    {rot:<12}{-fr[comp] * 100:6.1f}%")
+    print("-" * 70)
+
+    # Viabilidade da partição atual
+    atual_n = {comp: resumos[comp].n_pets for comp, _r in ativos}
+    avisos_atuais = [(comp, a) for comp in atual_n
+                     for a in avaliar_contagem(comp, atual_n[comp], geo, lim)]
+    if geo.ocn_ni or geo.atm_cells:
+        partes = []
+        if geo.ocn_ni:
+            partes.append(f"oceano/gelo {geo.ocn_ni} x {geo.ocn_nj}")
+        if geo.atm_cells:
+            partes.append(f"MPAS {geo.atm_cells} células")
+        print(f"  Grades consideradas   : {', '.join(partes)}")
+    else:
+        print("  Grades consideradas   : não encontradas (use --ocn-grid e "
+              "--atm-cells para avaliar a viabilidade das contagens)")
+    for comp, a in avisos_atuais:
+        print(f"  AVISO partição atual, {dict(COMP_ROTULO)[comp]}: {a}")
     print("-" * 70)
 
     print(f"  Sugestão de partição para {target_pets} PETs totais:")
@@ -619,6 +865,26 @@ def print_report(
             print(f"    {chave} = {sugestao[comp]}")
     if "ICE" not in sugestao:
         print("    use_sis2_dynamic = .false.   ! gelo ausente nesta medição")
+    print("  (divisão proporcional ao trabalho medido, supondo escala linear)")
+    avisos_sug = [(comp, a) for comp in sugestao
+                  for a in avaliar_contagem(comp, sugestao[comp], geo, lim)]
+    for comp, a in avisos_sug:
+        print(f"  AVISO sugestão, {dict(COMP_ROTULO)[comp]}: {a}")
+    if pratica and pratica != sugestao:
+        print(f"  Ajuste prático (contagens viáveis mais próximas, "
+              f"{target_pets} PETs):")
+        for comp, _rot, _c, chave in COMPONENTES:
+            if comp in pratica:
+                print(f"    {chave} = {pratica[comp]}")
+        if geo.ocn_ni:
+            for comp in ("OCN", "ICE"):
+                if comp in pratica:
+                    a, b, bi, bj = melhor_layout(pratica[comp], geo.ocn_ni, geo.ocn_nj)
+                    print(f"    ({dict(COMP_ROTULO)[comp]}: melhor layout {a} x {b}, "
+                          f"blocos de {bi} x {bj})")
+        if "ICE" in pratica and pratica["ICE"] == 1:
+            print("    (gelo com 1 PET: piso da divisão, pelo trabalho medido; "
+                  "arranjo sem troca de bordas, a validar)")
 
     if "shared" in mode:
         # Com layout shared, cada componente foi medido usando TODOS os PETs;
@@ -632,7 +898,7 @@ def print_report(
         )
     else:
         atual = {comp: resumos[comp].n_pets for comp, _r in ativos}
-        if atual == sugestao:
+        if atual == sugestao or (pratica and atual == pratica):
             print("  (a partição atual já está aproximadamente balanceada.)")
         else:
             # Usa a chave curta ('atm', e não 'mpas'), que é a mesma dos
@@ -696,7 +962,11 @@ def write_json(
     med_total_s: float,
     n_steps: Optional[int],
     sugestao: Dict[str, int],
+    pratica: Optional[Dict[str, int]] = None,
 ) -> None:
+    tempos = {c: resumos[c].total_s for c, _r, _k, _p in COMPONENTES
+              if pets[c] and resumos[c].total_s > 0}
+    fr = fracao_ociosa(mode, tempos)
     payload = {
         "mode": mode,
         "n_steps": n_steps,
@@ -713,6 +983,12 @@ def write_json(
         payload[f"{chave}_total_s"] = r.total_s
         payload[f"{chave}_per_step_s"] = r.per_step_s
         payload[f"suggested_{chave}_pet_count"] = sugestao.get(comp)
+        if comp in fr:
+            # Fração ociosa (concorrente split) ou, com sinal negativo, a
+            # participação no total (demais casos); ver fracao_ociosa().
+            payload[f"{chave}_idle_frac"] = fr[comp]
+        if pratica:
+            payload[f"suggested_practical_{chave}_pet_count"] = pratica.get(comp)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
@@ -787,6 +1063,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
                     help="Gera um gráfico PNG comparando o tempo por PET")
     p.add_argument("--baseline-json", type=Path, default=None,
                     help="Compara com um resumo JSON de uma calibração anterior")
+    p.add_argument("--ocn-grid", default=None, metavar="NIxNJ",
+                    help="Grade do oceano/gelo, ex.: 180x155 (padrão: lida de "
+                         "MOM_parameter_doc.all, MOM_input ou MOM_override)")
+    p.add_argument("--atm-cells", type=int, default=None,
+                    help="Células da malha MPAS (padrão: lidas do nome dos "
+                         "arquivos x1.<N>.*)")
+    p.add_argument("--min-block", type=int, default=20,
+                    help="Menor lado aceitável de um bloco do oceano/gelo "
+                         "(padrão: 20 pontos)")
+    p.add_argument("--min-cells-per-pet", type=int, default=150,
+                    help="Mínimo de células MPAS por PET (padrão: 150)")
     return p
 
 
@@ -842,6 +1129,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     sugestao = suggest_partition(
         [(comp, resumos[comp]) for comp in ativos], target_pets)
 
+    # Grades para a avaliação de viabilidade: argumentos explícitos têm
+    # prioridade; senão, procura no diretório atual, no dos logs e no acima.
+    geo = detectar_geometria([Path.cwd(), args.logdir, args.logdir.parent])
+    if args.ocn_grid:
+        try:
+            ni, nj = (int(x) for x in args.ocn_grid.lower().split("x"))
+            geo.ocn_ni, geo.ocn_nj, geo.origem_ocn = ni, nj, "--ocn-grid"
+        except ValueError:
+            print(f"AVISO: --ocn-grid inválido ('{args.ocn_grid}'); use NIxNJ.",
+                  file=sys.stderr)
+    if args.atm_cells:
+        geo.atm_cells, geo.origem_atm = args.atm_cells, "--atm-cells"
+    lim = Limites(min_bloco=args.min_block,
+                  min_celulas_pet=args.min_cells_per_pet)
+    pratica = ajuste_pratico(sugestao, resumos, target_pets, geo, lim)
+
     baseline = None
     if args.baseline_json and args.baseline_json.is_file():
         baseline = json.loads(args.baseline_json.read_text())
@@ -856,6 +1159,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         sugestao=sugestao,
         incomplete_pairs=result.incomplete_pairs,
         baseline=baseline,
+        geo=geo,
+        lim=lim,
+        pratica=pratica,
     )
 
     if args.csv_out:
@@ -863,7 +1169,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[csv]  detalhe por chamada salvo em: {args.csv_out}")
     if args.json_out:
         write_json(args.json_out, mode, resumos, pets, med.total_s,
-                   n_steps, sugestao)
+                   n_steps, sugestao, pratica)
         print(f"[json] resumo salvo em: {args.json_out}")
     if args.plot_out:
         write_plot(args.plot_out, resumos, pets)
