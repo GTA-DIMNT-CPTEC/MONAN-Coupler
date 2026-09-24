@@ -135,8 +135,7 @@ contains
     integer :: dimid_lat, dimid_lon
     integer :: varid_lat, varid_lon, varid_t
     integer :: nx_local, ny_local, nx_global, ny_global
-    integer :: ix, iy, ig, jg, fld_rank
-    integer :: nx_max_local, ny_max_local
+    integer :: fld_rank
     integer :: yy, mm, dd, hh, mn, ss
     character(len=256)  :: fname, dpath
     character(len=20)   :: tstamp

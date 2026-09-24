@@ -13,7 +13,6 @@
 !!   GetFieldPtrOptional      — obtém ponteiro sem erro de log para campos opcionais
 !!   RegridOrCopy             — regrid ATM→OCN com fallback temporário
 !!   RouteOcnToAtm            — exporta campos OCN→ATM via mediador (Fase 2)
-!!   RegridOptionalCurrent    — regrid silencioso de correntes opcionais
 
 module med_cap_methods_mod
 
@@ -21,7 +20,9 @@ module med_cap_methods_mod
   use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState
-  use mpas_cap_config_mod, only: cfg_use_sis2_dynamic
+  use coupler_config_mod, only: cfg_use_sis2_dynamic
+
+  use coupler_utils_mod, only : ChkErr
 
   implicit none
   private
@@ -33,7 +34,6 @@ module med_cap_methods_mod
   public :: GetFieldPtrOptional
   public :: RegridOrCopy
   public :: RouteOcnToAtm
-  public :: RegridOptionalCurrent
   public :: NeighborFillExtrapolate
 
   ! B-METHODS-TERMORDER-01 (22/09/2026): as chamadas de ESMF_FieldRegrid deste
@@ -86,13 +86,11 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_FieldGet(field, localDeCount=localDeCount_f, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     if (localDeCount_f == 0) return   ! PET sem dados locais — nada a zerar
 
     call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     fptr = 0.0_ESMF_KIND_R8
 
   end subroutine ZeroInternalField
@@ -111,13 +109,11 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_FieldGet(field, localDeCount=localDeCount_f, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     if (localDeCount_f == 0) return
 
     call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     fptr = value
 
   end subroutine FillInternalField
@@ -285,9 +281,6 @@ contains
   !!   So_t (SST), Si_ifrac, So_u, So_v, Sf_zorl — ver MediatorAdvance para detalhes.
   !!   Sf_zorl: calculada pelo bulk NCAR via Charnock + Smith (1988).
   !!
-  !! Sprint B (Mai/2026): So_u/So_v agora anunciados no exportState do MED.
-  !!   Preenchimento via RegridOrCopy(is%f_uocn_atm/f_vocn_atm → So_u/So_v).
-  !!   RegridOptionalCurrent desativado para So_u/So_v (Sprint B os anuncia).
   !============================================================================
   subroutine RouteOcnToAtm(importState, exportState, clock, is, rc)
     type(ESMF_State),        intent(inout) :: importState
@@ -296,12 +289,8 @@ contains
     type(MED_InternalState), intent(inout) :: is
     integer,                 intent(out)   :: rc
 
-    type(ESMF_Field) :: field_ocn, field_atm
     real(ESMF_KIND_R8), pointer :: ptr_atm(:,:)
-    type(ESMF_StateItem_Flag)   :: itemType
 
-    real(ESMF_KIND_R8), parameter :: SST_FILL_LAND = 271.35_ESMF_KIND_R8  ! [K]
-    integer :: i, j
 
     rc = ESMF_SUCCESS
     nullify(ptr_atm)
@@ -315,39 +304,8 @@ contains
       return
     end if
 
-    ! So_t: tratado por RegridOrCopy no MediatorAdvance — sem ação adicional aqui.
-
-    ! Si_ifrac: regrid OCN→ATM e exportação feitos no Sprint A.5.2
-    !           dentro de MediatorAdvance — sem ação adicional aqui.
-
-    ! So_u/So_v: Sprint B — preenchimento via RegridOrCopy no MediatorAdvance.
-    !   RegridOptionalCurrent desativado para evitar conflito de grade
-    !   (exportState.So_u/v vive na grade OCN após Sprint B).
-
-    ! FIX B-ICEREGRID-03 (Set/2026): bloco DESATIVADO. Fazia copia DIRETA
-    ! ponto-a-ponto de Si_ifrac_sis2 (grade tripolar do SIS2) para Si_ifrac
-    ! (grade do ATM) sem regrid nenhum — so' protegido por uma checagem de
-    ! FORMA (shape), que passava porque as duas grades coincidentemente tem
-    ! as mesmas dimensoes (360x180) nesta configuracao, apesar de serem
-    ! GEOMETRICAMENTE diferentes. Perto do fold tripolar (Artico) isso
-    ! produzia valores sem relacao com a posicao real — exatamente a causa
-    ! do sumico de gelo visto no monan2_import_*.nc mesmo depois do
-    ! B-ICEREGRID-02 ja ter corrigido o regrid propriamente dito em
-    ! is%f_ifrac_atm (medido por FIX-DIAG-SPRINTB2-01, que mostrava valores
-    ! saudaveis) — esta rotina roda DEPOIS daquele regrid e sobrescrevia o
-    ! resultado correto com a copia crua.
-    !
-    ! Redundante agora: o regrid mascarado + extrapolacao de vizinhanca
-    ! (B-ICEREGRID-01/02, dentro de MediatorAdvance) ja preenche
-    ! is%f_ifrac_atm corretamente e ja e' exportado para "Si_ifrac" via
-    ! RegridOrCopy antes desta rotina ser chamada — nao ha mais nada a
-    ! fazer aqui.
-    !
-    ! if (cfg_use_sis2_dynamic) then
-    !   [bloco original removido — ver historico do arquivo/controle de
-    !   versao para o codigo completo, caso seja necessario reativar como
-    !   referencia]
-    ! end if
+    ! So_t, Si_ifrac, So_u e So_v ja foram regridados e exportados por
+    ! RegridOrCopy em MediatorAdvance; aqui resta apenas o carimbo de tempo.
 
     ! Estampilar timestamp no exportState (MPAS usa para validação)
     call NUOPC_SetTimestamp(exportState, clock, rc=rc)
@@ -360,51 +318,6 @@ contains
 
   end subroutine RouteOcnToAtm
 
-  !============================================================================
-  !> @brief Realiza regrid OCN→ATM silencioso para um campo opcional.
-  !!
-  !! Verifica existência do campo nos dois States via ESMF_StateGet(itemSearch=...)
-  !! antes de obter os Fields, evitando mensagens de erro para campos opcionais.
-  !!
-  !! Desativado no Sprint B para So_u/So_v (que agora são anunciados).
-  !============================================================================
-  subroutine RegridOptionalCurrent(importState, exportState, fieldName, rh)
-    type(ESMF_State),       intent(inout) :: importState
-    type(ESMF_State),       intent(inout) :: exportState
-    character(len=*),       intent(in)    :: fieldName
-    type(ESMF_RouteHandle), intent(inout) :: rh
-
-    integer          :: rc_loc
-    integer          :: n_imp, n_exp
-    type(ESMF_Field) :: f_ocn, f_atm
-
-    rc_loc = ESMF_SUCCESS
-
-    call ESMF_StateGet(importState, itemSearch=trim(fieldName), &
-      itemCount=n_imp, rc=rc_loc)
-    if (rc_loc /= ESMF_SUCCESS .or. n_imp <= 0) return
-
-    call ESMF_StateGet(exportState, itemSearch=trim(fieldName), &
-      itemCount=n_exp, rc=rc_loc)
-    if (rc_loc /= ESMF_SUCCESS .or. n_exp <= 0) return
-
-    call ESMF_StateGet(importState, trim(fieldName), f_ocn, rc=rc_loc)
-    if (rc_loc /= ESMF_SUCCESS) return
-
-    call ESMF_StateGet(exportState, trim(fieldName), f_atm, rc=rc_loc)
-    if (rc_loc /= ESMF_SUCCESS) return
-
-    call ESMF_FieldRegrid(f_ocn, f_atm, rh, &
-      zeroregion=ESMF_REGION_TOTAL, &
-      termorderflag=MET_TERMORDER, rc=rc_loc)   ! B-METHODS-TERMORDER-01
-
-    if (rc_loc == ESMF_SUCCESS) then
-      call ESMF_LogWrite( &
-        'MED RouteOcnToAtm: regrid OCN->ATM aplicado em ' // trim(fieldName), &
-        ESMF_LOGMSG_INFO)
-    end if
-
-  end subroutine RegridOptionalCurrent
 
   !============================================================================
   !> @brief Extrapolação por vizinhança (3x3, media iterativa) para preencher

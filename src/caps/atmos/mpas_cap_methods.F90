@@ -17,11 +17,11 @@ module mpas_cap_methods_mod
   use mpas_atm_types_mod, only : mpas_atm_public_type,   &
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
-  use mpas_cap_utils_mod, only : ChkErr
+  use coupler_utils_mod, only : ChkErr
   ! Sprint C: cfg_zorl_default usado como fallback NaN-guard em mpas_import
   ! FIX B-SST-GUARD-01 (Ago 2026): cfg_sst_default adicionado — usado como
   ! fallback no guard de SST agora aplicado (ver abaixo).
-  use mpas_cap_config_mod, only : cfg_zorl_default,          &
+  use coupler_config_mod, only : cfg_zorl_default,          &
                                    cfg_sst_default,           &
                                    cfg_write_import_diag,     &
                                    cfg_import_diag_dir,       &
@@ -954,7 +954,7 @@ contains
       if (present(lon_rad) .and. present(lat_rad) .and. &
           size(lon_rad) >= n .and. size(lat_rad) >= n) then
         block
-          integer           :: icell, ig, jg, ierr_mpi, mpi_comm_use
+          integer           :: icell, ig, jg, mpi_comm_use
           integer           :: ii, jj
           real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
           real(ESMF_KIND_R8), parameter :: DLON    = 1.0_ESMF_KIND_R8

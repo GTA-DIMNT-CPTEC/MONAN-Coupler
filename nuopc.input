@@ -273,33 +273,15 @@
 ! ATIVO quando use_docn=.false. em &nuopc_mode (padrão de produção).
 ! Requer também use_med_to_mpas=.true. para acoplamento Fase 2 correto.
 !
-!   mesh_ocn      Arquivo de grade para o componente MOM6.
-!                 [N5] Atenção: o valor abaixo aponta para ocean_hgrid.nc
-!                 (supergrid FRE-NCtools). Verificar se mom_cap_MONAN.F90
-!                 espera este arquivo ou um ESMF mesh pré-gerado. Se o cap
-!                 exigir formato ESMF_FILEFORMAT_ESMFMESH, gerar com:
-!                   ESMF_RegridWeightGen --source ocean_hgrid.nc \
-!                     --destination ocean_esmf_mesh.nc \
-!                     --src_type SCRIP --dst_type ESMFMESH
-!                 e atualizar para: mesh_ocn = 'INPUT/ocean_esmf_mesh.nc'
+!   mesh_ocn      Supergrade do MOM6 (ocean_hgrid.nc, formato FRE-NCtools).
+!                 O mediador e o cap do gelo leem dela as dimensões e as
+!                 coordenadas reais da grade T do oceano.
 !
-!   use_mommesh   .true.  → MOM6 usa ESMF_Mesh tripolar (produção)
-!                 .false. → MOM6 usa ESMF_Grid simplificado (testes)
-!                 Default Fortran: .false. — deve ser .true. em produção.
-!
-!   restart_n     Número do restart a carregar:
-!                   0 → sem restart; MOM6 parte do estado inicial
-!                  >0 → carrega MOM6_input/restart.nc número N
-!
-! ATENÇÃO: stop_ymd e stop_tod NÃO são definidos aqui.
-!   Calculados automaticamente por esm_MONAN.F90 a partir do
-!   stopTime do relógio ESMF — passados ao MOM6 via
-!   NUOPC_CompAttributeSet para o FMS time manager.
+! As chaves use_mommesh e restart_n foram retiradas: não tinham efeito.
+! Se ainda presentes, o acoplador emite aviso de chave obsoleta.
 !-----------------------------------------------------------------------
 &nuopc_ocn
-  mesh_ocn       = 'INPUT/ocean_hgrid.nc'  ! [N5] ver nota sobre ESMF mesh acima
-  use_mommesh    = .true.                   ! default Fortran: .false.
-  restart_n      = 0
+  mesh_ocn       = 'INPUT/ocean_hgrid.nc'
 /
 
 !-----------------------------------------------------------------------

@@ -18,7 +18,7 @@ module med_bulk_ncar_mod
 
   use ESMF
 
-  use mpas_cap_config_mod, only: cfg_use_docn_ice,        &
+  use coupler_config_mod, only: cfg_use_docn_ice,        &
                                 cfg_use_sis2_dynamic,     &
                                 cfg_docn_ice_init_only,   &  ! Sprint B.1
                                 cfg_write_fixdiag
@@ -792,9 +792,6 @@ contains
       real(ESMF_KIND_R8), parameter :: USTAR_MIN      = 1.0e-4_ESMF_KIND_R8
       real(ESMF_KIND_R8), parameter :: Z0_MIN         = 1.0e-5_ESMF_KIND_R8
       real(ESMF_KIND_R8), parameter :: Z0_MAX         = 0.1_ESMF_KIND_R8
-      real(ESMF_KIND_R8), parameter :: Z0_DEFAULT     = 0.01_ESMF_KIND_R8
-      real(ESMF_KIND_R8), parameter :: T_FILL_LAND    = 271.35_ESMF_KIND_R8
-      real(ESMF_KIND_R8), parameter :: TOL_LAND       = 1.0e-6_ESMF_KIND_R8
 
       real(ESMF_KIND_R8), pointer :: p_taux(:,:) => null()
       real(ESMF_KIND_R8), pointer :: p_tauy(:,:) => null()

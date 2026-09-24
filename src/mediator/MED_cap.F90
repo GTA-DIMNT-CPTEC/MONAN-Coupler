@@ -1,219 +1,27 @@
-!==============================================================================!
-! MED_cap_MONAN.F90 — Orquestrador NUOPC do mediador ATM-OCN do MONAN         !
-!==============================================================================!
-!                                                                              !
-! Versão 2.6 (Set/2026) — BUG-SEQ-STAMP-01: em coupling_mode='sequential' o
-!   elemento 'MED' roda ANTES dos avanços, logo o importState descreve o estado
-!   em t, não em t+dt. O mediador carimbava o exportState e nomeava os arquivos
-!   de diagnóstico com nextTime nos dois modos, adiantando em um dt_coupling
-!   todo mom6_import_*.nc / monan2_import_*.nc do modo sequencial. Introduzido
-!   stampTime (= currTime em sequential, = nextTime em concurrent).
-! Versão 2.5 (Mai/2026) — BUG-MED-ZERO: is%f_ifrac_atm era zerado antes de
-!   fill_ifrac_from_oisst em Sprint B.1.1, destruindo o campo OISST de t=0.
-!   O campo retém agora os valores entre passos e decai com τ=24h.
-! Versão 2.4 (Mai/2026) — Sprint B.1.1 (fill_ifrac t=0 com med_ifrac_init_done)!
-! Versão 2.0 (Mai/2026) — GT Acoplamento MONAN / INPE/CGCT/DIMNT              !
-!                                                                              !
-! Reorganização de responsabilidades (Passos 1–5):                            !
-!   Tipos e constantes  → med_cap_types.F90   (med_cap_types_mod)             !
-!   Física bulk NCAR    → med_bulk_ncar.F90   (med_bulk_ncar_mod)             !
-!   Utilitários ESMF    → med_cap_methods.F90 (med_cap_methods_mod)           !
-!   Diagnóstico NetCDF  → med_cap_netcdf.F90  (med_cap_netcdf_mod)            !
-!                                                                              !
-! Este arquivo contém apenas o ciclo de vida NUOPC puro do mediador:         !
-!   SetServices, Initialize* (P0/Advertise/Realize/DataComplete)              !
-!   MediatorAdvance — orquestrador que chama os módulos especializados        !
-!                                                                              !
-! Ver também cabeçalho do arquivo original para histórico de correções.      !
-!==============================================================================!
-
-!==============================================================================!
-! diag_bitsum_mod — FIX-DIAG-BITSUM-01 (Set/2026)                              !
-!==============================================================================!
-! Checksum EXATO de campos reais, POR PET, para diagnostico de
-! reprodutibilidade bit a bit.
-!
-! POR QUE. Os diagnosticos FIX-DIAG-ICESRC-01/-02 imprimem 17 algarismos,
-! precisao suficiente, mas so' o PET 0 e' recolhido. A bateria de 22/09/2026
-! achou diferencas de exatamente 1 ulp no Si_ifrac recebido pelo MPAS
-! (1573 pontos, r1 x r4, 01h) fora da fatia do PET 0.
-!
-! COMO. Cada valor e' lido como inteiro de 64 bits (transfer), separado em
-! duas metades de 32 bits, e as metades sao somadas em inteiro. Soma de
-! inteiros e' exata e nao depende da ordem: o resultado so' muda se algum
-! bit de algum ponto mudar.
-!
-! POR QUE NAO HA REDUCAO ENTRE PETs. No MediatorAdvance, os PETs sem pedaco
-! da grade atmosferica retornam cedo (bloco localDeCount_med == 0). Uma
-! chamada coletiva depois desse ponto travaria o job. Aqui cada PET grava a
-! sua parte no proprio log (logs/PETnn.esmApp.log), e o mede-taxa-repro.sh
-! junta as linhas de todos os PETs. Bonus: a diferenca aparece localizada
-! por PET, isto e', por regiao do dominio.
-!
-! LIMITES.
-!  - Seguro ate' 2**31 pontos por pedaco (cada metade < 2**32).
-!  - Nao detecta dois pontos que TROCAM de valor entre si. Entre execucoes
-!    com a mesma decomposicao isso nao ocorre na pratica.
-!
-! SAIDA. Uma linha por chamada, no log de cada PET que chega ao ponto:
-!   FIX-DIAG-BITSUM-01: <rotulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
-! com " ERRO=<k>" no fim se algum pedaco local nao pode ser lido.
-!==============================================================================!
-module diag_bitsum_mod
-
-  use, intrinsic :: iso_fortran_env, only: int64, real64
-  use ESMF
-
-  implicit none
-  private
-
-  public :: diag_bitsum_log
-
-  interface diag_bitsum_log
-    module procedure bitsum_log_1d
-    module procedure bitsum_log_2d
-    module procedure bitsum_log_field
-  end interface diag_bitsum_log
-
-  character(len=*), parameter :: PREFIXO = 'FIX-DIAG-BITSUM-01'
-
-contains
-
-  ! --------------------------------------------------------------------------
-  !> Acumula contagem e as duas somas de 32 bits de um trecho contiguo.
-  pure subroutine acumula(x, n, s_hi, s_lo)
-    real(real64),   intent(in)    :: x(:)
-    integer(int64), intent(inout) :: n, s_hi, s_lo
-
-    integer(int64), parameter :: MASK32 = int(z'FFFFFFFF', int64)
-    integer(int64) :: b
-    integer        :: i
-
-    do i = 1, size(x)
-      b    = transfer(x(i), b)
-      s_lo = s_lo + iand(b, MASK32)
-      s_hi = s_hi + iand(shiftr(b, 32), MASK32)
-    end do
-    n = n + size(x, kind=int64)
-  end subroutine acumula
-
-  ! --------------------------------------------------------------------------
-  pure subroutine acumula_2d(x, n, s_hi, s_lo)
-    real(real64),   intent(in)    :: x(:,:)
-    integer(int64), intent(inout) :: n, s_hi, s_lo
-    integer :: j
-    do j = 1, size(x, 2)
-      call acumula(x(:, j), n, s_hi, s_lo)
-    end do
-  end subroutine acumula_2d
-
-  ! --------------------------------------------------------------------------
-  !> Grava a linha no log deste PET.
-  subroutine grava(rotulo, n, s_hi, s_lo, n_err)
-    character(len=*), intent(in) :: rotulo
-    integer(int64),   intent(in) :: n, s_hi, s_lo
-    integer,          intent(in) :: n_err
-
-    character(len=512) :: msg
-
-    if (n_err == 0) then
-      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0)') &
-            PREFIXO, trim(rotulo), n, s_hi, s_lo
-    else
-      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0," ERRO=",i0)') &
-            PREFIXO, trim(rotulo), n, s_hi, s_lo, n_err
-    end if
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-  end subroutine grava
-
-  ! --------------------------------------------------------------------------
-  subroutine bitsum_log_1d(rotulo, x, rc)
-    character(len=*), intent(in)  :: rotulo
-    real(real64),     intent(in)  :: x(:)
-    integer,          intent(out) :: rc
-    integer(int64) :: n, s_hi, s_lo
-    n = 0 ; s_hi = 0 ; s_lo = 0
-    call acumula(x, n, s_hi, s_lo)
-    call grava(rotulo, n, s_hi, s_lo, 0)
-    rc = ESMF_SUCCESS
-  end subroutine bitsum_log_1d
-
-  ! --------------------------------------------------------------------------
-  subroutine bitsum_log_2d(rotulo, x, rc)
-    character(len=*), intent(in)  :: rotulo
-    real(real64),     intent(in)  :: x(:,:)
-    integer,          intent(out) :: rc
-    integer(int64) :: n, s_hi, s_lo
-    n = 0 ; s_hi = 0 ; s_lo = 0
-    call acumula_2d(x, n, s_hi, s_lo)
-    call grava(rotulo, n, s_hi, s_lo, 0)
-    rc = ESMF_SUCCESS
-  end subroutine bitsum_log_2d
-
-  ! --------------------------------------------------------------------------
-  !> ESMF_Field real(8) de posto 1 ou 2, com qualquer numero de pedacos
-  !! locais (localDeCount pode ser 0, 1 ou mais). Soma a regiao exclusiva.
-  subroutine bitsum_log_field(rotulo, field, rc)
-    character(len=*), intent(in)  :: rotulo
-    type(ESMF_Field), intent(in)  :: field
-    integer,          intent(out) :: rc
-
-    integer                  :: rank, ldec, lde, rc_loc, n_err
-    type(ESMF_TypeKind_Flag) :: tk
-    real(real64), pointer    :: p1(:), p2(:,:)
-    integer(int64)           :: n, s_hi, s_lo
-
-    n = 0 ; s_hi = 0 ; s_lo = 0 ; n_err = 0
-    rank = 0 ; ldec = 0
-
-    call ESMF_FieldGet(field, rank=rank, typekind=tk, localDeCount=ldec, rc=rc_loc)
-    if (rc_loc /= ESMF_SUCCESS) then
-      n_err = n_err + 1
-      ldec  = 0
-    else if (tk /= ESMF_TYPEKIND_R8 .or. (rank /= 1 .and. rank /= 2)) then
-      n_err = n_err + 1
-      ldec  = 0
-    end if
-
-    do lde = 0, ldec - 1
-      if (rank == 1) then
-        nullify(p1)
-        call ESMF_FieldGet(field, localDe=lde, farrayPtr=p1, rc=rc_loc)
-        if (rc_loc == ESMF_SUCCESS .and. associated(p1)) then
-          call acumula(p1, n, s_hi, s_lo)
-        else
-          n_err = n_err + 1
-        end if
-      else
-        nullify(p2)
-        call ESMF_FieldGet(field, localDe=lde, farrayPtr=p2, rc=rc_loc)
-        if (rc_loc == ESMF_SUCCESS .and. associated(p2)) then
-          call acumula_2d(p2, n, s_hi, s_lo)
-        else
-          n_err = n_err + 1
-        end if
-      end if
-    end do
-
-    call grava(rotulo, n, s_hi, s_lo, n_err)
-    rc = ESMF_SUCCESS
-  end subroutine bitsum_log_field
-
-end module diag_bitsum_mod
-
-!------------------------------------------------------------------------------
-! FIX-DIAG-BITSUM-01: o modulo acima foi colado neste arquivo para dispensar
-! mudanca no Makefile. Diagnostico temporario: remover junto com as chamadas
-! marcadas FIX-DIAG-BITSUM-01 quando a investigacao terminar.
-!------------------------------------------------------------------------------
+!> @file MED_cap.F90
+!! @brief Mediador NUOPC do acoplamento atmosfera-oceano-gelo do MONAN.
+!!
+!! Ciclo de vida NUOPC do mediador (SetServices, Initialize*, MediatorAdvance).
+!! As partes especializadas ficam em módulos próprios:
+!!   med_cap_types.F90    tipos, listas de campos e constantes
+!!   med_bulk_ncar.F90    fluxos turbulentos por fórmulas bulk NCAR
+!!   med_cap_methods.F90  utilitários ESMF (campos internos, regrid, roteamento)
+!!   med_cap_netcdf.F90   diagnóstico NetCDF dos campos importados
+!!
+!! A fonte atmosférica (MPAS ou DATM) e a rota OCN -> ATM (pelo mediador ou
+!! direta) vêm de nuopc.input (coupler_config_mod). O histórico de correções
+!! está em docs/CHANGELOG.md.
+!!
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module MED_cap_MONAN_mod
   use ESMF
   use ESMF, only: ESMF_State, ESMF_StateGet
   use mpi
-  use diag_bitsum_mod, only: diag_bitsum_log   ! FIX-DIAG-BITSUM-01
-  use netcdf   ! FIX B-OCNGRID-01: leitura direta de ocean_hgrid.nc (grade T real MOM6)
-  use mpas_cap_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
+  use diag_bitsum_mod, only: diag_bitsum_log
+  use coupler_utils_mod, only: ChkErr
+  use netcdf
+  use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn_ice,                 &
                                   cfg_write_fixdiag,                &
                                   cfg_docn_ice_init_only,           &
@@ -224,7 +32,8 @@ module MED_cap_MONAN_mod
                                   cfg_docn_epoch_year,              &
                                   cfg_docn_epoch_month,             &
                                   cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
-                                  cfg_use_docn, cfg_mom6_mesh_ocn,  & ! FIX B-OCNGRID-01
+                                  cfg_use_docn, cfg_mom6_mesh_ocn,  &
+                                  cfg_use_datm, cfg_use_med_to_mpas, &
                                   cfg_use_sis2_dynamic,             & ! FIX SIS2-ATIVACAO
                                   cfg_coupling_mode,                & ! BUG-SEQ-STAMP-01
                                   cfg_seq_repro                       ! seq_repro (reprodutibilidade)
@@ -232,7 +41,6 @@ module MED_cap_MONAN_mod
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
   use NUOPC, only: NUOPC_IsAtTime
-  use NUOPC, only: NUOPC_CompAttributeGet, NUOPC_CompAttributeAdd
   use NUOPC_Mediator, only: med_routine_SS          => SetServices
   use NUOPC_Mediator, only: med_label_DataInitialize => label_DataInitialize
   use NUOPC_Mediator, only: med_label_Advance        => label_Advance
@@ -257,7 +65,7 @@ module MED_cap_MONAN_mod
                                   FillInternalField,                        &
                                   GetFieldPtr, GetFieldPtrOptional,         &
                                   RegridOrCopy, RouteOcnToAtm,              &
-                                  RegridOptionalCurrent, NeighborFillExtrapolate
+                                  NeighborFillExtrapolate
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
 
   implicit none
@@ -326,38 +134,31 @@ contains
     rc = ESMF_SUCCESS
 
     call NUOPC_CompDerive(gcomp, med_routine_SS, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       userRoutine=InitializeP0, phase=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p1"/), userRoutine=InitializeAdvertise, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p3"/), userRoutine=InitializeRealize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_DataInitialize, &
       specRoutine=InitializeDataComplete, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_Advance, &
       specRoutine=MediatorAdvance, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_CheckImport, &
       specRoutine=CheckImportNoop, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine SetServices
 
@@ -383,8 +184,7 @@ contains
     rc = ESMF_SUCCESS
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
       acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine InitializeP0
 
   !============================================================================
@@ -397,13 +197,6 @@ contains
     integer, intent(out) :: rc
 
     integer :: n
-    logical                         :: isPresent, isSet
-    character(len=8)                :: attr_val
-    ! use_mpas_atm lido aqui apenas para log; o valor persistente fica no estado interno
-    ! criado em InitializeRealize.
-    logical, save :: use_mpas_atm_advertise = .false.
-    ! med_ifrac_init_done declarado no escopo do módulo (acessível em MediatorAdvance)
-
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
 
@@ -411,55 +204,31 @@ contains
 
     allocate(iswrap%wrap)
     is => iswrap%wrap
-
-    ! Inicializar todos os campos l�gicos do InternalState
-    is%use_mpas_atm = use_mpas_atm_advertise
-
-    ! Ler use_med_to_mpas do atributo NUOPC (definido por esm.F90)
-    call NUOPC_CompAttributeGet(gcomp, name="use_med_to_mpas", &
-      value=attr_val, rc=rc)
-    if (rc == ESMF_SUCCESS) then
-      is%use_med_to_mpas = (trim(attr_val) == 'true')
-    else
-      is%use_med_to_mpas = .false.
-      rc = ESMF_SUCCESS  ! atributo opcional
-    end if
-    if (is%use_med_to_mpas) then
-      call ESMF_LogWrite('MED: use_med_to_mpas=true — RouteOcnToAtm ativo', &
-        ESMF_LOGMSG_INFO)
-    end if
-    is%rh_created   = .false.
+    is%use_mpas_atm    = .not. cfg_use_datm
+    is%use_med_to_mpas = cfg_use_med_to_mpas
+    is%rh_created      = .false.
 
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return    !--- Le atributo use_mpas_atm definido pelo driver em esm.F90 ---
-    ! Valores aceitos: "true" ou "false" (default: "false" = usa DATM)
-    call NUOPC_CompAttributeGet(gcomp, name="use_mpas_atm", &
-      value=attr_val, isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    if (isPresent .and. isSet) then
-      use_mpas_atm_advertise = (trim(attr_val) == "true")
-    end if
-    if (use_mpas_atm_advertise) then
-      call ESMF_LogWrite('MED: use_mpas_atm=true (MPAS como fonte primaria)', &
-        ESMF_LOGMSG_INFO)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    if (is%use_mpas_atm) then
+      call ESMF_LogWrite('MED: fonte atmosferica = MPAS', ESMF_LOGMSG_INFO)
     else
-      call ESMF_LogWrite('MED: use_mpas_atm=false (DATM como fonte)', &
-        ESMF_LOGMSG_INFO)
+      call ESMF_LogWrite('MED: fonte atmosferica = DATM', ESMF_LOGMSG_INFO)
     end if
+    if (is%use_med_to_mpas) &
+      call ESMF_LogWrite('MED: use_med_to_mpas=true, RouteOcnToAtm ativo', ESMF_LOGMSG_INFO)
 
     ! Anuncia campos de import conforme a fonte atmosferica configurada.
     ! CRITICO: o NUOPC aborta em IPDv03p6 se um campo anunciado nao tiver
     ! conector ativo. Por isso MPAS e DATM sao anunciados exclusivamente.
-    if (use_mpas_atm_advertise) then
+    if (is%use_mpas_atm) then
       ! Modo MPAS: anuncia campos _mpas (fornecidos pelo MPAS_cap)
       do n = 1, n_import_mpas
         call NUOPC_Advertise(importState, StandardName=trim(import_mpas_names(n)), &
           TransferOfferGeomObject="cannot provide", &
           SharePolicyField="share", rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
     else
       ! Modo DATM: anuncia campos sem sufixo (fornecidos pelo DATM_cap)
@@ -469,8 +238,7 @@ contains
         call NUOPC_Advertise(importState, StandardName=trim(import_datm_names(n)), &
           TransferOfferGeomObject="cannot provide", &
           SharePolicyField="share", rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
     end if
 
@@ -478,8 +246,7 @@ contains
     call NUOPC_Advertise(importState, StandardName="So_t", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! BUG-CALC-DUU (fix v13.0): anuncia So_u e So_v no importState do MED.
     ! O NUOPC só conecta campos mutuamente anunciados: o OCN exporta So_u/So_v
@@ -490,14 +257,12 @@ contains
     call NUOPC_Advertise(importState, StandardName="So_u", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_Advertise(importState, StandardName="So_v", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! FIX B-COASTMASK-02 (Ago 2026): anuncia So_omask no importState do MED.
     ! O OCN (mom_cap_methods.F90::mom_export) ja exporta 'So_omask' = nint(mask2dT)
@@ -509,8 +274,7 @@ contains
     call NUOPC_Advertise(importState, StandardName="So_omask", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Si_ifrac_sis2 — fração de gelo real vinda do componente ICE (SIS2).
     !
@@ -532,8 +296,7 @@ contains
       call NUOPC_Advertise(importState, StandardName="Si_ifrac_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       ! Fase 2 (B-ICE-ALBEDO-01): albedo do gelo por banda. Mesmo padrão
       ! de Si_ifrac_sis2 acima (nome próprio para não colidir com um
@@ -541,37 +304,31 @@ contains
       call NUOPC_Advertise(importState, StandardName="Si_avsdr_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Advertise(importState, StandardName="Si_avsdf_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Advertise(importState, StandardName="Si_anidr_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Advertise(importState, StandardName="Si_anidf_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       ! Fase 3 (B-ICE-FLUX-DIFF-01): temperatura de pele real do gelo.
       call NUOPC_Advertise(importState, StandardName="Si_t_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
 
     ! Advertise campos de export para o OCN
     do n = 1, n_export
       call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     call ESMF_LogWrite('MED: InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
@@ -600,39 +357,15 @@ contains
     integer :: nx_max, ny_tiles, lde
     integer :: nx_tiles_target  ! B-57
     real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
-    integer :: ncid, varid, dimid
-    real(ESMF_KIND_R8), allocatable :: ocn_lon(:,:), ocn_lat(:,:)
-    logical             :: isPresent, isSet
-    character(len=8)    :: attr_val
     character(len=256)  :: msg_tmp  ! FIX B-OCNGRID-01
 
     rc = ESMF_SUCCESS
 
     ! Recuperar estado interno
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-    !---------------------------------------------------------------------------
-    ! CORRECAO: re-ler use_mpas_atm antes do branch de realizacao de campos.
-    ! Em InitializeAdvertise, ESMF_GridCompSetInternalState e chamado ANTES
-    ! de NUOPC_CompAttributeGet, entao is%use_mpas_atm fica .false. mesmo
-    ! quando o atributo e "true". Lemos novamente aqui para corrigir.
-    !---------------------------------------------------------------------------
-    is%use_mpas_atm = .false.
-    call NUOPC_CompAttributeGet(gcomp, name="use_mpas_atm", &
-      value=attr_val, isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    if (isPresent .and. isSet) is%use_mpas_atm = (trim(attr_val) == "true")
-    if (is%use_mpas_atm) then
-      call ESMF_LogWrite("MED: InitializeRealize modo MPAS (use_mpas_atm=true)", &
-        ESMF_LOGMSG_INFO)
-    else
-      call ESMF_LogWrite("MED: InitializeRealize modo DATM (use_mpas_atm=false)", &
-        ESMF_LOGMSG_INFO)
-    end if
 
     ! B-44/B-45/B-46: obter petCount para calcular regDecomp de ambas as grades.
     ! Sem regDecomp explícito, com N>ny PETs o ESMF gera DEs vazias (localDeCount=0)
@@ -739,8 +472,7 @@ contains
 
     ! ESMF_GridAddCoord: COLETIVA — todos os PETs
     call ESMF_GridAddCoord(atm_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! B-45: verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
     call ESMF_GridGet(atm_grid, localDeCount=localDeCount_atm, rc=rc)
@@ -857,8 +589,7 @@ contains
 
     ! ESMF_GridAddCoord: COLETIVA — todos os PETs
     call ESMF_GridAddCoord(ocn_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! B-45: verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
     call ESMF_GridGet(ocn_grid, localDeCount=localDeCount_ocn, rc=rc)
@@ -1054,21 +785,17 @@ contains
       do n = 1, n_import_mpas
         tmp_field = ESMF_FieldCreate(grid=atm_grid, typekind=ESMF_TYPEKIND_R8, &
           staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(import_mpas_names(n)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
     else
       do n = 1, n_import_datm
         tmp_field = ESMF_FieldCreate(grid=atm_grid, typekind=ESMF_TYPEKIND_R8, &
           staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(import_datm_names(n)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
     end if
 
@@ -1080,40 +807,32 @@ contains
     !--------------------------------------------------------------------------
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_t", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! BUG-CALC-DUU (fix v13.0): realizar So_u e So_v na grade OCN.
     ! Simétrico ao tratamento de So_t: correntes vêm do OCN, portanto
     ! devem ser realizadas em ocn_grid para que o rh_ocn2atm funcione.
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_u", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_v", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! FIX B-COASTMASK-02: realizar So_omask (mascara real mask2dT do MOM6)
     ! na grade OCN, simetrico a So_t/So_u/So_v.
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_omask", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! FIX SIS2-ATIVACAO (Ago 2026): realizar Si_ifrac_sis2 (gelo real do
     ! ICE) na MESMA grade ocn_grid — a grade do componente ICE (ver
@@ -1123,53 +842,41 @@ contains
     if (cfg_use_sis2_dynamic) then
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_ifrac_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       ! Fase 2 (B-ICE-ALBEDO-01): mesma ocn_grid, mesmo raciocinio.
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_avsdr_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_avsdf_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_anidr_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_anidf_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       ! Fase 3 (B-ICE-FLUX-DIFF-01): mesma ocn_grid.
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_t_sis2", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
 
     !--------------------------------------------------------------------------
@@ -1178,11 +885,9 @@ contains
     do n = 1, n_export
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(export_names(n)), rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(exportState, field=tmp_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     !--------------------------------------------------------------------------
@@ -1300,8 +1005,7 @@ contains
     call FillInternalField(is%f_zorl_atm, 0.01_ESMF_KIND_R8, rc)
 
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! BUG-OUT-01 fix v4: ler config de diagnóstico de importação
     call med_read_import_config()
@@ -1651,16 +1355,14 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
 
     ! CORRECAO 2: NUOPC_MediatorGet e a API correta para mediadores
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Obtem campo de referencia para a grade ATM conforme o modo ativo.
     ! use_mpas_atm ja esta no estado interno (lido em InitializeRealize).
@@ -1819,16 +1521,14 @@ contains
   ! So_t escrito pelo "OCN" da passagem anterior, e o gate abre.
   !==========================================================================
     call ESMF_ClockGet(clock, startTime=startTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha So_t (gate)", &
       line=__LINE__, file=__FILE__)) return
 
     sst_ready = NUOPC_IsAtTime(ocn_field, startTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
   !--------------------------------------------------------------------------
   ! FIX B-SEQINIT-02 (v14.21): CARIMBO NAO E' DADO.
@@ -1847,8 +1547,7 @@ contains
   !--------------------------------------------------------------------------
     if (sst_ready) then
       call ESMF_VMGetCurrent(vm, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       n_phys_s(1) = 0
       call ESMF_FieldGet(ocn_field, localDeCount=ldec_sst, rc=localrc)
@@ -2031,18 +1730,16 @@ contains
     real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
     real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    real(ESMF_KIND_R8), pointer :: sst(:,:), fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: sst(:,:)
     ! BUG-CALC-DUU (fix v13.0): ponteiros para correntes oceânicas na grade ATM
     real(ESMF_KIND_R8), pointer :: uocn(:,:), vocn(:,:)
 
     real(ESMF_KIND_R8), pointer     :: shum_local(:,:) => null()
     real(ESMF_KIND_R8), pointer     :: snow_local(:,:) => null()
     integer :: i1_glob, i2_glob, j1_glob, j2_glob
-    real(ESMF_KIND_R8) :: wspd, qsat, sst_eff
-    integer :: i, j, i1, i2, j1, j2
+    integer :: i1, i2, j1, j2
     integer :: fieldCount, k
     character(len=64), allocatable :: fieldNameList(:)
-    character(len=256) :: msg
 
     ! BUG-CALC-DUU: nullify após todas as declarações (instrução executável
     ! não pode preceder declarações — Fortran 2003 §12.4).
@@ -2051,8 +1748,7 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
     ! BUG-NC-02 fix (GT Acoplamento MONAN/INPE — Maio 2026):
@@ -2066,8 +1762,7 @@ contains
     ! contribuição vazia (grid_local = FILL_IMP) antes de retornar.
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
     nextTime = currTime + dt
@@ -2127,8 +1822,7 @@ contains
     ! têm localDeCount=0 para o atm_grid interno do MED. Esses PETs não têm
     ! dados locais — nenhum campo interno pode ser acessado via farrayPtr.
     call ESMF_FieldGet(is%f_taux_atm, localDeCount=localDeCount_med, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     if (localDeCount_med == 0) then  ! (*) — ponto de retorno corrigido
       ! PET sem DE local: participar nas operações MPI coletivas dentro de
       ! med_write_import_fields antes de retornar (evita deadlock BUG-NC-02).
@@ -3890,7 +3584,7 @@ contains
 
     ! ── BUG-OUT-01 fix v4: diagnóstico de importação inline ──────────────────
     ! Implementação direta em MED_cap_MONAN.F90 — sem dependência de
-    ! MOM_cap_methods (lib pré-compilada) nem de mpas_cap_config_mod.
+    ! MOM_cap_methods (lib pré-compilada) nem de coupler_config_mod.
     ! Lê mom6_output.nml com namelist local de 2 variáveis (sem ios/=0).
     ! Usa netcdf (já importado neste módulo) para escrever os campos.
     ! ─────────────────────────────────────────────────────────────────────────
@@ -4013,7 +3707,6 @@ contains
     ! ser incorreta no instante em que o mediador ganhar uma petList própria,
     ! e falharia com deadlock, não com erro. ESMF_VMGetCurrent devolve a VM
     ! do componente em execução, tornando rootPet=0 local ao MED.
-    !call ESMF_VMGetGlobal(vm, rc=rc)
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(f0, f1, buf); return

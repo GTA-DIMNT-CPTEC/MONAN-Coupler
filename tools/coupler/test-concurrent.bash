@@ -33,7 +33,7 @@
 #
 # SEGURANÇA / ISOLAMENTO
 #   NÃO altera o seu nuopc.input: gera uma cópia de teste injetada via a variável
-#   NUOPC_INPUT (suportada por mpas_cap_config_mod). Logs e diagnósticos vão para
+#   NUOPC_INPUT (suportada por coupler_config_mod). Logs e diagnósticos vão para
 #   diretórios *-concurrent-test isolados.
 #
 # CONVENÇÕES DE CAMINHO (idênticas ao run_esmApp.jaci)

@@ -67,7 +67,7 @@ MONAN-Coupler/
 │   ├── driver/      esm.F90 (driver NUOPC, RunSequences, partição de PETs)
 │   ├── mediator/    MED_cap.F90, med_bulk_ncar.F90, escritores de diagnóstico
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
-│   └── shared/      utilitários (allreduce, tempo)
+│   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash
 ├── tools/           apoio: coupler, postproc, animation, atmos, ocean, dev
@@ -77,14 +77,31 @@ MONAN-Coupler/
 └── README.md
 ```
 
+## Organização do código
+
+A configuração de `nuopc.input` é lida uma única vez, em `esmApp.F90`, pelo módulo `coupler_config_mod` (`src/shared/coupler_config.F90`); os demais módulos consultam as variáveis `cfg_*`, que são somente leitura. Grupo de namelist ausente mantém os valores padrão; grupo com erro de sintaxe é erro fatal.
+
+Convenções para código novo:
+
+| Tema | Regra |
+| --- | --- |
+| Erros ESMF | `if (ChkErr(rc, __LINE__, __FILE__)) return`, de `coupler_utils_mod` |
+| Texto | `int_to_str`, `real_to_str` e `str_lower` de `coupler_utils_mod`; não criar cópias locais |
+| Configuração | nova chave em `coupler_config.F90`, com validação em `valid_config`; não usar atributos NUOPC para repassar configuração |
+| Componentes e conectores | registrar pelo `add_model` e `add_connector` de `esm.F90` |
+| Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` |
+| Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
+
+O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
+
 ## Compilação
 
 O `Makefile` monta apenas o acoplador (`bin/esmApp`), assumindo os componentes já compilados pela instalação. Alvos úteis:
 
 ```bash
 make            # compila bin/esmApp
-make check      # verifica o ambiente e as dependências
-make clean      # remove objetos; distclean remove tudo
+make check      # verifica se todos os fontes existem
+make clean      # remove build/ e bin/; distclean remove também lib/ e mod/
 make help       # lista os alvos
 ```
 

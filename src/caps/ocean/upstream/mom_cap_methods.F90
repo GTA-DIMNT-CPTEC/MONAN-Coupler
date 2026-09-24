@@ -15,10 +15,6 @@ use ESMF,                      only: ESMF_GEOMTYPE_FLAG, ESMF_GEOMTYPE_GRID, ESM
 use ESMF,                      only: ESMF_RC_VAL_OUTOFRANGE, ESMF_INDEX_DELOCAL, ESMF_MESHLOC_ELEMENT
 use ESMF,                      only: ESMF_TYPEKIND_R8, ESMF_FIELDSTATUS_COMPLETE
 use ESMF,                      only: ESMF_FieldStatus_Flag, ESMF_LOGMSG_ERROR, ESMF_FAILURE, ESMF_MAXSTR
-! Símbolos usados por WriteMOM6ImportDiag (diagnóstico NetCDF do importState):
-use ESMF,                      only: ESMF_FieldBundle, ESMF_FieldBundleCreate, ESMF_FieldBundleAdd
-use ESMF,                      only: ESMF_FieldBundleDestroy, ESMF_FieldBundleWrite
-use ESMF,                      only: ESMF_LOGMSG_WARNING, ESMF_STATEITEM_FIELD
 use ESMF,                      only: operator(/=), operator(==)
 use MOM_ocean_model_nuopc,     only: ocean_public_type, ocean_state_type
 use MOM_surface_forcing_nuopc, only: ice_ocean_boundary_type
@@ -35,7 +31,6 @@ public :: mom_import
 public :: mom_export
 public :: state_diagnose
 public :: ChkErr
-public :: WriteMOM6ImportDiag  ! BUG-OUT-01: diagnóstico dos campos importados do mediador
 
 interface State_getImport
    module procedure State_getImport_2d
@@ -1315,119 +1310,6 @@ subroutine field_getfldptr(field, fldptr1, fldptr2, rank, abort, rc)
   endif
 
 end subroutine field_getfldptr
-
-
-!> Escreve diagnóstico dos campos importados do mediador (14 fluxos Foxx_*/Faxa_*)
-!! em um arquivo NetCDF por passo de acoplamento.
-!!
-!! Ativado via nuopc.input: write_import_diag = .true.
-!! Gera: <diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc  (um por passo de acoplamento)
-!! Cada arquivo contém todos os campos ESMF_Field do importState em um FieldBundle.
-!!
-!! BUG-OUT-01 fix (GT Acoplamento de Modelos/INPE — Maio 2026):
-!!   A migração esm.F90 v7.0 substituiu DOCN_cap_mod por MOM_cap_mod.
-!!   DOCN_cap.F90::WriteDOCNDiag (que gerava docn_import_*.nc) nunca mais era
-!!   chamado. Esta subrotina reimplementa o diagnóstico de importação para MOM6.
-subroutine WriteMOM6ImportDiag(importState, currTime, diag_dir, rc)
-
-  type(ESMF_State),  intent(inout) :: importState  !< importState do componente OCN
-  type(ESMF_Time),   intent(in)    :: currTime      !< tempo corrente do acoplamento
-  character(len=*),  intent(in)    :: diag_dir      !< diretório de saída
-  integer,           intent(out)   :: rc
-
-  type(ESMF_FieldBundle)    :: fbundle
-  type(ESMF_Field)          :: field
-  type(ESMF_StateItem_Flag) :: itemType
-  integer :: n, fieldCount, n_added
-  integer :: yy, mm, dd, hh, mn, ss
-  character(len=256)  :: fname
-  character(len=19)   :: tstamp
-  character(len=12)   :: n_str
-  character(len=64), allocatable :: fieldNameList(:)
-  character(len=*), parameter :: subname = '(WriteMOM6ImportDiag)'
-
-  rc = ESMF_SUCCESS
-
-  ! Montar timestamp para o nome do arquivo
-  call ESMF_TimeGet(currTime, yy=yy, mm=mm, dd=dd, h=hh, m=mn, s=ss, rc=rc)
-  if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=u_FILE_u)) return
-  write(tstamp, '(I4.4,I2.2,I2.2,A1,I2.2,I2.2,I2.2)') yy, mm, dd, '_', hh, mn, ss
-
-  ! Criar diretório de saída (silencioso se já existe)
-  call execute_command_line('mkdir -p '//trim(diag_dir), wait=.true.)
-  fname = trim(diag_dir)//'/mom6_import_'//trim(tstamp)//'.nc'
-
-  ! Enumerar campos do importState
-  call ESMF_StateGet(importState, itemCount=fieldCount, rc=rc)
-  if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=u_FILE_u)) return
-
-  if (fieldCount == 0) then
-    call ESMF_LogWrite(subname//': importState vazio — nada a escrever', &
-      ESMF_LOGMSG_WARNING)
-    return
-  end if
-
-  allocate(fieldNameList(fieldCount))
-  call ESMF_StateGet(importState, itemNameList=fieldNameList, rc=rc)
-  if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=u_FILE_u)) return
-
-  ! Criar FieldBundle e adicionar todos os campos disponíveis
-  fbundle = ESMF_FieldBundleCreate(name='mom6_import_'//trim(tstamp), rc=rc)
-  if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=u_FILE_u)) return
-
-  n_added = 0
-  do n = 1, fieldCount
-    call ESMF_StateGet(importState, itemName=trim(fieldNameList(n)), &
-      itemType=itemType, rc=rc)
-    if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; cycle; end if
-
-    if (itemType == ESMF_STATEITEM_FIELD) then
-      call ESMF_StateGet(importState, itemName=trim(fieldNameList(n)), &
-        field=field, rc=rc)
-      if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; cycle; end if
-
-      call ESMF_FieldBundleAdd(fbundle, fieldList=(/field/), rc=rc)
-      if (rc /= ESMF_SUCCESS) then
-        ! Campo pode já estar em outro bundle — ignorar silenciosamente
-        rc = ESMF_SUCCESS; cycle
-      end if
-      n_added = n_added + 1
-    end if
-  end do
-  deallocate(fieldNameList)
-
-  if (n_added == 0) then
-    call ESMF_LogWrite(subname//': nenhum ESMF_Field válido no importState', &
-      ESMF_LOGMSG_WARNING)
-    call ESMF_FieldBundleDestroy(fbundle, nogarbage=.true., rc=rc)
-    return
-  end if
-
-  ! Escrever FieldBundle em arquivo NetCDF (ESMF usa PIO internamente)
-  call ESMF_FieldBundleWrite(fbundle, fileName=trim(fname), &
-    overwrite=.true., rc=rc)
-  if (rc /= ESMF_SUCCESS) then
-    call ESMF_LogWrite(subname//': AVISO: FieldBundleWrite falhou para '// &
-      trim(fname)//' — diagnóstico omitido neste passo', ESMF_LOGMSG_WARNING)
-    call ESMF_FieldBundleDestroy(fbundle, nogarbage=.true., rc=rc)
-    rc = ESMF_SUCCESS  ! não-fatal
-    return
-  end if
-
-  write(n_str, '(I0)') n_added
-  call ESMF_LogWrite(subname//': escrito '//trim(fname)// &
-    ' ('//trim(n_str)//' campos)', ESMF_LOGMSG_INFO)
-
-  ! Destruir bundle sem apagar os campos (que pertencem ao importState)
-  call ESMF_FieldBundleDestroy(fbundle, nogarbage=.true., rc=rc)
-  if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-    line=__LINE__, file=u_FILE_u)) return
-
-end subroutine WriteMOM6ImportDiag
 
 
 !> Returns true if ESMF_LogFoundError() determines that rc is an error code. Otherwise false.

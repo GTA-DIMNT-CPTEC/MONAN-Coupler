@@ -52,6 +52,8 @@ module DATM_cap_mod
   use NUOPC_Model, only: NUOPC_ModelGet
   ! CORRECAO 2: removida dependencia de MOM_io (stdout, io_infra_end nao
   !   eram utilizados e acoplavam o DATM desnecessariamente ao MOM6).
+  use coupler_utils_mod, only : ChkErr
+
   implicit none
   private
   public :: SetServices
@@ -90,35 +92,29 @@ contains
     rc = ESMF_SUCCESS
 
     call NUOPC_CompDerive(gcomp, model_routine_SS, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       userRoutine=InitializeP0, phase=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p1"/), userRoutine=InitializeAdvertise, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p3"/), userRoutine=InitializeRealize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, &
       specLabel=model_label_DataInitialize, &
       specRoutine=InitializeDataComplete, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, &
       specLabel=model_label_Advance, &
       specRoutine=ModelAdvance, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine SetServices
 
@@ -134,8 +130,7 @@ contains
 
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
       acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine InitializeP0
 
@@ -155,36 +150,27 @@ contains
 
     ! Campos de estado atmosferico bruto (JRA55)
     call NUOPC_Advertise(exportState, StandardName="Sa_u10m",   rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Sa_v10m",   rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Sa_tbot",   rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Sa_shum",   rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Sa_pslv",   rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Radiacao descendente (sem decomposicao em bandas - o MED faz isso)
     call NUOPC_Advertise(exportState, StandardName="Faxa_swdn", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Faxa_lwdn", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Precipitacao
     call NUOPC_Advertise(exportState, StandardName="Faxa_rain", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Advertise(exportState, StandardName="Faxa_snow", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DATM: InitializeAdvertise concluido (campos brutos JRA55)', &
       ESMF_LOGMSG_INFO)
@@ -222,12 +208,10 @@ contains
       indexflag = ESMF_INDEX_GLOBAL,        &
       coordSys  = ESMF_COORDSYS_SPH_DEG,   &
       rc        = rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Longitude: com ESMF_INDEX_GLOBAL, i eh o indice global (1..640)
     ! lon_centro_i = (i-1)*dx + dx/2  => [0.28125, 0.84375, ..., 359.71875]
@@ -236,8 +220,7 @@ contains
     ! Formula: lon_centro_i = (i-1)*dx + dx/2   [0.28125, 0.84375, ..., 359.71875]
     call ESMF_GridGetCoord(grid, coordDim=1, &
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     do j = lbound(coordX,2), ubound(coordX,2)
       do i = lbound(coordX,1), ubound(coordX,1)
         ! Com ESMF_INDEX_GLOBAL, i eh indice global (1..640); lon=(i-1)*dx+dx/2
@@ -248,8 +231,7 @@ contains
     ! Latitude: lat_centro_j = -90 + (j-1)*dy + dy/2
     call ESMF_GridGetCoord(grid, coordDim=2, &
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     do j = lbound(coordY,2), ubound(coordY,2)
       do i = lbound(coordY,1), ubound(coordY,1)
         coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_global) &
@@ -274,8 +256,7 @@ contains
     is%initialized = .false.
 
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DATM: InitializeRealize concluido', ESMF_LOGMSG_INFO)
   end subroutine InitializeRealize
@@ -293,11 +274,9 @@ contains
 
     field = ESMF_FieldCreate(grid=grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(stdname), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_Realize(state, field=field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine RealizeField
 
   !============================================================================
@@ -316,28 +295,23 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGet(gcomp, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     if (fieldCount > 0) then
       allocate(fieldNameList(fieldCount))
       call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       do i = 1, fieldCount
         call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
           field=field, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
 
         call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
 
         select case(trim(fieldNameList(i)))
           case('Sa_pslv')
@@ -353,11 +327,9 @@ contains
     end if
 
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete",  value="true", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DATM: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
   end subroutine InitializeDataComplete
@@ -382,7 +354,7 @@ contains
     type(DATM_InternalStateWrapper) :: iswrap
     type(DATM_InternalState), pointer :: is
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
-    integer :: i, j, i1, i2, j1, j2
+    integer :: i1, i2, j1, j2
     integer :: year, month, day, hour, minu, sec
     integer :: fieldCount, k
     character(len=64), allocatable :: fieldNameList(:)
@@ -391,24 +363,20 @@ contains
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
     call NUOPC_ModelGet(gcomp, modelClock=clock, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     nextTime = currTime + dt
 
     call ESMF_TimeGet(currTime, yy=year, mm=month, dd=day, &
       h=hour, m=minu, s=sec, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     write(msg,'(A,I4,5(A,I2.2))') 'DATM: avancando para ', year, '-', &
       month, '-', day, ' ', hour, ':', minu, ':', sec
@@ -416,12 +384,10 @@ contains
 
     ! Obtem limites locais a partir do primeiro campo
     call ESMF_StateGet(exportState, itemName="Sa_u10m", field=field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     i1 = lbound(fptr,1); i2 = ubound(fptr,1)
     j1 = lbound(fptr,2); j2 = ubound(fptr,2)
@@ -459,15 +425,6 @@ contains
     call ReadJRAFieldInterp(gcomp, "INPUT/JRA_prsn.nc", "prsn", currTime, is%prsn, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg="Falha prsn", line=__LINE__, file=__FILE__)) return
 
-!is%uas = 0.0
-!is%vas = 0.0
-!is%tas = 290.0
-!is%huss = 0.01
-!is%psl = 101325.0
-!is%rsds = 0.0
-!is%rlds = 0.0
-!is%prra = 0.0
-!is%prsn = 0.0
     ! Escreve campos lidos no exportState
     call PutField(exportState, "Sa_u10m",   is%uas,  rc); if (rc/=ESMF_SUCCESS) return
     call PutField(exportState, "Sa_v10m",   is%vas,  rc); if (rc/=ESMF_SUCCESS) return
@@ -481,20 +438,16 @@ contains
 
     ! Atualizar timestamps
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     allocate(fieldNameList(fieldCount))
     call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     do k = 1, fieldCount
       call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
         field=field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_SetTimestamp(field, nextTime, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     deallocate(fieldNameList)
 
@@ -520,8 +473,7 @@ contains
       line=__LINE__, file=__FILE__)) return
 
     call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     fptr = array
 
@@ -571,11 +523,10 @@ contains
     ! A interpolacao temporal e feita em f0_global antes do broadcast.
     integer, parameter :: NX = 640, NY = 320
     real(ESMF_KIND_R8), target    :: f0_global(NX,NY), f1_global(NX,NY)
-    real(ESMF_KIND_R8), pointer :: f0_1d(:)
     real(ESMF_KIND_R8), allocatable :: buf_global(:)
 
     ! Limites locais do subdominio deste PET
-    integer :: i1, i2, j1, j2, i, j, ij, localPet
+    integer :: i1, i2, j1, j2, i, j, localPet
     integer :: ni, nj!local
     character(len=256) :: msg
 
@@ -588,12 +539,10 @@ contains
     ! ver docn_cap_netcdf.F90. Evita broadcast coletivo sobre 8 PETs quando o
     ! DATM roda só no subconjunto da atmosfera (teste DATM concorrente).
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     f0_global = 0.0_ESMF_KIND_R8
     f1_global = 0.0_ESMF_KIND_R8
@@ -606,18 +555,15 @@ contains
     !--------------------------------------------------------------------------
     call ESMF_TimeSet(epochTime, yy=2016, mm=1, dd=1, h=1, m=30, s=0, &
       calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_TimeIntervalSet(interval3h, s=10800, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     dt_since_epoch = currTime - epochTime
 
     call ESMF_TimeIntervalGet(dt_since_epoch, s_i8=sec_since_epoch, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Garantir sec_since_epoch >= 0 (currTime nao pode ser anterior ao epoch)
     if (sec_since_epoch < 0_ESMF_KIND_I8) then
@@ -650,8 +596,7 @@ contains
     ! Broadcast: PET0 envia campo global para todos os PETs
     ! ESMF_VMBroadcast usa contagem de elementos (NX*NY doubles)
     call ESMF_VMBroadcast(vm, bcstData=buf_global, count=NX*NY, rootPet=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Cada PET copia apenas o seu subdominio local
     ! array tem indices globais (ESMF_INDEX_GLOBAL): lbound/ubound dao i1,i2,j1,j2 globais

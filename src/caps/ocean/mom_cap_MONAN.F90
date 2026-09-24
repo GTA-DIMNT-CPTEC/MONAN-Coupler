@@ -130,7 +130,7 @@ module MOM_cap_MONAN_mod
 
   ! Alternativa 1 + Sprint B.1 — leitura de Si_ifrac de arquivo OISST
   use docn_cap_netcdf_mod,     only : ReadOcnFieldInterp
-  use mpas_cap_config_mod,     only : cfg_use_docn_ice,        &
+  use coupler_config_mod,     only : cfg_use_docn_ice,        &
                                        cfg_docn_ice_init_only,  &
                                        cfg_docn_ice_file,       &
                                        cfg_docn_ice_varname,    &
@@ -240,53 +240,44 @@ contains
 
     ! Herda fases padrão NUOPC_Model (IPDv03)
     call NUOPC_CompDerive(gcomp, model_routine_SS, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Fase 0: seleciona versão IPDv03
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       userRoutine=InitializeP0, phase=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Fase IPDv03p1: anuncia campos
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p1"/), userRoutine=InitializeAdvertise, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Fase IPDv03p3: realiza campos e inicializa MOM6
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p3"/), userRoutine=InitializeRealize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! DataInitialize: exporta estado inicial do MOM6 (SST real t=0)
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_DataInitialize, &
       specRoutine=InitializeDataComplete, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! ModelAdvance: import → update_ocean_model → export
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, &
       specRoutine=ModelAdvance, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! CheckImport tolerante: aceita campos com timestamp em ±dt_coupling
     call ESMF_MethodRemove(gcomp, label=model_label_CheckImport, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_CheckImport, &
       specRoutine=CheckImportTolerant, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Finalize: encerra MOM6 e libera memória
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Finalize, &
       specRoutine=ModelFinalize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('OCN(MOM6): SetServices concluido', ESMF_LOGMSG_INFO)
 
@@ -303,8 +294,7 @@ contains
     rc = ESMF_SUCCESS
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
       acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine InitializeP0
 
   ! ============================================================================
@@ -327,8 +317,7 @@ contains
            StandardName=trim(import_names(n)),                       &
            TransferOfferGeomObject="cannot provide",                 &
            SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     ! Anuncia campos exportados (SST real, correntes → MED e MPAS)
@@ -336,8 +325,7 @@ contains
       call NUOPC_Advertise(exportState,                              &
            StandardName=trim(export_names(n)),                       &
            TransferOfferGeomObject="will provide", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     call ESMF_LogWrite('OCN(MOM6): InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
@@ -704,21 +692,17 @@ contains
         field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
                 staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
                 name=trim(import_names(n)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(importState, field=field, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
       do n = 1, n_export
         field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
                 staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
                 name=trim(export_names(n)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(exportState, field=field, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
       call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
     end block
@@ -761,12 +745,10 @@ contains
     is => wrap%ptr
 
     call NUOPC_ModelGet(gcomp, exportState=exportState, modelClock=clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_ClockGet(clock, startTime=startTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Obtém grade para mom_export
     call get_ocean_grid(is%ocean_state, ocean_grid)
@@ -829,23 +811,19 @@ contains
     do k = 1, fieldCount
       call ESMF_StateGet(exportState, itemName=trim(fldNames(k)), &
            field=field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_SetTimestamp(field, startTime, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     deallocate(fldNames)
 
     ! Sinaliza NUOPC que a inicialização de dados está completa
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
       value="true", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
       value="true", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('OCN(MOM6): IDC — SST + Si_ifrac exportados (t=0)', &
       ESMF_LOGMSG_INFO)
@@ -889,8 +867,7 @@ contains
     ! ── Recuperar contexto NUOPC e estado interno ─────────────────────────
     call NUOPC_ModelGet(gcomp, importState=importState, &
          exportState=exportState, modelClock=clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GetInternalState Advance', &
@@ -899,8 +876,7 @@ contains
 
     ! ── Obter instante atual e passo de tempo ─────────────────────────────
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=timeStep, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     nextTime = currTime + timeStep
 
     ! Converter ESMF → FMS para update_ocean_model
@@ -976,20 +952,16 @@ contains
 
     ! ── Passo 4: Atualizar timestamps NUOPC de todos os campos exportados ──
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     allocate(fldNames(fieldCount))
     call ESMF_StateGet(exportState, itemNameList=fldNames, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     do k = 1, fieldCount
       call ESMF_StateGet(exportState, itemName=trim(fldNames(k)), &
            field=field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_SetTimestamp(field, nextTime, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     deallocate(fldNames)
 
@@ -1023,11 +995,9 @@ contains
 
     ! Obtém stopTime para ocean_model_end
     call NUOPC_ModelGet(gcomp, modelClock=clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_ClockGet(clock, stopTime=stopTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     ! [C6] Converter ESMF_Time -> FMS via ESMF_TimeGet + set_date
     call ESMF_TimeGet(stopTime, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
     fms_stop = set_date(yr, mo, dy, hr, mn, sc)
@@ -1073,12 +1043,10 @@ contains
     rc = ESMF_SUCCESS
 
     call NUOPC_ModelGet(gcomp, importState=importState, modelClock=clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     do n = 1, n_import
       call ESMF_StateGet(importState, itemName=trim(import_names(n)), &
@@ -1233,11 +1201,9 @@ contains
 
     ! ── 1. Relógio corrente ─────────────────────────────────────────────────
     call ESMF_GridCompGet(gcomp, clock=clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_ClockGet(clock, currTime=currTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! ── 2. Ler OISST globalmente via ReadOcnFieldInterp ─────────────────────
     nx = cfg_docn_nx

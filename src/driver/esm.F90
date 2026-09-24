@@ -1,1253 +1,469 @@
 !> @file esm.F90
-!! @brief Driver ESMF/NUOPC do sistema acoplado MONAN-A 2.0 × MOM6+SIS2.
+!! @brief Driver NUOPC do sistema acoplado MONAN-A 2.0 x MOM6 + SIS2.
 !!
-!! Versão 8.0 — Fase 2 completa: acoplamento dinâmico real MPAS × MOM6+SIS2.
-!!
-!! Arquitetura:
-!!   MPAS (ATM) ──→ MED ──→ OCN
-!!                   ↑         │
-!!             OCN ──┘         │ (Fase 2)
-!!             MED ──────────→ MPAS
+!! O driver registra os componentes e os conectores e define a ordem de
+!! execução de cada passo de acoplamento (RunSequence). Tudo o que ele faz é
+!! decidido pela configuração lida de nuopc.input (coupler_config_mod).
 !!
 !! Componentes:
-!!   MPAS : modelo atmosférico MONAN-A 2.0 (MPAS 8.3.1), malha Voronoi
-!!   MED  : mediador MED_cap_MONAN — bulk NCAR (Large & Yeager 2009)
-!!   OCN  : MOM6+SIS2 dinâmico (MOM_cap_MONAN_mod — Fase 2)
+!!   MPAS  atmosfera MONAN-A 2.0 (MPAS-A 8.3.1)
+!!   MED   mediador: fluxos ar-mar por fórmulas bulk NCAR
+!!   OCN   oceano: MOM6 dinâmico, ou DOCN (SST lida de arquivo OISST)
+!!   ICE   gelo marinho SIS2 (opcional, use_sis2_dynamic)
 !!
-!! Conectores (4 no total):
-!!   MPAS → MED  : 9 campos atmosféricos com sufixo _mpas
-!!   OCN  → MED  : So_t, Si_ifrac, So_u, So_v → fórmula bulk
-!!   MED  → OCN  : 14 campos de fluxo calculados (Foxx_*, Faxa_*, etc.)
-!!   MED  → MPAS : So_t, Si_ifrac, So_u, So_v, Sf_zorl (Fase 2, regrid conserv.)
-!!              OU OCN → MPAS direto (Fase 1, DOCN)
+!! Dois eixos independentes definem a execução:
+!!   pet_layout    (espaço)  shared: todos em todos os PETs;
+!!                           split: blocos disjuntos ATM | OCN | ICE, MED em todos.
+!!   coupling_mode (tempo)   sequential: um componente depois do outro;
+!!                           concurrent: ATM, OCN e ICE avançam ao mesmo tempo,
+!!                           com defasagem de um passo nos dados trocados.
 !!
-!! RunSequence — Fase 2 (use_med_to_mpas=true, MOM6 dinâmico):
-!!   1. OCN  → MED   So_t, Si_ifrac, So_u, So_v → mediador
-!!   2. MPAS → MED   9 campos _mpas → mediador
-!!   3. MED           RouteOcnToAtm (regrid conservativo) + bulk NCAR
-!!   4. MED  → MPAS  SST, gelo, correntes → MONAN-A (regrid conservativo)
-!!   5. MPAS          dinâmica + física atmosférica (N×dt_atm)
-!!   6. MED  → OCN   14 fluxos Foxx_*/Faxa_* → MOM6+SIS2
-!!   7. OCN           avança MOM6+SIS2 (sub-cicla barotrópico internamente)
+!! Sincronização: uma linha de modelo na RunSequence não sincroniza PETs. Os
+!! conectores de e para o MED rodam na união dos PETs de origem e destino e,
+!! como o MED está em todos os PETs, cada um deles é um ponto de encontro de
+!! todos os PETs. Ver docs/analise-sequential-split-sis2.md.
 !!
-!! RunSequence — Fase 1 (use_med_to_mpas=false, DOCN):
-!!   1. OCN  → MPAS  SST lag t-1 → sfc_input MONAN-A
-!!   2. MPAS          dinâmica + física atmosférica (N×dt_atm)
-!!   3. MPAS → MED   9 campos _mpas → mediador
-!!   4. OCN  → MED   So_t, Si_ifrac, So_u, So_v → mediador
-!!   5. MED           fórmula bulk NCAR → 14 fluxos
-!!   6. MED  → OCN   14 fluxos Foxx_*/Faxa_*
-!!   7. OCN           avança DOCN (OISST netcdf)
-!!
-!! Alterações (Set/2026):
-!!   Acrescentada ao log, no ramo pet_layout='split' com coupling_mode=
-!!   'sequential', uma linha que nomeia quantos PETs ficam parados em cada
-!!   fase do passo. Nenhuma mudança de comportamento; é diagnóstico para
-!!   interpretar o consumo de fila (nós × walltime) sem cronometrar as
-!!   janelas de execução componente a componente.
-!!
-!!   Documentado em SetRunSequence o mecanismo de sincronização da
-!!   RunSequence (linha de Model não sincroniza; conector de/para o MED
-!!   sincroniza, porque o MED está em todos os PETs) e o registro de que a
-!!   reordenação de 'MED -> ICE' foi avaliada e descartada. Ver
-!!   docs/analise-sequential-split-sis2.md.
-!!
-!! NUOPC/ESMF 8.9.1 — INPE / CGCT / DIMNT — Grupo de Trabalho para
-!! Acoplamento de Modelos. Cachoeira Paulista, SP — Maio 2026.
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module ESM_MONAN
 
   use ESMF
-  use NUOPC, only : NUOPC_FreeFormatCreate, NUOPC_FreeFormat, &
-                    NUOPC_FreeFormatDestroy, NUOPC_CompAttributeSet, &
-                    NUOPC_CompAttributeAdd, NUOPC_CompAttributeGet, &
-                    NUOPC_FieldDictionarySetAutoAdd, &
-                    NUOPC_CompDerive, NUOPC_CompSpecialize
-  use NUOPC_Driver, &
-    driver_routine_SS             => SetServices,            &
-    driver_label_SetModelServices => label_SetModelServices, &
-    driver_label_SetRunSequence   => label_SetRunSequence,   &
-    driver_label_ModifyCplLists   => label_ModifyCplLists    ! B-CPL-TERMORDER-01
-
-  ! Conector NUOPC padrão
-  use NUOPC_Connector, only : CPL_SetServices => SetServices
-
-  ! Caps dos componentes
-  ! Correcao B-60: modulos MONAN usam sufixo _MONAN no nome interno.
-  ! Diagnostico build/mod/ confirmou: mpas_cap_monan_mod.mod e med_cap_monan_mod.mod
-  use mpas_cap_MONAN_mod,  only : MPAS_SetServices => SetServices
-  use MED_cap_MONAN_mod,   only : MED_SetServices  => SetServices
-  ! Fase 2: OCN usa MOM_cap_MONAN_mod (wrapper sobre MOM_cap_mod com
-  ! InitializeRealize, ModelAdvance e Finalize reais do MOM6+SIS2).
-  ! Quando use_docn=.true. (Fase 1), DOCN_SetServices é usado no lugar.
-  use MOM_cap_MONAN_mod,   only : OCN_SetServices  => SetServices
-  use DOCN_cap_mod,        only : DOCN_SetServices => SetServices
-
-  ! Componente ICE (SIS2 dinâmico), integrado a partir do MONAN-Coupler-PK.
-  ! É um componente NUOPC separado, e não um subcomponente embutido no OCN via
-  ! combined_ice_ocean_driver. Só é registrado quando cfg_use_sis2_dynamic
-  ! está ligado.
-  use sis_cap_MONAN_mod,   only : ICE_SetServices  => SetServices
-  use mpas_cap_config_mod, only : cfg_use_datm, cfg_use_docn, &
-                                   cfg_use_med_to_mpas, config_read, &
-                                   cfg_coupling_mode, cfg_pet_layout, &
-                                   cfg_atm_pet_count, cfg_ocn_pet_count, &
-                                   cfg_ice_pet_count, cfg_use_sis2_dynamic, &
-                                   cfg_seq_repro
+  use NUOPC,             only : NUOPC_FreeFormat, NUOPC_FreeFormatCreate,   &
+                                NUOPC_FreeFormatDestroy, NUOPC_CompDerive,  &
+                                NUOPC_CompSpecialize, NUOPC_CompAttributeSet, &
+                                NUOPC_CompAttributeGet,                     &
+                                NUOPC_FieldDictionarySetAutoAdd
+  use NUOPC_Driver,      driver_routine_SS             => SetServices,            &
+                         driver_label_SetModelServices => label_SetModelServices, &
+                         driver_label_SetRunSequence   => label_SetRunSequence,   &
+                         driver_label_ModifyCplLists   => label_ModifyCplLists
+  use NUOPC_Connector,   only : CPL_SetServices  => SetServices
+  use mpas_cap_MONAN_mod, only : MPAS_SetServices => SetServices
+  use MED_cap_MONAN_mod,  only : MED_SetServices  => SetServices
+  use MOM_cap_MONAN_mod,  only : OCN_SetServices  => SetServices
+  use DOCN_cap_mod,       only : DOCN_SetServices => SetServices
+  use sis_cap_MONAN_mod,  only : ICE_SetServices  => SetServices
+  use coupler_config_mod, only : cfg_use_docn, cfg_use_med_to_mpas,     &
+                                 cfg_use_sis2_dynamic, cfg_seq_repro,   &
+                                 cfg_coupling_mode, cfg_pet_layout,     &
+                                 cfg_atm_pet_count, cfg_ocn_pet_count,  &
+                                 cfg_ice_pet_count
+  use coupler_utils_mod,  only : ChkErr, int_to_str
 
   implicit none
   private
   public :: SetServices
 
-  ! ── Rótulos dos componentes ───────────────────────────────────────────────
-  character(len=*), parameter :: MPAS_LABEL = "MPAS"
-  character(len=*), parameter :: MED_LABEL  = "MED"
-  character(len=*), parameter :: OCN_LABEL  = "OCN"
-  character(len=*), parameter :: ICE_LABEL  = "ICE"
-
-  !----------------------------------------------------------------------------
-  ! dt_coupling_s: intervalo de acoplamento em segundos.
-  !   3h = 10800 s — padrão para experimentos MONAN-A 2.0 × MOM6.
-  !   Editar aqui ou sobrescrever via atributo NUOPC "dt_coupling".
-  !----------------------------------------------------------------------------
-  ! dt_coupling_s lido dinamicamente do clock do driver em SetRunSequence
-  ! (era: integer, parameter :: dt_coupling_s = 10800 — bug: hardcoded)
+  character(len=*), parameter :: MPAS_LABEL = 'MPAS'
+  character(len=*), parameter :: MED_LABEL  = 'MED'
+  character(len=*), parameter :: OCN_LABEL  = 'OCN'
+  character(len=*), parameter :: ICE_LABEL  = 'ICE'
 
 contains
 
-  ! ============================================================================
+  !> Registra o driver NUOPC e as três especializações usadas.
   subroutine SetServices(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
 
-    rc = ESMF_SUCCESS
-
     call NUOPC_CompDerive(driver, driver_routine_SS, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call NUOPC_CompSpecialize(driver, &
-      specLabel=driver_label_SetModelServices, &
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call NUOPC_CompSpecialize(driver, specLabel=driver_label_SetModelServices, &
       specRoutine=SetModelServices, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    ! B-CPL-TERMORDER-01: fixa a ordem de soma dos conectores NUOPC.
-    call NUOPC_CompSpecialize(driver, &
-      specLabel=driver_label_ModifyCplLists, &
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call NUOPC_CompSpecialize(driver, specLabel=driver_label_ModifyCplLists, &
       specRoutine=ModifyCplLists, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call NUOPC_CompSpecialize(driver, &
-      specLabel=driver_label_SetRunSequence, &
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call NUOPC_CompSpecialize(driver, specLabel=driver_label_SetRunSequence, &
       specRoutine=SetRunSequence, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
+    if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine SetServices
 
-  ! ============================================================================
-  !> @brief Registra um componente Model no driver e, no mesmo passo, atribui a
-  !! ele o relógio do driver.
-  !!
-  !! FIX-CLOCK-EXPLICITO (Ago 2026): criado para consertar um problema real —
-  !! com 3+ componentes concorrentes de PETs disjuntos (ATM/OCN/ICE), o
-  !! mecanismo automático do NUOPC não estava atribuindo relógio interno a
-  !! alguns componentes (rastreado até NUOPC_ModelBase.F90/
-  !! NUOPC_CompCheckSetClock, erro "Clock object is not present" — ver
-  !! SIS2_ativacao_plano_integracao.md para o histórico completo).
-  !!
-  !! IMPORTANTE PARA MANUTENÇÃO FUTURA: quando adicionar um NOVO componente
-  !! Model ao sistema (ex.: WAV, LND, um novo componente qualquer), use ESTA
-  !! função em vez de chamar NUOPC_DriverAddComp diretamente — assim a
-  !! correção do relógio é aplicada automaticamente, sem precisar lembrar de
-  !! repetir o mesmo bloco de código toda vez. Para Connectors (MED<->X),
-  !! use AddConnectorWithClock logo abaixo — o mesmo problema (e a mesma
-  !! correção, com ESMF_CplCompSet em vez de ESMF_GridCompSet) também
-  !! afeta Connectors, confirmado via NUOPC Compliance Checker
-  !! ("MED-TO-ICE: The internal Clock is not present!").
-  !!
-  !! Com três ou mais componentes em blocos disjuntos de PETs (ATM/OCN/ICE), o
-  !! mecanismo automático do NUOPC não estava atribuindo relógio interno a
-  !! alguns componentes, e a execução abortava com "Clock object is not
-  !! present" (rastreado até NUOPC_ModelBase.F90/NUOPC_CompCheckSetClock).
-  !! Atribuir o relógio explicitamente logo após o registro resolve.
-  !!
-  !! Ao acrescentar um componente Model novo (WAV, LND, o que for), use esta
-  !! rotina em vez de chamar NUOPC_DriverAddComp direto: assim a atribuição do
-  !! relógio vem junto, sem depender de alguém lembrar de repetir o bloco.
-  subroutine AddModelCompWithClock(driver, compLabel, compSetServicesRoutine, &
-      petList, driverClock, comp, rc)
-    type(ESMF_GridComp), intent(inout) :: driver
-    character(len=*),    intent(in)    :: compLabel
-    interface
-      subroutine compSetServicesRoutine(gcomp, rc)
-        use ESMF, only: ESMF_GridComp
-        type(ESMF_GridComp)   :: gcomp
-        integer, intent(out)  :: rc
-      end subroutine
-    end interface
-    integer,              intent(in)    :: petList(:)
-    type(ESMF_Clock),     intent(in)    :: driverClock
-    type(ESMF_GridComp),  intent(out)   :: comp
-    integer,              intent(out)   :: rc
-
-    ! CORREÇÃO (bug real, encontrado em execução): o relógio entregue a cada
-    ! componente precisa ser uma CÓPIA, não o objeto do driver.
-    !
-    ! ESMF_Clock é um tipo por referência. Passar driverClock direto para
-    ! ESMF_GridCompSet fazia todos os componentes Model apontarem para o
-    ! MESMO relógio físico. Como o NUOPC avança o relógio associado a cada
-    ! componente depois do respectivo Advance, com três componentes Model
-    ! (MPAS, OCN e ICE) o mesmo relógio recebia até três avanços por ciclo
-    ! de dt_coupling, em vez de um. O sintoma observado foi a escrita de
-    ! monan2_import passar de horária para a cada três horas: exatamente o
-    ! fator 3 previsto.
-    !
-    ! ESMF_ClockCreate com um relógio como argumento é o construtor de cópia
-    ! do ESMF, e resolve o problema.
-    type(ESMF_Clock) :: compClock
-
-    call NUOPC_DriverAddComp(driver,                          &
-      compLabel              = compLabel,                     &
-      compSetServicesRoutine = compSetServicesRoutine,        &
-      petList                = petList,                       &
-      comp                   = comp,                          &
-      rc                     = rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    compClock = ESMF_ClockCreate(driverClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ESM: falha ao copiar ' // &
-      'relogio para o componente ' // trim(compLabel), &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_GridCompSet(comp, clock=compClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ESM: falha ao atribuir ' // &
-      'relogio explicito ao componente ' // trim(compLabel), &
-      line=__LINE__, file=__FILE__)) return
-
-  end subroutine AddModelCompWithClock
-
-  ! ============================================================================
-  !> @brief Registra um Connector e atribui a ele uma CÓPIA independente do
-  !! relógio do driver. Equivalente a AddModelCompWithClock, mas para
-  !! ESMF_CplComp em vez de ESMF_GridComp.
-  !!
-  !! O mesmo problema de relógio ausente afeta os conectores; o NUOPC Compliance
-  !! Checker acusava "MED-TO-ICE: The internal Clock is not present!". Use esta
-  !! rotina ao acrescentar um conector novo.
-  !!
-  !! Registra um Connector (MED<->X) no driver E atribui explicitamente
-  !! uma cópia independente do relógio do driver a ele, num único passo.
-  !! Equivalente a AddModelCompWithClock, mas para ESMF_CplComp (Connector),
-  !! não ESMF_GridComp (Model).
-  !!
-  !! IMPORTANTE PARA MANUTENÇÃO FUTURA: quando adicionar um NOVO conector
-  !! (ex.: MED<->WAV), use ESTA função em vez de chamar NUOPC_DriverAddComp
-  !! diretamente.
-  subroutine AddConnectorWithClock(driver, srcCompLabel, dstCompLabel, &
-      compSetServicesRoutine, driverClock, rc)
-    type(ESMF_GridComp), intent(inout) :: driver
-    character(len=*),    intent(in)    :: srcCompLabel, dstCompLabel
-    interface
-      subroutine compSetServicesRoutine(cplcomp, rc)
-        use ESMF, only: ESMF_CplComp
-        type(ESMF_CplComp)    :: cplcomp
-        integer, intent(out)  :: rc
-      end subroutine
-    end interface
-    type(ESMF_Clock),     intent(in)    :: driverClock
-    integer,              intent(out)   :: rc
-
-    type(ESMF_CplComp) :: cplComp
-    ! Cópia independente do relógio, mesma razão explicada em
-    ! AddModelCompWithClock acima.
-    type(ESMF_Clock)   :: cplClock
-
-    call NUOPC_DriverAddComp(driver,                          &
-      srcCompLabel           = srcCompLabel,                  &
-      dstCompLabel           = dstCompLabel,                  &
-      compSetServicesRoutine = compSetServicesRoutine,        &
-      comp                   = cplComp,                       &
-      rc                     = rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    cplClock = ESMF_ClockCreate(driverClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ESM: falha ao copiar ' // &
-      'relogio para o conector ' // trim(srcCompLabel) // '->' // &
-      trim(dstCompLabel), line=__LINE__, file=__FILE__)) return
-
-    call ESMF_CplCompSet(cplComp, clock=cplClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ESM: falha ao atribuir ' // &
-      'relogio explicito ao conector ' // trim(srcCompLabel) // '->' // &
-      trim(dstCompLabel), line=__LINE__, file=__FILE__)) return
-
-  end subroutine AddConnectorWithClock
-
-  ! ============================================================================
-  !> @brief Acrescenta ':termorder=srcseq' a toda entrada de CplList.
-  !!
-  !! FIX B-CPL-TERMORDER-01 (Set/2026).
-  !!
-  !! O PROBLEMA. Um conector NUOPC executa, por baixo, um produto
-  !! matriz-esparsa: cada ponto de destino recebe a SOMA das contribuicoes de
-  !! varios pontos de origem, que chegam de PETs diferentes. A ordem dessa
-  !! soma vem da opcao 'termorder=' de cada entrada da CplList, e o DEFAULT do
-  !! NUOPC_Connector e' ESMF_TERMORDER_FREE: soma na ordem de chegada das
-  !! mensagens, que varia entre execucoes. Soma de ponto flutuante nao e'
-  !! associativa, entao o ultimo bit muda de uma rodada para outra.
-  !!
-  !! POR QUE O CONSERTO NO MEDIADOR NAO BASTOU. O B-REGRID-TERMORDER-01 fixou
-  !! SRCSEQ nas 18 chamadas de ESMF_FieldRegrid do MED_cap.F90. Mas os quatro
-  !! conectores deste driver sao componentes NUOPC_Connector genericos,
-  !! registrados por NUOPC_DriverAddComp com src/dstCompLabel: o regrid deles
-  !! acontece DENTRO do conector, nao no MED_cap. O caminho MED->MPAS, que e'
-  !! por onde a condicao de contorno chega ao MPAS, e' justamente um desses.
-  !!
-  !! A EVIDENCIA. Medicao de 17/09/2026, quatro execucoes, dt_coupling=43200
-  !! (uma unica injecao, na segunda janela): o monan_export de t=0 e' identico
-  !! nos seis pares, ou seja, a exportacao ja' esta' reproduzivel depois do
-  !! B-EXPORT-ALLREDUCE-01; e ainda assim o estado do MPAS diverge nos seis
-  !! pares, sempre no registro 73, que e' o passo da injecao. O caminho de
-  !! importacao nao tem nenhuma coletiva propria (state_get_field_1d faz
-  !! ESMF_FieldGather ordenado por indice global e escolha de vizinho mais
-  !! proximo, sem soma). A unica soma nao determinstica que resta entre o
-  !! mediador e o MPAS e' a do conector.
-  !!
-  !! COMO. O NUOPC monta a CplList sozinho, uma entrada por campo acoplado.
-  !! Esta especializacao roda depois disso e antes de os RouteHandles serem
-  !! computados, que e' a janela em que a lista ainda pode ser alterada. Cada
-  !! entrada ganha o sufixo ':termorder=srcseq'. O parser do NUOPC_Connector
-  !! aceita 'srcseq', 'srcpet' e 'free', e rejeita com mensagem de erro
-  !! qualquer outro valor: opcao desconhecida nao passa em silencio.
-  !!
-  !! CUSTO. SRCSEQ ordena os termos pelo indice de sequencia da origem antes
-  !! de somar. O custo em tempo de execucao aparece em cada troca de
-  !! acoplamento, nao a cada passo do modelo. Nas medicoes com o mediador ja'
-  !! em SRCSEQ o tempo de parede nao mudou de forma perceptivel.
-  !!
-  !! IDEMPOTENTE. Entradas que ja' tragam 'termorder=' sao deixadas como
-  !! estao, para que uma escolha explicita feita em outro lugar nao seja
-  !! sobrescrita aqui sem aviso.
-  subroutine ModifyCplLists(driver, rc)
-    type(ESMF_GridComp)  :: driver
-    integer, intent(out) :: rc
-
-    ! B-SRCTERM-01: 160 -> 512. Cada entrada recebe ate' 37 caracteres a mais
-    ! (':termorder=srcseq' e ':srcTermProcessing=0'); com 160, uma entrada
-    ! original acima de 123 caracteres seria cortada em silencio.
-    character(len=512), allocatable :: cplList(:)
-    type(ESMF_CplComp),     pointer :: connectorList(:)
-    integer            :: i, j, cplListSize, n_mod, n_ja
-    integer            :: n_src   ! B-SRCTERM-01
-    integer            :: n_trunc ! B-SRCTERM-01: entradas sem espaco
-    ! B-SRCTERM-01: 160 -> 256. A mensagem com as duas contagens tem 174
-    ! caracteres; com 160 o write interno falhava com "End of record".
-    character(len=256) :: msg
-
-    rc = ESMF_SUCCESS
-    nullify(connectorList)
-    n_mod = 0
-    n_src = 0   ! B-SRCTERM-01
-    n_trunc = 0 ! B-SRCTERM-01
-    n_ja  = 0
-
-    call NUOPC_DriverGetComp(driver, compList=connectorList, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    do i = 1, size(connectorList)
-      ! Tamanho primeiro: a consulta com valueList exige o vetor ja' alocado.
-      call NUOPC_CompAttributeGet(connectorList(i), name='CplList', &
-        itemCount=cplListSize, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      if (cplListSize > 0) then
-        allocate(cplList(cplListSize))
-        call NUOPC_CompAttributeGet(connectorList(i), name='CplList', &
-          valueList=cplList, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
-
-        do j = 1, cplListSize
-          if (index(cplList(j), 'termorder=') > 0) then
-            n_ja = n_ja + 1
-          else if (len_trim(cplList(j)) + len(':termorder=srcseq') > len(cplList(j))) then
-            n_trunc = n_trunc + 1
-          else
-            cplList(j) = trim(cplList(j))//':termorder=srcseq'
-            n_mod = n_mod + 1
-          end if
-          ! B-SRCTERM-01 (22/09/2026): termorder fixa apenas a ordem da soma
-          ! FINAL, no destino. As somas PARCIAIS do lado da origem sao
-          ! controladas por srcTermProcessing, que o ESMF escolhe por
-          ! auto-ajuste quando nao e' informado (mede desempenho em tempo de
-          ! execucao). Valores diferentes entre execucoes mudam o
-          ! agrupamento das parcelas e, com isso, o ultimo bit do resultado.
-          ! Zero manda fazer toda a aritmetica no destino.
-          if (index(cplList(j), 'srcTermProcessing=') <= 0) then
-            if (len_trim(cplList(j)) + len(':srcTermProcessing=0') > len(cplList(j))) then
-              n_trunc = n_trunc + 1
-            else
-              cplList(j) = trim(cplList(j))//':srcTermProcessing=0'
-              n_src = n_src + 1
-            end if
-          end if
-        end do
-
-        call NUOPC_CompAttributeSet(connectorList(i), name='CplList', &
-          valueList=cplList, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
-
-        deallocate(cplList)
-      end if
-    end do
-
-    deallocate(connectorList)
-
-    write(msg,'(A,I0,A,I0,A,I0,A,I0)') 'ESM: B-CPL-TERMORDER-01 - termorder=srcseq '// &
-      'aplicado a ', n_mod, ' entrada(s) de CplList; ', n_ja, &
-      ' ja possuiam termorder explicito; B-SRCTERM-01 - srcTermProcessing=0 '// &
-      'aplicado a ', n_src, ' entrada(s); sem espaco: ', n_trunc
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-    if (n_trunc > 0) call ESMF_LogWrite('ESM: B-SRCTERM-01 - ATENCAO: ha entrada(s) '// &
-      'de CplList sem espaco para as opcoes de reprodutibilidade; aumentar len '// &
-      'de cplList em ModifyCplLists', ESMF_LOGMSG_WARNING)
-    write(*,'(A)') ' '//trim(msg)
-
-  end subroutine ModifyCplLists
-
-  ! ============================================================================
-  !> @brief Registra componentes (MPAS, MED, OCN) e conectores.
+  !> Registra componentes e conectores.
   subroutine SetModelServices(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
 
     type(ESMF_GridComp)  :: mpasComp, medComp, ocnComp, iceComp
-    type(ESMF_Clock)        :: driverClock
-    type(ESMF_TimeInterval) :: driverTimeStep
-    integer(ESMF_KIND_I8)   :: dt_coupling_i8
+    type(ESMF_Clock)     :: driverClock
     integer              :: petCount, i, nAtm, nOcn, nIce
-    integer, allocatable :: atmPetList(:), ocnPetList(:), medPetList(:)
-    integer, allocatable :: icePetList(:)
-    logical              :: use_ice         ! componente ICE (SIS2) ativo?
-    logical              :: is_concurrent   ! eixo TEMPORAL  (RunSequence)
-    logical              :: is_split        ! eixo ESPACIAL  (petList)
-    character(len=10)    :: exec_str        ! 'SEQUENTIAL' | 'CONCURRENT'
-    integer              :: cfg_rc
-    character(len=160)   :: msg
-    character(len=16)    :: dt_str
-    character(len=8)     :: val_med_to_mpas
-    logical              :: use_med_to_mpas
-    logical              :: use_datm_local, use_docn_local
-    character(len=8)     :: str_use_datm, str_use_docn
-    ! ── Mudança ② (v7.0): variáveis para atributos obrigatórios do MOM6 ──────
-    ! O FMS (Flexible Modeling System) precisa de stop_ymd/stop_tod para
-    ! gerenciar alarmes de restart e parada do MOM6 internamente.
-    type(ESMF_Time)      :: stop_t
-    integer              :: syy, smm, sdd, sh, sm_int, ss_int
-    character(len=8)     :: stop_ymd_str   ! YYYYMMDD
-    character(len=6)     :: stop_tod_str   ! segundos desde meia-noite
+    integer, allocatable :: allPets(:), atmPets(:), ocnPets(:), icePets(:)
+    logical              :: use_ice
 
     rc = ESMF_SUCCESS
+    use_ice = cfg_use_sis2_dynamic
 
-    ! AutoAdd necessário para nomes customizados (_mpas, So_t, Foxx_*, etc.)
+    ! Nomes de campo próprios do acoplador (_mpas, Foxx_* etc.)
     call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_GridCompGet(driver, petCount=petCount, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    call ESMF_GridCompGet(driver, petCount=petCount, clock=driverClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
-    ! Particionamento de PETs (lido de &nuopc_petlayout via config_read, que já
-    ! foi chamado em esmApp.F90 antes de ESMF_Initialize).
-    !
-    ! São DOIS eixos ORTOGONAIS, e tratá-los como um só era o defeito corrigido
-    ! na v14.20 (o split de comunicador só existia no ramo concurrent, de modo
-    ! que atm_pet_count/ocn_pet_count eram descartados em silêncio no modo
-    ! sequential):
-    !
-    !   cfg_pet_layout    — decidido AQUI, pelas petList dos componentes:
-    !     'shared' : MPAS, MED e OCN em TODOS os PETs (sem split).
-    !     'split'  : ATM e OCN em blocos DISJUNTOS de PETs (split de
-    !                comunicador); MED permanece em todos os PETs.
-    !
-    !   cfg_coupling_mode — decidido em SetRunSequence, pela RunSequence:
-    !     'sequential' : ATM e OCN avançam um depois do outro (sem lag).
-    !     'concurrent' : ATM e OCN avançam ao mesmo tempo (lag de 1 passo).
-    !
-    ! sequential+split é uma configuração legal e útil: MPAS e MOM6 mantêm
-    ! decomposições de tamanhos muito diferentes, cada um no seu comunicador,
-    ! sem a defasagem de um passo do modo concorrente. O preço é tempo de
-    ! parede (soma dos dois componentes, com PETs ociosos em cada fase).
-    ! concurrent+shared é rejeitado em mpas_cap_config (config_read).
-    !
-    ! Os 4 conectores NÃO precisam de petList: NUOPC_DriverAddComp com
-    ! src/dstCompLabel roda automaticamente na UNIÃO dos PETs de origem e
-    ! destino — válido nos dois layouts e nos dois modos.
-    !--------------------------------------------------------------------------
-    is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
-    is_split      = (trim(cfg_pet_layout)    == 'split')
-    use_ice       = cfg_use_sis2_dynamic
-    if (is_concurrent) then
-      exec_str = 'CONCURRENT'
+    ! ---- Divisão de PETs entre componentes --------------------------------
+    allPets = [(i - 1, i = 1, petCount)]
+    if (trim(cfg_pet_layout) == 'split') then
+      call split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
+      if (rc /= ESMF_SUCCESS) return
+      atmPets = allPets(1:nAtm)
+      ocnPets = allPets(nAtm+1:nAtm+nOcn)
+      icePets = allPets(nAtm+nOcn+1:petCount)
     else
-      exec_str = 'SEQUENTIAL'
+      nAtm = petCount; nOcn = petCount; nIce = merge(petCount, 0, use_ice)
+      atmPets = allPets; ocnPets = allPets; icePets = allPets(1:nIce)
     end if
+    call log_layout(petCount, nAtm, nOcn, nIce, use_ice)
 
-    ! O relógio do driver é buscado AQUI, antes de qualquer registro de
-    ! componente, porque cada componente e cada conector recebem esse relógio
-    ! explicitamente no momento em que são registrados (ver
-    ! AddModelCompWithClock / AddConnectorWithClock).
-    call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    ! ---- Componentes --------------------------------------------------------
+    call add_model(driver, MPAS_LABEL, MPAS_SetServices, atmPets, driverClock, mpasComp, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    allocate(medPetList(petCount))
-    medPetList = [(i-1, i=1,petCount)]
+    call add_model(driver, MED_LABEL, MED_SetServices, allPets, driverClock, medComp, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    if (is_split) then
-      ! Partição disjunta ATM | OCN [| ICE], cobrindo todos os PETs.
-      !
-      ! O gelo entra aqui como um terceiro bloco, e não como um caso à parte:
-      ! quando use_ice está desligado, nIce=0 e as contas abaixo recaem
-      ! exatamente na divisão em dois blocos que existia antes, o que mantém a
-      ! partição byte a byte idêntica para quem não usa SIS2 dinâmico.
-      nAtm = cfg_atm_pet_count
-      nOcn = cfg_ocn_pet_count
-      nIce = 0
-      if (use_ice) nIce = cfg_ice_pet_count
-
-      if (use_ice .and. nIce <= 0) then
-        ! Automático: o que não foi fixado é dividido em partes ~iguais.
-        if (nAtm <= 0 .and. nOcn <= 0) then
-          nAtm = petCount / 3
-          nOcn = petCount / 3
-          nIce = petCount - nAtm - nOcn
-        else if (nAtm <= 0) then
-          nAtm = (petCount - nOcn) / 2
-          nIce = petCount - nAtm - nOcn
-        else if (nOcn <= 0) then
-          nOcn = (petCount - nAtm) / 2
-          nIce = petCount - nAtm - nOcn
-        else
-          nIce = petCount - nAtm - nOcn
-        end if
-      else if (nAtm <= 0 .and. nOcn <= 0) then
-        nAtm = (petCount - nIce + 1) / 2   ! metade, arredondando p/ cima
-        nOcn = petCount - nAtm - nIce
-      else if (nAtm <= 0) then
-        nAtm = petCount - nOcn - nIce
-      else if (nOcn <= 0) then
-        nOcn = petCount - nAtm - nIce
-      end if
-
-      if (nAtm < 1 .or. nOcn < 1 .or. (use_ice .and. nIce < 1) &
-          .or. nAtm + nOcn + nIce /= petCount) then
-        write(msg,'(A,I0,A,I0,A,I0,A,I0,A)') &
-          'ESM: ERRO particao split invalida — nAtm=', nAtm, &
-          ' nOcn=', nOcn, ' nIce=', nIce, &
-          ' devem somar petCount=', petCount, '.'
-        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_ERROR)
-        rc = ESMF_FAILURE; return
-      end if
-
-      allocate(atmPetList(nAtm)); atmPetList = [(i-1,      i=1,nAtm)]
-      allocate(ocnPetList(nOcn)); ocnPetList = [(nAtm+i-1, i=1,nOcn)]
-
-      if (use_ice) then
-        allocate(icePetList(nIce))
-        icePetList = [(nAtm+nOcn+i-1, i=1,nIce)]
-        write(msg,'(A,A,A,I0,A,I0,A,I0,A,I0,A,I0,A)') &
-          'ESM: layout SPLIT (execucao ', trim(exec_str), &
-          ') — ATM=PET[0..', nAtm-1, '] OCN=PET[', &
-          nAtm, '..', nAtm+nOcn-1, '] ICE=PET[', nAtm+nOcn, '..', &
-          petCount-1, '] MED=todos'
-      else
-        allocate(icePetList(0))
-        write(msg,'(A,A,A,I0,A,I0,A,I0,A)') &
-          'ESM: layout SPLIT (execucao ', trim(exec_str), &
-          ') — ATM=PET[0..', nAtm-1, '] OCN=PET[', &
-          nAtm, '..', petCount-1, '] MED=todos (ICE desativado)'
-      end if
-      call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-
-      ! Modelo de ocupação de sequential+split, explícito no log (Set/2026).
-      ! Não é erro nem aviso de defeito: é a informação de que uma fração
-      ! conhecida dos PETs fica parada em cada fase, para que quem lê o log
-      ! saiba interpretar o consumo de fila (nós × walltime) sem precisar
-      ! cronometrar as janelas de execução componente a componente.
-      ! As fases são executadas EM SÉRIE; ver o comentário em SetRunSequence
-      ! sobre o que sincroniza a RunSequence.
-      if (.not. is_concurrent) then
-        if (use_ice) then
-          write(msg,'(A,I0,A,I0,A,I0,A,I0,A)') &
-            'ESM: sequential+split: fases em serie MED, ATM, OCN, ICE. ' // &
-            'Parados: ', nOcn+nIce, ' PET no ATM, ', nAtm+nIce, &
-            ' no OCN, ', nAtm+nOcn, ' no ICE (de ', petCount, ').'
-        else
-          write(msg,'(A,I0,A,I0,A,I0,A)') &
-            'ESM: sequential+split: fases em serie MED, ATM, OCN. ' // &
-            'Parados: ', nOcn, ' PET no ATM, ', &
-            nAtm, ' no OCN (de ', petCount, ').'
-        end if
-        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-      end if
+    if (cfg_use_docn) then
+      call add_model(driver, OCN_LABEL, DOCN_SetServices, ocnPets, driverClock, ocnComp, rc)
+      write(*,'(A)') '[ESM] OCN: DOCN OISST ativo (use_docn=T)'
     else
-      allocate(atmPetList(petCount)); atmPetList = medPetList
-      allocate(ocnPetList(petCount)); ocnPetList = medPetList
-      if (use_ice) then
-        allocate(icePetList(petCount)); icePetList = medPetList
-        call ESMF_LogWrite( &
-          'ESM: layout SHARED (execucao '//trim(exec_str)// &
-          ') — MPAS, MED, OCN e ICE em todos os PETs', ESMF_LOGMSG_INFO)
-      else
-        allocate(icePetList(0))
-        call ESMF_LogWrite( &
-          'ESM: layout SHARED (execucao '//trim(exec_str)// &
-          ') — MPAS, MED e OCN em todos os PETs', ESMF_LOGMSG_INFO)
-      end if
+      call add_model(driver, OCN_LABEL, OCN_SetServices, ocnPets, driverClock, ocnComp, rc)
+      write(*,'(A)') '[ESM] OCN: MOM6+SIS2 dinamico ativo (use_docn=F)'
     end if
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
-    ! Componente MPAS (MONAN-A 2.0)
-    !--------------------------------------------------------------------------
-    call AddModelCompWithClock(driver, MPAS_LABEL, MPAS_SetServices, &
-      atmPetList, driverClock, mpasComp, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    ! O FMS tem relógio próprio; pequenas diferenças de carimbo de tempo são
+    ! esperadas e não devem abortar a rodada.
+    call NUOPC_CompAttributeSet(ocnComp, name='timeStampValidation', value='false', rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call NUOPC_CompAttributeSet(mpasComp, name="Verbosity",  value="high",  rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    call NUOPC_CompAttributeSet(mpasComp, name="DumpFields", value="false", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    ! Passa dt_coupling ao MPAS cap (para AlarmInit)
-    ! Lê do clock do driver (= dt_coupling de nuopc.input) em vez de hardcoded.
-    ! (driverClock já foi obtido no início desta rotina — sem nova busca.)
-    call ESMF_ClockGet(driverClock, timeStep=driverTimeStep, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    call ESMF_TimeIntervalGet(driverTimeStep, s_i8=dt_coupling_i8, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    write(dt_str,'(I0)') dt_coupling_i8
-    call NUOPC_CompAttributeAdd(mpasComp,  attrList=(/"dt_coupling"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    call NUOPC_CompAttributeSet(mpasComp,  name="dt_coupling", value=trim(dt_str), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! Componente MED (mediador NCAR bulk)
-    !--------------------------------------------------------------------------
-    call AddModelCompWithClock(driver, MED_LABEL, MED_SetServices, &
-      medPetList, driverClock, medComp, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call NUOPC_CompAttributeSet(medComp, name="Verbosity", value="high", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    ! ── Ler nuopc.input para obter cfg_use_datm / cfg_use_docn ─────────────
-    ! O rc de config_read era descartado aqui (a chamada NUOPC seguinte o
-    ! sobrescrevia), de modo que um erro de configuração — rc=2, por exemplo
-    ! um pet_layout invalido — passava despercebido neste ponto. Usa-se uma
-    ! variável própria para não colidir com o rc das chamadas ESMF/NUOPC.
-    call config_read(rc=cfg_rc)
-    if (cfg_rc == 2) then
-      call ESMF_LogWrite('ESM: ERRO em config_read (nuopc.input invalida) — '// &
-        'ver mensagens [mpas_cap_config] na saida padrao.', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE; return
-    end if
-    use_datm_local = cfg_use_datm
-    use_docn_local = cfg_use_docn
-    str_use_datm = merge('true    ', 'false   ', use_datm_local)
-    str_use_docn = merge('true    ', 'false   ', use_docn_local)
-    write(*,'(A,L1,A,L1)') '[ESM] nuopc_mode: use_datm=', use_datm_local, &
-      '  use_docn=', use_docn_local
-
-    ! Informa ao mediador: use_mpas_atm = NOT(use_datm)
-    ! Se use_datm=true → o mediador usa DATM como fallback (use_mpas_atm=false).
-    ! Se use_datm=false → mediador usa MPAS real (padrão de produção).
-    call NUOPC_CompAttributeAdd(medComp, attrList=(/"use_mpas_atm"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    call NUOPC_CompAttributeSet(medComp, name="use_mpas_atm", &
-      value=merge('false   ', 'true    ', use_datm_local), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! Componente OCN — seleção dinâmica via use_docn (nuopc_mode):
-    !   use_docn = .false. (padrão) → MOM6+SIS2 dinâmico (NUOPC cap)
-    !   use_docn = .true.           → DOCN (OISST v2.1 netcdf — SST/gelo por dados)
-    !
-    ! Ambos expõem o mesmo conjunto de campos NUOPC (So_t, So_u, So_v,
-    ! Si_ifrac, Sf_zorl) para o mediador, portanto o runsequence é idêntico.
-    !--------------------------------------------------------------------------
-    if (use_docn_local) then
-      call AddModelCompWithClock(driver, OCN_LABEL, DOCN_SetServices, &
-        ocnPetList, driverClock, ocnComp, rc)
-      write(*,'(A)') '[ESM] OCN: DOCN OISST ativo (use_docn=T, nuopc_mode)'
-    else
-      call AddModelCompWithClock(driver, OCN_LABEL, OCN_SetServices, &
-        ocnPetList, driverClock, ocnComp, rc)
-      write(*,'(A)') '[ESM] OCN: MOM6+SIS2 dinâmico ativo (use_docn=F)'
-    end if
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call NUOPC_CompAttributeSet(ocnComp, name="Verbosity", value="high", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! Mudança ② (v7.0): atributos obrigatórios para MOM6+SIS2
-    !
-    ! 1. timeStampValidation=false
-    !    Sem este atributo, o NUOPC verifica se o timestamp do campo exportado
-    !    pelo OCN coincide com o relógio do driver. O FMS usa seu próprio
-    !    gerenciador de tempo internamente, podendo gerar pequenas divergências
-    !    de timestamp que aborteriam o sistema com INCOMPATIBILITY (IPDv03p7).
-    !--------------------------------------------------------------------------
-    call NUOPC_CompAttributeSet(ocnComp, name="timeStampValidation", &
-      value="false", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! 2. restart_n=0 — sem restart periódico durante a simulação.
-    !    O mom_cap.F90 usa este atributo para decidir a frequência de escrita
-    !    de restarts intermediários. 0 = sem restart intermediário.
-    !    O restart final ao término da simulação é sempre escrito por
-    !    ocean_model_end() na fase ModelFinalize.
-    !--------------------------------------------------------------------------
-    call NUOPC_CompAttributeSet(ocnComp, name="restart_n", &
-      value="0", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! 3. stop_ymd e stop_tod — data/hora de parada para o FMS time manager
-    !    O FMS precisa saber quando a simulação termina para programar alarmes
-    !    de restart e shutdown. Calculados a partir do stopTime do clock do driver.
-    !    Formato: stop_ymd = YYYYMMDD (ex: "20260502")
-    !             stop_tod = segundos desde meia-noite (ex: "0")
-    !--------------------------------------------------------------------------
-    call ESMF_ClockGet(driverClock, stopTime=stop_t, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_TimeGet(stop_t, yy=syy, mm=smm, dd=sdd, &
-                      h=sh, m=sm_int, s=ss_int, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    write(stop_ymd_str, '(i4.4,i2.2,i2.2)') syy, smm, sdd
-    write(stop_tod_str, '(i6)') sh*3600 + sm_int*60 + ss_int
-
-    call NUOPC_CompAttributeSet(ocnComp, name="stop_ymd", &
-      value=trim(adjustl(stop_ymd_str)), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call NUOPC_CompAttributeSet(ocnComp, name="stop_tod", &
-      value=trim(adjustl(stop_tod_str)), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_LogWrite( &
-      'ESM: atributos MOM6 definidos — stop_ymd='//trim(stop_ymd_str)// &
-      '  stop_tod='//trim(adjustl(stop_tod_str)), ESMF_LOGMSG_INFO)
-    ! ── Fim Mudança ② ─────────────────────────────────────────────────────────
-
-    !--------------------------------------------------------------------------
-    ! Modo de roteamento OCN→ATM:
-    !   use_med_to_mpas = false (padrão, DOCN):
-    !     Conector direto OCN → MPAS. A grade DOCN (1440×720, lat/lon regular)
-    !     usa redistribuição zero-copy ao MPAS via regrid bilinear ESMF.
-    !
-    !   use_med_to_mpas = true (Fase 2, MOM6 dinâmico):
-    !     OCN exporta apenas ao MED; MED roteia para MPAS via RouteOcnToAtm
-    !     com regrid conservativo (tripolar B-grid → malha Voronoi).
-    !     Ativar em nuopc.input: use_med_to_mpas = '.true.'
-    !     Requer: MOM_cap.F90 v2.0 + pesos ESMF pré-computados.
-    !--------------------------------------------------------------------------
-    ! Ler use_med_to_mpas do nuopc.input via mpas_cap_config_mod
-    ! (cfg_use_med_to_mpas lido em config_read() chamado acima).
-    use_med_to_mpas = cfg_use_med_to_mpas
-    val_med_to_mpas = merge('true    ', 'false   ', use_med_to_mpas)
-    call NUOPC_CompAttributeAdd(driver, attrList=(/'use_med_to_mpas'/), rc=rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
-    call NUOPC_CompAttributeSet(driver, name='use_med_to_mpas', &
-      value=trim(val_med_to_mpas), rc=rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
-
-    if (use_med_to_mpas) then
-      call ESMF_LogWrite( &
-        'ESM: use_med_to_mpas=true — conector MED->MPAS ativo (Fase 2)', &
-        ESMF_LOGMSG_INFO)
-    else
-      call ESMF_LogWrite( &
-        'ESM: use_med_to_mpas=false — conector OCN->MPAS direto (DOCN OISST)', &
-        ESMF_LOGMSG_INFO)
-    end if
-
-    !--------------------------------------------------------------------------
-    ! Componente ICE (SIS2 dinâmico)
-    !
-    ! Componente NUOPC próprio, não um subcomponente embutido no OCN. Só é
-    ! registrado quando use_ice está ligado; caso contrário nada aqui executa e
-    ! o sistema fica idêntico ao de antes desta integração.
-    !--------------------------------------------------------------------------
     if (use_ice) then
-      call AddModelCompWithClock(driver, ICE_LABEL, ICE_SetServices, &
-        icePetList, driverClock, iceComp, rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      call NUOPC_CompAttributeSet(iceComp, name="Verbosity", value="high", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      ! Mesma justificativa do OCN: o SIS2 também usa o gerenciador de tempo
-      ! próprio do FMS internamente, e a validação de timestamp do NUOPC
-      ! abortaria o sistema por divergências pequenas e esperadas.
-      call NUOPC_CompAttributeSet(iceComp, name="timeStampValidation", &
-        value="false", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      call ESMF_LogWrite('ESM: componente ICE (SIS2) registrado', &
-        ESMF_LOGMSG_INFO)
+      call add_model(driver, ICE_LABEL, ICE_SetServices, icePets, driverClock, iceComp, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call NUOPC_CompAttributeSet(iceComp, name='timeStampValidation', value='false', rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call ESMF_LogWrite('ESM: componente ICE (SIS2) registrado', ESMF_LOGMSG_INFO)
     end if
 
-    !--------------------------------------------------------------------------
-    ! Também passar o flag ao mediador (usado em RouteOcnToAtm)
-    !--------------------------------------------------------------------------
-    call NUOPC_CompAttributeAdd(medComp, attrList=(/'use_med_to_mpas'/), rc=rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
-    call NUOPC_CompAttributeSet(medComp, name='use_med_to_mpas', &
-      value=trim(val_med_to_mpas), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-    !
-    ! 1. MPAS → MED : 9 campos _mpas → mediador
-    !--------------------------------------------------------------------------
-    call AddConnectorWithClock(driver, MPAS_LABEL, MED_LABEL, &
-      CPL_SetServices, driverClock, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    ! ---- Conectores ---------------------------------------------------------
+    call add_connector(driver, MPAS_LABEL, MED_LABEL, driverClock, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call add_connector(driver, OCN_LABEL, MED_LABEL, driverClock, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call add_connector(driver, MED_LABEL, OCN_LABEL, driverClock, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
-    ! 2. OCN → MED : So_t → bulk formula do mediador
-    !--------------------------------------------------------------------------
-    call AddConnectorWithClock(driver, OCN_LABEL, MED_LABEL, &
-      CPL_SetServices, driverClock, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! 3. MED → OCN : 14 campos de fluxo → MOM6
-    !--------------------------------------------------------------------------
-    call AddConnectorWithClock(driver, MED_LABEL, OCN_LABEL, &
-      CPL_SetServices, driverClock, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !--------------------------------------------------------------------------
-    ! 4. OCN → MPAS (DOCN OISST) OU MED → MPAS (MOM6 dinâmico)
-    !
-    !   DOCN — OCN → MPAS direto (use_med_to_mpas=false, padrão):
-    !     So_t, Si_ifrac, So_u, So_v, Sf_zorl → sfc_input MONAN-A via
-    !     redistribuição ESMF (grade DOCN 1440×720 lat/lon regular).
-    !
-    !   MOM6 dinâmico — MED → MPAS (use_med_to_mpas=true em nuopc.input):
-    !     MED_cap.RouteOcnToAtm aplica regrid conservativo (tripolar →
-    !     malha Voronoi) com máscara terra/oceano. Requer MOM_cap.F90 v2.0.
-    !--------------------------------------------------------------------------
-    if (use_med_to_mpas) then
-      call AddConnectorWithClock(driver, MED_LABEL, MPAS_LABEL, &
-        CPL_SetServices, driverClock, rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-      call ESMF_LogWrite( &
-        'ESM: conector 4 = MED -> MPAS (MOM6 — regrid conservativo)', &
-        ESMF_LOGMSG_INFO)
+    ! Condição de contorno oceânica da atmosfera: pelo mediador (MOM6) ou
+    ! direto do oceano de dados (DOCN).
+    if (cfg_use_med_to_mpas) then
+      call add_connector(driver, MED_LABEL, MPAS_LABEL, driverClock, rc)
     else
-      call AddConnectorWithClock(driver, OCN_LABEL, MPAS_LABEL, &
-        CPL_SetServices, driverClock, rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-      call ESMF_LogWrite( &
-        'ESM: conector 4 = OCN -> MPAS (DOCN OISST — redistribuicao)', &
-        ESMF_LOGMSG_INFO)
+      call add_connector(driver, OCN_LABEL, MPAS_LABEL, driverClock, rc)
     end if
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
-    ! 5. MED -> ICE : forçante atmosférica (Faxa_*) + SST/correntes (So_*)
-    ! 6. ICE -> MED : Si_ifrac real, que substitui a fórmula aproximada do OCN
-    !
-    ! O mediador já está preparado para isso: MED_cap.F90 anuncia e realiza
-    ! Si_ifrac_sis2 no importState, e med_cap_methods.F90 o sobrescreve em
-    ! RouteOcnToAtm. Ver a ressalva sobre grades no comentário daquela rotina.
-    !--------------------------------------------------------------------------
     if (use_ice) then
-      call AddConnectorWithClock(driver, MED_LABEL, ICE_LABEL, &
-        CPL_SetServices, driverClock, rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      call AddConnectorWithClock(driver, ICE_LABEL, MED_LABEL, &
-        CPL_SetServices, driverClock, rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
-
-      call ESMF_LogWrite( &
-        'ESM: conectores 5/6 = MED <-> ICE (SIS2) registrados', &
-        ESMF_LOGMSG_INFO)
+      call add_connector(driver, MED_LABEL, ICE_LABEL, driverClock, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call add_connector(driver, ICE_LABEL, MED_LABEL, driverClock, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
 
-    deallocate(atmPetList, ocnPetList, medPetList, icePetList)
-
-    call ESMF_LogWrite( &
-      'ESM: componentes e conectores registrados', &
-      ESMF_LOGMSG_INFO)
-
+    call ESMF_LogWrite('ESM: componentes e conectores registrados', ESMF_LOGMSG_INFO)
   end subroutine SetModelServices
 
-  ! ============================================================================
-  !> @brief Define a sequência de execução por passo de acoplamento.
+  !> Calcula o tamanho dos blocos ATM | OCN | ICE no layout split.
+  !! Contagem zero em nuopc.input significa "automático": o que sobra é
+  !! dividido em partes aproximadamente iguais.
+  subroutine split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
+    integer, intent(in)  :: petCount
+    logical, intent(in)  :: use_ice
+    integer, intent(out) :: nAtm, nOcn, nIce, rc
+
+    rc   = ESMF_SUCCESS
+    nAtm = cfg_atm_pet_count
+    nOcn = cfg_ocn_pet_count
+    nIce = merge(cfg_ice_pet_count, 0, use_ice)
+
+    if (use_ice .and. nIce <= 0) then
+      if (nAtm <= 0 .and. nOcn <= 0) then
+        nAtm = petCount / 3
+        nOcn = petCount / 3
+      else if (nAtm <= 0) then
+        nAtm = (petCount - nOcn) / 2
+      else if (nOcn <= 0) then
+        nOcn = (petCount - nAtm) / 2
+      end if
+      nIce = petCount - nAtm - nOcn
+    else if (nAtm <= 0 .and. nOcn <= 0) then
+      nAtm = (petCount - nIce + 1) / 2
+      nOcn = petCount - nAtm - nIce
+    else if (nAtm <= 0) then
+      nAtm = petCount - nOcn - nIce
+    else if (nOcn <= 0) then
+      nOcn = petCount - nAtm - nIce
+    end if
+
+    if (nAtm < 1 .or. nOcn < 1 .or. (use_ice .and. nIce < 1) .or. &
+        nAtm + nOcn + nIce /= petCount) then
+      call ESMF_LogWrite('ESM: ERRO particao split invalida: nAtm='//int_to_str(nAtm)// &
+        ' nOcn='//int_to_str(nOcn)//' nIce='//int_to_str(nIce)// &
+        ' devem somar petCount='//int_to_str(petCount)//'.', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+  end subroutine split_pets
+
+  !> Registra no log a divisão de PETs. O formato destas linhas é lido pelas
+  !! ferramentas de tools/coupler e tools/dev: não alterar sem ajustá-las.
+  subroutine log_layout(petCount, nAtm, nOcn, nIce, use_ice)
+    integer, intent(in) :: petCount, nAtm, nOcn, nIce
+    logical, intent(in) :: use_ice
+
+    character(len=:), allocatable :: exec, msg
+
+    exec = merge('CONCURRENT', 'SEQUENTIAL', trim(cfg_coupling_mode) == 'concurrent')
+
+    if (trim(cfg_pet_layout) /= 'split') then
+      if (use_ice) then
+        msg = 'MPAS, MED, OCN e ICE em todos os PETs'
+      else
+        msg = 'MPAS, MED e OCN em todos os PETs'
+      end if
+      call ESMF_LogWrite('ESM: layout SHARED (execucao '//exec//'): '//msg, ESMF_LOGMSG_INFO)
+      return
+    end if
+
+    msg = 'ESM: layout SPLIT (execucao '//exec//'): ATM=PET[0..'//int_to_str(nAtm-1)// &
+          '] OCN=PET['//int_to_str(nAtm)//'..'//int_to_str(nAtm+nOcn-1)//']'
+    if (use_ice) then
+      msg = msg//' ICE=PET['//int_to_str(nAtm+nOcn)//'..'//int_to_str(petCount-1)// &
+            '] MED=todos'
+    else
+      msg = msg//' MED=todos (ICE desativado)'
+    end if
+    call ESMF_LogWrite(msg, ESMF_LOGMSG_INFO)
+
+    ! No sequential+split parte dos PETs fica parada em cada fase; registrar
+    ! quantos ajuda a interpretar o consumo de fila (nós x tempo de parede).
+    if (exec == 'SEQUENTIAL') then
+      msg = 'ESM: sequential+split: PETs parados: '//int_to_str(petCount-nAtm)// &
+            ' durante o ATM, '//int_to_str(petCount-nOcn)//' durante o OCN'
+      if (use_ice) msg = msg//', '//int_to_str(petCount-nIce)//' durante o ICE'
+      call ESMF_LogWrite(msg//' (de '//int_to_str(petCount)//').', ESMF_LOGMSG_INFO)
+    end if
+  end subroutine log_layout
+
+  !> Registra um componente de modelo e lhe entrega uma CÓPIA do relógio do
+  !! driver. Motivos: (1) com três ou mais componentes em PETs disjuntos o
+  !! NUOPC não atribuía relógio a alguns deles ("Clock object is not present");
+  !! (2) ESMF_Clock é referência, e o relógio compartilhado era avançado uma
+  !! vez por componente a cada passo. Use esta rotina para qualquer componente novo.
+  subroutine add_model(driver, label, setServices, petList, driverClock, comp, rc)
+    type(ESMF_GridComp), intent(inout) :: driver
+    character(len=*),    intent(in)    :: label
+    interface
+      subroutine setServices(gcomp, rc)
+        use ESMF, only : ESMF_GridComp
+        type(ESMF_GridComp)  :: gcomp
+        integer, intent(out) :: rc
+      end subroutine setServices
+    end interface
+    integer,             intent(in)    :: petList(:)
+    type(ESMF_Clock),    intent(in)    :: driverClock
+    type(ESMF_GridComp), intent(out)   :: comp
+    integer,             intent(out)   :: rc
+
+    type(ESMF_Clock) :: compClock
+
+    call NUOPC_DriverAddComp(driver, compLabel=label, compSetServicesRoutine=setServices, &
+      petList=petList, comp=comp, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    compClock = ESMF_ClockCreate(driverClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_GridCompSet(comp, clock=compClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call NUOPC_CompAttributeSet(comp, name='Verbosity', value='high', rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+  end subroutine add_model
+
+  !> Registra um conector NUOPC padrão com cópia própria do relógio do driver
+  !! (mesmos motivos de add_model).
+  subroutine add_connector(driver, srcLabel, dstLabel, driverClock, rc)
+    type(ESMF_GridComp), intent(inout) :: driver
+    character(len=*),    intent(in)    :: srcLabel, dstLabel
+    type(ESMF_Clock),    intent(in)    :: driverClock
+    integer,             intent(out)   :: rc
+
+    type(ESMF_CplComp) :: cplComp
+    type(ESMF_Clock)   :: cplClock
+
+    call NUOPC_DriverAddComp(driver, srcCompLabel=srcLabel, dstCompLabel=dstLabel, &
+      compSetServicesRoutine=CPL_SetServices, comp=cplComp, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    cplClock = ESMF_ClockCreate(driverClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_CplCompSet(cplComp, clock=cplClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+  end subroutine add_connector
+
+  !> Torna reprodutíveis, bit a bit, as somas feitas dentro dos conectores.
   !!
-  !! Fase 1 (use_med_to_mpas=false, padrão — DOCN):
-  !!   1. OCN → MPAS  : SST lag t-1 → sfc_input MONAN-A
-  !!   2. MPAS        : dinâmica + física atmosférica (30×60 s)
-  !!   3. MPAS → MED  : 9 campos _mpas → mediador
-  !!   4. OCN → MED   : So_t, Si_ifrac, So_u, So_v → mediador
-  !!   5. MED         : fórmula bulk NCAR (Large & Yeager 2009)
-  !!   6. MED → OCN   : 14 fluxos Foxx_*/Faxa_*
-  !!   7. OCN         : avança DOCN (OISST netcdf)
+  !! Cada conector faz um produto matriz esparsa: o valor de destino é a soma
+  !! de contribuições vindas de vários PETs. Por padrão o ESMF soma na ordem
+  !! de chegada das mensagens (varia entre execuções) e escolhe por
+  !! auto-ajuste onde fazer somas parciais. Como a soma em ponto flutuante
+  !! não é associativa, o último bit muda. Duas opções fixam isso:
+  !!   termorder=srcseq       soma na ordem do índice de origem
+  !!   srcTermProcessing=0    toda a aritmética no destino
+  !! Entradas que já tragam a opção não são alteradas.
+  subroutine ModifyCplLists(driver, rc)
+    type(ESMF_GridComp)  :: driver
+    integer, intent(out) :: rc
+
+    character(len=*), parameter :: OPT_ORDER = ':termorder=srcseq'
+    character(len=*), parameter :: OPT_SRC   = ':srcTermProcessing=0'
+    character(len=512), allocatable :: cplList(:)
+    type(ESMF_CplComp),     pointer :: connectors(:)
+    integer :: i, j, n, n_order, n_src, n_full
+
+    rc = ESMF_SUCCESS
+    n_order = 0; n_src = 0; n_full = 0
+    nullify(connectors)
+
+    call NUOPC_DriverGetComp(driver, compList=connectors, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    do i = 1, size(connectors)
+      call NUOPC_CompAttributeGet(connectors(i), name='CplList', itemCount=n, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      if (n == 0) cycle
+
+      allocate(cplList(n))
+      call NUOPC_CompAttributeGet(connectors(i), name='CplList', valueList=cplList, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      do j = 1, n
+        call append_option(cplList(j), 'termorder=', OPT_ORDER, n_order)
+        call append_option(cplList(j), 'srcTermProcessing=', OPT_SRC, n_src)
+      end do
+      call NUOPC_CompAttributeSet(connectors(i), name='CplList', valueList=cplList, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      deallocate(cplList)
+    end do
+    deallocate(connectors)
+
+    call ESMF_LogWrite('ESM: reprodutibilidade dos conectores: termorder=srcseq em '// &
+      int_to_str(n_order)//' entrada(s), srcTermProcessing=0 em '//int_to_str(n_src)// &
+      ' entrada(s)', ESMF_LOGMSG_INFO)
+    if (n_full > 0) then
+      call ESMF_LogWrite('ESM: '//int_to_str(n_full)//' entrada(s) de CplList sem espaco '// &
+        'para as opcoes de reprodutibilidade; aumentar len de cplList', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+
+  contains
+
+    subroutine append_option(entry, key, option, counter)
+      character(len=*), intent(inout) :: entry
+      character(len=*), intent(in)    :: key, option
+      integer,          intent(inout) :: counter
+
+      if (index(entry, key) > 0) return
+      if (len_trim(entry) + len(option) > len(entry)) then
+        n_full = n_full + 1
+        return
+      end if
+      entry = trim(entry)//option
+      counter = counter + 1
+    end subroutine append_option
+
+  end subroutine ModifyCplLists
+
+  !> Define a sequência de execução de cada passo de acoplamento.
   !!
-  !! Fase 2 (use_med_to_mpas=true — MOM6 dinâmico):
-  !!   1. OCN → MED   : So_t, Si_ifrac, So_u, So_v → mediador
-  !!   2. MPAS → MED  : 9 campos _mpas → mediador
-  !!   3. MED         : RouteOcnToAtm (regrid conservativo) + bulk NCAR
-  !!   4. MED → MPAS  : SST, gelo, correntes (regrid conservativo)
-  !!   5. MPAS        : dinâmica + física atmosférica (30×60 s)
-  !!   6. MED → OCN   : 14 fluxos Foxx_*/Faxa_*
-  !!   7. OCN         : avança MOM6 dinâmico
+  !! Sete variantes, escolhidas pela configuração:
+  !!   modo        oceano     gelo   seq_repro   variante
+  !!   concurrent  MOM6       sim    -           conc_mom6_ice
+  !!   concurrent  MOM6       não    -           conc_mom6
+  !!   concurrent  DOCN       -      -           conc_docn
+  !!   sequential  MOM6       sim    sim         seq_mom6_ice_repro
+  !!   sequential  MOM6       sim    não         seq_mom6_ice
+  !!   sequential  MOM6       não    -           seq_mom6
+  !!   sequential  DOCN       -      -           seq_docn
+  !! ("MOM6" aqui significa use_med_to_mpas=.true.)
+  !!
+  !! No modo concorrente MPAS, OCN e ICE aparecem em linhas consecutivas, sem
+  !! conector entre eles, e por isso avançam ao mesmo tempo em PETs
+  !! disjuntos; o mediador entrega no início do passo o que calculou no fim
+  !! do passo anterior. Na variante seq_mom6_ice_repro a ordem imita esse
+  !! fluxo de dados, mas executa um componente de cada vez; o resultado é
+  !! comparável bit a bit ao concorrente. Na seq_mom6_ice a linha MED -> ICE
+  !! entre OCN e ICE é intencional: ela impede que os dois avancem juntos.
   subroutine SetRunSequence(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
 
+    character(len=*), parameter :: M2A = 'MED -> MPAS', M2O = 'MED -> OCN', M2I = 'MED -> ICE'
+    character(len=*), parameter :: A2M = 'MPAS -> MED', O2M = 'OCN -> MED', I2M = 'ICE -> MED'
+    character(len=*), parameter :: O2A = 'OCN -> MPAS'
+    integer, parameter :: LW = 24
+    character(len=LW), allocatable :: steps(:)
+    character(len=:),  allocatable :: title
     type(NUOPC_FreeFormat)  :: runSeqFF
     type(ESMF_Clock)        :: driverClock
-    type(ESMF_TimeInterval) :: driverTimeStep
-    character(len=18)       :: line1
+    type(ESMF_TimeInterval) :: timeStep
     integer(ESMF_KIND_I8)   :: dt_s
-    character(len=64)       :: msg
-    character(len=8)        :: val_seq
-    logical                 :: use_med_to_mpas
-    logical                 :: is_concurrent
+    logical :: concurrent, mom6, ice
+    integer :: i
 
     rc = ESMF_SUCCESS
+    concurrent = (trim(cfg_coupling_mode) == 'concurrent')
+    mom6       = cfg_use_med_to_mpas
+    ice        = cfg_use_sis2_dynamic .and. mom6
 
-    ! Eixo TEMPORAL, independente do eixo espacial (cfg_pet_layout, tratado em
-    ! SetModelServices). A RunSequence sequencial abaixo é válida tanto com
-    ! pet_layout=shared quanto com pet_layout=split: o driver NUOPC executa
-    ! cada componente apenas nos PETs de que ele é membro, e os conectores
-    ! rodam na união dos PETs de origem e destino. Já a RunSequence
-    ! concorrente EXIGE pet_layout=split, o que config_read garante.
-    is_concurrent = (trim(cfg_coupling_mode) == 'concurrent')
-
-    !-- Obter o timestep do clock do driver (= dt_coupling de nuopc.input) ----
-    call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, &
-      msg='ESM: falha ao obter clock do driver em SetRunSequence', &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_ClockGet(driverClock, timeStep=driverTimeStep, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_TimeIntervalGet(driverTimeStep, s_i8=dt_s, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    !-- Formatar "@<dt_s>" como character(len=18) com pad de espaços ----------
-    ! write() em character(len=18) preenche o restante com espaços
-    ! automaticamente: "@1800" → "@1800             " (18 chars).
-    write(line1, '("@",I0)') dt_s
-
-    write(msg, '(A,I0,A)') 'ESM: RunSequence dt=', dt_s, 's — periodo=driver clock'
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-
-    ! Ler flag use_med_to_mpas para selecionar sequência correta
-    val_seq = 'false'
-    call NUOPC_CompAttributeGet(driver, name='use_med_to_mpas', &
-      value=val_seq, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      val_seq = 'false'
-      rc = ESMF_SUCCESS
-    end if
-    use_med_to_mpas = (trim(val_seq) == '.true.' .or. trim(val_seq) == 'true')
-
-    ! CRÍTICO: todas as strings têm exatamente 18 chars (character(len=18)).
-    ! write() em character(len=18) preenche o restante com espaços.
-    !
-    ! Quatro variantes: {sequential, concurrent} × {Fase 1 DOCN, Fase 2 MOM6}.
-    !
-    ! No modo CONCORRENTE, as linhas "MPAS" e "OCN" aparecem CONSECUTIVAS e sem
-    ! conector entre elas → o driver NUOPC as executa em paralelo (cada PET só
-    ! roda o componente do qual é membro; ATM e OCN estão em PETs disjuntos).
-    ! O mediador entrega no início do passo os campos calculados ao FINAL do
-    ! passo anterior (lag de 1 dt_coupling — padrão em acoplamento concorrente,
-    ! equivalente ao "ocean lag" do CESM/UFS; inicializado por DataInitialize).
-    if (is_concurrent) then
-      if (use_med_to_mpas .and. cfg_use_sis2_dynamic) then
-        ! ── Fase 2 CONCORRENTE (MOM6 dinâmico) + ICE (SIS2) ─────────────────
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  MED -> MPAS     ", &  ! SST/gelo/correntes (t-1) -> ATM (regrid)
-          "  MED -> OCN      ", &  ! 14 fluxos (t-1) -> MOM6
-          "  MED -> ICE      ", &  ! forcante ATM + SST/correntes (t-1) -> SIS2
-          "  MPAS            ", &  ! ATM avanca   ┐
-          "  OCN             ", &  ! OCN avanca   ┤ concorrentes (PETs disjuntos)
-          "  ICE             ", &  ! SIS2 avanca  ┘
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  OCN -> MED      ", &  ! So_t, So_u, So_v -> mediador
-          "  ICE -> MED      ", &  ! Si_ifrac real (Si_ifrac_sis2) -> mediador
-          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR (p/ proximo passo)
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 2 CONCORRENTE + ICE (SIS2)', &
-          ESMF_LOGMSG_INFO)
-      else if (use_med_to_mpas) then
-        ! ── Fase 2 CONCORRENTE (MOM6 dinâmico) ──────────────────────────────
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  MED -> MPAS     ", &  ! SST/gelo/correntes (t-1) -> ATM (regrid)
-          "  MED -> OCN      ", &  ! 14 fluxos (t-1) -> MOM6
-          "  MPAS            ", &  ! ATM avanca   ┐ concorrentes (PETs disjuntos)
-          "  OCN             ", &  ! OCN avanca   ┘
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR (p/ proximo passo)
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 2 CONCORRENTE (MED->MPAS)', &
-          ESMF_LOGMSG_INFO)
-      else
-        ! ── Fase 1 CONCORRENTE (DOCN) ───────────────────────────────────────
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  OCN -> MPAS     ", &  ! SST (t-1) -> sfc_input MONAN-A (direto)
-          "  MED -> OCN      ", &  ! 14 fluxos (t-1) -> OCN (DOCN ignora)
-          "  MPAS            ", &  ! ATM avanca   ┐ concorrentes (PETs disjuntos)
-          "  OCN             ", &  ! OCN avanca   ┘
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-          "  MED             ", &  ! calcula fluxos bulk NCAR (p/ proximo passo)
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 1 CONCORRENTE (OCN->MPAS)', &
-          ESMF_LOGMSG_INFO)
-      end if
+    if (concurrent .and. ice) then
+      title = 'Fase 2 CONCORRENTE + ICE (SIS2)'
+      steps = [character(len=LW) :: M2A, M2O, M2I, 'MPAS', 'OCN', 'ICE', A2M, O2M, I2M, 'MED']
+    else if (concurrent .and. mom6) then
+      title = 'Fase 2 CONCORRENTE (MED->MPAS)'
+      steps = [character(len=LW) :: M2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
+    else if (concurrent) then
+      title = 'Fase 1 CONCORRENTE (OCN->MPAS)'
+      steps = [character(len=LW) :: O2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
+    else if (ice .and. cfg_seq_repro) then
+      title = 'Fase 2 SEQUENCIAL REPRODUTIVEL + ICE (SIS2)'
+      steps = [character(len=LW) :: M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE', A2M, O2M, I2M, 'MED']
+    else if (ice) then
+      title = 'Fase 2 SEQUENCIAL + ICE (SIS2)'
+      steps = [character(len=LW) :: O2M, I2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE']
+    else if (mom6) then
+      title = 'Fase 2 (MED->MPAS)'
+      steps = [character(len=LW) :: O2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN']
     else
-      if (use_med_to_mpas .and. cfg_use_sis2_dynamic) then
-        if (cfg_seq_repro) then
-          ! ── Fase 2 SEQUENCIAL REPRODUTIVEL (bit-a-bit == concurrent) + ICE ──
-          ! Variante selecionada por seq_repro=.true. em &nuopc_petlayout.
-          ! Reproduz o fluxo de dados do concurrent+split, porem SERIALIZADO:
-          ! as entregas MED->MPAS, MED->OCN e MED->ICE ficam ANTES de cada
-          ! avanco e carregam sempre o resultado do ULTIMO calculo do mediador
-          ! (a linha 'MED' do fim do ciclo anterior); o mediador NAO recalcula
-          ! entre os avancos. Assim cada componente recebe exatamente a mesma
-          ! entrada que receberia no concurrent, e o 'MED' fecha no fim a partir
-          ! dos avancos deste passo — identico ao concurrent. As barreiras
-          ! MED->OCN e MED->ICE entre os avancos preservam a execucao
-          ! um-de-cada-vez (razao de existir do sequential); a unica diferenca
-          ! para o concurrent e' o relogio de parede, que nao afeta o numero.
-          !
-          ! Consequencias (todas alinham ao concurrent; NADA muda no concurrent):
-          !   - arranque: no passo 1 o MED ainda nao calculou nada, entao o MPAS
-          !     avanca com o default (Sx_tsfc ~298 K), como no concurrent. A
-          !     inicializacao publica apenas So_t (MED_cap InitializeDataComplete),
-          !     entao os dois modos partem do MESMO ponto no passo 1.
-          !   - carimbo de tempo: com 'MED' no fim o rotulo correto e' nextTime;
-          !     MED_cap.F90 ja' trata isso via cfg_seq_repro (BUG-SEQ-STAMP-01).
-          !   - inicializacao: fecha em 1 passagem (produtor OCN antes do gate),
-          !     como o concurrent, em vez das 2 do sequential classico.
-          !
-          ! Para igualdade bit-a-bit, alem desta ordem, garantir nas DUAS rodadas:
-          ! mesma condicao inicial, mesmo dt_coupling, mesmas contagens de PET,
-          ! somas globais reprodutiveis no MOM6/SIS2, MPAS deterministico, mesmo
-          ! numero de nucleos e mesmas opcoes de compilacao.
-          runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-            line1,              &  ! "@<dt_coupling>    "
-            "  MED -> MPAS     ", &  ! resultado do passo anterior -> ATM (regrid)
-            "  MPAS            ", &  ! avanca MPAS
-            "  MED -> OCN      ", &  ! mesmo resultado anterior (barreira serializa)
-            "  OCN             ", &  ! avanca MOM6 dinamico
-            "  MED -> ICE      ", &  ! mesmo resultado anterior (barreira serializa)
-            "  ICE             ", &  ! avanca SIS2
-            "  MPAS -> MED     ", &  ! 9 campos _mpas (estado t+dt) -> mediador
-            "  OCN -> MED      ", &  ! So_t, So_u, So_v (t+dt) -> mediador
-            "  ICE -> MED      ", &  ! Si_ifrac real (t+dt) -> mediador
-            "  MED             ", &  ! RouteOcnToAtm + bulk NCAR (calcula no fim)
-            "@                 " /), rc=rc)
-          call ESMF_LogWrite('ESM: RunSequence Fase 2 SEQUENCIAL REPRODUTIVEL '// &
-            '+ ICE (SIS2) — fluxo de dados identico ao concurrent+split '// &
-            '(seq_repro=.true.)', ESMF_LOGMSG_INFO)
-        else
-        ! ── Fase 2 SEQUENCIAL (MOM6 dinâmico) + ICE (SIS2) ──────────────────
-        ! Equivalente sequencial da variante concorrente com gelo. Vale com
-        ! QUALQUER pet_layout: em 'shared' os três componentes dividem todos os
-        ! PETs; em 'split' cada um tem seu bloco disjunto e os demais ficam
-        ! ociosos durante a fase alheia. O que 'sequential' determina é a ORDEM
-        ! no tempo, não a ocupação de PETs; os dois eixos são independentes.
-        !
-        ! COMO O DRIVER NUOPC SINCRONIZA ESTA LISTA (Set/2026)
-        !
-        ! Os PETs percorrem a lista abaixo juntos, linha por linha. Ao chegar
-        ! numa linha de Model ('MPAS', 'OCN', 'ICE'), o PET executa se for
-        ! membro do componente e ATRAVESSA a linha sem fazer nada se não for.
-        ! Linha de Model, portanto, não sincroniza ninguém.
-        !
-        ! Quem sincroniza são os conectores de/para o MED. Um conector roda na
-        ! UNIÃO dos PETs de origem e destino e, como o MED está registrado em
-        ! TODOS os PETs, toda linha 'MED -> X' ou 'X -> MED' é ponto de
-        ! encontro obrigatório para os 100% dos PETs. É isso, e só isso, que
-        ! separa uma fase da outra nesta RunSequence.
-        !
-        ! Consequência para o gelo: é a linha 'MED -> ICE', entre 'OCN' e
-        ! 'ICE', que impede o bloco de PET do SIS2 de entrar no seu avanço
-        ! enquanto o MOM6 não terminar. Tempo por passo =
-        ! t_MED + t_ATM + t_OCN + t_ICE.
-        !
-        ! POR QUE A ORDEM É ESTA, E NÃO OUTRA
-        !
-        ! Mover 'MED -> ICE' para junto de 'MED -> OCN' deixaria 'OCN' e 'ICE'
-        ! consecutivos, sem encontro entre eles, e os dois blocos avançariam ao
-        ! mesmo tempo (t_MED + t_ATM + max(t_OCN, t_ICE)). O dado entregue
-        ! seria bit a bit o mesmo: o mediador executa uma única vez por passo,
-        ! na linha 'MED' acima, e não roda de novo entre 'OCN' e 'ICE'; além
-        ! disso o SIS2 não importa nada diretamente do MOM6 — as três entradas
-        ! oceânicas do gelo (So_t, So_u, So_v) vêm do exportState do MED, não
-        ! do OCN (ver import_names_ocn em sis_cap_MONAN.F90).
-        !
-        ! Essa reordenação foi implementada, avaliada e DESCARTADA em Set/2026.
-        ! Motivos, para não ser reproposta sem dado novo:
-        !
-        !   1. O ganho é limitado a min(t_OCN, t_ICE), e o SIS2 custa uma
-        !      fração do MOM6 na mesma grade. Não toca no termo dominante
-        !      deste modo, que é o bloco OCN+ICE parado durante todo o t_ATM.
-        !   2. sequential+split existe, por definição do projeto (ver grupo 7
-        !      da nuopc.input), para contornar restrição de decomposição e de
-        !      memória, NÃO para reduzir tempo de parede.
-        !   3. A chave chama-se 'sequential'. Fazer dois componentes avançarem
-        !      ao mesmo tempo sem que nada na nuopc.input diga isso é o modo
-        !      entregando comportamento que não foi pedido.
-        !
-        ! Se uma calibração mostrar t_ICE comparável a t_OCN, a reordenação
-        ! volta à mesa, porém como CHAVE EXPLÍCITA em &nuopc_petlayout, com
-        ! padrão nesta ordem, e não como comportamento implícito.
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  OCN -> MED      ", &  ! So_t, So_u, So_v -> mediador
-          "  ICE -> MED      ", &  ! Si_ifrac real (Si_ifrac_sis2) -> mediador
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR
-          "  MED -> MPAS     ", &  ! SST/gelo/correntes -> MPAS (regrid conserv.)
-          "  MPAS            ", &  ! dinamica + fisica ATM com SST do MED
-          "  MED -> OCN      ", &  ! 14 fluxos Foxx_*/Faxa_* -> MOM6
-          "  OCN             ", &  ! avanca MOM6 dinamico
-          "  MED -> ICE      ", &  ! forcante ATM + SST/correntes -> SIS2
-          "  ICE             ", &  ! avanca SIS2
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 2 SEQUENCIAL + ICE (SIS2)', &
-          ESMF_LOGMSG_INFO)
-        call ESMF_LogWrite('ESM: fases por passo = MED, ATM, OCN, ICE ' // &
-          '(uma de cada vez; ver comentario em SetRunSequence)', &
-          ESMF_LOGMSG_INFO)
-        end if   ! cfg_seq_repro
-      else if (use_med_to_mpas) then
-        ! ── Fase 2: MOM6 dinâmico — OCN e ATM exportam ao MED primeiro ───────
-        ! O MED aplica RouteOcnToAtm (regrid conservativo) e entrega ao MPAS.
-        ! Não há conector OCN→MPAS — tudo roteia pelo mediador.
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  MED             ", &  ! RouteOcnToAtm + bulk NCAR
-          "  MED -> MPAS     ", &  ! SST/gelo/correntes -> MPAS (regrid conserv.)
-          "  MPAS            ", &  ! dinamica + fisica ATM com SST do MED
-          "  MED -> OCN      ", &  ! 14 fluxos Foxx_*/Faxa_* -> MOM6
-          "  OCN             ", &  ! avanca MOM6 dinamico
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 2 (MED->MPAS)', ESMF_LOGMSG_INFO)
-      else
-        ! ── Fase 1: DOCN — conector direto OCN→MPAS com regrid bilinear ──────
-        ! SST com lag de 1 passo: garante que o MPAS usa So_t do passo anterior
-        ! (equivalente ao "ocean lag" do CESM — comportamento padrão em modelos
-        ! acoplados AOGCMs). Sem lag, MPAS e OCN processariam So_t simultaneamente
-        ! gerando inconsistência no first-call do sfc_input.
-        runSeqFF = NUOPC_FreeFormatCreate(stringList=(/ &
-          line1,              &  ! "@<dt_coupling>    "
-          "  OCN -> MPAS     ", &  ! SST lag t-1 -> sfc_input MONAN-A
-          "  MPAS            ", &  ! dinamica + fisica ATM
-          "  MPAS -> MED     ", &  ! 9 campos _mpas -> mediador
-          "  OCN -> MED      ", &  ! So_t, Si_ifrac, So_u, So_v -> mediador
-          "  MED             ", &  ! calcula fluxos bulk NCAR
-          "  MED -> OCN      ", &  ! 14 fluxos -> OCN (DOCN ignora)
-          "  OCN             ", &  ! avanca DOCN (OISST netcdf)
-          "@                 " /), rc=rc)
-        call ESMF_LogWrite('ESM: RunSequence Fase 1 (OCN->MPAS direto)', ESMF_LOGMSG_INFO)
-      end if
-    end if
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    ! As variantes de Fase 1 (DOCN) não incluem os passos do ICE, e isso é por
-    ! construção: o DOCN é um oceano sintético, com SST lida de arquivo OISST e
-    ! sem estado oceânico prognóstico a que o SIS2 possa se acoplar. Se o gelo
-    ! for pedido junto com a Fase 1, o componente ICE chega a ser registrado no
-    ! driver mas nunca é executado pela sequência, e ficaria inerte sem sinal
-    ! claro no log. O aviso abaixo torna isso visível.
-    !
-    ! A Fase 2 (MOM6 dinâmico) inclui o ICE nos dois modos, concorrente e
-    ! sequencial. Note que config_read já rejeita a combinação de gelo com
-    ! use_docn; este aviso cobre o caso restante, em que use_docn é falso mas
-    ! use_med_to_mpas também é, e o acoplamento vai direto de OCN para MPAS.
-    if (cfg_use_sis2_dynamic .and. .not. use_med_to_mpas) then
-      call ESMF_LogWrite('ESM: AVISO — use_sis2_dynamic=.true. mas a ' // &
-        'RunSequence selecionada e Fase 1 (oceano sintetico), que NAO ' // &
-        'inclui os passos do ICE. O SIS2 sera registrado porem nunca ' // &
-        'executado. Use MOM6 dinamico (use_med_to_mpas) para ativar o gelo.', &
-        ESMF_LOGMSG_WARNING)
+      title = 'Fase 1 (OCN->MPAS direto)'
+      steps = [character(len=LW) :: O2A, 'MPAS', A2M, O2M, 'MED', M2O, 'OCN']
     end if
 
+    ! O DOCN não tem estado oceânico ao qual o SIS2 possa se acoplar.
+    if (cfg_use_sis2_dynamic .and. .not. mom6) call ESMF_LogWrite('ESM: AVISO: ' // &
+      'use_sis2_dynamic=.true. com use_med_to_mpas=.false.: o ICE e registrado ' // &
+      'mas nunca executado.', ESMF_LOGMSG_WARNING)
+
+    ! Período do laço = passo do relógio do driver (dt_coupling)
+    call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_ClockGet(driverClock, timeStep=timeStep, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_TimeIntervalGet(timeStep, s_i8=dt_s, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    runSeqFF = NUOPC_FreeFormatCreate(stringList=[character(len=LW+2) :: &
+      '@'//int_to_str(int(dt_s)), ('  '//steps(i), i = 1, size(steps)), '@'], rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_DriverIngestRunSequence(driver, runSeqFF, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_FreeFormatDestroy(runSeqFF, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    write(msg, '(A,I0,A)') &
-      'ESM: RunSequence MPAS+MED+OCN configurada (dt=', dt_s, 's)'
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-
+    call ESMF_LogWrite('ESM: RunSequence '//title//' (dt='//int_to_str(int(dt_s))//' s)', &
+      ESMF_LOGMSG_INFO)
   end subroutine SetRunSequence
 
 end module ESM_MONAN

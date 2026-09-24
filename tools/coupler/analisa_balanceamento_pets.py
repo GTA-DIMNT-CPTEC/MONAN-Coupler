@@ -125,7 +125,7 @@ dos componentes ativos, é a quota proporcional
 arredondada pelo método do maior resto, de modo que as contagens somem
 exatamente `N`, com piso de 1 PET por componente. O piso existe porque o
 arredondamento pode zerar um componente muito rápido, e o driver rejeita
-contagem zero (ver a validação em mpas_cap_config.F90).
+contagem zero (ver a validação em coupler_config.F90).
 
 Isso é uma APROXIMAÇÃO de primeira ordem (equivale ao heurístico
 `atm_pet_frac` citado na configuração do projeto) — o resultado deve ser

@@ -46,6 +46,9 @@ module mpas_cap_MONAN_mod
                                     mpas_atm_state_type,     &
                                     atm_ocean_boundary_type
 
+  use mpas_atm_model_mod,   only : mpas_atm_init, mpas_atm_init_sfc, mpas_atm_run, &
+                                    mpas_atm_final
+
   use mpas_cap_methods_mod, only : mpas_import,         &
                                     mpas_export,         &
                                     mpas_create_grid,    &
@@ -56,71 +59,19 @@ module mpas_cap_MONAN_mod
                                     netcdf_config_set,   &
                                     set_mpas_diag_clock   ! timestamp do diag import (mpas_cap_netcdf)
 
-  use mpas_cap_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
-                                    cfg_mesh_atm, cfg_config_dir,     &
+  use coupler_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
+                                    cfg_config_dir,                   &
                                     cfg_dt_coupling, cfg_dt_atm,      &
                                     cfg_output_dir, cfg_grid_res_deg, &
                                     cfg_sst_default,                  &
                                     cfg_ice_fraction_default,         &
-                                    cfg_zorl_default, config_read
+                                    cfg_zorl_default
 
-  use mpas_cap_utils_mod,   only : ChkErr
+  use coupler_utils_mod,   only : ChkErr, int_to_str
 
   implicit none
   private
 
-  interface
-    subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
-                              dt_seconds, config_dir, mpi_comm, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,          intent(in)  :: dt_seconds
-      character(len=*), intent(in)  :: config_dir
-      integer,          intent(in)  :: mpi_comm
-      integer,          intent(out) :: rc
-    end subroutine mpas_atm_init
-
-    subroutine mpas_atm_init_sfc(atm_public, atm_state, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type, mpas_atm_state_type
-      type(mpas_atm_public_type), intent(inout) :: atm_public
-      type(mpas_atm_state_type),  intent(inout) :: atm_state
-      integer,                    intent(out)   :: rc
-    end subroutine mpas_atm_init_sfc
-
-    subroutine mpas_atm_run(atm_public, atm_state, atm_bnd, dt_coupling, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(in)    :: atm_bnd
-      integer,                       intent(in)    :: dt_coupling
-      integer,                       intent(out)   :: rc
-    end subroutine mpas_atm_run
-
-    subroutine mpas_atm_final(atm_public, atm_state, atm_bnd, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,                       intent(out)   :: rc
-    end subroutine mpas_atm_final
-
-    subroutine mpas_atm_resize(atm_public, atm_state, atm_bnd, nCells_new)
-      use mpas_atm_types_mod, only : mpas_atm_public_type, mpas_atm_state_type, &
-                                     atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,                       intent(in)    :: nCells_new
-    end subroutine mpas_atm_resize
-  end interface
 
   public :: SetServices
   public :: SetVM
@@ -187,14 +138,6 @@ module mpas_cap_MONAN_mod
     'Faxa_taux_mpas',               &  ! Fase 3: tensao zonal nativa (de ust)
     'Faxa_tauy_mpas' ]                 ! Fase 3: tensao meridional nativa (de ust)
 
-  integer, parameter :: netcdf_write_freq = 1
-
-  logical            :: write_diag    = .false.
-  logical            :: write_netcdf  = .true.
-  character(len=256) :: mesh_atm      = 'mpas_mesh.nc'
-  character(len=256) :: config_dir    = './'
-  integer            :: dt_coupling_s = 1800
-  integer            :: dt_atm_s      = 1800
   integer, save      :: step_count    = 0
 
   character(len=*), parameter :: u_FILE_u = __FILE__
@@ -243,48 +186,13 @@ contains
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
     type(ESMF_Time)    :: startTimeLoc
-    logical            :: isPresent, isSet
-    character(len=256) :: value
+    character(len=32)  :: value
     integer            :: yr, mo, dy, hr, mn, sc
     character(len=*), parameter :: subname = '(mpas_cap:InitializeP0)'
     rc = ESMF_SUCCESS
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
          acceptStringList=(/'IPDv03p'/), rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    block
-      integer :: cfg_rc
-      call config_read(cfg_rc)
-    end block
-    write_netcdf  = cfg_write_netcdf
-    write_diag    = cfg_write_diag
-    mesh_atm      = trim(cfg_mesh_atm)
-    config_dir    = trim(cfg_config_dir)
-    dt_coupling_s = cfg_dt_coupling
-    dt_atm_s      = cfg_dt_atm
-    call NUOPC_CompAttributeGet(gcomp, name='DumpFields', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) write_diag = (trim(value) == 'true')
-    call NUOPC_CompAttributeGet(gcomp, name='WriteNetCDF', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) write_netcdf = (trim(value) == 'true')
-    call NUOPC_CompAttributeGet(gcomp, name='mesh_atm', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) mesh_atm = trim(value)
-    call NUOPC_CompAttributeGet(gcomp, name='config_dir', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) config_dir = trim(value)
-    call NUOPC_CompAttributeGet(gcomp, name='dt_coupling', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) read(value, *) dt_coupling_s
-    call NUOPC_CompAttributeGet(gcomp, name='dt_atm', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) read(value, *) dt_atm_s
     call ESMF_ClockGet(clock, startTime=startTimeLoc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_TimeGet(startTimeLoc, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
@@ -312,8 +220,8 @@ contains
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end do
     call ESMF_LogWrite(subname//': anunciados '// &
-         trim(adjustl(int_to_str(N_IMP)))//' imp + '// &
-         trim(adjustl(int_to_str(N_EXP)))//' exp', ESMF_LOGMSG_INFO)
+         int_to_str(N_IMP)//' imp + '// &
+         int_to_str(N_EXP)//' exp', ESMF_LOGMSG_INFO)
   end subroutine InitializeAdvertise
 
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
@@ -365,7 +273,7 @@ contains
     allocate(g_atm_state)
     allocate(g_atm_bnd)
     call mpas_atm_init(g_atm_public, g_atm_state, g_atm_bnd, &
-                       dt_atm_s, config_dir, localMpiComm, rc)
+                       cfg_dt_atm, trim(cfg_config_dir), localMpiComm, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_init falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
@@ -467,11 +375,11 @@ contains
                g_atm_public%nCellsSolve > 0), rc, &
          g_atm_public%lonCell, g_atm_public%latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (write_diag) then
+    if (cfg_write_diag) then
       call state_diagnose(importState, 'importState@Advance', rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    call mpas_atm_run(g_atm_public, g_atm_state, g_atm_bnd, dt_coupling_s, rc)
+    call mpas_atm_run(g_atm_public, g_atm_state, g_atm_bnd, cfg_dt_coupling, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_run falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
@@ -479,11 +387,11 @@ contains
     end if
     call mpas_export(g_atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (write_diag) then
+    if (cfg_write_diag) then
       call state_diagnose(exportState, 'exportState@Advance', rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    if (write_netcdf .and. mod(step_count, netcdf_write_freq) == 0) then
+    if (cfg_write_netcdf) then
       call ESMF_VMGetCurrent(vm, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       call ESMF_ClockGet(clock, currTime=currTimeLoc, rc=rc)
@@ -491,7 +399,7 @@ contains
       call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                         h=hr, m=mn, s=sc, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call export_write_netcdf(exportState, step_count * dt_coupling_s, &
+      call export_write_netcdf(exportState, step_count * cfg_dt_coupling, &
                                 yr, mo, dy, hr, mn, sc, vm, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
@@ -703,10 +611,5 @@ contains
     end do
   end subroutine init_import_defaults
 
-  pure function int_to_str(n) result(s)
-    integer, intent(in) :: n
-    character(len=12)   :: s
-    write(s, '(I0)') n
-  end function int_to_str
 
 end module mpas_cap_MONAN_mod

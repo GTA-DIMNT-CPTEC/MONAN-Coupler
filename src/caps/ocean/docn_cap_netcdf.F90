@@ -1,17 +1,13 @@
 !> @file docn_cap_netcdf.F90
 !! @brief I/O NetCDF do componente de dados oceânicos DOCN.
 !!
-!! Versão 1.0 (Mai/2026) — GT Acoplamento de Modelos / INPE/CGCT/DIMNT
+!! Rotinas de leitura e escrita NetCDF do oceano de dados (OISST):
+!!   ReadGlobalField      lê um instante global de um arquivo NetCDF (PET 0)
+!!   ReadOcnFieldInterp   interpola no tempo entre dois instantes e distribui
+!!   WriteDOCNDiag        grava o diagnóstico docn_import_AAAAMMDD_HHMMSS.nc
 !!
-!! Contém as sub-rotinas de leitura e escrita NetCDF extraídas de DOCN_cap.F90
-!! como parte da reorganização de responsabilidades (Passo 7):
-!!
-!!   ReadGlobalField      — lê um snapshot global de um arquivo NetCDF (PET0)
-!!   ReadOcnFieldInterp   — interpolação temporal linear entre snapshots (PET0+bcast)
-!!   WriteDOCNDiag        — escrita diagnóstica dos campos OCN por passo de acoplamento
-!!
-!! Dependências: ESMF, NetCDF, MPI, mpas_cap_config_mod.
-!! DOCN_cap.F90 passa a importar as três rotinas via use deste módulo.
+!! Usado por DOCN_cap.F90 e, para a fração de gelo lida de arquivo, por
+!! mom_cap_MONAN.F90. INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module docn_cap_netcdf_mod
 
@@ -28,8 +24,9 @@ module docn_cap_netcdf_mod
 
   use netcdf
   use mpi
+  use coupler_utils_mod, only: ChkErr, int_to_str, real_to_str
 
-  use mpas_cap_config_mod, only: cfg_docn_mode,           &
+  use coupler_config_mod, only: cfg_docn_mode,           &
                                   cfg_docn_sst_file,       &
                                   cfg_docn_ice_file,       &
                                   cfg_docn_cur_file,       &
@@ -104,8 +101,8 @@ contains
           call ESMF_LogWrite( &
             "ReadGlobalField DOCN: ERRO B-59 — ordem de eixos incompativel! "// &
             "Arquivo "//trim(filename)//" tem dim1='"//trim(dim1_name)// &
-            "' com tamanho "//trim(adjustl(int2str_rg(dim1_size)))// &
-            " mas DOCN espera nx="//trim(adjustl(int2str_rg(nx)))//". "// &
+            "' com tamanho "//int_to_str(dim1_size)// &
+            " mas DOCN espera nx="//int_to_str(nx)//". "// &
             "Execute prepare_cur_file.sh para transpor: "// &
             "ncpdq -a time,latitude,longitude arquivo.nc arquivo_corrigido.nc", &
             ESMF_LOGMSG_ERROR)
@@ -127,12 +124,6 @@ contains
 
     nc_rc = nf90_close(ncid)
 
-  contains
-    function int2str_rg(n) result(s)
-      integer, intent(in) :: n
-      character(len=12) :: s
-      write(s,'(I12)') n
-    end function int2str_rg
 
   end subroutine ReadGlobalField
 
@@ -192,11 +183,9 @@ contains
     ! rootPet=0 passam a ser locais ao componente). Em sequential a VM do
     ! componente = todos os PETs, então o comportamento é idêntico ao anterior.
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     f0_data = 0.0_ESMF_KIND_R8
     f1_data = 0.0_ESMF_KIND_R8
@@ -205,13 +194,18 @@ contains
     call ESMF_TimeSet(epochTime, yy=cfg_docn_epoch_year, &
       mm=cfg_docn_epoch_month, dd=cfg_docn_epoch_day, &
       calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     dt_since_epoch = currTime - epochTime
     call ESMF_TimeIntervalGet(dt_since_epoch, s_i8=sec_since_epoch, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    if (sec_since_epoch < 0_ESMF_KIND_I8) then
+      call ESMF_LogWrite('DOCN ReadOcnFieldInterp: data corrente anterior ao ' // &
+        'epoch do arquivo oceanico (docn_epoch_*)', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      return
+    end if
 
     ! B-54/B-55: ler ntime do arquivo para clampar índice (evita out-of-bounds)
     ntime = huge(ntime)
@@ -251,8 +245,7 @@ contains
 
     ! Broadcast do campo global interpolado para todos os PETs
     call ESMF_VMBroadcast(vm, bcstData=buf_global, count=nx*ny, rootPet=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Cada PET copia o seu subdomínio local
     i1 = lbound(array,1); i2 = ubound(array,1)
@@ -536,8 +529,8 @@ contains
     ncstat = nf90_put_var(ncid_w, varid_v,   vout)
     ncstat = nf90_close(ncid_w)
     call ESMF_LogWrite('WriteDOCNDiag: '//trim(fname)//' (tidx0='// &
-      trim(adjustl(int2str(tidx0)))//' alpha='// &
-      trim(adjustl(real2str(real(alpha,4))))//') [B-58v2]', ESMF_LOGMSG_INFO)
+      int_to_str(tidx0)//' alpha='// &
+      real_to_str(alpha)//') [B-58v2]', ESMF_LOGMSG_INFO)
 
     99 continue
     if (allocated(f0))    deallocate(f0, f1, fout)
@@ -545,17 +538,6 @@ contains
     if (allocated(uout))  deallocate(uout, vout)
     if (allocated(lon_ax)) deallocate(lon_ax, lat_ax)
 
-  contains
-    function int2str(n) result(s)
-      integer, intent(in) :: n
-      character(len=12) :: s
-      write(s,'(I12)') n
-    end function int2str
-    function real2str(x) result(s)
-      real, intent(in) :: x
-      character(len=12) :: s
-      write(s,'(F8.4)') x
-    end function real2str
 
   end subroutine WriteDOCNDiag
 

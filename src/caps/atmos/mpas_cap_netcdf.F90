@@ -78,10 +78,10 @@ module mpas_cap_netcdf_mod
   ! próprio elimina o cruzamento de escopo sem alterar a semântica MPI.
   use mpi_allreduce_wrappers_mod, only : allreduce_r8, allreduce_i4
   use netcdf
-  use mpas_cap_utils_mod,  only : ChkErr
+  use coupler_utils_mod,  only : ChkErr, int_to_str
   ! Tipos MPAS e configurações necessários para o diagnóstico de importação
   use mpas_atm_types_mod,  only : atm_ocean_boundary_type, MPAS_RKIND
-  use mpas_cap_config_mod, only : cfg_import_diag_dir, cfg_grid_res_deg
+  use coupler_config_mod, only : cfg_import_diag_dir, cfg_grid_res_deg
 
   implicit none
   private
@@ -265,7 +265,7 @@ contains
     if (localPet == 0) then
       write(*,'(A,I0,A)') &
         '[NetCDF] Coordenadas prontas: ', nGlobal, ' células (grade 1° pronta)'
-      call ESMF_LogWrite(subname//': '//trim(int_to_str(nGlobal))// &
+      call ESMF_LogWrite(subname//': '//(int_to_str(nGlobal))// &
                          ' células — interpolação lat/lon ativa', ESMF_LOGMSG_INFO)
     end if
 
@@ -289,7 +289,7 @@ contains
     integer,            intent(in)    :: nLocal
     type(ESMF_VM),      intent(in)    :: vm
     integer,            intent(inout) :: rc
-    integer :: idx, k, localPet, petCount
+    integer :: idx, localPet, petCount
     rc = ESMF_SUCCESS
     if (.not. g_coords_ready .or. nLocal <= 0) return
     call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
@@ -816,10 +816,6 @@ contains
 
   ! ── Utilitários de conversão ──────────────────────────────────────────────
 
-  function int_to_str(n) result(s)
-    integer, intent(in) :: n; character(len=16) :: s
-    write(s,'(I0)') n
-  end function int_to_str
 
   ! ── Aritmética de calendário gregoriano proléptico ────────────────────────
 
@@ -959,7 +955,7 @@ contains
     integer :: varid_sot, varid_ifrac, varid_zorl
     integer :: varid_omask                      ! B-DIAGMASK-01
     integer :: varid_uocn, varid_vocn, varid_alb ! B-DIAG-IMPORT-INCOMPLETO-01
-    integer :: nlat, nlon, i, j
+    integer :: nlat, nlon, i
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
     real(ESMF_KIND_R8), allocatable :: mask_2d(:,:)   ! B-DIAGMASK-01
     real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)

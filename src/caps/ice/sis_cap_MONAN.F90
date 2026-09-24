@@ -61,7 +61,7 @@ module sis_cap_MONAN_mod
 
   use netcdf   ! FIX-GRADE-ICE: leitura direta de ocean_hgrid.nc (mesmo padrao
                ! ja usado e testado em MED_cap.F90, FIX B-OCNGRID-01/03)
-  use mpas_cap_config_mod, only : cfg_mom6_mesh_ocn, cfg_write_fixdiag
+  use coupler_config_mod, only : cfg_mom6_mesh_ocn, cfg_write_fixdiag
 
   ! FIX SIS2-ATIVACAO: API do SIS2, confirmada lendo a fonte real em
   ! models/ocean/MOM6-examples/src/SIS2/src/{ice_model,ice_type,
@@ -82,6 +82,9 @@ module sis_cap_MONAN_mod
                                mpp_get_pelist
   use mpp_mod,         only : mpp_pe
   use MOM_domains,     only : MOM_infra_init, AGRID
+
+  use coupler_utils_mod, only : ChkErr
+
 
   implicit none
   private
@@ -153,33 +156,27 @@ contains
     rc = ESMF_SUCCESS
 
     call NUOPC_CompDerive(gcomp, model_routine_SS, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       userRoutine=InitializeP0, phase=0, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p1"/), userRoutine=InitializeAdvertise, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       phaseLabelList=(/"IPDv03p3"/), userRoutine=InitializeRealize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_DataInitialize, &
       specRoutine=InitializeDataComplete, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Advance, &
       specRoutine=ModelAdvance, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! FIX (encontrado via comparação com mom_cap_MONAN.F90 — resolve
     ! "NUOPC INCOMPATIBILITY: Import Fields not at current time" em teste
@@ -190,17 +187,14 @@ contains
     ! relogio do driver ESMF). Mesma solução já testada em
     ! mom_cap_MONAN.F90 para o mesmo problema entre MED e OCN.
     call ESMF_MethodRemove(gcomp, label=model_label_CheckImport, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_CheckImport, &
       specRoutine=CheckImportTolerant, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=model_label_Finalize, &
       specRoutine=ModelFinalize, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine SetServices
 
@@ -219,8 +213,7 @@ contains
     ! InitializeRealize abaixo registram (phaseLabelList=IPDv03p1/IPDv03p3).
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
       acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     ! A especialização de SetClock foi REMOVIDA. A versão anterior
     ! especializava com uma implementação
     ! VAZIA (só retornava ESMF_SUCCESS sem fazer nada) — isso bloqueava o
@@ -244,14 +237,12 @@ contains
     do n = 1, n_import_atm
       call NUOPC_Advertise(importState, StandardName=trim(import_names_atm(n)), &
         TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     do n = 1, n_import_ocn
       call NUOPC_Advertise(importState, StandardName=trim(import_names_ocn(n)), &
         TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     do n = 1, n_export
       ! FIX (achado real via NUOPC_Connector.F90:2408 "Neither side able
@@ -272,8 +263,7 @@ contains
       ! o conector nao fazia a transferencia real. Alinhado ao padrao do OCN.
       call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     call ESMF_LogWrite('ICE(SIS2): InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
@@ -316,8 +306,7 @@ contains
     is => wrap%ptr
 
     call ESMF_VMGetCurrent(vm, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! ── 1. PE-list deste componente + inicializar FMS (MOM_infra_init) ───────
     ! FIX (corrigido, era bug de ordem): MOM_infra_init precisa ser a
@@ -350,8 +339,7 @@ contains
     call set_calendar_type(GREGORIAN)
 
     call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     allocate(is%ice%fast_pelist(petCount))
     allocate(is%ice%slow_pelist(petCount))
@@ -374,11 +362,9 @@ contains
     ! Agora SEGURO — FMS já foi inicializado explicitamente no passo 1.
     call ESMF_ClockGet(clock, startTime=startTime, timeStep=timeStep, &
       stopTime=stopTime, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_TimeGet(startTime, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     fms_start = set_date(yr, mo, dy, hr, mn, sc)
     fms_init  = fms_start
     dt_coupling = esmf2fms_time(timeStep)
@@ -388,8 +374,7 @@ contains
     ! ordem).
     call ESMF_TimeGet(stopTime, yy=syy_ice, mm=smm_ice, dd=sdd_ice, &
       h=shh_ice, m=smn_ice, s=sss_ice, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     fms_stop = set_date(syy_ice, smm_ice, sdd_ice, shh_ice, smn_ice, sss_ice)
 
     ! ── 3. Inicializar o SIS2 ────────────────────────────────────────────
@@ -490,17 +475,14 @@ contains
         'grade ESMF periodica', line=__LINE__, file=__FILE__)) return
 
       call ESMF_GridAddCoord(is%ice_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       call ESMF_GridGetCoord(is%ice_grid, coordDim=1, localDE=0, &
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       call ESMF_GridGetCoord(is%ice_grid, coordDim=2, localDE=0, &
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-        line=__LINE__, file=__FILE__)) return
+      if (ChkErr(rc, __LINE__, __FILE__)) return
 
       call ICE_FillMom6TGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
@@ -551,8 +533,7 @@ contains
           'FieldCreate import ATM ' // trim(import_names_atm(k)), &
           line=__LINE__, file=__FILE__)) return
         call NUOPC_Realize(importState, field=fld, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
 
       do k = 1, n_import_ocn
@@ -562,8 +543,7 @@ contains
           'FieldCreate import OCN ' // trim(import_names_ocn(k)), &
           line=__LINE__, file=__FILE__)) return
         call NUOPC_Realize(importState, field=fld, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
 
       do k = 1, n_export
@@ -573,8 +553,7 @@ contains
           'FieldCreate export ' // trim(export_names(k)), &
           line=__LINE__, file=__FILE__)) return
         call NUOPC_Realize(exportState, field=fld, rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-          line=__LINE__, file=__FILE__)) return
+        if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
 
       ! ── Alocar is%oib (2D) e is%aib (3D, com dimensao de categoria) ─────
@@ -627,8 +606,7 @@ contains
     end block
 
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('ICE(SIS2): InitializeRealize concluido', ESMF_LOGMSG_INFO)
 
@@ -644,8 +622,7 @@ contains
 
     rc = ESMF_SUCCESS
     call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
     ! FIX B-ICE-FASTSYNC-01: sincroniza fCS%IST <- sCS%IST logo apos
@@ -676,8 +653,7 @@ contains
 
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
       value="true", rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('ICE(SIS2): InitializeDataComplete concluido', &
       ESMF_LOGMSG_INFO)
@@ -696,8 +672,7 @@ contains
     rc = ESMF_SUCCESS
     nullify(is)
     call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
     ! ── Passo 1: popular is%aib/is%oib a partir do importState ───────────
@@ -860,66 +835,23 @@ contains
   end subroutine ModelAdvance
 
   ! ============================================================================
-  !> @brief CheckImport tolerante: aceita campos com timestamp em ±dt_coupling.
+  !> @brief CheckImport sem validação de carimbo de tempo.
   !!
-  !! Adaptado de mom_cap_MONAN.F90::CheckImportTolerant (mesmo problema,
-  !! mesma solução): o NUOPC_ModelBase padrão rejeita campos cujo timestamp
-  !! não seja exatamente igual a currTime. Isso falha no acoplamento
-  !! MED+ICE porque o MED estampilha os campos com nextTime_MED enquanto o
-  !! clock do ICE (gerenciado internamente pelo FMS/SIS2) ainda está em
-  !! currTime_ICE. Aceita a janela [currTime-dt, currTime+dt] e emite
-  !! WARNING (não FATAL) para campos fora dela.
+  !! O NUOPC padrão exige carimbo igual a currTime; o MED carimba com o
+  !! instante do seu próprio relógio enquanto o relógio do SIS2 é mantido pelo
+  !! FMS, e as duas marcas podem diferir. A validação é, por isso, desligada;
+  !! a rotina só registra uma vez no log que está ativa.
   subroutine CheckImportTolerant(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
 
-    type(ESMF_State)        :: importState
-    type(ESMF_Field)        :: field
-    integer :: n, localrc
     logical, save :: logged_once = .false.
 
     rc = ESMF_SUCCESS
-
-    ! FIX (simplificado — era bug real): a versão anterior comparava
-    ! fldTime (de NUOPC_GetTimestamp) com currTime±dt via operadores
-    ! ESMF_TimeLT/ESMF_TimeGT, mas isso causou "Object not Initialized"
-    ! repetido pra TODOS os campos em teste real — sugere que
-    ! NUOPC_GetTimestamp retorna sucesso (rc=ESMF_SUCCESS) sem realmente
-    ! popular um ESMF_Time válido para os campos do ICE (diferente do OCN,
-    ! onde a mesma lógica funciona). Em vez de arriscar mais comparações
-    ! frágeis com objetos possivelmente não-inicializados, esta versão só
-    ! confirma que os campos existem/estão realizados (diagnóstico útil) e
-    ! PULA a comparação de tempo em si — efetivamente desativando a
-    ! validação estrita sem crashar. RESIDUAL: isso mascara, não resolve,
-    ! uma possível causa raiz mais profunda (campos do ICE talvez nunca
-    ! sendo genuinamente estampilhados pelo conector MED -> ICE) — vale
-    ! investigar depois que o sistema estiver rodando, comparando com o
-    ! comportamento equivalente do OCN.
-    call NUOPC_ModelGet(gcomp, importState=importState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
-
-    if (.not. logged_once) then
-      do n = 1, n_import_atm
-        call ESMF_StateGet(importState, itemName=trim(import_names_atm(n)), &
-             field=field, rc=localrc)
-        if (localrc /= ESMF_SUCCESS) cycle
-        call ESMF_FieldGet(field, rc=localrc)
-        if (localrc /= ESMF_SUCCESS) cycle
-      end do
-      do n = 1, n_import_ocn
-        call ESMF_StateGet(importState, itemName=trim(import_names_ocn(n)), &
-             field=field, rc=localrc)
-        if (localrc /= ESMF_SUCCESS) cycle
-        call ESMF_FieldGet(field, rc=localrc)
-        if (localrc /= ESMF_SUCCESS) cycle
-      end do
-      call ESMF_LogWrite('ICE(SIS2): CheckImportTolerant ativo — ' // &
-        'validacao de timestamp desativada (ver comentario no codigo)', &
-        ESMF_LOGMSG_INFO)
-      logged_once = .true.
-    end if
-
+    if (logged_once) return
+    call ESMF_LogWrite('ICE(SIS2): CheckImportTolerant ativo, validacao de ' // &
+      'carimbo de tempo desativada', ESMF_LOGMSG_INFO)
+    logged_once = .true.
   end subroutine CheckImportTolerant
 
   ! ============================================================================
@@ -959,8 +891,7 @@ contains
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, importState=importState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! -- Forcante atmosferica: le 2D, replica (broadcast) para as N
     !    categorias de espessura de gelo em is%aib. Nomes confirmados em
@@ -1102,8 +1033,7 @@ contains
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_StateGet(exportState, itemName="Si_ifrac_sis2", field=f_ifrac, rc=rc)
     if (rc /= ESMF_SUCCESS) return
@@ -1248,8 +1178,7 @@ contains
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_StateGet(exportState, itemName="Si_avsdr_sis2", field=f_avsdr, rc=rc)
     if (rc /= ESMF_SUCCESS) return
@@ -1358,8 +1287,7 @@ contains
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_StateGet(exportState, itemName="Si_t_sis2", field=f_tice, rc=rc)
     if (rc /= ESMF_SUCCESS) return
@@ -1412,8 +1340,7 @@ contains
 
     rc = ESMF_SUCCESS
     call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg=ESMF_LOGERR_PASSTHRU, &
-      line=__LINE__, file=__FILE__)) return
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
     call ice_model_restart(is%ice)

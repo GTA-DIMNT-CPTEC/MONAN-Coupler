@@ -84,7 +84,7 @@ module mpas_atm_model_mod
   use atm_core_interface, only : atm_setup_core, atm_setup_domain
 
 
-  use mpas_cap_config_mod,  only : cfg_sst_default, &
+  use coupler_config_mod,  only : cfg_sst_default, &
                                     cfg_ice_fraction_default, &
                                     cfg_zorl_default,&
                                     cfg_use_datm,&
@@ -148,7 +148,6 @@ module mpas_atm_model_mod
   public :: mpas_atm_run
   public :: mpas_atm_final
   public :: mpas_atm_init_sfc
-  public :: mpas_atm_resize
 
 contains
 
@@ -896,7 +895,6 @@ contains
     ! Nomes Registry.xml: sst, iceAreaCell, znt
     ! ------------------------------------------------------------------
     call mpas_pool_get_subpool(g_domain%blocklist%structs, 'sfc_input', sfcInputPool)
-   !call mpas_pool_get_subpool(block % structs, 'sfc_input', sfc_input)
     call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
     call mpas_pool_get_config(g_domain%configs, 'config_do_restart', config_do_restart)
@@ -917,7 +915,6 @@ contains
       call mpas_pool_get_array(sfcInputPool, 'sst',         sst_field)
       call mpas_pool_get_array(sfcInputPool, 'xice',        ice_field)
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
-      !call mpas_pool_get_array(diag_physicsPool, 'znt',         zorl_field)
       call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
       ! Fase 2.6: sfc_albedo vive em diag_physics (confirmado no Registry.xml
       ! real do MONAN-Model — mpas_atmphys_driver_lsm.F le/escreve de la,
@@ -1397,119 +1394,6 @@ contains
 
   ! ============================================================================
 
-  ! ============================================================================
-  subroutine mpas_atm_resize(atm_public, atm_state, atm_bnd, nCells_new)
-    type(mpas_atm_public_type),    intent(inout) :: atm_public
-    type(mpas_atm_state_type),     intent(inout) :: atm_state
-    type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-    integer,                       intent(in)    :: nCells_new
-    character(len=256) :: msg
-
-    if (nCells_new == atm_public%nCells) then
-      write(msg,'(A,I0,A)') 'mpas_atm_resize: nCells=', nCells_new, ' consistente'
-      call mpas_log_write(trim(msg))
-      return
-    end if
-
-    write(msg,'(A,I0,A,I0)') 'mpas_atm_resize: AVISO ESMF nCells=', nCells_new, &
-         ' difere de MPAS nCells=', atm_public%nCells
-    call mpas_log_write(trim(msg))
-    write(*,'(A)') trim(msg)
-
-    ! ── Atualiza contadores de células em atm_public e atm_state ─────────
-    atm_public%nCells = nCells_new
-    atm_state%nCells  = nCells_new
-
-    ! ── Redimensiona atm_bnd ──────────────────────────────────────────────
-    ! Sprint A Fase 2: redimensiona também uocn/vocn (correntes do MOM6).
-    if (allocated(atm_bnd%sst))          deallocate(atm_bnd%sst)
-    if (allocated(atm_bnd%ice_fraction)) deallocate(atm_bnd%ice_fraction)
-    if (allocated(atm_bnd%uocn))         deallocate(atm_bnd%uocn)
-    if (allocated(atm_bnd%vocn))         deallocate(atm_bnd%vocn)
-    if (allocated(atm_bnd%zorl))         deallocate(atm_bnd%zorl)
-    if (allocated(atm_bnd%alb))          deallocate(atm_bnd%alb)      ! Fase 2.6
-    if (allocated(atm_bnd%omask))        deallocate(atm_bnd%omask)    ! B-DIAGMASK-01
-
-    allocate(atm_bnd%sst         (nCells_new))
-    allocate(atm_bnd%ice_fraction(nCells_new))
-    allocate(atm_bnd%uocn        (nCells_new))     ! Sprint A
-    allocate(atm_bnd%vocn        (nCells_new))     ! Sprint A
-    allocate(atm_bnd%zorl        (nCells_new))
-    allocate(atm_bnd%alb         (nCells_new))     ! Fase 2.6
-    allocate(atm_bnd%omask       (nCells_new))     ! B-DIAGMASK-01
-    atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
-    atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
-    atm_bnd%uocn         = 0.0_MPAS_RKIND
-    atm_bnd%vocn         = 0.0_MPAS_RKIND
-    atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
-    atm_bnd%alb          = 0.08_MPAS_RKIND    ! Fase 2.6 — default agua aberta
-    atm_bnd%omask        = 1.0_MPAS_RKIND     ! B-DIAGMASK-01 — default tudo oceano
-
-    ! ── Redimensiona buffers de módulo (acumulados e stress) ─────────────
-    ! Estes arrays são alocados em mpas_atm_init com tamanho = MPAS nCells.
-    ! Se o número de células mudou (particionamento ESMF diferente do MPAS),
-    ! os buffers devem ser realocados para evitar acesso fora dos limites em
-    ! mpas_atm_run (loop 1..n onde n = atm_state%nCells).
-    if (allocated(g_prev_acswdnb)) then
-      deallocate(g_prev_acswdnb, g_prev_aclwdnb, g_prev_precip)
-      deallocate(g_prev_snow)
-      deallocate(g_swdn_inst, g_lwdn_inst, g_prec_inst)
-      deallocate(g_taux_buf, g_tauy_buf)
-      deallocate(g_q2m_buf, g_prec_rain_buf, g_prec_snow_buf)
-
-      allocate(g_prev_acswdnb(nCells_new), g_prev_aclwdnb(nCells_new), &
-               g_prev_precip(nCells_new))
-      allocate(g_prev_snow(nCells_new))
-      allocate(g_swdn_inst(nCells_new), g_lwdn_inst(nCells_new), &
-               g_prec_inst(nCells_new))
-      allocate(g_taux_buf(nCells_new), g_tauy_buf(nCells_new))
-      allocate(g_q2m_buf(nCells_new), g_prec_rain_buf(nCells_new), &
-               g_prec_snow_buf(nCells_new))
-
-      ! Reinicializar com estado atual dos pools (se disponíveis)
-      if (associated(g_pool_acswdnb)) then
-        g_prev_acswdnb(1:nCells_new) = g_pool_acswdnb(1:nCells_new)
-      else
-        g_prev_acswdnb = 0.0_MPAS_RKIND
-      end if
-      if (associated(g_pool_aclwdnb)) then
-        g_prev_aclwdnb(1:nCells_new) = g_pool_aclwdnb(1:nCells_new)
-      else
-        g_prev_aclwdnb = 0.0_MPAS_RKIND
-      end if
-      if (associated(g_pool_rainnc) .and. associated(g_pool_rainc)) then
-        g_prev_precip(1:nCells_new) = g_pool_rainnc(1:nCells_new) &
-                                     + g_pool_rainc(1:nCells_new)
-      else if (associated(g_pool_rainnc)) then
-        g_prev_precip(1:nCells_new) = g_pool_rainnc(1:nCells_new)
-      else
-        g_prev_precip = 0.0_MPAS_RKIND
-      end if
-      g_swdn_inst     = 0.0_MPAS_RKIND
-      g_lwdn_inst     = 0.0_MPAS_RKIND
-      g_prec_inst     = 0.0_MPAS_RKIND
-      g_taux_buf      = 0.0_MPAS_RKIND
-      g_tauy_buf      = 0.0_MPAS_RKIND
-      g_q2m_buf       = 0.0_MPAS_RKIND
-      g_prec_rain_buf = 0.0_MPAS_RKIND
-      g_prec_snow_buf = 0.0_MPAS_RKIND
-
-      ! Redirecionar ponteiros de atm_public para os novos buffers
-      atm_public%swdn_sfc   => g_swdn_inst
-      atm_public%lwdn_sfc   => g_lwdn_inst
-      atm_public%prec_total => g_prec_inst
-      atm_public%taux_sfc   => g_taux_buf
-      atm_public%tauy_sfc   => g_tauy_buf
-      atm_public%q2m        => g_q2m_buf
-      atm_public%prec_rain  => g_prec_rain_buf
-      atm_public%prec_snow  => g_prec_snow_buf
-    end if
-
-    write(msg,'(A,I0,A)') 'mpas_atm_resize: buffers realocados para ', &
-         nCells_new, ' celulas'
-    call mpas_log_write(trim(msg))
-
-  end subroutine mpas_atm_resize
 
   ! ─── auxiliares privados ───────────────────────────────────────────────────
 

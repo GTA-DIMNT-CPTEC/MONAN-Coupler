@@ -169,8 +169,8 @@ module med_cap_types_mod
     real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)  !< Máscara oceano/continente
 
     logical :: rh_created       = .false.
-    logical :: use_mpas_atm     = .false.   !< Controlado por atributo NUOPC "use_mpas_atm"
-    logical :: use_med_to_mpas  = .false.   !< Controlado por atributo NUOPC "use_med_to_mpas"
+    logical :: use_mpas_atm     = .false.   !< .true. = MPAS, .false. = DATM (de use_datm)
+    logical :: use_med_to_mpas  = .false.   !< cópia de cfg_use_med_to_mpas
 
   end type MED_InternalState
 
