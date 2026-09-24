@@ -90,11 +90,31 @@ make help       # lista os alvos
 
 ## Saídas e pós-processamento
 
-Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e campos importados em `diag_import/` (`monan2_import_*.nc` no lado atmosférico e `mom6_import_*.nc` no lado oceânico), além dos logs do ESMF em `logs/`. Os scripts em `tools/` apoiam a análise: `tools/postproc/` para pós-processamento dos NetCDF, `tools/animation/` para animações, `tools/coupler/` para balanceamento de PETs e testes de modo, e `tools/dev/` para linhas de base de comparação.
+Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e campos importados em `diag_import/` (`monan2_import_*.nc` no lado atmosférico e `mom6_import_*.nc` no lado oceânico), além dos logs do ESMF em `logs/`. Os scripts em `tools/` apoiam a análise: `tools/postproc/` para pós-processamento dos NetCDF, `tools/animation/` para animações, `tools/coupler/` para balanceamento de PETs, testes de modo e baterias de reprodutibilidade binária, `tools/atmos/` para as partições METIS e o teste do MPAS autônomo, `tools/ocean/` para a divisão de domínio do MOM6, e `tools/dev/` para linhas de base de comparação e o ambiente do `nccmp`. O catálogo completo, com a pergunta que cada ferramenta responde, está em [`docs/ferramentas.md`](docs/ferramentas.md).
+
+## Reprodutibilidade binária
+
+Desde 22/09/2026, o acoplador é reprodutível bit a bit: execuções idênticas, na mesma configuração de PETs, produzem o mesmo resultado nos modos sequencial e concorrente, com o SIS2 dinâmico e com o módulo de icebergs ligado (na configuração atual não há icebergs na simulação, então o código de icebergs em si ainda não foi exercitado). A causa da não reprodutibilidade anterior estava na ordem das somas dos remapeamentos do ESMF, e a correção fixa as duas camadas dessa ordem em todos os remapeamentos e ligações entre componentes (`B-SRCTERM-01`, `B-METHODS-TERMORDER-01`). A regra vale para qualquer remapeamento novo: ver [`docs/ferramentas.md`](docs/ferramentas.md), seção 6. A reprodutibilidade de uma configuração se verifica com o [`mede-taxa-repro.sh`](docs/uso-mede-taxa-repro.md).
 
 ## Documentação
 
-A pasta [`docs/`](docs/) reúne a documentação técnica, entre ela a análise das RunSequences sequencial e concorrente, a integração do componente de gelo, a execução multi-nó, o uso dos scripts de balanceamento e de linha de base, e o CHANGELOG do projeto.
+A pasta [`docs/`](docs/) reúne a documentação técnica, entre ela a análise das RunSequences sequencial e concorrente, a integração do componente de gelo, a execução multi-nó e o CHANGELOG do projeto.
+
+Guias de uso das ferramentas:
+
+| Guia | Ferramentas |
+| --- | --- |
+| [`ferramentas.md`](docs/ferramentas.md) | catálogo de todas as ferramentas, com sequências típicas de uso |
+| [`MULTINO-run_esmApp.md`](docs/MULTINO-run_esmApp.md) | `run_esmApp.jaci` |
+| [`uso-plan-layout.md`](docs/uso-plan-layout.md) | `plan-layout.py` |
+| [`uso-gen-metis.md`](docs/uso-gen-metis.md) | `gen-metis.bash` |
+| [`domain-mom6.md`](docs/domain-mom6.md) | `domain-mom6.bash` |
+| [`uso-analisa-balanceamento.md`](docs/uso-analisa-balanceamento.md) | `analisa_balanceamento_pets.py` |
+| [`uso-mede-smt.md`](docs/uso-mede-smt.md) | `mede_smt.py` |
+| [`uso-smoke-tests.md`](docs/uso-smoke-tests.md) | `test-concurrent.bash`, `test-sequential-split.bash` |
+| [`uso-mede-taxa-repro.md`](docs/uso-mede-taxa-repro.md) | `mede-taxa-repro.sh` |
+| [`uso-duplas-rodadas-repro.md`](docs/uso-duplas-rodadas-repro.md) | `roda-repro-reprodiag.sh`, `roda_repro_producao.sh`, `roda_repro_datm_mom6.sh`, `roda-repro-mpas-standalone.sh`, `set-nccmp-jaci.bash` |
+| [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash` |
 
 ## Créditos
 
