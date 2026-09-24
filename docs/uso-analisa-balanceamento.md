@@ -3,7 +3,7 @@
 INPE / CGCT / DIMNT, Grupo de Trabalho para Acoplamento de Modelos.
 Sistema acoplado MONAN-A 2.0 (MPAS 8.3.1) com MOM6 e SIS2, NUOPC/ESMF 8.9.1.
 
-Manual de uso de `tools/coupler/analisa_balanceamento_pets.py`, versão 14.22 (23/09/2026).
+Manual de uso de `tools/coupler/analisa_balanceamento_pets.py`, versão 14.22 (23/09/2026). Resultados de referência atualizados em 24/09/2026.
 
 ## 1. Para que serve
 
@@ -26,6 +26,8 @@ Por isso ele sempre soma a duração de **todas** as chamadas `Run` de um compon
 O número de passos vem do `esmApp_run.log`, campo `Passos (est.)`, ou da opção `--steps`.
 
 ## 3. Uso básico
+
+**Requisito: Python 3.7 ou mais novo.** O script usa `from __future__ import annotations` e `dataclasses`, que não existem em versões anteriores. Na jaci, o Python do sistema operacional é mais antigo; o do módulo de Python é o adequado. Atenção ao `set-nccmp-jaci.bash`: ele começa com `module purge`, que descarrega também o módulo do Python. Depois dele, o `python3` volta a ser o do sistema, e o script para com `SyntaxError: future feature annotations is not defined`. Rode o script antes de carregar o `set-nccmp-jaci.bash`, use um terminal separado para as comparações, ou recarregue o módulo do Python (`module load cray-python`, ou o módulo que você usa).
 
 Do diretório de experimento, depois de uma execução concluída:
 
@@ -213,13 +215,38 @@ Referências gravadas por versões anteriores continuam utilizáveis: os campos 
 
 O script trata só de desempenho, mas toda mudança de contagem tem uma consequência para a verificação de resultado, medida em 23/09/2026:
 
-| O que muda | Efeito no resultado |
+| O que muda | Efeito no resultado | Medido em |
+| --- | --- | --- |
+| divisão do domínio do gelo, com o mesmo número de PETs de gelo | nenhum: 4 × 2 e 2 × 4 deram resultado idêntico bit a bit, inclusive no estado interno do SIS2 | 23/09, 128 + 8 + 8 |
+| número de PETs do oceano e do gelo, **com a atmosfera e o total fixos** | nenhum: 128 + 8 + 8 e 128 + 12 + 4 deram resultado idêntico, na atmosfera e no estado interno do gelo | 24/09 |
+| total de PETs, com a atmosfera fixa | **muda**: 128 + 20 + 4 (152 PETs) diferiu de 128 + 8 + 8 (144) | 24/09 |
+| número de PETs da atmosfera | **muda** | 23/09, 72 contra 144 PETs |
+
+A causa mais provável da mudança com o total é o mediador, que ocupa todos os PETs do job: com outra divisão, as somas e a extrapolação de vizinhança (feita dentro da fatia de cada PET) mudam de pedaço. Entre 144 e 152 PETs também mudou o número de PETs do oceano (12 para 20); a atribuição ao mediador se apoia no resultado anterior, em que o oceano de 8 para 12 PETs não alterou nada.
+
+A regra prática que sai daí:
+
+| Mudança | Precisa de nova bateria do `mede-taxa-repro.sh`? |
 | --- | --- |
-| divisão do domínio do gelo, com o mesmo número de PETs de gelo | nenhum: 4 × 2 e 2 × 4 deram resultado idêntico bit a bit, inclusive no estado interno do SIS2 |
-| número de PETs da atmosfera, ou o total (o mediador ocupa todos os PETs) | o resultado muda, como esperado: as somas passam a ser feitas em outros pedaços. Cada configuração nova precisa de uma bateria do `mede-taxa-repro.sh` |
-| número de PETs do oceano e do gelo, mantendo atmosfera e total | ainda não medido; a previsão é que não mude, pelo projeto do MOM6 e do SIS2 |
+| redistribuir PETs entre oceano e gelo, mantendo atmosfera e total | não: a configuração herda a validação da anterior |
+| mudar o número de PETs da atmosfera ou o total | sim: cada total é uma configuração própria |
+
+Como qualquer mudança de total exige bateria, vale escolher o total final pelo desempenho antes de validar, e só então rodar a bateria nele.
 
 Desde a correção `B-ICE-DECOMP-01` (commit `a9e6935`), o cap do SIS2 segue a decomposição do próprio SIS2, e qualquer contagem de PETs de gelo sugerida aqui pode ser usada diretamente, sem fixar o `LAYOUT`. Em binários anteriores a esse commit, contagens de gelo diferentes de 4 exigiam fixar o layout no `SIS_override` (com 8 PETs, `#override LAYOUT = 4, 2`), senão a inicialização quebrava com índice fora do intervalo em `sis_cap_MONAN.F90`.
+
+### 9.1 Resultados de referência (24 horas simuladas, concorrente, icebergs ligados)
+
+| Configuração (atmosfera + oceano + gelo) | Total | Oceano | Atmosfera | Atmosfera parada | Duração do job |
+| --- | --- | --- | --- | --- | --- |
+| 64 + 4 + 4 | 72 | | | | 366 s |
+| 128 + 8 + 8 | 144 | 201 s | 97 s | 52% | 234 s |
+| 128 + 12 + 4 | 144 | 162 s | 92 s | 43% | 200 s |
+| 128 + 20 + 4 | 152 | 117 s | 93 s | 21% | 158 s |
+
+O oceano foi o gargalo em todas as medições com 144 PETs ou mais, e o tempo do job acompanhou o dele: tirar 39 s do oceano (128 + 8 + 8 para 128 + 12 + 4) tirou 34 s do job. O MOM6, nesta grade de 180 × 155 pontos, escalou com eficiência de cerca de 83% de 8 para 12 PETs e de 84% de 12 para 20. O gelo nunca passou de 6 s de cálculo, e 4 PETs bastam para ele.
+
+Esses números mostram também o limite da divisão proporcional (seção 5): a estimativa linear para o oceano com 12 PETs era de cerca de 135 s, e o medido foi 162 s. A sugestão indica a direção certa, mas o tamanho do passo precisa ser confirmado por execução.
 
 ## 10. Avisos que aparecem no relatório
 
@@ -244,6 +271,8 @@ Desde a correção `B-ICE-DECOMP-01` (commit `a9e6935`), o cap do SIS2 segue a d
 **O layout real pode ser pior que o "melhor layout".** O MOM6 e o SIS2 escolhem sozinhos a fatoração com `LAYOUT = 0, 0`. A avaliação usa o melhor caso possível; confira no `MOM_parameter_doc.layout` e no `SIS_parameter_doc.layout` o layout que o modelo escolheu de fato.
 
 **O tempo de inicialização não entra na divisão.** Leitura de condições iniciais, criação dos pesos de remapeamento e escrita de saídas não escalam como o cálculo. Na execução de 144 PETs, cerca de 20 a 30 s dos 230 s do job eram desse tipo.
+
+**Python 3.7 ou mais novo.** Ver a seção 3, inclusive o efeito do `module purge` do `set-nccmp-jaci.bash`.
 
 ## 12. Histórico
 

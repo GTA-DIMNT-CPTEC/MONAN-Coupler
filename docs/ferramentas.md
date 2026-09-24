@@ -3,7 +3,7 @@
 INPE / CGCT / DIMNT, Grupo de Trabalho para Acoplamento de Modelos.
 Sistema acoplado MONAN-A 2.0 (MPAS 8.3.1) com MOM6 e SIS2, NUOPC/ESMF 8.9.1.
 
-Este documento lista as ferramentas usadas para compilar, executar, dimensionar, verificar e testar a reprodutibilidade do sistema de acoplamento, com a pergunta que cada uma responde e o guia de uso. Estado em 23/09/2026.
+Este documento lista as ferramentas usadas para compilar, executar, dimensionar, verificar e testar a reprodutibilidade do sistema de acoplamento, com a pergunta que cada uma responde e o guia de uso. Estado em 24/09/2026.
 
 ## 1. Visão geral
 
@@ -52,7 +52,16 @@ Quando um componente quebra, os outros esperam por ele e o job fica parado até 
 | `tools/coupler/analisa_balanceamento_pets.py` | lê os logs de uma execução concluída, mede o tempo de cada componente, mostra quanto cada um fica parado esperando o mais lento, e sugere uma divisão de PETs, com avaliação de viabilidade e ajuste prático (v14.22) | `docs/uso-analisa-balanceamento.md` |
 | `tools/coupler/mede_smt.py` | comparação controlada do efeito do SMT (dois fios por núcleo) no sistema acoplado | `docs/uso-mede-smt.md`, `docs/SMT-Jaci.md` |
 
-Referência medida em 23/09/2026 (concorrente, icebergs ligados, 24 horas simuladas): 72 PETs (64 + 4 + 4) em 366 s; 144 PETs (128 + 8 + 8) em 229 a 236 s. Com 144 PETs, o gargalo é o oceano (201 s de cálculo, contra 97 s da atmosfera e 3,6 s do gelo).
+Referência medida em 23 e 24/09/2026 (concorrente, icebergs ligados, 24 horas simuladas; atmosfera + oceano + gelo):
+
+| Configuração | Total | Duração do job | Gargalo |
+| --- | --- | --- | --- |
+| 64 + 4 + 4 | 72 | 366 s | |
+| 128 + 8 + 8 | 144 | 234 s | oceano, 201 s (atmosfera 97 s) |
+| 128 + 12 + 4 | 144 | 200 s | oceano, 162 s |
+| 128 + 20 + 4 | 152 | 158 s | oceano, 117 s (atmosfera 93 s) |
+
+Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa de poucos PETs (4 bastam). Detalhes em `docs/uso-analisa-balanceamento.md`, seção 9.
 
 ## 5. Funcionamento
 
@@ -70,7 +79,7 @@ Referência medida em 23/09/2026 (concorrente, icebergs ligados, 24 horas simula
 | `tools/coupler/roda_repro_producao.sh` | dupla rodada do caso de produção, em todas as saídas, usando a maquinaria de linha de base | `docs/uso-duplas-rodadas-repro.md` |
 | `tools/coupler/roda_repro_datm_mom6.sh` | dupla rodada com atmosfera de dados no lugar do MPAS, para separar a origem entre atmosfera e oceano/gelo | `docs/uso-duplas-rodadas-repro.md` |
 | `tools/atmos/roda-repro-mpas-standalone.sh` | dupla rodada do MPAS autônomo, fora do acoplador | `docs/uso-duplas-rodadas-repro.md` |
-| `tools/dev/set-nccmp-jaci.bash` | carrega os módulos do `nccmp` na jaci (com `source`) | `docs/uso-duplas-rodadas-repro.md`, seção 2 |
+| `tools/dev/set-nccmp-jaci.bash` | carrega os módulos do `nccmp` na jaci (com `source`); começa com `module purge`, que descarrega também o Python usado pelas ferramentas `.py` | `docs/uso-duplas-rodadas-repro.md`, seção 2 |
 
 **Instrumentos no código e na configuração**, usados por essas ferramentas:
 
@@ -121,8 +130,8 @@ Os comandos sugeridos ao fim de cada job pelo `run_esmApp.jaci` usam estes scrip
 1. `plan-layout.py`, para a topologia.
 2. `gen-metis.bash`, para a partição da atmosfera.
 3. Uma execução com `run_esmApp.jaci`, e `analisa_balanceamento_pets.py` sobre os logs dela.
-4. Se o balanço pedir, ajustar as contagens e repetir o passo 3.
-5. `mede-taxa-repro.sh` com 4 execuções e, se sair limpo, com 8, para confirmar a reprodutibilidade da configuração final.
+4. Se o balanço pedir, ajustar as contagens e repetir o passo 3. Redistribuir PETs entre oceano e gelo, mantendo a atmosfera e o total, não altera o resultado; mudar a atmosfera ou o total altera. Por isso, escolha primeiro o total final pelo desempenho.
+5. `mede-taxa-repro.sh` com 4 execuções e, se sair limpo, com 8, para confirmar a reprodutibilidade da configuração final. Redistribuições posteriores entre oceano e gelo, com o mesmo total e a mesma atmosfera, herdam essa validação.
 
 **Uma alteração de código que não deveria mudar o resultado.**
 

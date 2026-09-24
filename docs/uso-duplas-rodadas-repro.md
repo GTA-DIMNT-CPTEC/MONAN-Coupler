@@ -37,7 +37,7 @@ source $COUPLER_ROOT/tools/dev/set-nccmp-jaci.bash
 
 Ele faz `module purge` e carrega `libfabric`, `cray-netcdf-hdf5parallel`, `cray-hdf5-parallel` e `nccmp`. Duas consequências:
 
-- O `module purge` descarta os módulos já carregados na sessão. Use-o num terminal dedicado às comparações, ou recarregue o ambiente de compilação depois.
+- O `module purge` descarta os módulos já carregados na sessão, inclusive o do Python: depois dele, o `python3` volta a ser o do sistema operacional, anterior ao 3.7, e ferramentas como o `analisa_balanceamento_pets.py` param com `SyntaxError: future feature annotations is not defined`. Use-o num terminal dedicado às comparações, rode as ferramentas em Python antes dele, ou recarregue os módulos necessários depois (`module load cray-python`, ou o módulo de Python que você usa).
 - Precisa ser feito com `source`, não com `bash`: executado como script, os módulos seriam carregados num processo filho e sumiriam ao fim dele.
 
 Os scripts de reprodutibilidade conferem se o `nccmp` está disponível e, alguns, chamam este utilitário sozinhos.

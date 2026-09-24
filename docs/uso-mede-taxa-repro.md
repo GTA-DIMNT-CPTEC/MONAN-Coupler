@@ -233,7 +233,11 @@ Com mais de 9 execuções, troque `r?` por `r*`. Copiar o `nuopc.input` e o `SIS
 
 **Quando um componente quebra, o job fica parado até o fim do tempo pedido**, porque os outros esperam por ele, e termina com SIGTERM (exit 143). A dica automática de falta de memória do `run_esmApp.jaci` é enganosa nesse caso: procure o erro no `esmApp_run.log` e dê `qdel` no job.
 
-**A taxa vale só para a configuração medida.** Mudar `atm_pet_count`, o total de PETs, `dt_coupling`, o modo de acoplamento ou um componente exige nova bateria.
+**A taxa vale só para a configuração medida.** Mudar `atm_pet_count`, o total de PETs, `dt_coupling`, o modo de acoplamento ou um componente exige nova bateria. A exceção, medida em 23 e 24/09/2026: redistribuir PETs entre oceano e gelo, mantendo a atmosfera e o total, e mudar a divisão do domínio do gelo não alteram o resultado bit a bit; essas mudanças herdam a validação da configuração anterior.
+
+**Mudar o total de PETs muda o resultado**, mesmo com a atmosfera igual (medido em 24/09/2026: 128 + 20 + 4 diferiu de 128 + 8 + 8). A causa mais provável é o mediador, que ocupa todos os PETs. Não é defeito: cada total é uma configuração própria, e a reprodutibilidade se verifica dentro dela.
+
+**O `set-nccmp-jaci.bash` descarrega o Python.** Ele começa com `module purge`. Depois dele, ferramentas em Python como o `analisa_balanceamento_pets.py` falham com `SyntaxError` (o Python do sistema é anterior ao 3.7). Rode-as antes, use um terminal separado, ou recarregue o módulo do Python.
 
 ## 10. Resultados de referência
 
