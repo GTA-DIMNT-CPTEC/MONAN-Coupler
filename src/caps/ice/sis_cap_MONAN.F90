@@ -427,35 +427,64 @@ contains
     ! reais (nao-uniformes), periodicidade leste-oeste. Ver
     ! ICE_ReadMom6TGridDims/ICE_FillMom6TGridCoords abaixo.
     block
-      integer :: nx_ice, ny_ice, ny_tiles, nx_max, nx_tiles_target, lde
-      integer :: regDecomp(2)
+      integer :: nx_ice, ny_ice
+      integer :: gis, gie, gjs, gje
+      integer :: loc4(4)
+      integer, allocatable :: all4(:), cntx(:), cnty(:), pmap(:,:,:)
+      character(len=256) :: msg_decomp
+      logical :: ok_decomp
       real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
 
       call ICE_ReadMom6TGridDims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
         'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
-      ! Mesma fatoracao exata ja usada em MED_cap.F90 para a grade OCN —
-      ! garante 1 DE por PET, sem DE orfao.
-      nx_tiles_target = max(1, int(sqrt(real(petCount))))
-      ny_tiles = 1
-      do lde = nx_tiles_target, 1, -1
-        if (mod(petCount, lde) == 0 .and. lde <= ny_ice &
-            .and. (petCount / lde) <= nx_ice / 2) then
-          ny_tiles = lde
-          exit
-        end if
-      end do
-      nx_max       = petCount / ny_tiles
-      regDecomp(1) = nx_max
-      regDecomp(2) = ny_tiles
+      ! B-ICE-DECOMP-01 (23/09/2026): a grade ESMF segue a decomposicao que o
+      ! PROPRIO SIS2 escolheu em ice_model_init, bloco por bloco.
+      !
+      ! Antes, a grade era criada com uma regra propria (regDecomp a partir
+      ! da raiz quadrada do numero de PETs), supondo que ela coincidia com o
+      ! LAYOUT do SIS2. Com 4 PETs as duas davam 2 x 2 e o defeito ficava
+      ! escondido; com 8 PETs o SIS2 escolheu 2 x 4 (blocos 90 x 39) e o cap
+      ! 4 x 2 (blocos 45 x 78), e export_si_ifrac saiu do array do SIS2
+      ! ("Index '48' of dimension 2 ... outside of expected range (1:47)").
+      ! Mesmo principio do FIX-GRID-v5 do cap do oceano (deBlockList a partir
+      ! da decomposicao do MOM6).
+      !
+      ! Cada PET pega os limites GLOBAIS do seu bloco no dominio do SIS2, os
+      ! PETs trocam essa informacao, e ICE_DecompFromBlocks monta os tamanhos
+      ! por coluna e por linha e o mapa bloco -> PET, validando cobertura e
+      ! unicidade. Se a decomposicao nao for representavel (por exemplo,
+      ! blocos de terra eliminados por mascara), o cap para com mensagem
+      ! clara em vez de sair do array.
+      call mpp_get_compute_domain(is%ice%sCS%G%Domain%mpp_domain, gis, gie, gjs, gje)
+      loc4 = (/ gis, gie, gjs, gje /)
+      allocate(all4(4*petCount))
+      call ESMF_VMAllGather(vm, sendData=loc4, recvData=all4, count=4, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
+        'falha ao trocar os blocos do SIS2 entre PETs', line=__LINE__, file=__FILE__)) return
+
+      call ICE_DecompFromBlocks(reshape(all4, (/4, petCount/)), petCount, &
+        nx_ice, ny_ice, cntx, cnty, pmap, msg_decomp, ok_decomp)
+      if (.not. ok_decomp) then
+        call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
+          'decomposicao do SIS2 nao representavel na grade ESMF: ' // &
+          trim(msg_decomp), line=__LINE__, file=__FILE__, rcToReturn=rc)
+        return
+      end if
+
+      if (localPet == 0) then
+        write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
+          'segue a decomposicao do SIS2: ', size(cntx), ' x ', size(cnty), ' blocos'
+        call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
+      end if
 
       ! periodicDim=1 (leste-oeste) — mesma correcao ja testada em
       ! MED_cap.F90; polekindflag deliberadamente OMITIDO (ver nota de
       ! reversao no MED_cap.F90 sobre SIGSEGV causado por declarar polo
       ! onde nao existe).
-      is%ice_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), &
-        maxIndex=(/nx_ice, ny_ice/), regDecomp=regDecomp, periodicDim=1, &
+      is%ice_grid = ESMF_GridCreate1PeriDim(countsPerDEDim1=cntx, &
+        countsPerDEDim2=cnty, periodicDim=1, petMap=pmap, &
         indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao criar ' // &
         'grade ESMF periodica', line=__LINE__, file=__FILE__)) return
@@ -479,6 +508,17 @@ contains
 
       is%isc = lbound(coordX,1); is%iec = ubound(coordX,1)
       is%jsc = lbound(coordX,2); is%jec = ubound(coordX,2)
+
+      ! B-ICE-DECOMP-01: conferencia final, em cada PET, de que o bloco ESMF e'
+      ! exatamente o bloco do SIS2. Protege contra um petMap trocado.
+      if (is%isc /= gis .or. is%iec /= gie .or. is%jsc /= gjs .or. is%jec /= gje) then
+        write(msg_decomp,'(a,8(i0,a))') 'ICE(SIS2): B-ICE-DECOMP-01 bloco ESMF i ', &
+          is%isc, '..', is%iec, ' j ', is%jsc, '..', is%jec, &
+          ' difere do bloco do SIS2 i ', gis, '..', gie, ' j ', gjs, '..', gje, ''
+        call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg=trim(msg_decomp), &
+          line=__LINE__, file=__FILE__, rcToReturn=rc)
+        return
+      end if
 
       call ESMF_LogWrite('ICE(SIS2): grade ESMF criada ' // &
         '(mesma grade tripolar do OCN)', ESMF_LOGMSG_INFO)
@@ -1394,6 +1434,109 @@ contains
   ! modulo comum (ex.: mom6_grid_utils_mod) se o time preferir evitar a
   ! duplicacao entre MED_cap.F90 e sis_cap_MONAN.F90.
   !----------------------------------------------------------------------------
+  !> B-ICE-DECOMP-01: a partir dos blocos de todos os PETs (inicio e fim
+  !! globais em i e em j, na ordem dos PETs), monta a decomposicao retangular
+  !! que o ESMF precisa: tamanho de cada coluna (cntx), de cada linha (cnty) e
+  !! o PET dono de cada bloco (pmap). Valida que os blocos formam uma
+  !! grade produto (layout nbx x nby), cobrem 1..nx e 1..ny sem buraco nem
+  !! sobreposicao, e que cada bloco pertence a exatamente um PET.
+  !! blocos(1:4, p) = (/ is, ie, js, je /) do PET p-1.
+  subroutine ICE_DecompFromBlocks(blocos, npet, nx, ny, cntx, cnty, pmap, msg, ok)
+    integer,              intent(in)  :: blocos(:,:)
+    integer,              intent(in)  :: npet, nx, ny
+    integer, allocatable, intent(out) :: cntx(:), cnty(:), pmap(:,:,:)
+    character(len=*),     intent(out) :: msg
+    logical,              intent(out) :: ok
+
+    integer, allocatable :: xs(:), xe(:), ys(:), ye(:)
+    integer :: p, k, nbx, nby, ix, iy
+    logical :: novo
+
+    ok  = .false.
+    msg = ''
+    allocate(xs(npet), xe(npet), ys(npet), ye(npet))
+    nbx = 0 ; nby = 0
+
+    ! colunas e linhas distintas (pelo inicio), com o fim correspondente
+    do p = 1, npet
+      novo = .true.
+      do k = 1, nbx
+        if (xs(k) == blocos(1,p)) then
+          novo = .false.
+          if (xe(k) /= blocos(2,p)) then
+            write(msg,'(a,i0,a)') 'colunas com mesmo inicio e fins diferentes (PET ', p-1, ')'
+            return
+          end if
+        end if
+      end do
+      if (novo) then ; nbx = nbx + 1 ; xs(nbx) = blocos(1,p) ; xe(nbx) = blocos(2,p) ; end if
+      novo = .true.
+      do k = 1, nby
+        if (ys(k) == blocos(3,p)) then
+          novo = .false.
+          if (ye(k) /= blocos(4,p)) then
+            write(msg,'(a,i0,a)') 'linhas com mesmo inicio e fins diferentes (PET ', p-1, ')'
+            return
+          end if
+        end if
+      end do
+      if (novo) then ; nby = nby + 1 ; ys(nby) = blocos(3,p) ; ye(nby) = blocos(4,p) ; end if
+    end do
+
+    if (nbx * nby /= npet) then
+      write(msg,'(a,i0,a,i0,a,i0,a)') 'layout ', nbx, ' x ', nby, ' nao corresponde a ', npet, &
+        ' PETs (blocos mascarados ou decomposicao nao retangular?)'
+      return
+    end if
+
+    call ordena(xs(1:nbx), xe(1:nbx))
+    call ordena(ys(1:nby), ye(1:nby))
+
+    ! cobertura contigua de 1..nx e 1..ny
+    if (xs(1) /= 1 .or. xe(nbx) /= nx .or. ys(1) /= 1 .or. ye(nby) /= ny) then
+      write(msg,'(a,4(i0,a))') 'blocos nao cobrem a grade: i ', xs(1), '..', xe(nbx), &
+        ', j ', ys(1), '..', ye(nby)
+      return
+    end if
+    do k = 1, nbx - 1
+      if (xs(k+1) /= xe(k) + 1) then ; msg = 'colunas com buraco ou sobreposicao' ; return ; end if
+    end do
+    do k = 1, nby - 1
+      if (ys(k+1) /= ye(k) + 1) then ; msg = 'linhas com buraco ou sobreposicao' ; return ; end if
+    end do
+
+    allocate(cntx(nbx), cnty(nby), pmap(nbx, nby, 1))
+    cntx = xe(1:nbx) - xs(1:nbx) + 1
+    cnty = ye(1:nby) - ys(1:nby) + 1
+    pmap = -1
+    do p = 1, npet
+      ix = findloc(xs(1:nbx), blocos(1,p), dim=1)
+      iy = findloc(ys(1:nby), blocos(3,p), dim=1)
+      if (pmap(ix, iy, 1) /= -1) then
+        write(msg,'(a,i0,a,i0)') 'bloco atribuido a dois PETs: ', pmap(ix,iy,1), ' e ', p-1
+        return
+      end if
+      pmap(ix, iy, 1) = p - 1
+    end do
+    ok = .true.
+
+  contains
+
+    pure subroutine ordena(a, b)
+      integer, intent(inout) :: a(:), b(:)
+      integer :: i, j, ta, tb
+      do i = 2, size(a)
+        ta = a(i) ; tb = b(i) ; j = i - 1
+        do while (j >= 1)
+          if (a(j) <= ta) exit
+          a(j+1) = a(j) ; b(j+1) = b(j) ; j = j - 1
+        end do
+        a(j+1) = ta ; b(j+1) = tb
+      end do
+    end subroutine ordena
+
+  end subroutine ICE_DecompFromBlocks
+
   subroutine ICE_ReadMom6TGridDims(filename, ni, nj, rc)
     character(len=*), intent(in)  :: filename
     integer,           intent(out) :: ni, nj
