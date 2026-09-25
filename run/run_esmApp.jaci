@@ -267,9 +267,11 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     BUILD_ESMF="$(sed -n 's/^ESMF_VERSION_STRING=//p' "${ESMFMKFILE}" | head -1)"
     [[ -z "${BUILD_ESMF}" ]] && BUILD_ESMF="?"
   fi
-  BUILD_EXE="?"
-  if [[ -r "${EXE:-}" ]]; then
-    BUILD_EXE="$(date -r "${EXE}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
+  # B-RUN-EXE-01: caminho e data do executável de fato usado (antes lia a
+  # variável EXE, nunca definida, e o campo saía sempre '?').
+  BUILD_EXE="${EXECUTABLE} (?)"
+  if [[ -r "${EXECUTABLE}" ]]; then
+    BUILD_EXE="${EXECUTABLE} ($(date -r "${EXECUTABLE}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?'))"
   fi
 
   # ── Banner ─────────────────────────────────────────────────────────────────
@@ -1274,7 +1276,7 @@ cat > "${PBS_SCRIPT}" << HEREDOC
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
 #PBS -o ${WORKDIR}/logs/esmApp_run.log
-#PBS -v MPAS_NPES=${NPES},REPRO_MPI=${REPRO_MPI:-0}
+#PBS -v MPAS_NPES=${NPES},REPRO_MPI=${REPRO_MPI:-0},ESMAPP_BIN=${EXECUTABLE}
 
 # Gerado por run_esmApp.jaci em $(date '+%Y-%m-%d %H:%M:%S')
 # NPES=${NPES}  nós=${NNODES}  layout=${TOPO_DESC}  place=${PLACE}
