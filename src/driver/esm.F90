@@ -123,10 +123,10 @@ contains
 
     if (cfg_use_docn) then
       call add_model(driver, OCN_LABEL, DOCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      write(*,'(A)') '[ESM] OCN: DOCN OISST ativo (use_docn=T)'
+      call ESMF_LogWrite('ESM: OCN = DOCN OISST (use_docn=T)', ESMF_LOGMSG_INFO)
     else
       call add_model(driver, OCN_LABEL, OCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      write(*,'(A)') '[ESM] OCN: MOM6+SIS2 dinamico ativo (use_docn=F)'
+      call ESMF_LogWrite('ESM: OCN = MOM6+SIS2 dinamico (use_docn=F)', ESMF_LOGMSG_INFO)
     end if
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -404,7 +404,9 @@ contains
     character(len=*), parameter :: A2M = 'MPAS -> MED', O2M = 'OCN -> MED', I2M = 'ICE -> MED'
     character(len=*), parameter :: O2A = 'OCN -> MPAS'
     integer, parameter :: LW = 24
-    character(len=LW), allocatable :: steps(:)
+    character(len=LW)   :: steps(10)      ! no máximo 10 linhas por passo
+    character(len=LW+2) :: lines(12)
+    integer :: n
     character(len=:),  allocatable :: title
     type(NUOPC_FreeFormat)  :: runSeqFF
     type(ESMF_Clock)        :: driverClock
@@ -420,25 +422,32 @@ contains
 
     if (concurrent .and. ice) then
       title = 'Fase 2 CONCORRENTE + ICE (SIS2)'
-      steps = [character(len=LW) :: M2A, M2O, M2I, 'MPAS', 'OCN', 'ICE', A2M, O2M, I2M, 'MED']
+      n = 10
+      steps(1:n) = [character(len=LW) :: M2A, M2O, M2I, 'MPAS', 'OCN', 'ICE', A2M, O2M, I2M, 'MED']
     else if (concurrent .and. mom6) then
       title = 'Fase 2 CONCORRENTE (MED->MPAS)'
-      steps = [character(len=LW) :: M2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
+      n = 7
+      steps(1:n) = [character(len=LW) :: M2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
     else if (concurrent) then
       title = 'Fase 1 CONCORRENTE (OCN->MPAS)'
-      steps = [character(len=LW) :: O2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
+      n = 7
+      steps(1:n) = [character(len=LW) :: O2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
     else if (ice .and. cfg_seq_repro) then
       title = 'Fase 2 SEQUENCIAL REPRODUTIVEL + ICE (SIS2)'
-      steps = [character(len=LW) :: M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE', A2M, O2M, I2M, 'MED']
+      n = 10
+      steps(1:n) = [character(len=LW) :: M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE', A2M, O2M, I2M, 'MED']
     else if (ice) then
       title = 'Fase 2 SEQUENCIAL + ICE (SIS2)'
-      steps = [character(len=LW) :: O2M, I2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE']
+      n = 10
+      steps(1:n) = [character(len=LW) :: O2M, I2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE']
     else if (mom6) then
       title = 'Fase 2 (MED->MPAS)'
-      steps = [character(len=LW) :: O2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN']
+      n = 7
+      steps(1:n) = [character(len=LW) :: O2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN']
     else
       title = 'Fase 1 (OCN->MPAS direto)'
-      steps = [character(len=LW) :: O2A, 'MPAS', A2M, O2M, 'MED', M2O, 'OCN']
+      n = 7
+      steps(1:n) = [character(len=LW) :: O2A, 'MPAS', A2M, O2M, 'MED', M2O, 'OCN']
     end if
 
     ! O DOCN não tem estado oceânico ao qual o SIS2 possa se acoplar.
@@ -454,8 +463,16 @@ contains
     call ESMF_TimeIntervalGet(timeStep, s_i8=dt_s, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    runSeqFF = NUOPC_FreeFormatCreate(stringList=[character(len=LW+2) :: &
-      '@'//int_to_str(int(dt_s)), ('  '//steps(i), i = 1, size(steps)), '@'], rc=rc)
+    ! As linhas vão para uma variável antes da chamada: passado direto como
+    ! argumento, um construtor [character(len=...) :: ...] tem o comprimento
+    ! ignorado pelo gfortran (fica o do primeiro elemento, '@3600', e 'MPAS'
+    ! vira 'MPA').
+    lines(1) = '@'//int_to_str(int(dt_s))
+    do i = 1, n
+      lines(i+1) = '  '//steps(i)
+    end do
+    lines(n+2) = '@'
+    runSeqFF = NUOPC_FreeFormatCreate(stringList=lines(1:n+2), rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_DriverIngestRunSequence(driver, runSeqFF, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

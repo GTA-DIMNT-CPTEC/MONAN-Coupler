@@ -22,7 +22,7 @@ program esmApp
   use coupler_config_mod, only : config_read, config_parse_date, CONFIG_FILE_DEFAULT, &
                                  cfg_start_date, cfg_stop_date, cfg_dt_coupling,   &
                                  cfg_log_dir, cfg_log_kind
-  use coupler_utils_mod,  only : ChkErr
+  use coupler_utils_mod,  only : ChkErr, int_to_str
 
   implicit none
 
@@ -83,8 +83,8 @@ program esmApp
 
   ! Cada ESMF_GridCompRun executa exatamente um passo da RunSequence. Uma
   ! única chamada até stop_date foi testada e encerrava a rodada cedo.
-  call say('--- Loop de execucao: '//itoa(nSteps)//' passo(s) de acoplamento de '// &
-           itoa(cfg_dt_coupling)//' s')
+  call say('--- Loop de execucao: '//int_to_str(nSteps)//' passo(s) de acoplamento de '// &
+           int_to_str(cfg_dt_coupling)//' s')
   do step = 1, nSteps
     call ESMF_GridCompRun(esmComp, clock=clock, userRc=userRc, rc=rc)
     call check(rc, __LINE__, userRc)
@@ -136,12 +136,6 @@ contains
     character(len=*), intent(in) :: msg
     if (localPet == 0) write(*,'(A)') msg
   end subroutine say
-
-  function itoa(n) result(s)
-    integer, intent(in) :: n
-    character(len=16)   :: s
-    write(s,'(I0)') n
-  end function itoa
 
   subroutine print_banner()
     type(ESMF_VM) :: vm

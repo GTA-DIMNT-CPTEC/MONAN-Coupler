@@ -161,10 +161,11 @@ contains
                                seq_repro
 
     character(len=512) :: fpath
-    logical :: exists
+    logical :: exists, is_root
     integer :: unit, ios
 
     rc = CFG_OK
+    is_root = launcher_rank() == 0
 
     ! 1. Valores iniciais = valores atuais do módulo (padrões na 1a leitura)
     start_date = cfg_start_date;  stop_date = cfg_stop_date
@@ -210,7 +211,7 @@ contains
 
     inquire(file=trim(fpath), exist=exists)
     if (.not. exists) then
-      write(*,'(3A)') TAG//'AVISO: arquivo "', trim(fpath), &
+      if (is_root) write(*,'(3A)') TAG//'AVISO: arquivo "', trim(fpath), &
                       '" nao encontrado, usando valores padrao.'
       rc = CFG_NO_FILE
       return
@@ -218,7 +219,7 @@ contains
 
     open(newunit=unit, file=trim(fpath), status='old', action='read', iostat=ios)
     if (ios /= 0) then
-      write(*,'(2A)') TAG//'ERRO: nao foi possivel abrir ', trim(fpath)
+      if (is_root) write(*,'(2A)') TAG//'ERRO: nao foi possivel abrir ', trim(fpath)
       rc = CFG_FATAL
       return
     end if
@@ -256,7 +257,7 @@ contains
         pet_layout = 'shared'
       end if
     end if
-    if (use_mommesh .or. restart_n /= 0) write(*,'(A)') TAG//'AVISO: use_mommesh e ' // &
+    if (is_root .and. (use_mommesh .or. restart_n /= 0)) write(*,'(A)') TAG//'AVISO: use_mommesh e ' // &
       'restart_n (&nuopc_ocn) sao obsoletas e nao tem efeito; remova-as do nuopc.input.'
 
     ! 5. Validar (erro fatal)
@@ -266,18 +267,18 @@ contains
     end if
 
     ! 6. Avisos (a rodada continua)
-    if (trim(log_kind) == 'multi_on_error') write(*,'(A)') TAG//'AVISO: ' // &
+    if (is_root .and. trim(log_kind) == 'multi_on_error') write(*,'(A)') TAG//'AVISO: ' // &
       'log_kind=multi_on_error pode deixar logs/PET*.esmApp.log incompletos em ' // &
       'rodadas bem-sucedidas; as ferramentas de balanceamento dependem deles.'
-    if (dt_atm > dt_coupling) write(*,'(2(A,I0))') TAG//'AVISO: dt_atm=', dt_atm, &
+    if (is_root .and. dt_atm > dt_coupling) write(*,'(2(A,I0))') TAG//'AVISO: dt_atm=', dt_atm, &
       ' deve ser <= dt_coupling=', dt_coupling
-    if (mod(dt_coupling, dt_atm) /= 0) &
+    if (is_root .and. mod(dt_coupling, dt_atm) /= 0) &
       write(*,'(A)') TAG//'AVISO: dt_coupling nao e multiplo de dt_atm.'
     if (grid_res_deg <= 0.0 .or. grid_res_deg > 10.0) then
-      write(*,'(A)') TAG//'AVISO: grid_res_deg fora de (0,10]; usando 1.0.'
+      if (is_root) write(*,'(A)') TAG//'AVISO: grid_res_deg fora de (0,10]; usando 1.0.'
       grid_res_deg = 1.0
     end if
-    if (sst_default < 150.0 .or. sst_default > 350.0) &
+    if (is_root .and. (sst_default < 150.0 .or. sst_default > 350.0)) &
       write(*,'(A,F7.2)') TAG//'AVISO: sst_default fora do intervalo fisico: ', sst_default
     if (seq_repro) call neutralize_seq_repro()
 
@@ -320,9 +321,9 @@ contains
 
       group_ok = (ios <= 0)
       if (ios < 0) then
-        write(*,'(3A)') TAG//'AVISO: grupo &', group, ' ausente, usando valores padrao.'
+        if (is_root) write(*,'(3A)') TAG//'AVISO: grupo &', group, ' ausente, usando valores padrao.'
       else if (ios > 0) then
-        write(*,'(3A)') TAG//'ERRO: grupo &', group, &
+        if (is_root) write(*,'(3A)') TAG//'ERRO: grupo &', group, &
           ' com erro de sintaxe ou chave desconhecida.'
         rc = CFG_FATAL
       end if
@@ -381,16 +382,36 @@ contains
       else
         return
       end if
-      write(*,'(3A)') TAG//'AVISO: seq_repro=.true. exige ', reason, '; ignorado.'
+      if (is_root) write(*,'(3A)') TAG//'AVISO: seq_repro=.true. exige ', reason, '; ignorado.'
       seq_repro = .false.
     end subroutine neutralize_seq_repro
 
     subroutine fatal(msg)
       character(len=*), intent(in) :: msg
-      write(*,'(A)') TAG//'ERRO: '//msg
+      if (is_root) write(*,'(A)') TAG//'ERRO: '//msg
     end subroutine fatal
 
   end subroutine config_read
+
+  !> Posto MPI do processo, lido das variáveis que os lançadores definem
+  !! (PALS, PMI/Hydra, PMIx, Open MPI). A leitura da configuração acontece
+  !! antes do MPI; com isto só o processo 0 escreve as mensagens. Devolve 0
+  !! se nenhuma variável existir (execução sem lançador).
+  integer function launcher_rank()
+    character(len=*), parameter :: VARS(4) = [character(len=21) :: &
+      'PALS_RANKID', 'PMI_RANK', 'PMIX_RANK', 'OMPI_COMM_WORLD_RANK']
+    character(len=16) :: val
+    integer :: k, st, ios
+
+    launcher_rank = 0
+    do k = 1, size(VARS)
+      call get_environment_variable(trim(VARS(k)), val, status=st)
+      if (st /= 0) cycle
+      read(val, *, iostat=ios) launcher_rank
+      if (ios /= 0) launcher_rank = 0
+      return
+    end do
+  end function launcher_rank
 
   !> Converte 'AAAA-MM-DD' em ano, mês e dia. rc = 0 sucesso, 1 formato inválido.
   subroutine config_parse_date(date_str, yy, mm, dd, rc)
