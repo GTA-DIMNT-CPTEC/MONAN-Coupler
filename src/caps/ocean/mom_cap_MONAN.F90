@@ -364,6 +364,29 @@ contains
     integer :: yr, mo, dy, hr, mn, sc            ! [C6] conversao ESMF->FMS
     integer :: mpi_comm_mom                      ! [C13] comunicador MPI do ESMF
     character(len=256) :: logmsg
+      type(ESMF_Grid) :: ocn_grid
+      type(ESMF_DistGrid) :: distGrid
+      type(ESMF_DELayout) :: deLayout
+      integer :: npes_ocn
+      integer :: ntiles
+      integer :: n_2
+      integer, allocatable :: xb(:)
+      integer, allocatable :: xe(:)
+      integer, allocatable :: yb(:)
+      integer, allocatable :: ye(:)
+      integer, allocatable :: pe(:)
+      integer, allocatable :: deBlockList(:,:,:)
+      integer, allocatable :: petMap(:)
+      real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
+      real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
+      integer :: i
+      integer :: j
+      integer :: ig
+      integer :: jg
+      integer :: lbnd_i
+      integer :: lbnd_j
+      integer :: i1
+      integer :: j1
 
     rc = ESMF_SUCCESS
 
@@ -560,17 +583,6 @@ contains
     ! o DistGrid é definido globalmente pelo espaço de índices [1..ni]×[1..nj].
     call mom_set_geomtype(ESMF_GEOMTYPE_GRID)
 
-    block
-      type(ESMF_Grid)        :: ocn_grid
-      type(ESMF_DistGrid)    :: distGrid
-      type(ESMF_DELayout)    :: deLayout
-      integer :: npes_ocn, ntiles, n
-      integer, allocatable :: xb(:), xe(:), yb(:), ye(:), pe(:)
-      integer, allocatable :: deBlockList(:,:,:)
-      integer, allocatable :: petMap(:)
-      real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
-      real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
-      integer :: i, j, ig, jg
 
       ! ── 1. Verificar que temos exatamente 1 tile por PET ─────────────────
       ntiles = mpp_get_ntile_count(is%ocean_public%domain)
@@ -605,12 +617,12 @@ contains
       ! petMap: para cada DE (bloco), qual PET ESMF é responsável.
       allocate(deBlockList(2, 2, npes_ocn))
       allocate(petMap(npes_ocn))
-      do n = 1, npes_ocn
-        deBlockList(1, 1, n) = xb(n)
-        deBlockList(1, 2, n) = xe(n)
-        deBlockList(2, 1, n) = yb(n)
-        deBlockList(2, 2, n) = ye(n)
-        petMap(n) = pe(n) - pe(1)    ! PET ESMF (zero-based, relativo ao pe(1))
+      do n_2 = 1, npes_ocn
+        deBlockList(1, 1, n_2) = xb(n_2)
+        deBlockList(1, 2, n_2) = xe(n_2)
+        deBlockList(2, 1, n_2) = yb(n_2)
+        deBlockList(2, 2, n_2) = ye(n_2)
+        petMap(n_2) = pe(n_2) - pe(1)    ! PET ESMF (zero-based, relativo ao pe(1))
       end do
       deallocate(xb, xe, yb, ye, pe)
 
@@ -663,8 +675,6 @@ contains
           associated(lon_ptr) .and. associated(lat_ptr)) then
         ! lbnd_i/lbnd_j: índice inicial do farrayPtr retornado pelo ESMF.
         ! i1 = i + lbnd_i - isc  remapeia i global → índice local do ponteiro.
-        block
-          integer :: lbnd_i, lbnd_j, i1, j1
           lbnd_i = lbound(lon_ptr, 1)
           lbnd_j = lbound(lon_ptr, 2)
           do j = jsc, jec
@@ -677,7 +687,6 @@ contains
               lat_ptr(i1, j1) = ocean_grid%geoLatT(ig, jg)
             end do
           end do
-        end block
       end if
       nullify(lon_ptr, lat_ptr)
 
@@ -688,24 +697,30 @@ contains
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! não-fatal
 
       ! ── 8. Realizar campos de importação e exportação ─────────────────────
-      do n = 1, n_import
+      do n_2 = 1, n_import
         field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
                 staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-                name=trim(import_names(n)), rc=rc)
+                name=trim(import_names(n_2)), rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(importState, field=field, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
-      do n = 1, n_export
+      do n_2 = 1, n_export
         field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
                 staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-                name=trim(export_names(n)), rc=rc)
+                name=trim(export_names(n_2)), rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
         call NUOPC_Realize(exportState, field=field, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
       end do
       call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
-    end block
+    if (allocated(xb)) deallocate(xb)
+    if (allocated(xe)) deallocate(xe)
+    if (allocated(yb)) deallocate(yb)
+    if (allocated(ye)) deallocate(ye)
+    if (allocated(pe)) deallocate(pe)
+    if (allocated(deBlockList)) deallocate(deBlockList)
+    if (allocated(petMap)) deallocate(petMap)
 
     ! ── 9. Persistir estado interno no componente ESMF ────────────────────
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)

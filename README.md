@@ -67,6 +67,7 @@ MONAN-Coupler/
 │   ├── driver/      esm.F90 (driver NUOPC, RunSequences, partição de PETs)
 │   ├── mediator/    MED_cap.F90, med_bulk_ncar.F90, escritores de diagnóstico
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
+│   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash
@@ -91,6 +92,8 @@ Convenções para código novo:
 | Componentes e conectores | registrar pelo `add_model` e `add_connector` de `esm.F90` |
 | Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` |
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
+| Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente |
+| Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
 
 O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
 
@@ -101,6 +104,7 @@ O `Makefile` monta apenas o acoplador (`bin/esmApp`), assumindo os componentes j
 ```bash
 make            # compila bin/esmApp
 make check      # verifica se todos os fontes existem
+make test       # testes do framework de interpolação (requer ESMFMKFILE)
 make clean      # remove build/ e bin/; distclean remove também lib/ e mod/
 make help       # lista os alvos
 ```

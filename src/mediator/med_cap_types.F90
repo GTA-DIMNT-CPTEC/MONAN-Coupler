@@ -15,6 +15,7 @@
 module med_cap_types_mod
 
   use ESMF
+  use regrid_manager_mod, only : regrid_manager_t
 
   implicit none
   public
@@ -111,41 +112,19 @@ module med_cap_types_mod
     type(ESMF_Field) :: f_swvdr_ice, f_swvdf_ice, f_swidr_ice, f_swidf_ice
 
     ! RouteHandles
-    type(ESMF_RouteHandle) :: rh_atm2ocn      !< ATM → OCN
-    type(ESMF_RouteHandle) :: rh_ocn2atm      !< OCN → ATM bilinear — So_t, So_u, So_v
-    !> Regrid bilinear OCN→ATM ciente de máscara dedicado a So_t (v4.18).
-    !! Máscara pelo fill MOM6 (~200 K); bordas por extrapolação de vizinhança.
-    type(ESMF_RouteHandle) :: rh_ocn2atm_sst
-    logical :: rh_sst_masked = .false.
-    !> FIX B-ICEREGRID-01 (Set/2026): regrid bilinear OCN(SIS2)→ATM ciente
-    !! de máscara (So_omask), dedicado aos campos do gelo (Si_ifrac_sis2,
-    !! Si_avsdr/vdf/idr/idf, Si_t_sis2). Antes, esses campos usavam o
-    !! rh_ocn2atm generico (sem máscara nem extrapolação de vizinhança) —
-    !! mesma classe de problema que motivou o rh_ocn2atm_sst acima, so' que
-    !! sem correção: pior aqui, pois gelo se concentra justamente na região
-    !! de deformação da malha tripolar (alta latitude), onde o rh_ocn2atm_sst
-    !! ja' provou ser necessário mesmo para SST (campo global, onde o mesmo
-    !! artefato fica diluído no resto do domínio).
-    type(ESMF_RouteHandle) :: rh_ocn2atm_ice
-    logical :: rh_ice_masked = .false.
+    !> Rotas de interpolação do mediador (ver src/regrid):
+    !!   atm2ocn          ATM -> OCN, vizinho mais próximo (fluxos exportados)
+    !!   ocn2atm          OCN -> ATM, bilinear (So_t inicial, correntes, reserva)
+    !!   ocn2atm_sst      OCN -> ATM, conservativo mascarado (So_t)
+    !!   ocn2atm_ice      OCN -> ATM, conservativo mascarado (campos do SIS2)
+    !!   ocn2atm_landmask OCN -> ATM, vizinho mais próximo (So_omask)
+    !!   atm2ocn_ice      ATM -> OCN, conservativo (Si_ifrac exportado)
+    !! Cada rota pode ser trocada em nuopc.input, grupo &nuopc_regrid.
+    type(regrid_manager_t) :: regrid
 
-    !> FIX B-LANDMASK-01 (Set/2026): mascara terra/oceano REAL (So_omask),
-    !! regridada uma unica vez de ocn_grid para atm_grid. Substitui a
-    !! heuristica "SST~=271,35K = terra" (Sprint A.5.1/A.5.2), que colide
-    !! numericamente com agua aberta genuina no ponto de congelamento
-    !! (justamente a borda do gelo marinho). Metodo NEAREST_STOD (nao
-    !! precisa de precisao subcelular, so' discriminar terra/oceano).
-    type(ESMF_Field)       :: f_omask_atm
-    type(ESMF_RouteHandle) :: rh_ocn2atm_landmask
-    logical :: rh_landmask_created = .false.
-
-    !> FIX B-CONSERVE-03 (Set/2026): RouteHandle DEDICADO ATM->OCN para a
-    !! perna de exportacao de Si_ifrac (B-ICEREGRID-04) usando CONSERVE.
-    !! Nao reusa rh_atm2ocn (compartilhado com Foxx_taux/tauy/sen/... via
-    !! NEAREST_STOD) para nao alterar o metodo de regrid desses outros
-    !! campos, que nunca foi pedido nem validado para CONSERVE.
-    type(ESMF_RouteHandle) :: rh_atm2ocn_ice
-    logical :: rh_atm2ocn_ice_created = .false.
+    !> Máscara terra/oceano real (So_omask) na grade ATM, obtida uma vez.
+    type(ESMF_Field) :: f_omask_atm
+    logical          :: landmask_done = .false.   !< regrid da máscara já tentado
     !> Sprint B.2 (Set/2026) — ENTREGUE. Si_ifrac_sis2 (e agora os 4 campos
     !! de albedo do gelo, Fase 2) sao realizados pelo MED na MESMA ocn_grid
     !! usada por So_t (ver InitializeRealize: "geometricamente equivalente
@@ -168,7 +147,6 @@ module med_cap_types_mod
 
     real(ESMF_KIND_R8), allocatable :: ocn_mask_atm(:,:)  !< Máscara oceano/continente
 
-    logical :: rh_created       = .false.
     logical :: use_mpas_atm     = .false.   !< .true. = MPAS, .false. = DATM (de use_datm)
     logical :: use_med_to_mpas  = .false.   !< cópia de cfg_use_med_to_mpas
 

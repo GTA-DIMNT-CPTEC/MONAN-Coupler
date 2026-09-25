@@ -78,6 +78,10 @@ contains
     real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat celulas [rad, -pi/2..pi/2]
 
     character(len=*), parameter :: subname = '(mpas_import)'
+          real(MPAS_RKIND), parameter :: ICE_POLAR = 0.5_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: RAD2DEG_2 = 180.0_MPAS_RKIND / 3.14159265358979_MPAS_RKIND
+          real(MPAS_RKIND), allocatable :: ice_fallback(:)
+          integer :: n_2
 
     rc = ESMF_SUCCESS
 
@@ -113,43 +117,7 @@ contains
     ! evita uma descontinuidade artificial de temperatura logo em 60°N/S
     ! caso o fallback seja usado numa faixa continua de celulas ali.
     if (allocated(atm_bnd%sst)) then
-      block
-        real(MPAS_RKIND), parameter :: T_FILL_POLAR    = 271.35_MPAS_RKIND
-        real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
-          3.14159265358979_MPAS_RKIND
-        logical,          allocatable :: invalid_sst(:)
-        real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
-        real(MPAS_RKIND) :: t_fill_tropical
-        integer :: n
-        ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
-        ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
-        ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
-        ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
-        ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
-        ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
-        ! tudo a (1:nCells), consistente com o resto desta subrotina.
-        n = nCells
-        t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
-        allocate(invalid_sst(n), t_fallback(n))
-        invalid_sst = (atm_bnd%sst(1:n) < 270.0_MPAS_RKIND .or. &
-                        atm_bnd%sst(1:n) > 310.0_MPAS_RKIND .or. &
-                        atm_bnd%sst(1:n) /= atm_bnd%sst(1:n))       ! NaN guard
-        if (present(latCell)) then
-          allocate(lat_deg(n), frac(n))
-          lat_deg = abs(latCell(1:n)) * RAD2DEG                 ! 0..90
-          frac    = min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, lat_deg / 90.0_MPAS_RKIND))
-          ! frac=0 no equador (usa t_fill_tropical), frac=1 no polo (usa T_FILL_POLAR)
-          t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
-          deallocate(lat_deg, frac)
-        else
-          ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
-          ! por seguranca — nao deveria ocorrer em uso normal, ja que
-          ! lonCell/latCell sao sempre passados por quem chama.
-          t_fallback = t_fill_tropical
-        end if
-        where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
-        deallocate(invalid_sst, t_fallback)
-      end block
+      call fill_invalid_sst()
     end if
 
     ! -- Fracao de gelo marinho [0-1] -------------------------------------
@@ -173,21 +141,15 @@ contains
       ! acima. Só o valor de preenchimento muda; o corte físico em [0,1] logo
       ! acima continua igual, e aquele já estava correto.
       if (present(latCell)) then
-        block
-          real(MPAS_RKIND), parameter :: ICE_POLAR = 0.5_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
-            3.14159265358979_MPAS_RKIND
-          real(MPAS_RKIND), allocatable :: ice_fallback(:)
-          integer :: n
-          n = nCells
-          allocate(ice_fallback(n))
+          n_2 = nCells
+          allocate(ice_fallback(n_2))
           ice_fallback = ICE_POLAR * min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, &
-            (abs(latCell(1:n)) * RAD2DEG) / 90.0_MPAS_RKIND))
-          where (atm_bnd%ice_fraction(1:n) /= atm_bnd%ice_fraction(1:n))  ! NaN guard
-            atm_bnd%ice_fraction(1:n) = ice_fallback
+            (abs(latCell(1:n_2)) * RAD2DEG_2) / 90.0_MPAS_RKIND))
+          where (atm_bnd%ice_fraction(1:n_2) /= atm_bnd%ice_fraction(1:n_2))  ! NaN guard
+            atm_bnd%ice_fraction(1:n_2) = ice_fallback
           end where
           deallocate(ice_fallback)
-        end block
+        if (allocated(ice_fallback)) deallocate(ice_fallback)
       else
         where (atm_bnd%ice_fraction /= atm_bnd%ice_fraction) &     ! NaN guard
           atm_bnd%ice_fraction = 0.0_MPAS_RKIND
@@ -303,6 +265,46 @@ contains
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! diagnóstico não-fatal
     end if
 
+
+  contains
+
+    subroutine fill_invalid_sst()
+      real(MPAS_RKIND), parameter :: T_FILL_POLAR    = 271.35_MPAS_RKIND
+      real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
+        3.14159265358979_MPAS_RKIND
+      logical,          allocatable :: invalid_sst(:)
+      real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
+      real(MPAS_RKIND) :: t_fill_tropical
+      integer :: n
+      ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
+      ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
+      ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
+      ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
+      ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
+      ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
+      ! tudo a (1:nCells), consistente com o resto desta subrotina.
+      n = nCells
+      t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
+      allocate(invalid_sst(n), t_fallback(n))
+      invalid_sst = (atm_bnd%sst(1:n) < 270.0_MPAS_RKIND .or. &
+                      atm_bnd%sst(1:n) > 310.0_MPAS_RKIND .or. &
+                      atm_bnd%sst(1:n) /= atm_bnd%sst(1:n))       ! NaN guard
+      if (present(latCell)) then
+        allocate(lat_deg(n), frac(n))
+        lat_deg = abs(latCell(1:n)) * RAD2DEG                 ! 0..90
+        frac    = min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, lat_deg / 90.0_MPAS_RKIND))
+        ! frac=0 no equador (usa t_fill_tropical), frac=1 no polo (usa T_FILL_POLAR)
+        t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
+        deallocate(lat_deg, frac)
+      else
+        ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
+        ! por seguranca — nao deveria ocorrer em uso normal, ja que
+        ! lonCell/latCell sao sempre passados por quem chama.
+        t_fallback = t_fill_tropical
+      end if
+      where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
+      deallocate(invalid_sst, t_fallback)
+    end subroutine fill_invalid_sst
   end subroutine mpas_import
 
   !> @brief Exporta campos de atm_public para o exportState ESMF.
@@ -624,6 +626,10 @@ contains
     integer :: itemCount, i, localrc
     character(len=160) :: msg
     character(len=*), parameter :: subname = '(state_diagnose)'
+        real(ESMF_KIND_R8), pointer :: fp1d(:)
+        real(ESMF_KIND_R8), pointer :: fp2d(:,:)
+        real(ESMF_KIND_R8), allocatable :: vals(:)
+        integer :: fdr
 
     rc = ESMF_SUCCESS
 
@@ -645,11 +651,6 @@ contains
     do i = 1, itemCount
       call ESMF_StateGet(state, itemName=trim(fldnames(i)), field=field, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle
-      block
-        real(ESMF_KIND_R8), pointer :: fp1d(:)
-        real(ESMF_KIND_R8), pointer :: fp2d(:,:)
-        real(ESMF_KIND_R8), allocatable :: vals(:)
-        integer :: fdr
         nullify(fp1d, fp2d)
         call ESMF_FieldGet(field, dimCount=fdr, rc=localrc)
         if (localrc /= ESMF_SUCCESS) cycle
@@ -670,7 +671,7 @@ contains
           '  max=', maxval(vals), &
           '  mean=', sum(vals) / real(size(vals), ESMF_KIND_R8)
         call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-      end block
+      if (allocated(vals)) deallocate(vals)
     end do
 
     deallocate(fldnames)
@@ -715,6 +716,23 @@ contains
     real(ESMF_KIND_R8), pointer  :: fptr1d(:)
     integer :: n_esmf, fld_rank
     character(len=*), parameter  :: subname = '(state_get_field_1d)'
+      integer :: localDeCount_sg
+        integer, parameter :: NLON = 360
+        integer, parameter :: NLAT = 180
+        real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
+        real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
+        real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
+        real(ESMF_KIND_R8), parameter :: FILL_THR = 1.0e19_ESMF_KIND_R8
+        real(ESMF_KIND_R8), allocatable :: buf2d(:,:)
+        real(ESMF_KIND_R8), allocatable :: buf1d(:)
+        type(ESMF_VM) :: vm_l
+        integer :: localPet_l
+        integer :: icell
+        integer :: ig
+        integer :: jg
+        real(ESMF_KIND_R8) :: lon_d
+        real(ESMF_KIND_R8) :: lat_d
+        real(ESMF_KIND_R8) :: val
 
     rc = ESMF_SUCCESS
     nullify(fptr1d)
@@ -727,13 +745,10 @@ contains
     end if
 
     ! B-45: verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
-    block
-      integer :: localDeCount_sg
       call ESMF_FieldGet(field, localDeCount=localDeCount_sg, rc=rc)
       if (rc /= ESMF_SUCCESS .or. localDeCount_sg == 0) then
         rc = ESMF_SUCCESS; return
       end if
-    end block
 
     ! Consultar rank do campo ANTES de chamar farrayPtr (evita erro ESMF)
     call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
@@ -786,16 +801,6 @@ contains
       ! PETs devem alcançá-las. mpas_create_grid usa regDecomp que cobre
       ! petCount, garantindo ≥1 DE por PET; logo o guard B-45 (localDeCount==0)
       ! acima não dispara para estes campos e não há risco de deadlock.
-      block
-        integer,            parameter :: NLON = 360, NLAT = 180
-        real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
-        real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
-        real(ESMF_KIND_R8), parameter :: RAD2DEG  = 57.29577951308232_ESMF_KIND_R8
-        real(ESMF_KIND_R8), parameter :: FILL_THR = 1.0e19_ESMF_KIND_R8
-        real(ESMF_KIND_R8), allocatable :: buf2d(:,:), buf1d(:)
-        type(ESMF_VM)      :: vm_l
-        integer            :: localPet_l, icell, ig, jg
-        real(ESMF_KIND_R8) :: lon_d, lat_d, val
 
         call ESMF_VMGetCurrent(vm_l, rc=rc)
         if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; return; end if
@@ -858,7 +863,8 @@ contains
         end if
 
         deallocate(buf2d, buf1d)
-      end block
+      if (allocated(buf2d)) deallocate(buf2d)
+      if (allocated(buf1d)) deallocate(buf1d)
     end if
     rc = ESMF_SUCCESS
 
@@ -894,6 +900,53 @@ contains
     real(ESMF_KIND_R8), pointer  :: fptr2d(:,:)
     integer :: n_esmf, fld_rank, i, j, idx
     character(len=*), parameter  :: subname = '(state_set_field_1d)'
+      integer :: localDeCount_ss
+          integer :: icell
+          integer :: ig
+          integer :: jg
+          integer :: mpi_comm_use
+          integer :: ii
+          integer :: jj
+          real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
+          real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
+          real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
+          integer, parameter :: NX_G = 360
+          integer, parameter :: NY_G = 180
+          real(ESMF_KIND_R8) :: lon_d
+          real(ESMF_KIND_R8) :: lat_d
+          real(ESMF_KIND_R8), allocatable :: sum_local(:,:)
+          real(ESMF_KIND_R8), allocatable :: sum_global(:,:)
+          real(ESMF_KIND_R8), allocatable :: count_local(:,:)
+          real(ESMF_KIND_R8), allocatable :: count_global(:,:)
+          real(ESMF_KIND_R8), allocatable :: buf_global(:,:)
+          type(ESMF_VM) :: vm_local
+          integer :: nPets_red
+          integer :: myRank_red
+          integer :: iPet_red
+          integer :: ierr_red
+          real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
+          real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
+          integer :: ii_f
+          integer :: jj_f
+          integer :: di_f
+          integer :: dj_f
+          integer :: ia_f
+          integer :: ja_f
+          integer :: n_nbr_f
+          integer :: n_it
+          real(ESMF_KIND_R8) :: sum_nbr_f
+          integer, parameter :: N_FILL_ITER = 12
+          integer :: n_holes_pre
+          integer :: n_holes_post
+          integer :: my_pet
+          type(ESMF_VM) :: vm_v
+          character(len=240) :: vmsg
+          integer :: n_cov
+          integer :: n_max_dup
+          real(ESMF_KIND_R8) :: avg_dup_val
+          real(ESMF_KIND_R8) :: lon_ii_d
+          real(ESMF_KIND_R8) :: lon_0360_d
+          integer :: ig_buf
 
     rc = ESMF_SUCCESS
     nullify(fptr1d, fptr2d)
@@ -906,13 +959,10 @@ contains
     end if
 
     ! B-45: verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
-    block
-      integer :: localDeCount_ss
       call ESMF_FieldGet(field, localDeCount=localDeCount_ss, rc=rc)
       if (rc /= ESMF_SUCCESS .or. localDeCount_ss == 0) then
         rc = ESMF_SUCCESS; return
       end if
-    end block
 
     ! Consultar rank do campo ANTES de chamar farrayPtr (evita erro ESMF)
     call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
@@ -953,18 +1003,6 @@ contains
       !   buf_global(ig,jg) = buf_sum(ig,jg) / max(buf_count(ig,jg), 1)
       if (present(lon_rad) .and. present(lat_rad) .and. &
           size(lon_rad) >= n .and. size(lat_rad) >= n) then
-        block
-          integer           :: icell, ig, jg, mpi_comm_use
-          integer           :: ii, jj
-          real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
-          real(ESMF_KIND_R8), parameter :: DLON    = 1.0_ESMF_KIND_R8
-          real(ESMF_KIND_R8), parameter :: DLAT    = 1.0_ESMF_KIND_R8
-          integer,            parameter :: NX_G = 360, NY_G = 180
-          real(ESMF_KIND_R8) :: lon_d, lat_d
-          real(ESMF_KIND_R8), allocatable :: sum_local(:,:),   sum_global(:,:)
-          real(ESMF_KIND_R8), allocatable :: count_local(:,:), count_global(:,:)
-          real(ESMF_KIND_R8), allocatable :: buf_global(:,:)
-          type(ESMF_VM) :: vm_local
 
           allocate(sum_local(NX_G, NY_G),   sum_global(NX_G, NY_G))
           allocate(count_local(NX_G, NY_G), count_global(NX_G, NY_G))
@@ -1048,10 +1086,6 @@ contains
           ! problema: a ordem da soma fica a cargo da implementacao. Trocar
           ! Allreduce por Reduce nao consertaria nada.
           !--------------------------------------------------------------------
-          block
-            integer :: nPets_red, myRank_red, iPet_red, ierr_red
-            real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
-            real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
 
             call MPI_Comm_size(mpi_comm_use, nPets_red,  ierr_red)
             call MPI_Comm_rank(mpi_comm_use, myRank_red, ierr_red)
@@ -1088,7 +1122,8 @@ contains
                            0, mpi_comm_use, ierr_red)
 
             deallocate(sum_gath, cnt_gath)
-          end block
+          if (allocated(sum_gath)) deallocate(sum_gath)
+          if (allocated(cnt_gath)) deallocate(cnt_gath)
 
           ! 4. Média: dividir soma por contagem (preserva 0 onde contagem=0)
           where (count_global > 0.5_ESMF_KIND_R8)
@@ -1111,11 +1146,6 @@ contains
           ! no PET 0, escreve marca '##### BUG-SPARSE-02 v7.6 ATIVO #####' no log.
           ! Se você NÃO vê essa linha em logs/PET0.esmApp.log, o binário não
           ! tem este patch compilado.
-          block
-            integer            :: ii_f, jj_f, di_f, dj_f, ia_f, ja_f, n_nbr_f, n_it
-            real(ESMF_KIND_R8) :: sum_nbr_f
-            integer, parameter :: N_FILL_ITER = 12   ! v7.6: era 3
-            integer            :: n_holes_pre, n_holes_post
 
             ! Diagnóstico pré-fill
             n_holes_pre = count(count_global < 0.5_ESMF_KIND_R8)
@@ -1149,34 +1179,23 @@ contains
             n_holes_post = count(count_global < 0.5_ESMF_KIND_R8)
 
             ! VERIFICAÇÃO DE BUILD + DIAGNÓSTICO (PET 0, campo de referência)
-            block
-              integer :: my_pet
-              type(ESMF_VM) :: vm_v
               call ESMF_VMGetCurrent(vm_v, rc=rc)
               if (rc == ESMF_SUCCESS) then
                 call ESMF_VMGet(vm_v, localPet=my_pet, rc=rc)
                 rc = ESMF_SUCCESS
                 if (my_pet == 0 .and. trim(fldname) == 'Sa_u10m_mpas') then
-                  block
-                    character(len=240) :: vmsg
                     write(vmsg, '(A,A,A,I0,A,I0,A,I0,A)') &
                       '##### BUG-SPARSE-02 v7.6 ATIVO ##### campo=', &
                       trim(fldname), ' buracos_pre_fill=', n_holes_pre, &
                       ' buracos_pos_fill=', n_holes_post, &
                       ' (N_FILL_ITER=', N_FILL_ITER, ')'
                     call ESMF_LogWrite(trim(vmsg), ESMF_LOGMSG_INFO)
-                  end block
                 end if
               end if
               rc = ESMF_SUCCESS
-            end block
-          end block
 
           ! Diagnóstico (apenas para Sa_pslv_mpas, no PET 0)
           ! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 ! (Fortran é estrito).
-          block
-            integer :: my_pet, n_cov, n_max_dup
-            real(ESMF_KIND_R8) :: avg_dup_val
             call ESMF_VMGet(vm_local, localPet=my_pet, rc=rc)
             if (my_pet == 0 .and. trim(fldname) == 'Sa_pslv_mpas') then
               n_cov     = int(sum(count_global))
@@ -1190,7 +1209,6 @@ contains
                 '  avg_dup=',    avg_dup_val
               flush(6)
             end if
-          end block
 
           ! 5. Copiar do buffer global para a porção LOCAL da fptr2d.
           !
@@ -1216,9 +1234,6 @@ contains
           do jj = lbound(fptr2d,2), ubound(fptr2d,2)
             do ii = lbound(fptr2d,1), ubound(fptr2d,1)
               if (ii >= 1 .and. ii <= NX_G .and. jj >= 1 .and. jj <= NY_G) then
-                block
-                  real(ESMF_KIND_R8) :: lon_ii_d, lon_0360_d
-                  integer            :: ig_buf
                   lon_ii_d   = -180.0_ESMF_KIND_R8 + &
                                (real(ii, ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * DLON
                   lon_0360_d = lon_ii_d
@@ -1226,13 +1241,18 @@ contains
                   ig_buf = int(lon_0360_d / DLON) + 1
                   ig_buf = max(1, min(ig_buf, NX_G))
                   fptr2d(ii, jj) = buf_global(ig_buf, jj)
-                end block
               end if
             end do
           end do
 
           deallocate(sum_local, sum_global, count_local, count_global, buf_global)
-        end block
+        if (allocated(sum_local)) deallocate(sum_local)
+        if (allocated(sum_global)) deallocate(sum_global)
+        if (allocated(count_local)) deallocate(count_local)
+        if (allocated(count_global)) deallocate(count_global)
+        if (allocated(buf_global)) deallocate(buf_global)
+        if (allocated(sum_gath)) deallocate(sum_gath)
+        if (allocated(cnt_gath)) deallocate(cnt_gath)
       else
         ! Fallback legado: mapeamento column-major (sem garantia geográfica)
         idx = 0

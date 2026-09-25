@@ -72,6 +72,11 @@ contains
     integer,             intent(out) :: rc
 
     integer :: ncid, varid, start(3), count_arr(3), nc_rc
+      integer :: ndims_var
+      integer :: dimids(4)
+      integer :: dim1_size
+      integer :: nc_rc_dim
+      character(len=64) :: dim1_name
 
     rc    = ESMF_SUCCESS
     nc_rc = nf90_open(filename, NF90_NOWRITE, ncid)
@@ -91,9 +96,6 @@ contains
     ! B-59: verificar ordem dos eixos do arquivo NetCDF.
     ! DOCN espera (lon, lat, time) em ordem Fortran = (time, lat, lon) em C/NetCDF.
     ! Se dim1_size /= nx, os eixos estão incompatíveis — abortar com mensagem clara.
-    block
-      integer :: ndims_var, dimids(4), dim1_size, nc_rc_dim
-      character(len=64) :: dim1_name
       nc_rc_dim = nf90_inquire_variable(ncid, varid, ndims=ndims_var, dimids=dimids)
       if (nc_rc_dim == NF90_NOERR .and. ndims_var >= 2) then
         nc_rc_dim = nf90_inquire_dimension(ncid, dimids(1), name=dim1_name, len=dim1_size)
@@ -111,7 +113,6 @@ contains
           return
         end if
       end if
-    end block
 
     start     = [1, 1, tidx]
     count_arr = [nx, ny, 1]

@@ -1,0 +1,6 @@
+# artefatos dos testes
+*.o
+*.mod
+test_regrid
+pesos_teste.nc
+PET*.log

@@ -196,6 +196,7 @@ contains
   ! ============================================================================
   subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
                             dt_seconds, config_dir, mpi_comm, rc)
+      use iso_c_binding, only : c_loc, c_ptr, c_int, c_char
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
     type(mpas_atm_state_type),     intent(inout) :: atm_state
@@ -230,6 +231,7 @@ contains
     ! Nao ha custo em usar StrKIND: a variavel e' local e usada com trim.
     character(len=StrKIND) :: startTimeStamp
     character(len=256) :: msg
+        type(mpas_pool_type), pointer :: diagPool2 => null()
 
     rc = 0
     g_mpi_comm           = mpi_comm
@@ -437,8 +439,6 @@ contains
     !      registradas → reads retornam garbage → crash na física.
     !      Interface C definida localmente (igual ao mpas_subdriver.F).
     ! ------------------------------------------------------------------
-    block
-      use iso_c_binding, only : c_loc, c_ptr, c_int, c_char
       interface
         subroutine xml_stream_parser(xmlname, mgr_p, comm, ierr) bind(c)
           use iso_c_binding, only : c_char, c_ptr, c_int
@@ -472,7 +472,6 @@ contains
                             messageType=MPAS_LOG_CRIT)
         rc = 1; return
       end if
-    end block
 
     call mpas_log_write('mpas_atm_init: xml_stream_parser concluido')
 
@@ -667,8 +666,6 @@ contains
       write(*,'(A)') '  Ativando fallback por perfil logaritmico de uReconstructZonal/Meridional.'
 
       ! Buscar uReconstructZonal e uReconstructMeridional (3D: nVertLevels x nCells)
-      block
-        type(mpas_pool_type), pointer :: diagPool2 => null()
         call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag', diagPool2)
         if (associated(diagPool2)) then
           call mpas_pool_get_array(diagPool2, 'uReconstructZonal',     g_pool_uZonal)
@@ -676,7 +673,6 @@ contains
           ! zgrid: altura geopotencial nos centros de camada [m] (3D: nVertLevels x nCells)
           call mpas_pool_get_array(diagPool2, 'zgrid',                  g_pool_zgrid)
         end if
-      end block
 
       if (associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
         allocate(g_u10_buf(n), g_v10_buf(n))
@@ -865,6 +861,9 @@ contains
     logical, save :: first_coupling_call = .true.
     logical, pointer :: config_do_restart => null()
     logical :: is_cold_start
+        real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
+        type(mpas_pool_type), pointer :: diag_physicsPool_after
+        character(len=250) :: diag_msg_alb
 
 
     rc = 0
@@ -1009,43 +1008,7 @@ contains
             ! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
             !--------------------------------------------------------------
             if (.not. (first_coupling_call .and. is_cold_start)) then
-              block
-                type (field1DReal), pointer :: fld_halo => null()
-                integer :: i_halo
-                character(len=32), parameter :: campos_sfcinput(3) = &
-                  [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
-                character(len=32), parameter :: campos_diagphys(2) = &
-                  [ character(len=32) :: 'z0', 'sfc_albedo' ]
-
-                do i_halo = 1, size(campos_sfcinput)
-                  nullify(fld_halo)
-                  call mpas_pool_get_field(sfcInputPool, &
-                    trim(campos_sfcinput(i_halo)), fld_halo)
-                  if (associated(fld_halo)) then
-                    call mpas_dmpar_exch_halo_field(fld_halo)
-                  else
-                    call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-                      'campo '//trim(campos_sfcinput(i_halo))// &
-                      ' nao encontrado em sfc_input; halo NAO trocado')
-                  end if
-                end do
-
-                do i_halo = 1, size(campos_diagphys)
-                  nullify(fld_halo)
-                  call mpas_pool_get_field(diag_physicsPool, &
-                    trim(campos_diagphys(i_halo)), fld_halo)
-                  if (associated(fld_halo)) then
-                    call mpas_dmpar_exch_halo_field(fld_halo)
-                  else
-                    call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-                      'campo '//trim(campos_diagphys(i_halo))// &
-                      ' nao encontrado em diag_physics; halo NAO trocado')
-                  end if
-                end do
-
-                call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 - halos '// &
-                  'dos campos de contorno injetados trocados')
-              end block
+              call exchange_surface_halos()
             end if
          endif
       end if
@@ -1090,10 +1053,6 @@ contains
     ! mesma celula de oceano (diag_alb_cell). Ja validado em producao
     ! (Set/2026, preservado=T) — gated por cfg_write_fixdiag.
     if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
-      block
-        real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
-        type(mpas_pool_type), pointer :: diag_physicsPool_after
-        character(len=250) :: diag_msg_alb
         call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', &
           diag_physicsPool_after)
         if (associated(diag_physicsPool_after)) then
@@ -1109,7 +1068,6 @@ contains
             call mpas_log_write(trim(diag_msg_alb))
           end if
         end if
-      end block
     end if
 
     ! ------------------------------------------------------------------
@@ -1124,9 +1082,39 @@ contains
     ! IMPORTANTE: usar real(dt_coupling, MPAS_RKIND) para evitar perda de
     ! precisão quando MPAS_RKIND = kind(1.0) (single precision).
     ! ------------------------------------------------------------------
-    block
+    call compute_instantaneous_fluxes()
+
+    atm_state%running = .true.
+
+    nullify(sfcInputPool, sst_field, ice_field, zorl_field)
+
+
+  contains
+
+    subroutine compute_instantaneous_fluxes()
       real(MPAS_RKIND) :: dt_r, precip_now   ! Sprint A: spd removido (usado agora no bloco have_currents)
       integer          :: k
+          real(MPAS_RKIND) :: z_sfc
+          real(MPAS_RKIND) :: scale_fac
+          real(MPAS_RKIND), parameter :: Z10 = 10.0_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: Z0 = 0.001_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND
+          integer :: nv
+          real(MPAS_RKIND) :: u_rel
+          real(MPAS_RKIND) :: v_rel
+          real(MPAS_RKIND) :: spd_rel
+          logical :: have_currents
+        real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
+        real(MPAS_RKIND) :: snow_now
+        real(MPAS_RKIND) :: delta_snow
+        real(MPAS_RKIND) :: delta_total
+          real(MPAS_RKIND) :: es
+          real(MPAS_RKIND) :: qs
+          real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: a = 17.67_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: b = 243.5_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
+          real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
       dt_r = real(dt_coupling, MPAS_RKIND)
 
       ! ── SW e LW descendentes: incremento ÷ dt → W/m² ─────────────
@@ -1168,9 +1156,6 @@ contains
       ! snownc [mm] = neve estratiforme acumulada (subconjunto de rainnc)
       ! Se snownc não estiver disponível, usa partição por temperatura:
       !   T < T_FREEZE → tudo neve; caso contrário → tudo chuva
-      block
-        real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
-        real(MPAS_RKIND) :: snow_now, delta_snow, delta_total
         do k = 1, n
           delta_total = g_prec_inst(k)
           if (associated(g_pool_snownc)) then
@@ -1196,7 +1181,6 @@ contains
         if (associated(g_pool_snownc)) then
           g_prev_snow(1:n) = g_pool_snownc(1:n)
         end if
-      end block
 
       ! ── Umidade específica a 2m: q2 [kg/kg] ───────────────────────
       ! g_pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
@@ -1205,20 +1189,12 @@ contains
         g_q2m_buf(1:n) = g_pool_q2(1:n)
       else if (associated(atm_public%t2m)) then
         ! Fallback: umidade de saturação em T2m (Tetens) × RH=0.8
-        block
-          real(MPAS_RKIND) :: es, qs
-          real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: a   = 17.67_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: b   = 243.5_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: p0  = 101325.0_MPAS_RKIND
           do k = 1, n
             es = es0 * exp(a*(atm_public%t2m(k)-273.15_MPAS_RKIND) / &
                            (b + atm_public%t2m(k)-273.15_MPAS_RKIND))
             qs = eps * es / (p0 - es)
             g_q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
           end do
-        end block
       end if
 
       ! ── BUG-WIND-01 fallback: calcular u10/v10 por perfil log. neutro ────
@@ -1229,12 +1205,6 @@ contains
       ! z0 = 0.001 m (rugosidade oceano aberto, neutro)
       if (allocated(g_u10_buf) .and. allocated(g_v10_buf) .and. &
           associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
-        block
-          real(MPAS_RKIND) :: z_sfc, scale_fac
-          real(MPAS_RKIND), parameter :: Z10   = 10.0_MPAS_RKIND   ! altura alvo [m]
-          real(MPAS_RKIND), parameter :: Z0    = 0.001_MPAS_RKIND  ! rugosidade [m]
-          real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND  ! fallback [m]
-          integer :: nv
           nv = size(g_pool_uZonal, 1)  ! número de níveis verticais
           do k = 1, n
             ! Altura do centro do nível 1 a partir de zgrid (se disponível)
@@ -1252,7 +1222,6 @@ contains
             g_u10_buf(k) = g_pool_uZonal(nv, k) * scale_fac
             g_v10_buf(k) = g_pool_vMerid(nv, k) * scale_fac
           end do
-        end block
       end if
 
       ! ── Stress superficial: τ = ρ · ust² · V_rel / |V_rel| ─────────────
@@ -1273,9 +1242,6 @@ contains
       ! Fórmula de Monin-Obukhov: CD = (ust/|V_rel|)²
       if (associated(g_pool_ust) .and. &
           associated(atm_public%u10) .and. associated(atm_public%v10)) then
-        block
-          real(MPAS_RKIND) :: u_rel, v_rel, spd_rel
-          logical :: have_currents
           have_currents = allocated(atm_bnd%uocn) .and. allocated(atm_bnd%vocn)
           do k = 1, n
             if (have_currents) then
@@ -1290,15 +1256,47 @@ contains
             g_taux_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * u_rel / spd_rel
             g_tauy_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * v_rel / spd_rel
           end do
-        end block
       end if
 
-    end block
+    end subroutine compute_instantaneous_fluxes
 
-    atm_state%running = .true.
+    subroutine exchange_surface_halos()
+      type (field1DReal), pointer :: fld_halo => null()
+      integer :: i_halo
+      character(len=32), parameter :: campos_sfcinput(3) = &
+        [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
+      character(len=32), parameter :: campos_diagphys(2) = &
+        [ character(len=32) :: 'z0', 'sfc_albedo' ]
 
-    nullify(sfcInputPool, sst_field, ice_field, zorl_field)
+      do i_halo = 1, size(campos_sfcinput)
+        nullify(fld_halo)
+        call mpas_pool_get_field(sfcInputPool, &
+          trim(campos_sfcinput(i_halo)), fld_halo)
+        if (associated(fld_halo)) then
+          call mpas_dmpar_exch_halo_field(fld_halo)
+        else
+          call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+            'campo '//trim(campos_sfcinput(i_halo))// &
+            ' nao encontrado em sfc_input; halo NAO trocado')
+        end if
+      end do
 
+      do i_halo = 1, size(campos_diagphys)
+        nullify(fld_halo)
+        call mpas_pool_get_field(diag_physicsPool, &
+          trim(campos_diagphys(i_halo)), fld_halo)
+        if (associated(fld_halo)) then
+          call mpas_dmpar_exch_halo_field(fld_halo)
+        else
+          call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+            'campo '//trim(campos_diagphys(i_halo))// &
+            ' nao encontrado em diag_physics; halo NAO trocado')
+        end if
+      end do
+
+      call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 - halos '// &
+        'dos campos de contorno injetados trocados')
+    end subroutine exchange_surface_halos
   end subroutine mpas_atm_run
 
   ! ============================================================================

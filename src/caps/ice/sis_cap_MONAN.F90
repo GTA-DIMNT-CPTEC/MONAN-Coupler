@@ -299,6 +299,26 @@ contains
     integer :: yr, mo, dy, hr, mn, sc
     integer :: syy_ice, smm_ice, sdd_ice, shh_ice, smn_ice, sss_ice
     logical :: concurrent_ice_flag
+      integer :: nx_ice
+      integer :: ny_ice
+      integer :: gis
+      integer :: gie
+      integer :: gjs
+      integer :: gje
+      integer :: loc4(4)
+      integer, allocatable :: all4(:)
+      integer, allocatable :: cntx(:)
+      integer, allocatable :: cnty(:)
+      integer, allocatable :: pmap(:,:,:)
+      character(len=256) :: msg_decomp
+      logical :: ok_decomp
+      real(ESMF_KIND_R8), pointer :: coordX(:,:)
+      real(ESMF_KIND_R8), pointer :: coordY(:,:)
+      integer :: ni_loc
+      integer :: nj_loc
+      integer :: ncat
+      integer :: k
+      type(ESMF_Field) :: fld
 
     rc = ESMF_SUCCESS
 
@@ -411,14 +431,6 @@ contains
     ! (FIX B-OCNGRID-01/03) — dimensao real lida do supergrid, coordenadas T
     ! reais (nao-uniformes), periodicidade leste-oeste. Ver
     ! ICE_ReadMom6TGridDims/ICE_FillMom6TGridCoords abaixo.
-    block
-      integer :: nx_ice, ny_ice
-      integer :: gis, gie, gjs, gje
-      integer :: loc4(4)
-      integer, allocatable :: all4(:), cntx(:), cnty(:), pmap(:,:,:)
-      character(len=256) :: msg_decomp
-      logical :: ok_decomp
-      real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
 
       call ICE_ReadMom6TGridDims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
@@ -504,12 +516,12 @@ contains
 
       call ESMF_LogWrite('ICE(SIS2): grade ESMF criada ' // &
         '(mesma grade tripolar do OCN)', ESMF_LOGMSG_INFO)
-    end block
+    if (allocated(all4)) deallocate(all4)
+    if (allocated(cntx)) deallocate(cntx)
+    if (allocated(cnty)) deallocate(cnty)
+    if (allocated(pmap)) deallocate(pmap)
 
     ! ── 5. Realizar campos ESMF sobre is%ice_grid ────────────────────────
-    block
-      integer :: ni_loc, nj_loc, ncat, k
-      type(ESMF_Field) :: fld
 
       ni_loc = is%iec - is%isc + 1
       nj_loc = is%jec - is%jsc + 1
@@ -603,7 +615,6 @@ contains
 
       call ESMF_LogWrite('ICE(SIS2): campos ESMF realizados, ' // &
         'oib/aib alocados', ESMF_LOGMSG_INFO)
-    end block
 
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -744,38 +755,7 @@ contains
     ! CUSTO. Tres somas e tres reducoes sobre um arranjo 3D local, uma vez por
     ! troca de acoplamento. O checksum e' inteiro, imune a arredondamento de
     ! impressao, que ja enganou esta investigacao duas vezes.
-    block
-      character(len=200) :: msg_slow
-      integer(kind=8)    :: cks_ini, cks_ter, cks_din
-      logical            :: tem_ps
-
-      tem_ps = associated(is%ice%part_size)
-
-      if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
-      call update_ice_slow_thermo(is%ice)
-      if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
-      call update_ice_dynamics_trans(is%ice)
-      if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
-
-      if (tem_ps) then
-        write(msg_slow,'(A,I0,A,I0,A,I0)') &
-          'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
-          '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
-        call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
-        if (cks_ini == cks_ter .and. cks_ter == cks_din) then
-          call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
-            'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
-            'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
-            'diagnostico esta CEGO e nao permite concluir nada.', &
-            ESMF_LOGMSG_WARNING)
-        end if
-      else
-        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
-          'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
-        call update_ice_slow_thermo(is%ice)
-        call update_ice_dynamics_trans(is%ice)
-      end if
-    end block
+    call advance_ice_slow()
 
     call ESMF_LogWrite('ICE(SIS2): update_ice_slow_thermo + ' // &
       'update_ice_dynamics_trans concluido', ESMF_LOGMSG_INFO)
@@ -832,6 +812,41 @@ contains
 
     call ESMF_LogWrite('ICE(SIS2): ModelAdvance concluido', ESMF_LOGMSG_INFO)
 
+
+  contains
+
+    !> Termodinâmica lenta e dinâmica do SIS2, com soma de verificação da
+    !! fração por categoria antes e depois de cada etapa (diagnóstico).
+    subroutine advance_ice_slow()
+      character(len=200) :: msg_slow
+      integer(kind=8)    :: cks_ini, cks_ter, cks_din
+      logical            :: tem_ps
+
+      tem_ps = associated(is%ice%part_size)
+
+      if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
+      call update_ice_slow_thermo(is%ice)
+      if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
+      call update_ice_dynamics_trans(is%ice)
+      if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
+
+      if (tem_ps) then
+        write(msg_slow,'(A,I0,A,I0,A,I0)') &
+          'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
+          '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
+        call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
+        if (cks_ini == cks_ter .and. cks_ter == cks_din) then
+          call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
+            'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
+            'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
+            'diagnostico esta CEGO e nao permite concluir nada.', &
+            ESMF_LOGMSG_WARNING)
+        end if
+      else
+        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
+          'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
+      end if
+    end subroutine advance_ice_slow
   end subroutine ModelAdvance
 
   ! ============================================================================
@@ -1030,6 +1045,7 @@ contains
     real(ESMF_KIND_R8), pointer :: ptr_ifrac(:,:) => null()
     integer :: ii, jj, lb1, lb2, ub1, ub2
     integer :: i_off, j_off, k_lo, k_hi
+          character(len=200) :: diag_msg6
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -1123,14 +1139,11 @@ contains
     ! gated por cfg_write_fixdiag para nao poluir logs de rodadas longas.
     if (cfg_write_fixdiag) then
       if (associated(is%ice%part_size)) then
-        block
-          character(len=200) :: diag_msg6
           write(diag_msg6,'(A,ES12.4,A,ES12.4)') &
             'FIX-DIAG-FASTSYNC-01: Ice%part_size(:,:,1) [fachada publica] ' // &
             'min=', minval(is%ice%part_size(:,:,1)), ' max=', &
             maxval(is%ice%part_size(:,:,1))
           call ESMF_LogWrite(trim(diag_msg6), ESMF_LOGMSG_INFO)
-        end block
       else
         call ESMF_LogWrite('FIX-DIAG-FASTSYNC-01: Ice%part_size ainda nao ' // &
           'associado neste ponto', ESMF_LOGMSG_INFO)
@@ -1175,6 +1188,7 @@ contains
     ! termo de gelo no blend por ifrac feito no mediador torna esse valor
     ! quase irrelevante), ou onde Ice%albedo_* ainda nao estiver associado.
     real(ESMF_KIND_R8), parameter :: ALBEDO_ICE_FALLBACK = 0.65_ESMF_KIND_R8
+        character(len=200) :: diag_msg7
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -1246,14 +1260,11 @@ contains
     ! FIX-DIAG-FASTSYNC-01. Espera-se min proximo do fallback/agua (baixo)
     ! e max na faixa de neve fria (~0,8-0,9) em regioes com gelo espesso.
     if (cfg_write_fixdiag) then
-      block
-        character(len=200) :: diag_msg7
         write(diag_msg7,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
           'FIX-DIAG-ALBEDO-01: Si_avsdr min=', minval(ptr_avsdr), &
           ' max=', maxval(ptr_avsdr), &
           ' | Si_anidr min=', minval(ptr_anidr), ' max=', maxval(ptr_anidr)
         call ESMF_LogWrite(trim(diag_msg7), ESMF_LOGMSG_INFO)
-      end block
     end if
 
   end subroutine export_si_albedo
@@ -1284,6 +1295,7 @@ contains
     ! associado — o peso do termo de gelo no blend a jusante torna esse
     ! valor quase irrelevante nesses casos.
     real(ESMF_KIND_R8), parameter :: TICE_FALLBACK = 271.35_ESMF_KIND_R8
+        character(len=150) :: diag_msg8
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -1320,12 +1332,9 @@ contains
     end do
 
     if (cfg_write_fixdiag) then
-      block
-        character(len=150) :: diag_msg8
         write(diag_msg8,'(A,ES10.3,A,ES10.3)') &
           'FIX-DIAG-TSKIN-01: Si_t_sis2 min=', minval(ptr_tice), ' max=', maxval(ptr_tice)
         call ESMF_LogWrite(trim(diag_msg8), ESMF_LOGMSG_INFO)
-      end block
     end if
 
   end subroutine export_si_tskin

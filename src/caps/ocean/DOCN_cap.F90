@@ -258,6 +258,12 @@ contains
     real(ESMF_KIND_R8), pointer     :: coordX(:,:), coordY(:,:)
     type(DOCN_InternalStateWrapper) :: iswrap
     type(DOCN_InternalState), pointer :: is
+      integer :: nx_tiles_target
+      integer :: nx_max
+      integer :: ny_tiles
+      integer :: regDecomp_2d(2)
+      integer :: localDeCount_docn
+      integer :: lde_docn
 
     rc = ESMF_SUCCESS
 
@@ -301,9 +307,6 @@ contains
     !   N=512: netcdf(360×180) → regDecomp=(/23,23/)=529  15col× 7row ✓
     !   N=512: netcdf(1440×720)→ regDecomp=(/23,23/)=529  62col×31row ✓
 
-    block
-      integer :: nx_tiles_target, nx_max, ny_tiles, regDecomp_2d(2)
-      integer :: localDeCount_docn, lde_docn
       nx_tiles_target = max(1, nint(sqrt(real(petCount))))
       nx_max          = min(nx_tiles_target, nx / 2)
       ny_tiles        = (petCount + nx_max - 1) / nx_max
@@ -345,7 +348,6 @@ contains
           end do
         end do
       end do  ! lde_docn
-    end block
 
     ! Campos importados — anuncia e realiza todos os N_IMP fluxos do mediador.
     call RealizeFields(importState, grid, IMP_NAMES, N_IMP, rc)

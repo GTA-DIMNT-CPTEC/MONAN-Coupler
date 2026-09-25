@@ -17,6 +17,7 @@
 module med_cap_methods_mod
 
   use ESMF
+  use regrid_manager_mod, only : regrid_spec
   use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState
@@ -34,20 +35,8 @@ module med_cap_methods_mod
   public :: GetFieldPtrOptional
   public :: RegridOrCopy
   public :: RouteOcnToAtm
-  public :: NeighborFillExtrapolate
 
-  ! B-METHODS-TERMORDER-01 (22/09/2026): as chamadas de ESMF_FieldRegrid deste
-  ! arquivo nao passavam termorderflag e caiam no padrao do ESMF,
-  ! ESMF_TERMORDER_FREE, que soma na ordem de chegada das mensagens. O
-  ! B-REGRID-TERMORDER-01 (Set/2026) corrigiu apenas o MED_cap.F90; este
-  ! arquivo ficou de fora. Mesmo valor usado la' (MED_TERMORDER).
-  type(ESMF_TermOrder_Flag), parameter :: MET_TERMORDER = ESMF_TERMORDER_SRCSEQ
 
-  ! B-SRCTERM-01: srcTermProcessing e' intent(inout) em ESMF_FieldRegridStore
-  ! (o ESMF devolve nele o valor escolhido quando faz auto-ajuste), entao nao
-  ! aceita literal. Esta variavel e' zerada imediatamente antes de cada
-  ! chamada, para que nenhuma herde valor de outra.
-  integer, save :: stp_b_srcterm = 0
 
 contains
 
@@ -223,7 +212,6 @@ contains
     integer,                 intent(out)   :: rc
 
     type(ESMF_Field) :: dst_field
-    type(ESMF_RouteHandle) :: rh_tmp
     real(ESMF_KIND_R8), pointer :: dst_ptr(:,:)
 
     rc = ESMF_SUCCESS
@@ -233,40 +221,18 @@ contains
       msg="RegridOrCopy: "//trim(dst_name), &
       line=__LINE__, file=__FILE__)) return
 
-    if (is%rh_created) then
-      call ESMF_FieldRegrid(src_field, dst_field, is%rh_atm2ocn, &
-        zeroregion=ESMF_REGION_TOTAL, &
-        termorderflag=MET_TERMORDER, rc=rc)   ! B-METHODS-TERMORDER-01
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &
-        line=__LINE__, file=__FILE__)) return
-      ! Sanitizar NaNs
-      call ESMF_FieldGet(dst_field, farrayPtr=dst_ptr, rc=rc)
-      where (dst_ptr /= dst_ptr) dst_ptr = 0.0_ESMF_KIND_R8
-    else
-      ! Routehandle ainda não disponível: regrid temporário nearest-stod
-      stp_b_srcterm = 0   ! B-SRCTERM-01
-      call ESMF_FieldRegridStore( &
-        srcField       = src_field,    &
-        dstField       = dst_field,    &
-        routehandle    = rh_tmp,       &
-        regridmethod   = ESMF_REGRIDMETHOD_NEAREST_STOD, &
-        unmappedaction = ESMF_UNMAPPEDACTION_IGNORE, &
-        srcTermProcessing = stp_b_srcterm, &   ! B-SRCTERM-01
-        rc             = rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg="RegridOrCopy fallback: falha store "//trim(dst_name), &
-        line=__LINE__, file=__FILE__)) return
-      call ESMF_FieldRegrid(src_field, dst_field, rh_tmp, &
-        zeroregion=ESMF_REGION_TOTAL, &
-        termorderflag=MET_TERMORDER, rc=rc)   ! B-METHODS-TERMORDER-01
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg="RegridOrCopy fallback: falha regrid "//trim(dst_name), &
-        line=__LINE__, file=__FILE__)) return
-      call ESMF_RouteHandleDestroy(rh_tmp, nogarbage=.true., rc=rc)
-      call ESMF_FieldGet(dst_field, farrayPtr=dst_ptr, rc=rc)
-      where (dst_ptr /= dst_ptr) dst_ptr = 0.0_ESMF_KIND_R8
+    ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN); se ainda
+    ! não existe, é criada com este par.
+    if (.not. is%regrid%has('atm2ocn')) then
+      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), src_field, dst_field, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
+    call is%regrid%apply('atm2ocn', src_field, dst_field, rc, zero_total=.true.)
+    if (ESMF_LogFoundError(rcToCheck=rc, &
+      msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &
+      line=__LINE__, file=__FILE__)) return
+    call ESMF_FieldGet(dst_field, farrayPtr=dst_ptr, rc=rc)
+    where (dst_ptr /= dst_ptr) dst_ptr = 0.0_ESMF_KIND_R8
 
   end subroutine RegridOrCopy
 
@@ -296,9 +262,9 @@ contains
     nullify(ptr_atm)
 
     ! Guard: routehandles devem estar criados para Fase 2
-    if (.not. is%rh_created) then
+    if (.not. is%regrid%has('ocn2atm')) then
       call ESMF_LogWrite( &
-        'MED RouteOcnToAtm: rh_ocn2atm nao criado — pulando Fase 2', &
+        'MED RouteOcnToAtm: rota ocn2atm ainda nao criada; pulando', &
         ESMF_LOGMSG_WARNING)
       rc = ESMF_SUCCESS
       return
@@ -319,128 +285,5 @@ contains
   end subroutine RouteOcnToAtm
 
 
-  !============================================================================
-  !> @brief Extrapolação por vizinhança (3x3, media iterativa) para preencher
-  !!   celulas invalidas apos regrid — generalização do algoritmo validado
-  !!   para So_t (FIX B-OCNGRID-04/05, "costura do Indico desapareceu",
-  !!   Ago/2026), parametrizado por faixa fisica valida em vez de fixo em
-  !!   temperatura. Usado pelo FIX B-ICEREGRID-01 para os campos do gelo
-  !!   (Si_ifrac_sis2, albedo, Si_t_sis2), que antes nao tinham NENHUM
-  !!   tratamento de borda/costura apos o regrid bilinear.
-  !!
-  !! IMPORTANTE (mesma ressalva do algoritmo original): o loop e' LOCAL ao
-  !! DE de cada PET — um buraco que atravessa a fronteira entre PETs pode
-  !! nao fechar por vizinhanca aqui, mesmo com N_ITER grande. O fallback
-  !! constante (vfill) ao final garante que nenhum ponto fique de fato
-  !! indefinido.
-  !!
-  !! FIX B-NEIGHBORFILL-02 (Set/2026): revisao do FIX B-NEIGHBORFILL-01.
-  !! Reduzir max_iter (40->5) resolvia o "vazamento" de valor real por
-  !! longa distancia (ver FIX-DIAG-ICEGEO-01), mas criava o problema
-  !! OPOSTO: buraco real e LOCAL (perto do fold tripolar) maior que 5
-  !! celulas de largura deixa de fechar com vizinho de verdade e cai no
-  !! vfill -- ou seja, gelo real passa a DESAPARECER onde antes (com
-  !! max_iter=40) apenas "vazava" para o lugar errado. Os dois sao
-  !! defeitos do MESMO mecanismo (difusao sem limite de escala), nao
-  !! contraditorios entre si.
-  !!
-  !! Correcao: FRAC_INVALID_SKIP verifica ANTES de iterar se a fracao de
-  !! celulas invalidas e' grande demais para ser um "buraco local" legitimo
-  !! (deformacao de malha). Se for, pula a difusao inteira e cai direto no
-  !! vfill -- um dominio com, digamos, mais de 25% invalido e' sinal de
-  !! problema no regrid/mascara upstream, nao algo que extrapolacao deva
-  !! tentar adivinhar. Para o caso restante (fracao pequena, buraco
-  !! genuinamente local), max_iter volta a um valor generoso o bastante
-  !! para fechar com dado real proximo, sem o risco de arrastar valor por
-  !! dezenas de graus, porque o caso "dominio muito invalido" -- que era o
-  !! que permitia esse arrasto de longo alcance -- ja foi filtrado acima.
-  !!
-  !! @param[inout] arr      Campo 2D a corrigir in-place
-  !! @param[in]    vmin     Limite fisico inferior valido
-  !! @param[in]    vmax     Limite fisico superior valido
-  !! @param[in]    vfill    Valor de fallback final para celulas sem nenhum
-  !!                         vizinho valido apos max_iter iteracoes OU
-  !!                         quando a fracao invalida inicial e' grande
-  !!                         demais para difusao local (ver FRAC_INVALID_SKIP)
-  !! @param[out]   rc       Codigo de retorno (sempre ESMF_SUCCESS; a rotina
-  !!                         nao falha, so' preenche o melhor que consegue)
-  !! @param[in]    max_iter Opcional. Alcance maximo (em celulas) da difusao
-  !!                         de vizinhanca, usado SO' quando a fracao
-  !!                         invalida inicial esta' abaixo de FRAC_INVALID_SKIP.
-  !!                         Default 15 -- fecha buracos locais razoaveis
-  !!                         (varias celulas de largura) sem arrastar valor
-  !!                         por dezenas de graus, ja que o caso de dominio
-  !!                         amplamente invalido e' tratado separadamente.
-  !============================================================================
-  subroutine NeighborFillExtrapolate(arr, vmin, vmax, vfill, rc, max_iter)
-    real(ESMF_KIND_R8), intent(inout) :: arr(:,:)
-    real(ESMF_KIND_R8), intent(in)    :: vmin, vmax, vfill
-    integer,             intent(out)   :: rc
-    integer, optional,   intent(in)    :: max_iter
-
-    real(ESMF_KIND_R8), parameter :: FRAC_INVALID_SKIP = 0.25_ESMF_KIND_R8
-    integer :: N_ITER
-    real(ESMF_KIND_R8), allocatable :: tmp(:,:)
-    logical,            allocatable :: valid(:,:)
-    integer :: i1,iN,j1,jN,i2,j2,ii2,jj2,it,nbr
-    real(ESMF_KIND_R8) :: acc, frac_invalid_ini
-
-    N_ITER = 15
-    if (present(max_iter)) N_ITER = max_iter
-
-    rc = ESMF_SUCCESS
-    i1=lbound(arr,1); iN=ubound(arr,1); j1=lbound(arr,2); jN=ubound(arr,2)
-
-    ! NaN/Inf tambem tratados como invalidos (empurrados para fora da faixa
-    ! valida de proposito, para participar do loop de extrapolacao).
-    where (arr /= arr) arr = vmin - 1.0_ESMF_KIND_R8
-
-    allocate(valid(i1:iN,j1:jN), tmp(i1:iN,j1:jN))
-    valid = (arr >= vmin .and. arr <= vmax)
-
-    ! FIX B-NEIGHBORFILL-02: fracao invalida grande demais para ser um
-    ! "buraco local" legitimo -- pula a difusao inteira, cai direto no
-    ! vfill. Um dominio amplamente invalido e' sinal de problema no
-    ! regrid/mascara upstream; tentar preencher por difusao aqui so' troca
-    ! um sintoma por outro (buraco vira valor arrastado de longe).
-    frac_invalid_ini = real(count(.not. valid), ESMF_KIND_R8) / &
-                        real(size(valid), ESMF_KIND_R8)
-    if (frac_invalid_ini > FRAC_INVALID_SKIP) then
-      where (.not. valid) arr = vfill
-      call ESMF_LogWrite('MED NeighborFillExtrapolate: fracao invalida ' // &
-        'inicial acima do limiar -- difusao pulada, fallback direto ' // &
-        '(ver FIX B-NEIGHBORFILL-02; investigar regrid/mascara upstream)', &
-        ESMF_LOGMSG_WARNING)
-      deallocate(valid, tmp)
-      return
-    end if
-
-    do it = 1, N_ITER
-      if (count(.not. valid) == 0) exit
-      tmp = arr
-      do j2 = j1, jN
-        do i2 = i1, iN
-          if (valid(i2,j2)) cycle
-          acc = 0.0_ESMF_KIND_R8; nbr = 0
-          do jj2 = max(j1,j2-1), min(jN,j2+1)
-            do ii2 = max(i1,i2-1), min(iN,i2+1)
-              if (valid(ii2,jj2)) then
-                acc = acc + arr(ii2,jj2); nbr = nbr + 1
-              end if
-            end do
-          end do
-          if (nbr > 0) tmp(i2,j2) = acc / real(nbr, ESMF_KIND_R8)
-        end do
-      end do
-      arr = tmp
-      valid = (arr >= vmin .and. arr <= vmax)
-    end do
-    ! Fallback final: qualquer celula que sobrou sem NENHUM vizinho valido
-    ! apos N_ITER (raro; tipicamente so' em buracos que atravessam fronteira
-    ! de PET) cai no valor constante de seguranca.
-    where (.not. valid) arr = vfill
-    deallocate(valid, tmp)
-
-  end subroutine NeighborFillExtrapolate
 
 end module med_cap_methods_mod

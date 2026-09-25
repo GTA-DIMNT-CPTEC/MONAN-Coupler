@@ -15,6 +15,7 @@
 !!   &nuopc_docn       arquivos e grade do oceano de dados (OISST)
 !!   &nuopc_ocn        arquivo de grade do MOM6
 !!   &nuopc_petlayout  modo de acoplamento e divisão de PETs
+!!   &nuopc_regrid     (opcional) esquema de interpolação por rota
 !!
 !! Regras de leitura:
 !!   - grupo ausente do arquivo: mantém os valores padrão, com aviso;
@@ -103,6 +104,15 @@ module coupler_config_mod
   logical,            public, protected :: cfg_use_docn_ice       = .false.
   logical,            public, protected :: cfg_docn_ice_init_only = .false.
 
+  ! &nuopc_regrid (opcional): troca do esquema de interpolação por rota.
+  ! Entradas vazias mantêm a configuração padrão da rota.
+  integer, parameter, public :: MAX_REGRID_OVERRIDES = 16
+  character(len=32),  public, protected :: cfg_regrid_route(MAX_REGRID_OVERRIDES)   = ''
+  character(len=32),  public, protected :: cfg_regrid_scheme(MAX_REGRID_OVERRIDES)  = ''
+  character(len=64),  public, protected :: cfg_regrid_methods(MAX_REGRID_OVERRIDES) = ''
+  character(len=256), public, protected :: cfg_regrid_weights(MAX_REGRID_OVERRIDES) = ''
+  character(len=32),  public, protected :: cfg_regrid_class(MAX_REGRID_OVERRIDES)   = ''
+
 contains
 
   !> Lê o arquivo de configuração e preenche as variáveis cfg_*.
@@ -141,6 +151,10 @@ contains
     character(len=16)  :: coupling_mode, pet_layout
     integer            :: atm_pet_count, ocn_pet_count, ice_pet_count
     logical            :: use_sis2_dynamic, seq_repro
+    character(len=32)  :: regrid_route(MAX_REGRID_OVERRIDES), regrid_scheme(MAX_REGRID_OVERRIDES)
+    character(len=64)  :: regrid_methods(MAX_REGRID_OVERRIDES)
+    character(len=256) :: regrid_weights(MAX_REGRID_OVERRIDES)
+    character(len=32)  :: regrid_class(MAX_REGRID_OVERRIDES)
 
     namelist /nuopc_driver/    start_date, stop_date, dt_coupling, dt_atm, &
                                log_dir, log_kind, write_fixdiag
@@ -159,6 +173,8 @@ contains
     namelist /nuopc_petlayout/ coupling_mode, pet_layout, atm_pet_count, &
                                ocn_pet_count, ice_pet_count, use_sis2_dynamic, &
                                seq_repro
+    namelist /nuopc_regrid/    regrid_route, regrid_scheme, regrid_methods, &
+                               regrid_weights, regrid_class
 
     character(len=512) :: fpath
     logical :: exists, is_root
@@ -197,6 +213,9 @@ contains
     atm_pet_count = cfg_atm_pet_count;  ocn_pet_count = cfg_ocn_pet_count
     ice_pet_count = cfg_ice_pet_count
     use_sis2_dynamic = cfg_use_sis2_dynamic;  seq_repro = cfg_seq_repro
+    regrid_route = cfg_regrid_route;  regrid_scheme = cfg_regrid_scheme
+    regrid_methods = cfg_regrid_methods;  regrid_weights = cfg_regrid_weights
+    regrid_class = cfg_regrid_class
 
     ! 2. Localizar o arquivo
     if (present(file_path)) then
@@ -224,25 +243,8 @@ contains
       return
     end if
 
-    ! 3. Ler cada grupo. Para no primeiro grupo com erro de sintaxe.
-    read_groups: block
-      rewind(unit); read(unit, nml=nuopc_driver, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_driver')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_atm, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_atm')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_netcdf, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_netcdf')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_atm_bnd, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_atm_bnd')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_docn, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_docn')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_ocn, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_ocn')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_mode, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_mode')) exit read_groups
-      rewind(unit); read(unit, nml=nuopc_petlayout, iostat=ios)
-      if (.not. group_ok(ios, 'nuopc_petlayout')) exit read_groups
-    end block read_groups
+    ! 3. Ler cada grupo; para no primeiro grupo com erro de sintaxe.
+    call read_groups(unit)
     close(unit)
     if (rc == CFG_FATAL) return
 
@@ -310,17 +312,47 @@ contains
     cfg_atm_pet_count = atm_pet_count;  cfg_ocn_pet_count = ocn_pet_count
     cfg_ice_pet_count = ice_pet_count
     cfg_use_sis2_dynamic = use_sis2_dynamic;  cfg_seq_repro = seq_repro
+    cfg_regrid_route = regrid_route;  cfg_regrid_scheme = regrid_scheme
+    cfg_regrid_methods = regrid_methods;  cfg_regrid_weights = regrid_weights
+    cfg_regrid_class = regrid_class
 
   contains
 
+    subroutine read_groups(unit)
+      integer, intent(in) :: unit
+      integer :: ios
+
+      rewind(unit); read(unit, nml=nuopc_driver, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_driver')) return
+      rewind(unit); read(unit, nml=nuopc_atm, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_atm')) return
+      rewind(unit); read(unit, nml=nuopc_netcdf, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_netcdf')) return
+      rewind(unit); read(unit, nml=nuopc_atm_bnd, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_atm_bnd')) return
+      rewind(unit); read(unit, nml=nuopc_docn, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_docn')) return
+      rewind(unit); read(unit, nml=nuopc_ocn, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_ocn')) return
+      rewind(unit); read(unit, nml=nuopc_mode, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_mode')) return
+      rewind(unit); read(unit, nml=nuopc_petlayout, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_petlayout')) return
+      rewind(unit); read(unit, nml=nuopc_regrid, iostat=ios)
+      if (.not. group_ok(ios, 'nuopc_regrid', optional_group=.true.)) return
+    end subroutine read_groups
+
     !> Interpreta o iostat de uma leitura de namelist.
     !! Negativo: grupo ausente (aviso). Positivo: erro de sintaxe (fatal).
-    logical function group_ok(ios, group)
-      integer,          intent(in) :: ios
-      character(len=*), intent(in) :: group
+    logical function group_ok(ios, group, optional_group)
+      integer,          intent(in)           :: ios
+      character(len=*), intent(in)           :: group
+      logical,          intent(in), optional :: optional_group
 
       group_ok = (ios <= 0)
-      if (ios < 0) then
+      if (ios < 0 .and. present(optional_group)) then
+        continue   ! grupo opcional ausente: sem aviso
+      else if (ios < 0) then
         if (is_root) write(*,'(3A)') TAG//'AVISO: grupo &', group, ' ausente, usando valores padrao.'
       else if (ios > 0) then
         if (is_root) write(*,'(3A)') TAG//'ERRO: grupo &', group, &

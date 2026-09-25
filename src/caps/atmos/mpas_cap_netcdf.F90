@@ -520,10 +520,32 @@ contains
     end if   ! localPet == 0
 
     ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce (FIX-EXP v2) ──────
-    block
+    call write_export_fields()
+
+        ! ── 7. PET0: fechar arquivo ───────────────────────────────────────────
+    if (localPet == 0) then
+      if (allocated(grid_2d)) deallocate(grid_2d)
+      ncstat = nf90_close(ncid)
+      if (ncstat == NF90_NOERR) then
+        write(*,'(A,4A)') '[NetCDF] Escrito (', trim(valid_time_iso), ') → ', trim(fname), ''
+        call ESMF_LogWrite(subname//': '//trim(fname)//' escrito', &
+                           ESMF_LOGMSG_INFO)
+      else
+        write(*,'(A)') '[NetCDF] AVISO nf90_close: '//trim(nf90_strerror(ncstat))
+      end if
+    end if
+
+    deallocate(fldnames, allCounts, displs, sendBuf, recvBuf)
+
+
+  contains
+
+    subroutine write_export_fields()
       real(ESMF_KIND_R8) :: acc_local(NLON,NLAT), acc_global(NLON,NLAT)
       integer            :: cnt_local(NLON,NLAT), cnt_global(NLON,NLAT)
       integer :: raw_idx, jr
+              real(ESMF_KIND_R8), pointer :: fp1(:)
+              real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
 
       do i = 1, itemCount
         raw_idx = 0
@@ -548,8 +570,6 @@ contains
           sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
           call ESMF_StateGet(exportState, itemName=trim(fldnames(i)), field=field, rc=rc)
           if (rc == ESMF_SUCCESS) then
-            block
-              real(ESMF_KIND_R8), pointer :: fp1(:), fp2(:,:); integer :: rk
               nullify(fp1,fp2)
               call ESMF_FieldGet(field, dimCount=rk, rc=rc)
               if (rc==ESMF_SUCCESS) then
@@ -568,7 +588,6 @@ contains
                   if (associated(fp2)) nullify(fp2)
                 end if
               end if
-            end block
           end if
           rc = ESMF_SUCCESS
           if (allocated(g_lon_local_saved) .and. nLocal>0) &
@@ -592,23 +611,7 @@ contains
           end if
         end if
       end do ! campos
-    end block
-
-        ! ── 7. PET0: fechar arquivo ───────────────────────────────────────────
-    if (localPet == 0) then
-      if (allocated(grid_2d)) deallocate(grid_2d)
-      ncstat = nf90_close(ncid)
-      if (ncstat == NF90_NOERR) then
-        write(*,'(A,4A)') '[NetCDF] Escrito (', trim(valid_time_iso), ') → ', trim(fname), ''
-        call ESMF_LogWrite(subname//': '//trim(fname)//' escrito', &
-                           ESMF_LOGMSG_INFO)
-      else
-        write(*,'(A)') '[NetCDF] AVISO nf90_close: '//trim(nf90_strerror(ncstat))
-      end if
-    end if
-
-    deallocate(fldnames, allCounts, displs, sendBuf, recvBuf)
-
+    end subroutine write_export_fields
   end subroutine export_write_netcdf
 
   ! ============================================================================
@@ -980,6 +983,10 @@ contains
     real(ESMF_KIND_R8) :: res_deg, dlon, dlat
     character(len=19) :: ts_str
     character(len=256) :: outdir
+      logical, allocatable :: is_ocean(:,:)
+      logical, allocatable :: is_land(:,:)
+      character(len=200) :: logmsg_mask
+      integer :: n_ocn_b
 
     rc = ESMF_SUCCESS
     outdir = trim(cfg_import_diag_dir)
@@ -1307,27 +1314,22 @@ contains
     ! Feito com mascaras logicas explicitas (e nao com ELSEWHERE encadeado)
     ! porque aqui o array de controle e' o proprio array atribuido — a
     ! ordem de avaliacao passaria a importar para quem for reler isto.
-    block
-      logical, allocatable :: is_ocean(:,:), is_land(:,:)
       allocate(is_ocean(nlon, nlat), is_land(nlon, nlat))
       is_ocean = (mask_2d >= OMASK_MIN)
       is_land  = (.not. is_ocean) .and. (mask_2d > 0.5_ESMF_KIND_R8 * FILL_DIAG)
       where (is_ocean) mask_2d = 1.0_ESMF_KIND_R8
       where (is_land)  mask_2d = 0.0_ESMF_KIND_R8
       deallocate(is_ocean, is_land)
-    end block
+    if (allocated(is_ocean)) deallocate(is_ocean)
+    if (allocated(is_land)) deallocate(is_land)
     ios = nf90_put_var(ncid, varid_omask, mask_2d)
 
-    block
-      character(len=200) :: logmsg_mask
-      integer :: n_ocn_b
       n_ocn_b = count(mask_2d >= OMASK_MIN)
       write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
         'B-DIAGMASK-01: monan2_import mascarado — oceano ', &
         100.0*real(n_ocn_b)/real(nlon*nlat), '% (', n_ocn_b, ' de ', &
         nlon*nlat, ' bins)'
       call ESMF_LogWrite(trim(logmsg_mask), ESMF_LOGMSG_INFO)
-    end block
 
     ios = nf90_close(ncid)
     deallocate(grid_2d, mask_2d, lat_axis, lon_axis)

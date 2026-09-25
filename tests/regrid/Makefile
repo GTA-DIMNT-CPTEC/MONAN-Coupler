@@ -1,0 +1,39 @@
+# Testes do framework de interpolação (src/regrid). Requer ESMFMKFILE.
+#   make            compila ./test_regrid
+#   make run NP=2   executa com NP processos MPI
+include $(ESMFMKFILE)
+
+SRC  := ../../src
+FC   := $(ESMF_F90COMPILER)
+FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) -I. -J. \
+         -ffree-line-length-none -fallow-argument-mismatch -O0 -g -fcheck=all \
+         -Wall -Wno-unused-dummy-argument
+LIBS := $(ESMF_F90LINKOPTS) $(ESMF_F90LINKPATHS) $(ESMF_F90LINKRPATHS) $(ESMF_F90ESMFLINKLIBS)
+NP ?= 1
+
+OBJS := coupler_utils.o coupler_config.o regrid_base.o regrid_esmf.o regrid_weights.o \
+        regrid_mpassit.o regrid_registry.o regrid_manager.o identity_scheme.o test_regrid.o
+vpath %.F90 $(SRC)/shared $(SRC)/regrid .
+
+test_regrid: $(OBJS)
+	$(FC) -o $@ $^ $(LIBS)
+
+%.o: %.F90
+	$(FC) $(FLAGS) -c $<
+
+# dependências entre módulos
+coupler_config.o: coupler_utils.o
+regrid_esmf.o regrid_weights.o: regrid_base.o
+regrid_mpassit.o: regrid_esmf.o
+regrid_registry.o: regrid_esmf.o regrid_weights.o regrid_mpassit.o
+regrid_manager.o: regrid_registry.o coupler_config.o
+identity_scheme.o: regrid_base.o
+test_regrid.o: regrid_manager.o identity_scheme.o
+
+run: test_regrid
+	mpirun -np $(NP) ./test_regrid
+
+clean:
+	rm -f *.o *.mod test_regrid PET*.log pesos_teste.nc
+
+.PHONY: run clean

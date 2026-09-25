@@ -10,6 +10,7 @@
 #   make distclean  clean + scripts PBS e bibliotecas instaladas (lib/ mod/)
 #   make rebuild    clean + all
 #   make check      verifica se os fontes existem
+#   make test       compila e executa os testes de tests/regrid
 #   make printenv   mostra as variáveis de compilação
 #   make help       lista os alvos
 #
@@ -17,7 +18,7 @@
 # "Dependências entre módulos", os módulos do projeto que ele usa.
 # =============================================================================
 
-VERSION := 15.0
+VERSION := 16.0
 
 # O Cray XD 2000 exporta MAKEFLAGS=-e (o ambiente sobreporia as atribuições).
 MAKEFLAGS := $(filter-out -e,$(MAKEFLAGS))
@@ -33,7 +34,7 @@ ifndef MOM6_LIBDIR
 endif
 
 # 'all' antes do include, para continuar sendo o alvo padrão.
-.PHONY: all dirs clean distclean rebuild check printenv help
+.PHONY: all dirs clean distclean rebuild check test printenv help
 all: bin/esmApp
 	@echo ""
 	@echo "  OK: bin/esmApp gerado com sucesso."
@@ -50,7 +51,7 @@ override SRCDIR  := src
 override OBJDIR  := build/obj
 override MODDIR  := build/mod
 override BINDIR  := bin
-SRC_SUBDIRS := shared caps/atmos caps/ocean caps/ocean/upstream caps/ice \
+SRC_SUBDIRS := shared regrid caps/atmos caps/ocean caps/ocean/upstream caps/ice \
                mediator driver main
 vpath %.F90 $(addprefix $(SRCDIR)/,$(SRC_SUBDIRS))
 
@@ -137,6 +138,8 @@ LDLIBS := $(MPAS_LIBS) $(ESMF_LIBS) $(MOM6_LIBS) -lz -ldl -lm -lgomp
 # Objetos (a ordem de compilação vem das dependências abaixo)
 # -----------------------------------------------------------------------------
 SRCS := coupler_utils coupler_config diag_bitsum                          \
+        regrid_base regrid_esmf regrid_weights regrid_mpassit             \
+        regrid_registry regrid_manager                                    \
         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
         mpas_atm_types mpas_atm_model mpas_cap_netcdf mpas_cap_methods    \
         mpas_cap_MONAN DATM_cap                                           \
@@ -173,9 +176,10 @@ $(OBJDIR)/docn_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.
 $(OBJDIR)/esm.o: $(OBJDIR)/DOCN_cap.o $(OBJDIR)/MED_cap.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/sis_cap_MONAN.o
 $(OBJDIR)/esmApp.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/esm.o
 $(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/med_cap_types.o
-$(OBJDIR)/MED_cap.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o
-$(OBJDIR)/med_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/med_cap_types.o
+$(OBJDIR)/MED_cap.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
+$(OBJDIR)/med_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_cap_netcdf.o: $(OBJDIR)/med_cap_types.o
+$(OBJDIR)/med_cap_types.o: $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/mom_cap_methods.o: $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o
 $(OBJDIR)/mom_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/docn_cap_netcdf.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/mom_ocean_model_nuopc.o: $(OBJDIR)/mom_surface_forcing_nuopc.o
@@ -184,6 +188,11 @@ $(OBJDIR)/mpas_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils
 $(OBJDIR)/mpas_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mpas_atm_model.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_methods.o $(OBJDIR)/mpas_cap_netcdf.o
 $(OBJDIR)/mpas_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpi_allreduce_wrappers.o
 $(OBJDIR)/mpi_allreduce_wrappers.o: $(OBJDIR)/mpi_allreduce_i4.o $(OBJDIR)/mpi_allreduce_r8.o
+$(OBJDIR)/regrid_esmf.o: $(OBJDIR)/regrid_base.o
+$(OBJDIR)/regrid_manager.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_registry.o
+$(OBJDIR)/regrid_mpassit.o: $(OBJDIR)/regrid_esmf.o
+$(OBJDIR)/regrid_registry.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o $(OBJDIR)/regrid_mpassit.o $(OBJDIR)/regrid_weights.o
+$(OBJDIR)/regrid_weights.o: $(OBJDIR)/regrid_base.o
 $(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/time_utils.o: $(OBJDIR)/mom_cap_methods.o
 
@@ -193,6 +202,9 @@ $(OBJDIR)/time_utils.o: $(OBJDIR)/mom_cap_methods.o
 help:
 	@echo "  Makefile v$(VERSION): make | clean | distclean | rebuild | check | printenv | help"
 	@echo "  Pré-requisito: source run/setenv-gnu.bash"
+
+test:
+	$(MAKE) -C tests/regrid run NP=$${NP:-2}
 
 check:
 	@miss=0; for s in $(SRCS); do \

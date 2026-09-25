@@ -234,6 +234,10 @@ contains
     integer            :: i, localMpiComm, localPet
     real(ESMF_KIND_R8), parameter   :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
     character(len=*), parameter :: subname = '(mpas_cap:InitializeRealize)'
+      real(ESMF_KIND_R8), allocatable :: lon_local_nc(:)
+      real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)
+      integer :: k
+      integer :: n_local
     rc = ESMF_SUCCESS
 
     ! ── 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada ─
@@ -281,9 +285,6 @@ contains
     end if
 
     ! ── 4. Coordenadas NetCDF (MPI_Allgather apos SMIOL — seguro) ────────
-    block
-      real(ESMF_KIND_R8), allocatable :: lon_local_nc(:), lat_local_nc(:)
-      integer :: k, n_local
       ! B-32: usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
       n_local = g_atm_public%nCellsSolve
@@ -297,7 +298,8 @@ contains
       call netcdf_init_coords(lon_local_nc, lat_local_nc, n_local, vm, rc)
       deallocate(lon_local_nc, lat_local_nc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end block
+    if (allocated(lon_local_nc)) deallocate(lon_local_nc)
+    if (allocated(lat_local_nc)) deallocate(lat_local_nc)
 
     call ESMF_LogWrite(subname//': InitializeRealize concluido', ESMF_LOGMSG_INFO)
   end subroutine InitializeRealize
