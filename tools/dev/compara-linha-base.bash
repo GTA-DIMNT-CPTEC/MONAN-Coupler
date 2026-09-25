@@ -137,6 +137,8 @@ fi
 
 
 n_ok=0; n_dif=0; n_faltando=0; n_extra=0; n_meta=0
+TMP_CMP=$(mktemp)
+trap 'rm -f "${TMP_CMP}"' EXIT
 
 # ── Compara cada arquivo da referência com o correspondente atual ────────────
 for ref_file in "${REF}"/*.nc; do
@@ -155,9 +157,13 @@ for ref_file in "${REF}"/*.nc; do
     continue
   fi
 
-  saida=$(nccmp "${NCCMP_OPTS[@]}" "${ref_file}" "${atual}" 2>&1)
+  # B-CMP-MEM-01: a saida do nccmp -f pode ter milhoes de linhas quando o
+  # arquivo inteiro difere; guardada numa variavel, estourava a memoria do
+  # bash (xrealloc). Vai para um arquivo temporario e so' o inicio e' lido.
+  nccmp "${NCCMP_OPTS[@]}" "${ref_file}" "${atual}" > "${TMP_CMP}" 2>&1
   rc_cmp=$?
-  if [[ ${rc_cmp} -eq 0 && -z "${saida}" ]]; then
+  saida=$(head -n 12 "${TMP_CMP}")
+  if [[ ${rc_cmp} -eq 0 && ! -s "${TMP_CMP}" ]]; then
     printf '  %-42s  %s\n' "${nome}" "igual"
     n_ok=$(( n_ok + 1 ))
   else
@@ -176,8 +182,10 @@ for ref_file in "${REF}"/*.nc; do
     # passar, a diferenca esta' confinada aos metadados.
     dados_opts=(-d -f)
     [[ -n "${TOLERANCIA}" ]] && dados_opts+=(-T "${TOLERANCIA}")
-    saida_dados=$(nccmp "${dados_opts[@]}" "${ref_file}" "${atual}" 2>&1)
-    if [[ $? -eq 0 && -z "${saida_dados}" ]]; then
+    nccmp "${dados_opts[@]}" "${ref_file}" "${atual}" > "${TMP_CMP}" 2>&1
+    rc_dados=$?
+    saida_dados=$(head -n 12 "${TMP_CMP}")
+    if [[ ${rc_dados} -eq 0 && ! -s "${TMP_CMP}" ]]; then
       printf '  %-42s  %s\n' "${nome}" "difere so nos METADADOS (dados iguais)"
       echo "${saida}" | head -4 | sed 's/^/        /'
       n_meta=$(( n_meta + 1 ))

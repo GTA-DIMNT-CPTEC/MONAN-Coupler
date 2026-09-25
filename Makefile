@@ -111,7 +111,6 @@ MOM6_SRCS    := mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods 
                 time_utils mom_cap_MONAN sis_cap_MONAN
 MOM6_FCFLAGS := $(F90FLAGS) -fdefault-real-8 -fdefault-double-8 -Wno-unused-function \
                 -Wno-character-truncation -Wno-maybe-uninitialized -Wno-unused-variable
-$(MOM6_SRCS:%=$(OBJDIR)/%.o): F90FLAGS := $(MOM6_FCFLAGS)
 
 # -----------------------------------------------------------------------------
 # Ligação
@@ -156,6 +155,13 @@ bin/esmApp: $(OBJS) | dirs
 
 $(OBJDIR)/%.o: %.F90 | dirs
 	$(FC) $(F90FLAGS) -c -o $@ $<
+
+# Fontes ligados ao MOM6: regra própria. Não usar variável por alvo
+# ('alvo: F90FLAGS := ...'): o make a repassa às dependências construídas a
+# partir desse alvo, e com 'make -j' um fonte da atmosfera ou do mediador
+# poderia ser compilado com -fdefault-real-8.
+$(MOM6_SRCS:%=$(OBJDIR)/%.o): $(OBJDIR)/%.o: %.F90 | dirs
+	$(FC) $(MOM6_FCFLAGS) -c -o $@ $<
 
 # -----------------------------------------------------------------------------
 # Dependências entre módulos (quem usa quem, dentro do projeto)
