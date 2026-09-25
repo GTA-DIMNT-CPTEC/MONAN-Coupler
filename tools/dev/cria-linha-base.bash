@@ -153,8 +153,16 @@ _PADROES_RAIZ=( 'reprodiag.nc' 'reprodiag_*.nc' )
 [[ -n "${BASE_SAIDA_RAIZ_EXTRA:-}" ]] && _PADROES_RAIZ+=( ${BASE_SAIDA_RAIZ_EXTRA} )
 
 # Entradas conhecidas da raiz: nunca copiar para saida/.
-_PADROES_ENTRADA_RAIZ=( 'x1.*.nc' 'mpas_mesh.nc' 'ocean_*.nc' 'OISST*.nc' \
-                        '*_init.nc' 'grid_spec*.nc' )
+_PADROES_ENTRADA_RAIZ=( 'x1.*.nc' 'mpas_mesh.nc' 'OISST*.nc' '*_init.nc' \
+                        'grid_spec*.nc' 'MOM_IC.nc' 'tempsalt.nc' 'ucur.nc' \
+                        'vcur.nc' 'Vertical_coordinate.nc' 'monan_tos.nc' 'srflx.nc' )
+
+# B-BASE-ENTRADA-01: saídas dos modelos gravadas na raiz que NÃO entram na
+# comparação (diagnósticos próprios do MPAS, do MOM6 e do SIS2). Antes eram
+# somadas em entrada/CHECKSUMS.txt como se fossem entradas, e uma rodada nova
+# acusava "entrada diferente" em arquivos que ela mesma regrava.
+_PADROES_SAIDA_MODELOS=( 'MONAN_DIAG_*.nc' 'ice.nc' 'ocean_month.nc' \
+                         'sea_ice_geometry.nc' 'ocean.stats.nc' )
 
 _ARQS_RAIZ=()
 for _pat in "${_PADROES_RAIZ[@]}"; do
@@ -287,6 +295,12 @@ done
   echo ""
   for f in *.nc INPUT/*.nc; do
     [[ -f "${f}" ]] || continue
+    _eh_saida=0
+    for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_SAIDA_MODELOS[@]}"; do
+      # shellcheck disable=SC2053
+      [[ "${f}" == ${_pat} ]] && { _eh_saida=1; break; }
+    done
+    [[ ${_eh_saida} -eq 1 ]] && continue
     printf '%s  %12s  %s\n' \
       "$(sha256sum "${f}" | cut -d' ' -f1)" "$(stat -c%s "${f}")" "${f}"
   done
@@ -316,7 +330,7 @@ _nao_classificados=()
 for _f in *.nc; do
   [[ -f "${_f}" ]] || continue
   _classificado=0
-  for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_ENTRADA_RAIZ[@]}"; do
+  for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_ENTRADA_RAIZ[@]}" "${_PADROES_SAIDA_MODELOS[@]}"; do
     # shellcheck disable=SC2053
     [[ "${_f}" == ${_pat} ]] && { _classificado=1; break; }
   done

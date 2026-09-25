@@ -18,7 +18,7 @@
 # "Dependências entre módulos", os módulos do projeto que ele usa.
 # =============================================================================
 
-VERSION := 16.0
+VERSION := 16.1
 
 # O Cray XD 2000 exporta MAKEFLAGS=-e (o ambiente sobreporia as atribuições).
 MAKEFLAGS := $(filter-out -e,$(MAKEFLAGS))
@@ -96,6 +96,16 @@ inc_if_exists = $(if $(wildcard $(1)/.),-I$(1))
 # -----------------------------------------------------------------------------
 FC := $(ESMF_F90COMPILER)
 
+# Fusão de multiplicação e soma (FMA). Desligada por padrão: com ela o
+# compilador decide onde usar 'a*b+c' com um único arredondamento conforme a
+# organização do código, e uma refatoração sem nenhuma mudança de cálculo
+# altera o último bit do resultado (medido na etapa R-FASE2A-01; sem FMA, o
+# código refatorado reproduz o original bit a bit). Custo medido: nenhum
+# (rodada de 1 dia, 152 PETs: 142,5 s sem FMA contra 144,4 s com FMA).
+# Vale só para o código do acoplador; MPAS, MOM6 e SIS2 não são recompilados.
+# Para ligar:  make FP_CONTRACT=fast   (exige linha de base própria)
+FP_CONTRACT ?= off
+
 F90FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) $(ESMF_F90COMPILEFREENOCPP) \
             -I$(MONAN2_MODDIR) -I$(MODDIR) -J$(MODDIR)                              \
             -I$(MOM6_MODDIR) -I$(FMS_MODDIR) -I$(NUOPC_MODDIR)                      \
@@ -103,7 +113,7 @@ F90FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) $(ESMF_F90COMPILEFREE
             $(call inc_if_exists,$(NUOPC_INCDIR)) $(MOAB_INC)                       \
             -I$(PNETCDF_DIR)/include $(MOM6_HDR_INC)                                \
             -ffree-form -ffree-line-length-none -fopenmp -fallow-argument-mismatch  \
-            -ffpe-summary=none -O2 -g -fcheck=all -fbacktrace                       \
+            -ffpe-summary=none -O2 -ffp-contract=$(FP_CONTRACT) -g -fcheck=all -fbacktrace \
             -Wall -Wno-unused-dummy-argument
 
 # Fontes ligados ao MOM6/FMS: a biblioteca usa real de 8 bytes e os caps do
@@ -231,4 +241,5 @@ printenv:
 	@echo "  MONAN2_LIBDIR = $(MONAN2_LIBDIR)"
 	@echo "  MOM6_LIBDIR   = $(MOM6_LIBDIR)"
 	@echo "  MOAB externo  = $(USE_EXTERNAL_MOAB)"
+	@echo "  FP_CONTRACT   = $(FP_CONTRACT)"
 	@echo "  F90FLAGS      ="; echo "$(F90FLAGS)" | tr ' ' '\n' | grep -v '^$$' | sed 's/^/    /'

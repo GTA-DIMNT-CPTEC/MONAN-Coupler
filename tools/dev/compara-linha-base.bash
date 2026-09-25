@@ -38,16 +38,21 @@ compara-linha-base.bash — compara a rodada atual com uma linha de base
   -t VALOR       tolerância relativa (ex.: 1e-12). Sem -t, exige
                  identidade exata dos dados, que é o critério das
                  etapas de refatoração.
+  -e             confere também as entradas pela soma registrada em
+                 entrada/CHECKSUMS.txt (arquivos ausentes são ignorados;
+                 pode levar alguns minutos com entradas grandes)
   -h             esta mensagem
 
 EOF
 }
 
-while getopts ":l:o:t:h" opt; do
+CONFERE_ENTRADAS=0
+while getopts ":l:o:t:eh" opt; do
   case "${opt}" in
     l) ROTULO="${OPTARG}" ;;
     o) BASE_DIR="${OPTARG}" ;;
     t) TOLERANCIA="${OPTARG}" ;;
+    e) CONFERE_ENTRADAS=1 ;;
     h) _uso; exit 0 ;;
     \?) echo "ERRO: opção inválida: -${OPTARG}" >&2; _uso; exit 2 ;;
     :)  echo "ERRO: a opção -${OPTARG} exige argumento" >&2; exit 2 ;;
@@ -135,6 +140,30 @@ if [[ -f "${BASE_RAIZ}/config/nuopc.input" && -f nuopc.input ]]; then
   fi
 fi
 
+
+#-----------------------------------------------------------------------------
+# B-BASE-ENTRADA-01: conferência das entradas (opção -e).
+# O CHECKSUMS.txt tem três colunas (soma, tamanho, arquivo); o sha256sum -c
+# espera duas. Entradas que não existem aqui são ignoradas: a lista de bases
+# antigas pode incluir saídas de rodadas anteriores gravadas na raiz.
+#-----------------------------------------------------------------------------
+if [[ ${CONFERE_ENTRADAS} -eq 1 && -f "${BASE_RAIZ}/entrada/CHECKSUMS.txt" ]]; then
+  _n_ent=0; _n_ent_dif=0
+  while read -r _soma _tam _arq; do
+    [[ "${_soma}" =~ ^[0-9a-f]{64}$ && -f "${_arq}" ]] || continue
+    _n_ent=$((_n_ent + 1))
+    if [[ "$(sha256sum "${_arq}" | cut -d' ' -f1)" != "${_soma}" ]]; then
+      [[ ${_n_ent_dif} -eq 0 ]] && echo " ATENCAO: entradas diferentes das usadas na base:"
+      echo "          ${_arq}"
+      _n_ent_dif=$((_n_ent_dif + 1))
+    fi
+  done < "${BASE_RAIZ}/entrada/CHECKSUMS.txt"
+  if [[ ${_n_ent_dif} -eq 0 ]]; then
+    echo " Entradas: ${_n_ent} arquivo(s) conferem com a base"
+  else
+    echo "          Qualquer diferenca de resultado pode vir dai, e nao do codigo."
+  fi
+fi
 
 n_ok=0; n_dif=0; n_faltando=0; n_extra=0; n_meta=0
 TMP_CMP=$(mktemp)

@@ -109,6 +109,8 @@ make clean      # remove build/ e bin/; distclean remove também lib/ e mod/
 make help       # lista os alvos
 ```
 
+O código do acoplador é compilado sem fusão de multiplicação e soma (`-ffp-contract=off`, variável `FP_CONTRACT` do Makefile). Com a fusão ligada, o compilador escolhe onde usar a instrução FMA conforme a organização do código, e uma refatoração que não muda nenhum cálculo altera o último bit do resultado. O custo medido foi nulo (rodada de 1 dia com 152 PETs: 142,5 s sem FMA, 144,4 s com). Para ligar a fusão, `make FP_CONTRACT=fast`; isso exige uma linha de base própria.
+
 ## Saídas e pós-processamento
 
 Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e campos importados em `diag_import/` (`monan2_import_*.nc` no lado atmosférico e `mom6_import_*.nc` no lado oceânico), além dos logs do ESMF em `logs/`. Os scripts em `tools/` apoiam a análise: `tools/postproc/` para pós-processamento dos NetCDF, `tools/animation/` para animações, `tools/coupler/` para balanceamento de PETs, testes de modo e baterias de reprodutibilidade binária, `tools/atmos/` para as partições METIS e o teste do MPAS autônomo, `tools/ocean/` para a divisão de domínio do MOM6, e `tools/dev/` para linhas de base de comparação e o ambiente do `nccmp`. O catálogo completo, com a pergunta que cada ferramenta responde, está em [`docs/ferramentas.md`](docs/ferramentas.md).
@@ -116,6 +118,16 @@ Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e c
 ## Reprodutibilidade binária
 
 Desde 22/09/2026, o acoplador é reprodutível bit a bit: execuções idênticas, na mesma configuração de PETs, produzem o mesmo resultado nos modos sequencial e concorrente, com o SIS2 dinâmico e com o módulo de icebergs ligado (na configuração atual não há icebergs na simulação, então o código de icebergs em si ainda não foi exercitado). A causa da não reprodutibilidade anterior estava na ordem das somas dos remapeamentos do ESMF, e a correção fixa as duas camadas dessa ordem em todos os remapeamentos e ligações entre componentes (`B-SRCTERM-01`, `B-METHODS-TERMORDER-01`). A regra vale para qualquer remapeamento novo: ver [`docs/ferramentas.md`](docs/ferramentas.md), seção 6. A reprodutibilidade de uma configuração se verifica com o [`mede-taxa-repro.sh`](docs/uso-mede-taxa-repro.md).
+
+Para validar uma alteração de código que não deve mudar resultados, compare uma rodada com a linha de base de referência, hoje a **R-NOFMA-01** (código de `ea10fb6` compilado com `-ffp-contract=off`, 152 PETs, rodada de 1 dia). O roteiro completo está em [`docs/validacao-refatoracao.md`](docs/validacao-refatoracao.md); os cuidados principais são:
+
+| Cuidado | Motivo |
+| --- | --- |
+| Um diretório novo para cada rodada | saídas antigas misturadas às novas já produziram um FAIL sem causa no código |
+| `nuopc.input` copiado de `baseline/<rótulo>/config/` | o mesmo arquivo nas duas rodadas |
+| `-n` igual à soma das contagens de PET, também no `--check` | o `--check` sem `-n` assume 4 processos |
+| Executável alternativo por `ESMAPP_BIN` | o cabeçalho do log registra caminho e data do executável usado |
+| `compara-linha-base.bash -e` | confere também as entradas pela soma registrada na linha de base |
 
 ## Documentação
 

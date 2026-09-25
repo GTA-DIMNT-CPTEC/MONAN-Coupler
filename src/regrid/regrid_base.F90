@@ -158,6 +158,7 @@ contains
     if (opt%overflow_to_fill) where (arr > opt%vmax) arr = opt%vfill
     where (arr /= arr) arr = opt%vmin - 1.0_ESMF_KIND_R8   ! NaN -> inválido
 
+    allocate(valid(ni, nj))
     valid = (arr >= opt%vmin .and. arr <= opt%vmax)
 
     if (real(count(.not. valid), ESMF_KIND_R8) / real(ni*nj, ESMF_KIND_R8) > &

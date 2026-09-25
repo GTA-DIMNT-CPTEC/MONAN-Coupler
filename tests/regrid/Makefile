@@ -1,6 +1,7 @@
 # Testes do framework de interpolação (src/regrid). Requer ESMFMKFILE.
 #   make            compila ./test_regrid
-#   make run NP=2   executa com NP processos MPI
+#   make run NP=2   executa com NP processos MPI (num nó de cálculo;
+#                   na Jaci, carregar antes o módulo cray-pals)
 include $(ESMFMKFILE)
 
 SRC  := ../../src
@@ -30,8 +31,14 @@ regrid_manager.o: regrid_registry.o coupler_config.o
 identity_scheme.o: regrid_base.o
 test_regrid.o: regrid_manager.o identity_scheme.o
 
+# Lançador MPI: na Jaci, dentro de um job, o 'mpiexec' do PBS (/opt/pbs/bin)
+# aparece antes do Cray PALS no PATH e não funciona com o cray-mpich. Usa o do
+# PALS quando existir (módulo cray-pals); senão, mpiexec ou mpirun do sistema.
+MPIEXEC ?= $(or $(shell which -a mpiexec 2>/dev/null | grep /pals/ | head -1),\
+                $(shell command -v mpiexec 2>/dev/null),mpirun)
+
 run: test_regrid
-	mpirun -np $(NP) ./test_regrid
+	$(MPIEXEC) -n $(NP) ./test_regrid
 
 clean:
 	rm -f *.o *.mod test_regrid PET*.log pesos_teste.nc
