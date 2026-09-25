@@ -196,7 +196,6 @@ contains
   ! ============================================================================
   subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
                             dt_seconds, config_dir, mpi_comm, rc)
-      use iso_c_binding, only : c_loc, c_ptr, c_int, c_char
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
     type(mpas_atm_state_type),     intent(inout) :: atm_state
@@ -439,39 +438,8 @@ contains
     !      registradas → reads retornam garbage → crash na física.
     !      Interface C definida localmente (igual ao mpas_subdriver.F).
     ! ------------------------------------------------------------------
-      interface
-        subroutine xml_stream_parser(xmlname, mgr_p, comm, ierr) bind(c)
-          use iso_c_binding, only : c_char, c_ptr, c_int
-          character(kind=c_char), dimension(*), intent(in)    :: xmlname
-          type(c_ptr),                          intent(inout) :: mgr_p
-          integer(kind=c_int),                  intent(inout) :: comm
-          integer(kind=c_int),                  intent(out)   :: ierr
-        end subroutine xml_stream_parser
-      end interface
-      type(c_ptr)                            :: mgr_p
-      integer(kind=c_int)                    :: c_comm, c_ierr
-      character(kind=c_char,len=1), dimension(512) :: c_filename
-      integer :: k, slen
-
-      ! Converter streams_filename para C string
-      slen = len_trim(g_domain%streams_filename)
-      do k = 1, slen
-        c_filename(k) = g_domain%streams_filename(k:k)
-      end do
-      c_filename(slen+1) = achar(0)  ! null terminator (C string)
-
-#ifdef MPAS_USE_MPI_F08
-      c_comm = g_domain%dminfo%comm%mpi_val
-#else
-      c_comm = g_domain%dminfo%comm
-#endif
-      mgr_p = c_loc(g_domain%streamManager)
-      call xml_stream_parser(c_filename, mgr_p, c_comm, c_ierr)
-      if (c_ierr /= 0) then
-        call mpas_log_write('ERRO: xml_stream_parser falhou para streams.atmosphere', &
-                            messageType=MPAS_LOG_CRIT)
-        rc = 1; return
-      end if
+    call parse_streams_xml(rc)
+    if (rc /= 0) return
 
     call mpas_log_write('mpas_atm_init: xml_stream_parser concluido')
 
@@ -798,6 +766,51 @@ contains
     call mpas_log_write(trim(msg))
 
   end subroutine mpas_atm_init
+
+  !> Lê streams.atmosphere e registra as streams no stream manager do MPAS,
+  !! como faz o mpas_subdriver.F. Sem esta chamada as streams do namelist
+  !! não são registradas e as leituras retornam lixo.
+  subroutine parse_streams_xml(rc)
+    use iso_c_binding, only : c_loc, c_ptr, c_int, c_char
+    integer, intent(out) :: rc
+
+    interface
+      subroutine xml_stream_parser(xmlname, mgr_p, comm, ierr) bind(c)
+        use iso_c_binding, only : c_char, c_ptr, c_int
+        character(kind=c_char), dimension(*), intent(in)    :: xmlname
+        type(c_ptr),                          intent(inout) :: mgr_p
+        integer(kind=c_int),                  intent(inout) :: comm
+        integer(kind=c_int),                  intent(out)   :: ierr
+      end subroutine xml_stream_parser
+    end interface
+
+    type(c_ptr)                                  :: mgr_p
+    integer(kind=c_int)                          :: c_comm, c_ierr
+    character(kind=c_char,len=1), dimension(512) :: c_filename
+    integer :: k, slen
+
+    rc = 0
+
+    ! streams_filename como texto C (terminado em caractere nulo)
+    slen = len_trim(g_domain%streams_filename)
+    do k = 1, slen
+      c_filename(k) = g_domain%streams_filename(k:k)
+    end do
+    c_filename(slen+1) = achar(0)
+
+#ifdef MPAS_USE_MPI_F08
+    c_comm = g_domain%dminfo%comm%mpi_val
+#else
+    c_comm = g_domain%dminfo%comm
+#endif
+    mgr_p = c_loc(g_domain%streamManager)
+    call xml_stream_parser(c_filename, mgr_p, c_comm, c_ierr)
+    if (c_ierr /= 0) then
+      call mpas_log_write('ERRO: xml_stream_parser falhou para streams.atmosphere', &
+                          messageType=MPAS_LOG_CRIT)
+      rc = 1
+    end if
+  end subroutine parse_streams_xml
 
   ! ============================================================================
   subroutine mpas_atm_init_sfc(atm_public, atm_state, rc)
