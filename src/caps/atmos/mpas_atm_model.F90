@@ -1021,7 +1021,7 @@ contains
             ! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
             !--------------------------------------------------------------
             if (.not. (first_coupling_call .and. is_cold_start)) then
-              call exchange_surface_halos()
+              call exchange_surface_halos(sfcInputPool, diag_physicsPool)
             end if
          endif
       end if
@@ -1095,222 +1095,225 @@ contains
     ! IMPORTANTE: usar real(dt_coupling, MPAS_RKIND) para evitar perda de
     ! precisão quando MPAS_RKIND = kind(1.0) (single precision).
     ! ------------------------------------------------------------------
-    call compute_instantaneous_fluxes()
+    call compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_bnd)
 
     atm_state%running = .true.
 
     nullify(sfcInputPool, sst_field, ice_field, zorl_field)
-
-
-  contains
-
-    subroutine compute_instantaneous_fluxes()
-      real(MPAS_RKIND) :: dt_r, precip_now   ! Sprint A: spd removido (usado agora no bloco have_currents)
-      integer          :: k
-          real(MPAS_RKIND) :: z_sfc
-          real(MPAS_RKIND) :: scale_fac
-          real(MPAS_RKIND), parameter :: Z10 = 10.0_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: Z0 = 0.001_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND
-          integer :: nv
-          real(MPAS_RKIND) :: u_rel
-          real(MPAS_RKIND) :: v_rel
-          real(MPAS_RKIND) :: spd_rel
-          logical :: have_currents
-        real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
-        real(MPAS_RKIND) :: snow_now
-        real(MPAS_RKIND) :: delta_snow
-        real(MPAS_RKIND) :: delta_total
-          real(MPAS_RKIND) :: es
-          real(MPAS_RKIND) :: qs
-          real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: a = 17.67_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: b = 243.5_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
-          real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
-      dt_r = real(dt_coupling, MPAS_RKIND)
-
-      ! ── SW e LW descendentes: incremento ÷ dt → W/m² ─────────────
-      if (associated(g_pool_acswdnb)) then
-        do k = 1, n
-          g_swdn_inst(k) = max((g_pool_acswdnb(k) - g_prev_acswdnb(k)) / dt_r, &
-                               0.0_MPAS_RKIND)
-        end do
-        g_prev_acswdnb(1:n) = g_pool_acswdnb(1:n)
-      end if
-
-      if (associated(g_pool_aclwdnb)) then
-        do k = 1, n
-          g_lwdn_inst(k) = max((g_pool_aclwdnb(k) - g_prev_aclwdnb(k)) / dt_r, &
-                               0.0_MPAS_RKIND)
-        end do
-        g_prev_aclwdnb(1:n) = g_pool_aclwdnb(1:n)
-      end if
-
-      ! ── Precipitação total: (rainnc + rainc) incremento ÷ dt ──────
-      ! rainnc [mm] = precipitação estratiforme acumulada
-      ! rainc  [mm] = precipitação convectiva acumulada (esquema GF/KF)
-      ! 1 mm = 1 kg/m² → taxa = Δmm / dt [kg/m²/s]
-      do k = 1, n
-        precip_now = 0.0_MPAS_RKIND
-        if (associated(g_pool_rainnc)) precip_now = precip_now + g_pool_rainnc(k)
-        if (associated(g_pool_rainc))  precip_now = precip_now + g_pool_rainc(k)
-        g_prec_inst(k) = max((precip_now - g_prev_precip(k)) / dt_r, &
-                              0.0_MPAS_RKIND)
-      end do
-      ! Atualizar acumulado anterior
-      do k = 1, n
-        g_prev_precip(k) = 0.0_MPAS_RKIND
-        if (associated(g_pool_rainnc)) g_prev_precip(k) = g_prev_precip(k) + g_pool_rainnc(k)
-        if (associated(g_pool_rainc))  g_prev_precip(k) = g_prev_precip(k) + g_pool_rainc(k)
-      end do
-
-      ! ── Precipitação sólida (neve): snownc incremento ÷ dt ────────
-      ! snownc [mm] = neve estratiforme acumulada (subconjunto de rainnc)
-      ! Se snownc não estiver disponível, usa partição por temperatura:
-      !   T < T_FREEZE → tudo neve; caso contrário → tudo chuva
-        do k = 1, n
-          delta_total = g_prec_inst(k)
-          if (associated(g_pool_snownc)) then
-            snow_now = g_pool_snownc(k)
-            delta_snow = max((snow_now - g_prev_snow(k)) / dt_r, 0.0_MPAS_RKIND)
-            g_prec_snow_buf(k) = min(delta_snow, delta_total)
-            g_prec_rain_buf(k) = max(delta_total - g_prec_snow_buf(k), 0.0_MPAS_RKIND)
-          else if (associated(atm_public%t2m)) then
-            ! Fallback: partição por temperatura
-            if (atm_public%t2m(k) < T_FREEZE) then
-              g_prec_snow_buf(k) = delta_total
-              g_prec_rain_buf(k) = 0.0_MPAS_RKIND
-            else
-              g_prec_snow_buf(k) = 0.0_MPAS_RKIND
-              g_prec_rain_buf(k) = delta_total
-            end if
-          else
-            g_prec_rain_buf(k) = delta_total
-            g_prec_snow_buf(k) = 0.0_MPAS_RKIND
-          end if
-        end do
-        ! Atualizar acumulado anterior de neve
-        if (associated(g_pool_snownc)) then
-          g_prev_snow(1:n) = g_pool_snownc(1:n)
-        end if
-
-      ! ── Umidade específica a 2m: q2 [kg/kg] ───────────────────────
-      ! g_pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
-      ! Valor instantâneo → válido para o instante corrente.
-      if (associated(g_pool_q2)) then
-        g_q2m_buf(1:n) = g_pool_q2(1:n)
-      else if (associated(atm_public%t2m)) then
-        ! Fallback: umidade de saturação em T2m (Tetens) × RH=0.8
-          do k = 1, n
-            es = es0 * exp(a*(atm_public%t2m(k)-273.15_MPAS_RKIND) / &
-                           (b + atm_public%t2m(k)-273.15_MPAS_RKIND))
-            qs = eps * es / (p0 - es)
-            g_q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
-          end do
-      end if
-
-      ! ── BUG-WIND-01 fallback: calcular u10/v10 por perfil log. neutro ────
-      ! Ativo quando u10/v10 nao estao no pool (bl_mynn_in/bl_ysu_in=F).
-      ! g_u10_buf/g_v10_buf sao alocados em mpas_atm_init se g_pool_uZonal disponivel.
-      ! u10 = u_sfc × ln(10/z0) / ln(z_sfc/z0)
-      ! z_sfc: altura do centro do nivel 1 obtida de zgrid(1,:) - zgrid(0,:)/2
-      ! z0 = 0.001 m (rugosidade oceano aberto, neutro)
-      if (allocated(g_u10_buf) .and. allocated(g_v10_buf) .and. &
-          associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
-          nv = size(g_pool_uZonal, 1)  ! número de níveis verticais
-          do k = 1, n
-            ! Altura do centro do nível 1 a partir de zgrid (se disponível)
-            if (associated(g_pool_zgrid) .and. size(g_pool_zgrid,1) > 1) then
-              ! zgrid(1,k) = base do nível 1; (1,k)+(2,k))/2 = centro
-              z_sfc = 0.5_MPAS_RKIND * (g_pool_zgrid(1,k) + g_pool_zgrid(2,k))
-            else
-              z_sfc = Z_SFC_DEFAULT
-            end if
-            z_sfc = max(z_sfc, 2.0_MPAS_RKIND)  ! mínimo 2 m
-            ! Fator de perfil logarítmico neutro
-            scale_fac = log(Z10 / Z0) / log(z_sfc / Z0)
-            ! u10 = u_sfc × fator (nível 1 do MPAS = índice nv — top-down storage)
-            ! O MPAS armazena nVertLevels de cima para baixo: nível 1 = topo, nv = superfície
-            g_u10_buf(k) = g_pool_uZonal(nv, k) * scale_fac
-            g_v10_buf(k) = g_pool_vMerid(nv, k) * scale_fac
-          end do
-      end if
-
-      ! ── Stress superficial: τ = ρ · ust² · V_rel / |V_rel| ─────────────
-      !
-      ! Sprint A Fase 2 (Maio 2026):
-      ! Antes: τx = ρ · ust² · u10 / |V10|  (vento absoluto)
-      ! Agora: τx = ρ · ust² · u_rel / |V_rel|  (vento relativo ao oceano)
-      !
-      ! Vento relativo: V_rel = V_atm − V_ocn (Bryan et al. 2010, JC)
-      ! Esta é a formulação fisicamente consistente: o oceano sente apenas
-      ! o cisalhamento devido ao movimento relativo. Importante em correntes
-      ! fortes (Kuroshio, Gulf Stream, Brasil, Agulhas, ACC, ENSO/MJO).
-      !
-      ! Sobre regiões continentais: atm_bnd%uocn/vocn=0 (mascara MED),
-      ! recuperando exatamente a formulação original (V_rel = V_atm).
-      !
-      ! Direcao positiva: eastward (taux>0 quando V_rel vai para leste).
-      ! Fórmula de Monin-Obukhov: CD = (ust/|V_rel|)²
-      if (associated(g_pool_ust) .and. &
-          associated(atm_public%u10) .and. associated(atm_public%v10)) then
-          have_currents = allocated(atm_bnd%uocn) .and. allocated(atm_bnd%vocn)
-          do k = 1, n
-            if (have_currents) then
-              u_rel = atm_public%u10(k) - atm_bnd%uocn(k)
-              v_rel = atm_public%v10(k) - atm_bnd%vocn(k)
-            else
-              u_rel = atm_public%u10(k)
-              v_rel = atm_public%v10(k)
-            end if
-            spd_rel = sqrt(u_rel**2 + v_rel**2)
-            spd_rel = max(spd_rel, VMIN)
-            g_taux_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * u_rel / spd_rel
-            g_tauy_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * v_rel / spd_rel
-          end do
-      end if
-
-    end subroutine compute_instantaneous_fluxes
-
-    subroutine exchange_surface_halos()
-      type (field1DReal), pointer :: fld_halo => null()
-      integer :: i_halo
-      character(len=32), parameter :: campos_sfcinput(3) = &
-        [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
-      character(len=32), parameter :: campos_diagphys(2) = &
-        [ character(len=32) :: 'z0', 'sfc_albedo' ]
-
-      do i_halo = 1, size(campos_sfcinput)
-        nullify(fld_halo)
-        call mpas_pool_get_field(sfcInputPool, &
-          trim(campos_sfcinput(i_halo)), fld_halo)
-        if (associated(fld_halo)) then
-          call mpas_dmpar_exch_halo_field(fld_halo)
-        else
-          call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-            'campo '//trim(campos_sfcinput(i_halo))// &
-            ' nao encontrado em sfc_input; halo NAO trocado')
-        end if
-      end do
-
-      do i_halo = 1, size(campos_diagphys)
-        nullify(fld_halo)
-        call mpas_pool_get_field(diag_physicsPool, &
-          trim(campos_diagphys(i_halo)), fld_halo)
-        if (associated(fld_halo)) then
-          call mpas_dmpar_exch_halo_field(fld_halo)
-        else
-          call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-            'campo '//trim(campos_diagphys(i_halo))// &
-            ' nao encontrado em diag_physics; halo NAO trocado')
-        end if
-      end do
-
-      call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 - halos '// &
-        'dos campos de contorno injetados trocados')
-    end subroutine exchange_surface_halos
   end subroutine mpas_atm_run
+
+  subroutine compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_bnd)
+    integer, intent(in) :: dt_coupling
+    integer, intent(inout) :: n
+    type(mpas_atm_public_type), intent(inout) :: atm_public
+    type(atm_ocean_boundary_type), intent(in) :: atm_bnd
+    real(MPAS_RKIND) :: dt_r, precip_now   ! Sprint A: spd removido (usado agora no bloco have_currents)
+    integer          :: k
+    real(MPAS_RKIND) :: z_sfc
+    real(MPAS_RKIND) :: scale_fac
+    real(MPAS_RKIND), parameter :: Z10 = 10.0_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: Z0 = 0.001_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND
+    integer :: nv
+    real(MPAS_RKIND) :: u_rel
+    real(MPAS_RKIND) :: v_rel
+    real(MPAS_RKIND) :: spd_rel
+    logical :: have_currents
+    real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
+    real(MPAS_RKIND) :: snow_now
+    real(MPAS_RKIND) :: delta_snow
+    real(MPAS_RKIND) :: delta_total
+    real(MPAS_RKIND) :: es
+    real(MPAS_RKIND) :: qs
+    real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: a = 17.67_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: b = 243.5_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
+    dt_r = real(dt_coupling, MPAS_RKIND)
+
+    ! ── SW e LW descendentes: incremento ÷ dt → W/m² ─────────────
+    if (associated(g_pool_acswdnb)) then
+      do k = 1, n
+        g_swdn_inst(k) = max((g_pool_acswdnb(k) - g_prev_acswdnb(k)) / dt_r, &
+                             0.0_MPAS_RKIND)
+      end do
+      g_prev_acswdnb(1:n) = g_pool_acswdnb(1:n)
+    end if
+
+    if (associated(g_pool_aclwdnb)) then
+      do k = 1, n
+        g_lwdn_inst(k) = max((g_pool_aclwdnb(k) - g_prev_aclwdnb(k)) / dt_r, &
+                             0.0_MPAS_RKIND)
+      end do
+      g_prev_aclwdnb(1:n) = g_pool_aclwdnb(1:n)
+    end if
+
+    ! ── Precipitação total: (rainnc + rainc) incremento ÷ dt ──────
+    ! rainnc [mm] = precipitação estratiforme acumulada
+    ! rainc  [mm] = precipitação convectiva acumulada (esquema GF/KF)
+    ! 1 mm = 1 kg/m² → taxa = Δmm / dt [kg/m²/s]
+    do k = 1, n
+      precip_now = 0.0_MPAS_RKIND
+      if (associated(g_pool_rainnc)) precip_now = precip_now + g_pool_rainnc(k)
+      if (associated(g_pool_rainc))  precip_now = precip_now + g_pool_rainc(k)
+      g_prec_inst(k) = max((precip_now - g_prev_precip(k)) / dt_r, &
+                            0.0_MPAS_RKIND)
+    end do
+    ! Atualizar acumulado anterior
+    do k = 1, n
+      g_prev_precip(k) = 0.0_MPAS_RKIND
+      if (associated(g_pool_rainnc)) g_prev_precip(k) = g_prev_precip(k) + g_pool_rainnc(k)
+      if (associated(g_pool_rainc))  g_prev_precip(k) = g_prev_precip(k) + g_pool_rainc(k)
+    end do
+
+    ! ── Precipitação sólida (neve): snownc incremento ÷ dt ────────
+    ! snownc [mm] = neve estratiforme acumulada (subconjunto de rainnc)
+    ! Se snownc não estiver disponível, usa partição por temperatura:
+    !   T < T_FREEZE → tudo neve; caso contrário → tudo chuva
+      do k = 1, n
+        delta_total = g_prec_inst(k)
+        if (associated(g_pool_snownc)) then
+          snow_now = g_pool_snownc(k)
+          delta_snow = max((snow_now - g_prev_snow(k)) / dt_r, 0.0_MPAS_RKIND)
+          g_prec_snow_buf(k) = min(delta_snow, delta_total)
+          g_prec_rain_buf(k) = max(delta_total - g_prec_snow_buf(k), 0.0_MPAS_RKIND)
+        else if (associated(atm_public%t2m)) then
+          ! Fallback: partição por temperatura
+          if (atm_public%t2m(k) < T_FREEZE) then
+            g_prec_snow_buf(k) = delta_total
+            g_prec_rain_buf(k) = 0.0_MPAS_RKIND
+          else
+            g_prec_snow_buf(k) = 0.0_MPAS_RKIND
+            g_prec_rain_buf(k) = delta_total
+          end if
+        else
+          g_prec_rain_buf(k) = delta_total
+          g_prec_snow_buf(k) = 0.0_MPAS_RKIND
+        end if
+      end do
+      ! Atualizar acumulado anterior de neve
+      if (associated(g_pool_snownc)) then
+        g_prev_snow(1:n) = g_pool_snownc(1:n)
+      end if
+
+    ! ── Umidade específica a 2m: q2 [kg/kg] ───────────────────────
+    ! g_pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
+    ! Valor instantâneo → válido para o instante corrente.
+    if (associated(g_pool_q2)) then
+      g_q2m_buf(1:n) = g_pool_q2(1:n)
+    else if (associated(atm_public%t2m)) then
+      ! Fallback: umidade de saturação em T2m (Tetens) × RH=0.8
+        do k = 1, n
+          es = es0 * exp(a*(atm_public%t2m(k)-273.15_MPAS_RKIND) / &
+                         (b + atm_public%t2m(k)-273.15_MPAS_RKIND))
+          qs = eps * es / (p0 - es)
+          g_q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
+        end do
+    end if
+
+    ! ── BUG-WIND-01 fallback: calcular u10/v10 por perfil log. neutro ────
+    ! Ativo quando u10/v10 nao estao no pool (bl_mynn_in/bl_ysu_in=F).
+    ! g_u10_buf/g_v10_buf sao alocados em mpas_atm_init se g_pool_uZonal disponivel.
+    ! u10 = u_sfc × ln(10/z0) / ln(z_sfc/z0)
+    ! z_sfc: altura do centro do nivel 1 obtida de zgrid(1,:) - zgrid(0,:)/2
+    ! z0 = 0.001 m (rugosidade oceano aberto, neutro)
+    if (allocated(g_u10_buf) .and. allocated(g_v10_buf) .and. &
+        associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
+        nv = size(g_pool_uZonal, 1)  ! número de níveis verticais
+        do k = 1, n
+          ! Altura do centro do nível 1 a partir de zgrid (se disponível)
+          if (associated(g_pool_zgrid) .and. size(g_pool_zgrid,1) > 1) then
+            ! zgrid(1,k) = base do nível 1; (1,k)+(2,k))/2 = centro
+            z_sfc = 0.5_MPAS_RKIND * (g_pool_zgrid(1,k) + g_pool_zgrid(2,k))
+          else
+            z_sfc = Z_SFC_DEFAULT
+          end if
+          z_sfc = max(z_sfc, 2.0_MPAS_RKIND)  ! mínimo 2 m
+          ! Fator de perfil logarítmico neutro
+          scale_fac = log(Z10 / Z0) / log(z_sfc / Z0)
+          ! u10 = u_sfc × fator (nível 1 do MPAS = índice nv — top-down storage)
+          ! O MPAS armazena nVertLevels de cima para baixo: nível 1 = topo, nv = superfície
+          g_u10_buf(k) = g_pool_uZonal(nv, k) * scale_fac
+          g_v10_buf(k) = g_pool_vMerid(nv, k) * scale_fac
+        end do
+    end if
+
+    ! ── Stress superficial: τ = ρ · ust² · V_rel / |V_rel| ─────────────
+    !
+    ! Sprint A Fase 2 (Maio 2026):
+    ! Antes: τx = ρ · ust² · u10 / |V10|  (vento absoluto)
+    ! Agora: τx = ρ · ust² · u_rel / |V_rel|  (vento relativo ao oceano)
+    !
+    ! Vento relativo: V_rel = V_atm − V_ocn (Bryan et al. 2010, JC)
+    ! Esta é a formulação fisicamente consistente: o oceano sente apenas
+    ! o cisalhamento devido ao movimento relativo. Importante em correntes
+    ! fortes (Kuroshio, Gulf Stream, Brasil, Agulhas, ACC, ENSO/MJO).
+    !
+    ! Sobre regiões continentais: atm_bnd%uocn/vocn=0 (mascara MED),
+    ! recuperando exatamente a formulação original (V_rel = V_atm).
+    !
+    ! Direcao positiva: eastward (taux>0 quando V_rel vai para leste).
+    ! Fórmula de Monin-Obukhov: CD = (ust/|V_rel|)²
+    if (associated(g_pool_ust) .and. &
+        associated(atm_public%u10) .and. associated(atm_public%v10)) then
+        have_currents = allocated(atm_bnd%uocn) .and. allocated(atm_bnd%vocn)
+        do k = 1, n
+          if (have_currents) then
+            u_rel = atm_public%u10(k) - atm_bnd%uocn(k)
+            v_rel = atm_public%v10(k) - atm_bnd%vocn(k)
+          else
+            u_rel = atm_public%u10(k)
+            v_rel = atm_public%v10(k)
+          end if
+          spd_rel = sqrt(u_rel**2 + v_rel**2)
+          spd_rel = max(spd_rel, VMIN)
+          g_taux_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * u_rel / spd_rel
+          g_tauy_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * v_rel / spd_rel
+        end do
+    end if
+
+  end subroutine compute_instantaneous_fluxes
+
+  subroutine exchange_surface_halos(sfcInputPool, diag_physicsPool)
+    type(mpas_pool_type), pointer :: sfcInputPool
+    type(mpas_pool_type), pointer :: diag_physicsPool
+    type (field1DReal), pointer :: fld_halo => null()
+    integer :: i_halo
+    character(len=32), parameter :: campos_sfcinput(3) = &
+    [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
+    character(len=32), parameter :: campos_diagphys(2) = &
+    [ character(len=32) :: 'z0', 'sfc_albedo' ]
+
+    do i_halo = 1, size(campos_sfcinput)
+      nullify(fld_halo)
+      call mpas_pool_get_field(sfcInputPool, &
+        trim(campos_sfcinput(i_halo)), fld_halo)
+      if (associated(fld_halo)) then
+        call mpas_dmpar_exch_halo_field(fld_halo)
+      else
+        call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+          'campo '//trim(campos_sfcinput(i_halo))// &
+          ' nao encontrado em sfc_input; halo NAO trocado')
+      end if
+    end do
+
+    do i_halo = 1, size(campos_diagphys)
+      nullify(fld_halo)
+      call mpas_pool_get_field(diag_physicsPool, &
+        trim(campos_diagphys(i_halo)), fld_halo)
+      if (associated(fld_halo)) then
+        call mpas_dmpar_exch_halo_field(fld_halo)
+      else
+        call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
+          'campo '//trim(campos_diagphys(i_halo))// &
+          ' nao encontrado em diag_physics; halo NAO trocado')
+      end if
+    end do
+
+    call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 - halos '// &
+      'dos campos de contorno injetados trocados')
+  end subroutine exchange_surface_halos
 
   ! ============================================================================
   !> @brief Finaliza o MONAN-A.
@@ -1332,7 +1335,6 @@ contains
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(out)   :: rc
 
-    integer :: ierr
 
     rc = 0
 

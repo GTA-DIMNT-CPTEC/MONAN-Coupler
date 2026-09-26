@@ -117,7 +117,7 @@ contains
     ! evita uma descontinuidade artificial de temperatura logo em 60°N/S
     ! caso o fallback seja usado numa faixa continua de celulas ali.
     if (allocated(atm_bnd%sst)) then
-      call fill_invalid_sst()
+      call fill_invalid_sst(nCells, atm_bnd, latCell)
     end if
 
     ! -- Fracao de gelo marinho [0-1] -------------------------------------
@@ -264,48 +264,48 @@ contains
       call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! diagnóstico não-fatal
     end if
-
-
-  contains
-
-    subroutine fill_invalid_sst()
-      real(MPAS_RKIND), parameter :: T_FILL_POLAR    = 271.35_MPAS_RKIND
-      real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
-        3.14159265358979_MPAS_RKIND
-      logical,          allocatable :: invalid_sst(:)
-      real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
-      real(MPAS_RKIND) :: t_fill_tropical
-      integer :: n
-      ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
-      ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
-      ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
-      ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
-      ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
-      ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
-      ! tudo a (1:nCells), consistente com o resto desta subrotina.
-      n = nCells
-      t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
-      allocate(invalid_sst(n), t_fallback(n))
-      invalid_sst = (atm_bnd%sst(1:n) < 270.0_MPAS_RKIND .or. &
-                      atm_bnd%sst(1:n) > 310.0_MPAS_RKIND .or. &
-                      atm_bnd%sst(1:n) /= atm_bnd%sst(1:n))       ! NaN guard
-      if (present(latCell)) then
-        allocate(lat_deg(n), frac(n))
-        lat_deg = abs(latCell(1:n)) * RAD2DEG                 ! 0..90
-        frac    = min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, lat_deg / 90.0_MPAS_RKIND))
-        ! frac=0 no equador (usa t_fill_tropical), frac=1 no polo (usa T_FILL_POLAR)
-        t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
-        deallocate(lat_deg, frac)
-      else
-        ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
-        ! por seguranca — nao deveria ocorrer em uso normal, ja que
-        ! lonCell/latCell sao sempre passados por quem chama.
-        t_fallback = t_fill_tropical
-      end if
-      where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
-      deallocate(invalid_sst, t_fallback)
-    end subroutine fill_invalid_sst
   end subroutine mpas_import
+
+  subroutine fill_invalid_sst(nCells, atm_bnd, latCell)
+    integer, intent(in) :: nCells
+    type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
+    real(MPAS_RKIND), optional, intent(in) :: latCell(:)
+    real(MPAS_RKIND), parameter :: T_FILL_POLAR    = 271.35_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: RAD2DEG = 180.0_MPAS_RKIND / &
+    3.14159265358979_MPAS_RKIND
+    logical,          allocatable :: invalid_sst(:)
+    real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
+    real(MPAS_RKIND) :: t_fill_tropical
+    integer :: n
+    ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
+    ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
+    ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
+    ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
+    ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
+    ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
+    ! tudo a (1:nCells), consistente com o resto desta subrotina.
+    n = nCells
+    t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
+    allocate(invalid_sst(n), t_fallback(n))
+    invalid_sst = (atm_bnd%sst(1:n) < 270.0_MPAS_RKIND .or. &
+                    atm_bnd%sst(1:n) > 310.0_MPAS_RKIND .or. &
+                    atm_bnd%sst(1:n) /= atm_bnd%sst(1:n))       ! NaN guard
+    if (present(latCell)) then
+      allocate(lat_deg(n), frac(n))
+      lat_deg = abs(latCell(1:n)) * RAD2DEG                 ! 0..90
+      frac    = min(1.0_MPAS_RKIND, max(0.0_MPAS_RKIND, lat_deg / 90.0_MPAS_RKIND))
+      ! frac=0 no equador (usa t_fill_tropical), frac=1 no polo (usa T_FILL_POLAR)
+      t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
+      deallocate(lat_deg, frac)
+    else
+      ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
+      ! por seguranca — nao deveria ocorrer em uso normal, ja que
+      ! lonCell/latCell sao sempre passados por quem chama.
+      t_fallback = t_fill_tropical
+    end if
+    where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
+    deallocate(invalid_sst, t_fallback)
+  end subroutine fill_invalid_sst
 
   !> @brief Exporta campos de atm_public para o exportState ESMF.
   !!

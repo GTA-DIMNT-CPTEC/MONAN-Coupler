@@ -322,7 +322,7 @@ contains
     integer,          intent(inout) :: rc
 
     ! Locais
-    integer :: localPet, petCount, mpiComm, mpi_ierr
+    integer :: localPet, petCount, mpiComm
     integer :: i, itemCount, nLocal, nGlobal
     integer :: ncid, varid, ncstat
     integer :: dimid_lat, dimid_lon, dimid_t
@@ -336,9 +336,8 @@ contains
 
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
     real(ESMF_KIND_R8) :: lat_axis(NLAT), lon_axis(NLON)
-    real(ESMF_KIND_R8) :: time_val, othr
+    real(ESMF_KIND_R8) :: time_val
 
-    type(ESMF_Field) :: field
     character(len=36) :: fname_base
     character(len=64) :: fname
     character(len=19) :: valid_time_iso, time_units_str
@@ -520,7 +519,8 @@ contains
     end if   ! localPet == 0
 
     ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce (FIX-EXP v2) ──────
-    call write_export_fields()
+    call write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
+        grid_2d, ncstat, ncid, varid, rc)
 
         ! ── 7. PET0: fechar arquivo ───────────────────────────────────────────
     if (localPet == 0) then
@@ -536,83 +536,97 @@ contains
     end if
 
     deallocate(fldnames, allCounts, displs, sendBuf, recvBuf)
-
-
-  contains
-
-    subroutine write_export_fields()
-      real(ESMF_KIND_R8) :: acc_local(NLON,NLAT), acc_global(NLON,NLAT)
-      integer            :: cnt_local(NLON,NLAT), cnt_global(NLON,NLAT)
-      integer :: raw_idx, jr
-              real(ESMF_KIND_R8), pointer :: fp1(:)
-              real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
-
-      do i = 1, itemCount
-        raw_idx = 0
-        do jr = 1, g_n_raw
-          if (trim(g_raw_names(jr)) == trim(fldnames(i))) then; raw_idx = jr; exit; end if
-        end do
-
-        othr = field_outlier_threshold(fldnames(i))
-        acc_local = 0.0_ESMF_KIND_R8; cnt_local = 0
-
-        if (raw_idx > 0 .and. allocated(g_raw_local) .and. g_nLocal_saved > 0 .and. &
-            allocated(g_lon_local_saved)) then
-          ! FIX-EXP v2: g_raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
-          ! g_lon_local_saved — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
-          call voronoi_accum_local( &
-            g_raw_local(1:g_nLocal_saved, raw_idx), &
-            g_lon_local_saved(1:g_nLocal_saved),    &
-            g_lat_local_saved(1:g_nLocal_saved),    &
-            g_nLocal_saved, acc_local, cnt_local, othr)
-        else
-          ! Fallback ESMF field — cobertura parcial
-          sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
-          call ESMF_StateGet(exportState, itemName=trim(fldnames(i)), field=field, rc=rc)
-          if (rc == ESMF_SUCCESS) then
-              nullify(fp1,fp2)
-              call ESMF_FieldGet(field, dimCount=rk, rc=rc)
-              if (rc==ESMF_SUCCESS) then
-                if (rk==1) then
-                  call ESMF_FieldGet(field, farrayPtr=fp1, rc=rc)
-                  if (rc==ESMF_SUCCESS .and. associated(fp1) .and. size(fp1)>=nLocal) &
-                    sendBuf(1:nLocal)=fp1(1:nLocal)
-                  if (associated(fp1)) nullify(fp1)
-                else
-                  call ESMF_FieldGet(field, farrayPtr=fp2, rc=rc)
-                  if (rc==ESMF_SUCCESS .and. associated(fp2)) then
-                    block; real(ESMF_KIND_R8), allocatable :: flat(:)
-                    flat=pack(fp2,.true.)
-                    if (size(flat)>=nLocal) sendBuf(1:nLocal)=flat(1:nLocal); end block
-                  end if
-                  if (associated(fp2)) nullify(fp2)
-                end if
-              end if
-          end if
-          rc = ESMF_SUCCESS
-          if (allocated(g_lon_local_saved) .and. nLocal>0) &
-            call voronoi_accum_local(sendBuf(1:nLocal), g_lon_local_saved(1:nLocal), &
-              g_lat_local_saved(1:nLocal), nLocal, acc_local, cnt_local, othr)
-        end if
-
-        ! W1-FIX (v12.0): wrappers isoladas em módulo separado (mpi_allreduce_wrappers_mod).
-        call allreduce_r8(acc_local, acc_global, NLON*NLAT, mpiComm, mpi_ierr)
-        call allreduce_i4(cnt_local, cnt_global, NLON*NLAT, mpiComm, mpi_ierr)
-
-        if (localPet == 0) then
-          grid_2d = FILL_VALUE
-          where (cnt_global > 0) grid_2d = acc_global / real(cnt_global, ESMF_KIND_R8)
-          ncstat = nf90_inq_varid(ncid, trim(fldnames(i)), varid)
-          if (ncstat == NF90_NOERR) then
-            ncstat = nf90_put_var(ncid, varid, grid_2d)
-            if (ncstat /= NF90_NOERR) &
-              write(*,'(3A)') '[NetCDF] AVISO nf90_put_var: ', &
-                trim(fldnames(i)), ' '//trim(nf90_strerror(ncstat))
-          end if
-        end if
-      end do ! campos
-    end subroutine write_export_fields
   end subroutine export_write_netcdf
+
+  subroutine write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, &
+      localPet, grid_2d, ncstat, ncid, varid, rc)
+    type(ESMF_State), intent(in) :: exportState
+    integer, intent(in) :: itemCount
+    integer, intent(inout) :: nLocal
+    integer, intent(inout) :: mpiComm
+    integer, intent(in) :: localPet
+    integer, intent(inout) :: ncstat
+    integer, intent(in) :: ncid
+    integer, intent(inout) :: varid
+    integer, intent(inout) :: rc
+    character(len=64), allocatable, intent(inout) :: fldnames(:)
+    real(ESMF_KIND_R8), allocatable, intent(inout) :: sendBuf(:)
+    real(ESMF_KIND_R8), allocatable, intent(inout) :: grid_2d(:,:)
+    type(ESMF_Field) :: field
+    integer :: i
+    integer :: mpi_ierr
+    real(ESMF_KIND_R8) :: othr
+    real(ESMF_KIND_R8) :: acc_local(NLON,NLAT), acc_global(NLON,NLAT)
+    integer            :: cnt_local(NLON,NLAT), cnt_global(NLON,NLAT)
+    integer :: raw_idx, jr
+    real(ESMF_KIND_R8), pointer :: fp1(:)
+    real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
+
+    do i = 1, itemCount
+      raw_idx = 0
+      do jr = 1, g_n_raw
+        if (trim(g_raw_names(jr)) == trim(fldnames(i))) then; raw_idx = jr; exit; end if
+      end do
+
+      othr = field_outlier_threshold(fldnames(i))
+      acc_local = 0.0_ESMF_KIND_R8; cnt_local = 0
+
+      if (raw_idx > 0 .and. allocated(g_raw_local) .and. g_nLocal_saved > 0 .and. &
+          allocated(g_lon_local_saved)) then
+        ! FIX-EXP v2: g_raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
+        ! g_lon_local_saved — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
+        call voronoi_accum_local( &
+          g_raw_local(1:g_nLocal_saved, raw_idx), &
+          g_lon_local_saved(1:g_nLocal_saved),    &
+          g_lat_local_saved(1:g_nLocal_saved),    &
+          g_nLocal_saved, acc_local, cnt_local, othr)
+      else
+        ! Fallback ESMF field — cobertura parcial
+        sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
+        call ESMF_StateGet(exportState, itemName=trim(fldnames(i)), field=field, rc=rc)
+        if (rc == ESMF_SUCCESS) then
+            nullify(fp1,fp2)
+            call ESMF_FieldGet(field, dimCount=rk, rc=rc)
+            if (rc==ESMF_SUCCESS) then
+              if (rk==1) then
+                call ESMF_FieldGet(field, farrayPtr=fp1, rc=rc)
+                if (rc==ESMF_SUCCESS .and. associated(fp1) .and. size(fp1)>=nLocal) &
+                  sendBuf(1:nLocal)=fp1(1:nLocal)
+                if (associated(fp1)) nullify(fp1)
+              else
+                call ESMF_FieldGet(field, farrayPtr=fp2, rc=rc)
+                if (rc==ESMF_SUCCESS .and. associated(fp2)) then
+                  block; real(ESMF_KIND_R8), allocatable :: flat(:)
+                  flat=pack(fp2,.true.)
+                  if (size(flat)>=nLocal) sendBuf(1:nLocal)=flat(1:nLocal); end block
+                end if
+                if (associated(fp2)) nullify(fp2)
+              end if
+            end if
+        end if
+        rc = ESMF_SUCCESS
+        if (allocated(g_lon_local_saved) .and. nLocal>0) &
+          call voronoi_accum_local(sendBuf(1:nLocal), g_lon_local_saved(1:nLocal), &
+            g_lat_local_saved(1:nLocal), nLocal, acc_local, cnt_local, othr)
+      end if
+
+      ! W1-FIX (v12.0): wrappers isoladas em módulo separado (mpi_allreduce_wrappers_mod).
+      call allreduce_r8(acc_local, acc_global, NLON*NLAT, mpiComm, mpi_ierr)
+      call allreduce_i4(cnt_local, cnt_global, NLON*NLAT, mpiComm, mpi_ierr)
+
+      if (localPet == 0) then
+        grid_2d = FILL_VALUE
+        where (cnt_global > 0) grid_2d = acc_global / real(cnt_global, ESMF_KIND_R8)
+        ncstat = nf90_inq_varid(ncid, trim(fldnames(i)), varid)
+        if (ncstat == NF90_NOERR) then
+          ncstat = nf90_put_var(ncid, varid, grid_2d)
+          if (ncstat /= NF90_NOERR) &
+            write(*,'(3A)') '[NetCDF] AVISO nf90_put_var: ', &
+              trim(fldnames(i)), ' '//trim(nf90_strerror(ncstat))
+        end if
+      end if
+    end do ! campos
+  end subroutine write_export_fields
 
   ! ============================================================================
   !> Nearest-neighbor binning: mapeia células Voronoi para grade regular NLON×NLAT.

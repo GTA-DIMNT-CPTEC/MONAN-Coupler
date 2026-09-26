@@ -148,9 +148,22 @@ fi
 # antigas pode incluir saídas de rodadas anteriores gravadas na raiz.
 #-----------------------------------------------------------------------------
 if [[ ${CONFERE_ENTRADAS} -eq 1 && -f "${BASE_RAIZ}/entrada/CHECKSUMS.txt" ]]; then
+  # Saídas que a própria rodada grava na raiz. Linhas de base criadas antes
+  # da B-BASE-ENTRADA-01 as registravam como entradas; aqui são ignoradas.
+  # Manter igual à lista _PADROES_SAIDA_MODELOS do cria-linha-base.bash.
+  _SAIDAS_RAIZ=( 'MONAN_DIAG_*.nc' 'ice.nc' 'ocean_month.nc' 'sea_ice_geometry.nc' \
+                 'ocean.stats.nc' 'reprodiag.nc' 'reprodiag_*.nc' )
+  # shellcheck disable=SC2206
+  [[ -n "${BASE_SAIDA_RAIZ_EXTRA:-}" ]] && _SAIDAS_RAIZ+=( ${BASE_SAIDA_RAIZ_EXTRA} )
   _n_ent=0; _n_ent_dif=0
   while read -r _soma _tam _arq; do
     [[ "${_soma}" =~ ^[0-9a-f]{64}$ && -f "${_arq}" ]] || continue
+    _eh_saida=0
+    for _pat in "${_SAIDAS_RAIZ[@]}"; do
+      # shellcheck disable=SC2053
+      [[ "${_arq}" == ${_pat} ]] && { _eh_saida=1; break; }
+    done
+    [[ ${_eh_saida} -eq 1 ]] && continue
     _n_ent=$((_n_ent + 1))
     if [[ "$(sha256sum "${_arq}" | cut -d' ' -f1)" != "${_soma}" ]]; then
       [[ ${_n_ent_dif} -eq 0 ]] && echo " ATENCAO: entradas diferentes das usadas na base:"

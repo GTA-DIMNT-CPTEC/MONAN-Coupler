@@ -94,6 +94,7 @@ Convenções para código novo:
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
+| Etapas de uma rotina longa | procedimento de módulo com argumentos explícitos e `intent` declarado, em vez de procedimento interno (`contains` dentro da rotina), que enxerga todas as variáveis da rotina hospedeira |
 
 O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
 

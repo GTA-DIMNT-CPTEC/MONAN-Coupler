@@ -755,7 +755,7 @@ contains
     ! CUSTO. Tres somas e tres reducoes sobre um arranjo 3D local, uma vez por
     ! troca de acoplamento. O checksum e' inteiro, imune a arredondamento de
     ! impressao, que ja enganou esta investigacao duas vezes.
-    call advance_ice_slow()
+    call advance_ice_slow(is)
 
     call ESMF_LogWrite('ICE(SIS2): update_ice_slow_thermo + ' // &
       'update_ice_dynamics_trans concluido', ESMF_LOGMSG_INFO)
@@ -811,43 +811,41 @@ contains
       line=__LINE__, file=__FILE__)) return
 
     call ESMF_LogWrite('ICE(SIS2): ModelAdvance concluido', ESMF_LOGMSG_INFO)
-
-
-  contains
-
-    !> Termodinâmica lenta e dinâmica do SIS2, com soma de verificação da
-    !! fração por categoria antes e depois de cada etapa (diagnóstico).
-    subroutine advance_ice_slow()
-      character(len=200) :: msg_slow
-      integer(kind=8)    :: cks_ini, cks_ter, cks_din
-      logical            :: tem_ps
-
-      tem_ps = associated(is%ice%part_size)
-
-      if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
-      call update_ice_slow_thermo(is%ice)
-      if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
-      call update_ice_dynamics_trans(is%ice)
-      if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
-
-      if (tem_ps) then
-        write(msg_slow,'(A,I0,A,I0,A,I0)') &
-          'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
-          '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
-        call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
-        if (cks_ini == cks_ter .and. cks_ter == cks_din) then
-          call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
-            'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
-            'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
-            'diagnostico esta CEGO e nao permite concluir nada.', &
-            ESMF_LOGMSG_WARNING)
-        end if
-      else
-        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
-          'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
-      end if
-    end subroutine advance_ice_slow
   end subroutine ModelAdvance
+
+  !> Termodinâmica lenta e dinâmica do SIS2, com soma de verificação da
+  !! fração por categoria antes e depois de cada etapa (diagnóstico).
+  subroutine advance_ice_slow(is)
+    type(ice_internal_state_type), pointer :: is
+    character(len=200) :: msg_slow
+    integer(kind=8)    :: cks_ini, cks_ter, cks_din
+    logical            :: tem_ps
+
+    tem_ps = associated(is%ice%part_size)
+
+    if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
+    call update_ice_slow_thermo(is%ice)
+    if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
+    call update_ice_dynamics_trans(is%ice)
+    if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
+
+    if (tem_ps) then
+      write(msg_slow,'(A,I0,A,I0,A,I0)') &
+        'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
+        '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
+      call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
+      if (cks_ini == cks_ter .and. cks_ter == cks_din) then
+        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
+          'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
+          'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
+          'diagnostico esta CEGO e nao permite concluir nada.', &
+          ESMF_LOGMSG_WARNING)
+      end if
+    else
+      call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
+        'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
+    end if
+  end subroutine advance_ice_slow
 
   ! ============================================================================
   !> @brief CheckImport sem validação de carimbo de tempo.

@@ -278,7 +278,7 @@ contains
         if (ios == NF90_NOERR) then
           ios = nf90_put_att(ncid, varid, '_FillValue',    FILL_IMP4)
           ios = nf90_put_att(ncid, varid, 'missing_value', FILL_IMP4)
-          call put_field_metadata()
+          call put_field_metadata(fieldNameList, n, ios, ncid, varid)
         end if
       end do
 
@@ -496,68 +496,70 @@ contains
     if (allocated(fieldNameList)) deallocate(fieldNameList)
     call ESMF_LogWrite(subname//': ERRO NetCDF '//trim(fname), ESMF_LOGMSG_WARNING)
     rc = ESMF_SUCCESS
-
-
-  contains
-
-    subroutine put_field_metadata()
-      character(len=32) :: f_units
-      character(len=80) :: f_long, f_std
-      select case (trim(fieldNameList(n)))
-        case ('Foxx_taux');      f_units='Pa';         f_long='Tensao cisalhamento zonal';     f_std='surface_downward_eastward_stress'
-        case ('Foxx_tauy');      f_units='Pa';         f_long='Tensao cisalhamento meridional'; f_std='surface_downward_northward_stress'
-        case ('Foxx_sen');       f_units='W m-2';      f_long='Fluxo de calor sensivel';       f_std='surface_upward_sensible_heat_flux'
-        case ('Foxx_evap');      f_units='kg m-2 s-1'; f_long='Fluxo de evaporacao';           f_std='water_evaporation_flux'
-        case ('Foxx_lwnet');     f_units='W m-2';      f_long='Balanco onda longa';            f_std='surface_net_downward_longwave_flux'
-        case ('Foxx_swnet_vdr'); f_units='W m-2';      f_long='Onda curta vis. direto';        f_std='surface_net_downward_shortwave_flux'
-        case ('Foxx_swnet_vdf'); f_units='W m-2';      f_long='Onda curta vis. difuso';        f_std='surface_net_downward_shortwave_flux'
-        case ('Foxx_swnet_idr'); f_units='W m-2';      f_long='Onda curta IR direto';          f_std='surface_net_downward_shortwave_flux'
-        case ('Foxx_swnet_idf'); f_units='W m-2';      f_long='Onda curta IR difuso';          f_std='surface_net_downward_shortwave_flux'
-        case ('Faxa_rain');      f_units='kg m-2 s-1'; f_long='Precipitacao liquida';          f_std='rainfall_flux'
-        case ('Faxa_snow');      f_units='kg m-2 s-1'; f_long='Precipitacao solida';           f_std='snowfall_flux'
-        case ('Sa_pslv');        f_units='Pa';          f_long='Pressao nivel do mar';          f_std='air_pressure_at_mean_sea_level'
-        case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
-        case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
-        case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
-        ! BUG-NC-06: So_u, So_v e Sf_zorl faziam parte de export_names e
-        ! portanto ganhavam variavel no arquivo, mas nao apareciam em
-        ! NENHUM dos dois select case desta rotina. Caiam no case default,
-        ! saiam com long_name generico e, pior, com o 'cycle' do select
-        ! case de DADOS mais abaixo, nunca eram preenchidas: ficavam com
-        ! _FillValue e o GrADS as mostrava como 'all undefined values'.
-        case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
-        case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
-        case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
-        ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima):
-        ! campos das Fases 2.5/2.6/3, presentes em export_names mas
-        ! ausentes dos dois select case desta rotina — mesmo sintoma
-        ! (GrADS "Entire Grid Undefined").
-        case ('Sf_albedo');      f_units='1';           f_long='Albedo de banda larga efetivo (agua+gelo)'; f_std='surface_albedo'
-        case ('Faxa_coszen');    f_units='1';           f_long='Cosseno do angulo zenital solar'; f_std='cosine_of_solar_zenith_angle'
-        case ('Fioi_taux');      f_units='Pa';          f_long='Tensao cisalhamento zonal (gelo, T_gelo)';     f_std='surface_downward_eastward_stress'
-        case ('Fioi_tauy');      f_units='Pa';          f_long='Tensao cisalhamento meridional (gelo, T_gelo)'; f_std='surface_downward_northward_stress'
-        case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
-        case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
-        case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
-        ! FIX B-NC-UNITS-01 (Set/2026): Fioi_swnet_* e Sx_tsfc caiam no
-        ! case default e saiam com units='1'/standard_name='unknown' — os
-        ! quatro Fioi_swnet_* sao fluxos de onda curta (W m-2) e Sx_tsfc e'
-        ! a temperatura de superficie (pele) usada pelo bulk sobre gelo (K).
-        case ('Fioi_swnet_vdr'); f_units='W m-2';       f_long='Onda curta vis. direto (gelo)';   f_std='surface_net_downward_shortwave_flux'
-        case ('Fioi_swnet_vdf'); f_units='W m-2';       f_long='Onda curta vis. difuso (gelo)';   f_std='surface_net_downward_shortwave_flux'
-        case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
-        case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
-        case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
-        ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6. E' a UNICA
-        ! variavel do arquivo que nao recebe _FillValue sobre terra —
-        ! e' justamente ela que diz onde a terra fica.
-        case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'
-        case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
-      end select
-      ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
-      ios = nf90_put_att(ncid, varid, 'long_name',     trim(f_long))
-      ios = nf90_put_att(ncid, varid, 'standard_name', trim(f_std))
-    end subroutine put_field_metadata
   end subroutine med_write_import_fields
+
+  subroutine put_field_metadata(fieldNameList, n, ios, ncid, varid)
+    integer, intent(in) :: n
+    integer, intent(inout) :: ios
+    integer, intent(in) :: ncid
+    integer, intent(in) :: varid
+    character(len=64), allocatable, intent(in) :: fieldNameList(:)
+    character(len=32) :: f_units
+    character(len=80) :: f_long, f_std
+    select case (trim(fieldNameList(n)))
+      case ('Foxx_taux');      f_units='Pa';         f_long='Tensao cisalhamento zonal';     f_std='surface_downward_eastward_stress'
+      case ('Foxx_tauy');      f_units='Pa';         f_long='Tensao cisalhamento meridional'; f_std='surface_downward_northward_stress'
+      case ('Foxx_sen');       f_units='W m-2';      f_long='Fluxo de calor sensivel';       f_std='surface_upward_sensible_heat_flux'
+      case ('Foxx_evap');      f_units='kg m-2 s-1'; f_long='Fluxo de evaporacao';           f_std='water_evaporation_flux'
+      case ('Foxx_lwnet');     f_units='W m-2';      f_long='Balanco onda longa';            f_std='surface_net_downward_longwave_flux'
+      case ('Foxx_swnet_vdr'); f_units='W m-2';      f_long='Onda curta vis. direto';        f_std='surface_net_downward_shortwave_flux'
+      case ('Foxx_swnet_vdf'); f_units='W m-2';      f_long='Onda curta vis. difuso';        f_std='surface_net_downward_shortwave_flux'
+      case ('Foxx_swnet_idr'); f_units='W m-2';      f_long='Onda curta IR direto';          f_std='surface_net_downward_shortwave_flux'
+      case ('Foxx_swnet_idf'); f_units='W m-2';      f_long='Onda curta IR difuso';          f_std='surface_net_downward_shortwave_flux'
+      case ('Faxa_rain');      f_units='kg m-2 s-1'; f_long='Precipitacao liquida';          f_std='rainfall_flux'
+      case ('Faxa_snow');      f_units='kg m-2 s-1'; f_long='Precipitacao solida';           f_std='snowfall_flux'
+      case ('Sa_pslv');        f_units='Pa';          f_long='Pressao nivel do mar';          f_std='air_pressure_at_mean_sea_level'
+      case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
+      case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
+      case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
+      ! BUG-NC-06: So_u, So_v e Sf_zorl faziam parte de export_names e
+      ! portanto ganhavam variavel no arquivo, mas nao apareciam em
+      ! NENHUM dos dois select case desta rotina. Caiam no case default,
+      ! saiam com long_name generico e, pior, com o 'cycle' do select
+      ! case de DADOS mais abaixo, nunca eram preenchidas: ficavam com
+      ! _FillValue e o GrADS as mostrava como 'all undefined values'.
+      case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
+      case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
+      case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
+      ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima):
+      ! campos das Fases 2.5/2.6/3, presentes em export_names mas
+      ! ausentes dos dois select case desta rotina — mesmo sintoma
+      ! (GrADS "Entire Grid Undefined").
+      case ('Sf_albedo');      f_units='1';           f_long='Albedo de banda larga efetivo (agua+gelo)'; f_std='surface_albedo'
+      case ('Faxa_coszen');    f_units='1';           f_long='Cosseno do angulo zenital solar'; f_std='cosine_of_solar_zenith_angle'
+      case ('Fioi_taux');      f_units='Pa';          f_long='Tensao cisalhamento zonal (gelo, T_gelo)';     f_std='surface_downward_eastward_stress'
+      case ('Fioi_tauy');      f_units='Pa';          f_long='Tensao cisalhamento meridional (gelo, T_gelo)'; f_std='surface_downward_northward_stress'
+      case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
+      case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
+      case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
+      ! FIX B-NC-UNITS-01 (Set/2026): Fioi_swnet_* e Sx_tsfc caiam no
+      ! case default e saiam com units='1'/standard_name='unknown' — os
+      ! quatro Fioi_swnet_* sao fluxos de onda curta (W m-2) e Sx_tsfc e'
+      ! a temperatura de superficie (pele) usada pelo bulk sobre gelo (K).
+      case ('Fioi_swnet_vdr'); f_units='W m-2';       f_long='Onda curta vis. direto (gelo)';   f_std='surface_net_downward_shortwave_flux'
+      case ('Fioi_swnet_vdf'); f_units='W m-2';       f_long='Onda curta vis. difuso (gelo)';   f_std='surface_net_downward_shortwave_flux'
+      case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
+      case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
+      case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
+      ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6. E' a UNICA
+      ! variavel do arquivo que nao recebe _FillValue sobre terra —
+      ! e' justamente ela que diz onde a terra fica.
+      case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'
+      case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
+    end select
+    ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
+    ios = nf90_put_att(ncid, varid, 'long_name',     trim(f_long))
+    ios = nf90_put_att(ncid, varid, 'standard_name', trim(f_std))
+  end subroutine put_field_metadata
 
 end module med_cap_netcdf_mod

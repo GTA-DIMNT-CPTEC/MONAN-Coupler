@@ -641,7 +641,7 @@ contains
     ! deste DE): o canto deve estar a uma fracao de celula de distancia do
     ! centro, nunca identico nem absurdamente distante.
     if (associated(coordX) .and. associated(coordY)) then
-      call check_corner_coordinates()
+      call check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
     end if
 
     ! Opção 1: item de MÁSCARA na grade OCN (terra = SST fill ≈200 K do MOM6).
@@ -908,97 +908,99 @@ contains
         line=__LINE__, file=__FILE__)) return
 
     call ESMF_LogWrite('MED: InitializeRealize concluido', ESMF_LOGMSG_INFO)
-
-  contains
-
-    subroutine check_corner_coordinates()
-      character(len=250) :: diag_msg_corner
-      real(ESMF_KIND_R8), pointer :: coordX_c(:,:), coordY_c(:,:)
-      real(ESMF_KIND_R8) :: dlon_sample, dlat_sample
-      integer :: rc_diag
-          integer :: iN_c
-          integer :: i_c
-          integer :: jN_c
-          real(ESMF_KIND_R8) :: dlon_step
-          real(ESMF_KIND_R8) :: dlon_avg
-          real(ESMF_KIND_R8) :: dlon_max_found
-          real(ESMF_KIND_R8) :: dist_corner_min
-          real(ESMF_KIND_R8) :: dist_here
-          character(len=280) :: diag_msg_fold
-          real(ESMF_KIND_R8) :: dlon_raw
-          integer :: i_next
-      dlon_sample = -999.0_ESMF_KIND_R8; dlat_sample = -999.0_ESMF_KIND_R8
-      call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=localDeCount_ocn-1, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX_c, rc=rc_diag)
-      call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=localDeCount_ocn-1, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY_c, rc=rc_diag)
-      if (rc_diag == ESMF_SUCCESS .and. associated(coordX_c) .and. associated(coordY_c)) then
-        dlon_sample = coordX(lbound(coordX,1),lbound(coordX,2)) - &
-                      coordX_c(lbound(coordX_c,1),lbound(coordX_c,2))
-        dlat_sample = coordY(lbound(coordY,1),lbound(coordY,2)) - &
-                      coordY_c(lbound(coordY_c,1),lbound(coordY_c,2))
-      end if
-      write(diag_msg_corner,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-        'FIX-DIAG-CONSERVE01-01: canto lon min=', minval(coordX), ' max=', maxval(coordX), &
-        ' | canto lat min=', minval(coordY), ' max=', maxval(coordY), &
-        ' | canto-centro (amostra) dlon=', dlon_sample, ' dlat=', dlat_sample
-      call ESMF_LogWrite(trim(diag_msg_corner), ESMF_LOGMSG_INFO)
-
-      ! FIX-DIAG-CONSERVE02-01 (Set/2026): checagem especifica da(s)
-      ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
-      ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
-      ! > 80) -- a maioria dos PETs nao chega la' e nao tem o que checar.
-      ! Dois sintomas procurados, ambos assinatura de fold mal capturado
-      ! ou celula degenerada perto do polo:
-      !   (a) celula quase degenerada: distancia entre cantos vizinhos
-      !       (em i, na linha mais ao norte) proxima de zero -- area de
-      !       celula colapsando, o que faz CONSERVE tratar aquela celula
-      !       como praticamente inexistente (peso ~0), mesmo que fisicamente
-      !       deva ter area finita.
-      !   (b) salto de longitude entre celulas vizinhas em i, na mesma
-      !       linha, muito maior que o espacamento medio do resto da
-      !       grade -- indica descontinuidade de indice atraves da dobra
-      !       (dado de um lado do polo aparecendo ao lado do dado do
-      !       lado oposto sem a rotacao de 180 graus que o fold real exige).
-      if (maxval(coordY) > 80.0_ESMF_KIND_R8) then
-          iN_c = ubound(coordX,1); jN_c = ubound(coordX,2)
-          dlon_avg = 0.0_ESMF_KIND_R8; dlon_max_found = 0.0_ESMF_KIND_R8
-          dist_corner_min = huge(1.0_ESMF_KIND_R8)
-          do i_c = lbound(coordX,1), iN_c
-            ! Salto de longitude entre vizinhos em i, na linha mais ao
-            ! norte (jN_c) -- usa a diferenca angular MINIMA (trata
-            ! travessia de 0/360 corretamente, para nao confundir isso
-            ! com um salto real de fold).
-              i_next = merge(lbound(coordX,1), i_c+1, i_c == iN_c)
-              dlon_raw = abs(coordX(i_next,jN_c) - coordX(i_c,jN_c))
-              dlon_step = min(dlon_raw, 360.0_ESMF_KIND_R8 - dlon_raw)
-              dlon_avg = dlon_avg + dlon_step
-              dlon_max_found = max(dlon_max_found, dlon_step)
-              ! Distancia (aprox., em graus, sem correcao de cos(lat) --
-              ! suficiente para detectar colapso grosseiro de celula)
-              dist_here = sqrt(dlon_step**2 + &
-                (coordY(i_next,jN_c)-coordY(i_c,jN_c))**2)
-              dist_corner_min = min(dist_corner_min, dist_here)
-          end do
-          dlon_avg = dlon_avg / real(iN_c - lbound(coordX,1) + 1, ESMF_KIND_R8)
-          write(diag_msg_fold,'(A,ES10.3,A,ES10.3,A,ES10.3)') &
-            'FIX-DIAG-CONSERVE02-01: linha mais ao norte deste DE -- ' // &
-            'dlon medio entre vizinhos=', dlon_avg, ' dlon MAXIMO=', &
-            dlon_max_found, ' | menor distancia canto-canto encontrada=', &
-            dist_corner_min
-          call ESMF_LogWrite(trim(diag_msg_fold), ESMF_LOGMSG_INFO)
-          if (dist_corner_min < 1.0e-3_ESMF_KIND_R8) &
-            call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
-              'celula quase degenerada encontrada perto do polo ' // &
-              '(distancia canto-canto < 1e-3 grau)', ESMF_LOGMSG_WARNING)
-          if (dlon_max_found > 5.0_ESMF_KIND_R8 * max(dlon_avg, 1.0e-6_ESMF_KIND_R8)) &
-            call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
-              'salto de longitude muito maior que a media entre ' // &
-              'vizinhos na linha mais ao norte (possivel fold mal ' // &
-              'capturado ou descontinuidade de indice)', ESMF_LOGMSG_WARNING)
-      end if
-    end subroutine check_corner_coordinates
   end subroutine InitializeRealize
+
+  subroutine check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
+    type(ESMF_Grid), intent(inout) :: ocn_grid
+    integer, intent(inout) :: localDeCount_ocn
+    real(ESMF_KIND_R8), pointer :: coordX(:,:)
+    real(ESMF_KIND_R8), pointer :: coordY(:,:)
+    character(len=250) :: diag_msg_corner
+    real(ESMF_KIND_R8), pointer :: coordX_c(:,:), coordY_c(:,:)
+    real(ESMF_KIND_R8) :: dlon_sample, dlat_sample
+    integer :: rc_diag
+    integer :: iN_c
+    integer :: i_c
+    integer :: jN_c
+    real(ESMF_KIND_R8) :: dlon_step
+    real(ESMF_KIND_R8) :: dlon_avg
+    real(ESMF_KIND_R8) :: dlon_max_found
+    real(ESMF_KIND_R8) :: dist_corner_min
+    real(ESMF_KIND_R8) :: dist_here
+    character(len=280) :: diag_msg_fold
+    real(ESMF_KIND_R8) :: dlon_raw
+    integer :: i_next
+    dlon_sample = -999.0_ESMF_KIND_R8; dlat_sample = -999.0_ESMF_KIND_R8
+    call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=localDeCount_ocn-1, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX_c, rc=rc_diag)
+    call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=localDeCount_ocn-1, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY_c, rc=rc_diag)
+    if (rc_diag == ESMF_SUCCESS .and. associated(coordX_c) .and. associated(coordY_c)) then
+      dlon_sample = coordX(lbound(coordX,1),lbound(coordX,2)) - &
+                    coordX_c(lbound(coordX_c,1),lbound(coordX_c,2))
+      dlat_sample = coordY(lbound(coordY,1),lbound(coordY,2)) - &
+                    coordY_c(lbound(coordY_c,1),lbound(coordY_c,2))
+    end if
+    write(diag_msg_corner,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
+      'FIX-DIAG-CONSERVE01-01: canto lon min=', minval(coordX), ' max=', maxval(coordX), &
+      ' | canto lat min=', minval(coordY), ' max=', maxval(coordY), &
+      ' | canto-centro (amostra) dlon=', dlon_sample, ' dlat=', dlat_sample
+    call ESMF_LogWrite(trim(diag_msg_corner), ESMF_LOGMSG_INFO)
+
+    ! FIX-DIAG-CONSERVE02-01 (Set/2026): checagem especifica da(s)
+    ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
+    ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
+    ! > 80) -- a maioria dos PETs nao chega la' e nao tem o que checar.
+    ! Dois sintomas procurados, ambos assinatura de fold mal capturado
+    ! ou celula degenerada perto do polo:
+    !   (a) celula quase degenerada: distancia entre cantos vizinhos
+    !       (em i, na linha mais ao norte) proxima de zero -- area de
+    !       celula colapsando, o que faz CONSERVE tratar aquela celula
+    !       como praticamente inexistente (peso ~0), mesmo que fisicamente
+    !       deva ter area finita.
+    !   (b) salto de longitude entre celulas vizinhas em i, na mesma
+    !       linha, muito maior que o espacamento medio do resto da
+    !       grade -- indica descontinuidade de indice atraves da dobra
+    !       (dado de um lado do polo aparecendo ao lado do dado do
+    !       lado oposto sem a rotacao de 180 graus que o fold real exige).
+    if (maxval(coordY) > 80.0_ESMF_KIND_R8) then
+        iN_c = ubound(coordX,1); jN_c = ubound(coordX,2)
+        dlon_avg = 0.0_ESMF_KIND_R8; dlon_max_found = 0.0_ESMF_KIND_R8
+        dist_corner_min = huge(1.0_ESMF_KIND_R8)
+        do i_c = lbound(coordX,1), iN_c
+          ! Salto de longitude entre vizinhos em i, na linha mais ao
+          ! norte (jN_c) -- usa a diferenca angular MINIMA (trata
+          ! travessia de 0/360 corretamente, para nao confundir isso
+          ! com um salto real de fold).
+            i_next = merge(lbound(coordX,1), i_c+1, i_c == iN_c)
+            dlon_raw = abs(coordX(i_next,jN_c) - coordX(i_c,jN_c))
+            dlon_step = min(dlon_raw, 360.0_ESMF_KIND_R8 - dlon_raw)
+            dlon_avg = dlon_avg + dlon_step
+            dlon_max_found = max(dlon_max_found, dlon_step)
+            ! Distancia (aprox., em graus, sem correcao de cos(lat) --
+            ! suficiente para detectar colapso grosseiro de celula)
+            dist_here = sqrt(dlon_step**2 + &
+              (coordY(i_next,jN_c)-coordY(i_c,jN_c))**2)
+            dist_corner_min = min(dist_corner_min, dist_here)
+        end do
+        dlon_avg = dlon_avg / real(iN_c - lbound(coordX,1) + 1, ESMF_KIND_R8)
+        write(diag_msg_fold,'(A,ES10.3,A,ES10.3,A,ES10.3)') &
+          'FIX-DIAG-CONSERVE02-01: linha mais ao norte deste DE -- ' // &
+          'dlon medio entre vizinhos=', dlon_avg, ' dlon MAXIMO=', &
+          dlon_max_found, ' | menor distancia canto-canto encontrada=', &
+          dist_corner_min
+        call ESMF_LogWrite(trim(diag_msg_fold), ESMF_LOGMSG_INFO)
+        if (dist_corner_min < 1.0e-3_ESMF_KIND_R8) &
+          call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
+            'celula quase degenerada encontrada perto do polo ' // &
+            '(distancia canto-canto < 1e-3 grau)', ESMF_LOGMSG_WARNING)
+        if (dlon_max_found > 5.0_ESMF_KIND_R8 * max(dlon_avg, 1.0e-6_ESMF_KIND_R8)) &
+          call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
+            'salto de longitude muito maior que a media entre ' // &
+            'vizinhos na linha mais ao norte (possivel fold mal ' // &
+            'capturado ou descontinuidade de indice)', ESMF_LOGMSG_WARNING)
+    end if
+  end subroutine check_corner_coordinates
 
   !============================================================================
   ! FIX B-OCNGRID-01 (Ago 2026)
@@ -1634,7 +1636,6 @@ contains
     real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
     real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    real(ESMF_KIND_R8), pointer :: sst(:,:)
     ! BUG-CALC-DUU (fix v13.0): ponteiros para correntes oceânicas na grade ATM
     real(ESMF_KIND_R8), pointer :: uocn(:,:), vocn(:,:)
 
@@ -1642,8 +1643,6 @@ contains
     real(ESMF_KIND_R8), pointer     :: snow_local(:,:) => null()
     integer :: i1_glob, i2_glob, j1_glob, j2_glob
     integer :: i1, i2, j1, j2
-    integer :: fieldCount, k
-    character(len=64), allocatable :: fieldNameList(:)
       real(ESMF_KIND_R8), allocatable, target :: uas_g(:,:)
       real(ESMF_KIND_R8), allocatable, target :: vas_g(:,:)
       real(ESMF_KIND_R8), allocatable, target :: tas_g(:,:)
@@ -1661,21 +1660,7 @@ contains
       integer, parameter :: NY_G = 180
         real(ESMF_KIND_R8), pointer :: fpt_probe(:,:)
         logical, save :: raw_sst_diag_done = .false.
-        real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
-        character(len=300) :: dbgmsg2
-        integer :: i1r
-        integer :: i2r
-        integer :: j1r
-        integer :: mid_r
-        integer :: rc_diag
-            real(ESMF_KIND_R8), pointer :: p_if(:,:)
-            real(ESMF_KIND_R8), pointer :: p_vdr(:,:)
-            real(ESMF_KIND_R8), pointer :: p_idr(:,:)
-            character(len=220) :: diag_msgB2
         real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
-        integer :: ldec
-      real(ESMF_KIND_R8), pointer :: sst_diag(:,:)
-      integer :: rc_sst
         type(ESMF_Field) :: f_bs
         integer :: rc_bs_2
 
@@ -1777,33 +1762,7 @@ contains
     ! O loop bulk só preenche (i1:i2, j1:j2) = lbound:ubound(uas); sem
     ! zerar antes, regiões sem dados MPAS aparecem como lixo nos plots.
     !==========================================================================
-    call ZeroInternalField(is%f_taux_atm,   rc)
-    call ZeroInternalField(is%f_tauy_atm,   rc)
-    call ZeroInternalField(is%f_sen_atm,    rc)
-    call ZeroInternalField(is%f_evap_atm,   rc)
-    call ZeroInternalField(is%f_lwnet_atm,  rc)
-    call ZeroInternalField(is%f_swvdr_atm,  rc)
-    call ZeroInternalField(is%f_swvdf_atm,  rc)
-    call ZeroInternalField(is%f_swidr_atm,  rc)
-    call ZeroInternalField(is%f_swidf_atm,  rc)
-    call ZeroInternalField(is%f_rain_atm,   rc)
-    call ZeroInternalField(is%f_snow_atm,   rc)
-    call ZeroInternalField(is%f_pslv_atm,   rc)
-    ! BUG-MED-ZERO (v2.5): NÃO zerar is%f_ifrac_atm incondicionalmente.
-    ! Em Sprint B.1.1 (use_docn_ice=T, init_only=T, med_ifrac_init_done=T),
-    ! fill_ifrac_from_oisst é pulado após o primeiro passo, então zerando aqui
-    ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
-    ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
-    ! No Sprint B.1.1, o decaimento é aplicado no bloco 3b abaixo.
-    if (.not. (cfg_use_docn_ice .and. &
-               cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
-      call ZeroInternalField(is%f_ifrac_atm, rc)
-    end if
-    call ZeroInternalField(is%f_duu10n_atm, rc)
-    ! BUG-CALC-DUU (fix v13.0): zerar correntes para evitar persistência
-    call ZeroInternalField(is%f_uocn_atm,   rc)
-    call ZeroInternalField(is%f_vocn_atm,   rc)
-    rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
+    call zero_med_fluxes(is, rc)
 
     !==========================================================================
     ! 1. TENTAR OBTER CAMPOS DO MPAS (PRIMARIO)
@@ -2045,7 +2004,7 @@ contains
 
       ! DIAGNÓSTICO BUG-CALC-08 + BUG-MPAS-01: vai para stdout (= esmApp_run.log).
       ! Espera-se que após BUG-MPAS-01, n_nz_uas > 30000/64800 (cobertura global).
-      call log_atm_forcing_summary()
+      call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
 
       deallocate(tmp_local)
 
@@ -2112,91 +2071,7 @@ contains
     ! Residual nao mapeado na costa (onde nenhum vizinho valido bilinear
     ! existe) e' tratado pela extrapolacao por vizinhanca logo abaixo.
     !==========================================================================
-    if (is%regrid%has('ocn2atm')) then
-      call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
-
-      ! DIAGNOSTICO TEMPORARIO B-OCNGRID-02: valores BRUTOS de So_t (antes de
-      ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
-      ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
-        if (.not. raw_sst_diag_done) then
-          call ESMF_FieldGet(field, localDe=0, farrayPtr=sst_raw, rc=rc_diag)
-          if (rc_diag == ESMF_SUCCESS .and. associated(sst_raw)) then
-            i1r = lbound(sst_raw,1); i2r = ubound(sst_raw,1)
-            j1r = lbound(sst_raw,2)
-            mid_r = (i1r + i2r) / 2
-            write(dbgmsg2,'(A,I0,A,I0,A,I0)') &
-              'MED B-OCNGRID-02 DIAG: So_t BRUTO (OCN, DE local) i=[', i1r, &
-              ',', i2r, '] j1=', j1r
-            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
-            write(dbgmsg2,'(A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
-              '  sst_raw(i1,j1)=', sst_raw(i1r,j1r), &
-              ' sst_raw(mid,j1)=', sst_raw(mid_r,j1r), &
-              ' sst_raw(i2,j1)=', sst_raw(i2r,j1r), &
-              ' min_row=', minval(sst_raw(:,j1r))
-            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
-            raw_sst_diag_done = .true.
-          end if
-        end if
-
-
-      ! ?? Opção 1 (v4.18, corrigido v5.0): regrid SST ciente da mascara real
-      !    do oceano (So_omask) + extrapolação de vizinhança para a costa. ??
-      if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst()
-
-      if (is%regrid%has('ocn2atm_sst')) then
-        call is%regrid%apply('ocn2atm_sst', field, is%f_sst_atm, rc, zero_total=.true.)
-      else
-        call is%regrid%apply('ocn2atm', field, is%f_sst_atm, rc, zero_total=.true.)
-      end if
-      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
-
-      ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
-      if (associated(sst)) then
-        call fill_sst_gaps()
-      end if
-
-      ! BUG-CALC-DUU (fix v13.0): regrid de correntes oceânicas OCN → ATM.
-      ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid).
-      ! ESMF_StateGet é seguro — sem risco de "Not found" no log.
-      ! Fallback seguro: se regrid falhar, mantém zeros em f_uocn_atm/f_vocn_atm.
-      call regrid_ocean_currents(is, importState, zero_on_error=.false.)
-
-      ! ── Sprint B.2 (Set/2026) + FIX B-ICEREGRID-01: Si_ifrac_sis2 real +
-      !    albedo + T_gelo, regridados via RouteHandle MASCARADO dedicado
-      !    (rh_ocn2atm_ice), com extrapolacao por vizinhanca pos-regrid —
-      !    mesmo tratamento ja validado para So_t (rh_ocn2atm_sst), agora
-      !    estendido ao gelo. Antes usava rh_ocn2atm generico (sem mascara,
-      !    sem extrapolacao), problematico justamente porque o gelo se
-      !    concentra na regiao de deformacao da malha tripolar (alta
-      !    latitude) — o mesmo tipo de artefato que ja exigiu tratamento
-      !    especial para SST, so' que sem diluicao no resto do dominio.
-      if (cfg_use_sis2_dynamic) then
-        call update_ice_fields_on_atm_grid()
-
-        ! FIX-DIAG-SPRINTB2-01: validacao. is%f_ifrac_atm deve agora
-        ! refletir o Ice%part_size real (ver FIX-DIAG-FASTSYNC-01 no cap do
-        ! gelo) regridado para a grade ATM — nao mais zero nem OISST
-        ! sintetico. Os 4 bandos de albedo devem estar entre o fallback
-        ! (0,65) e valores de neve fria (~0,85-0,9) onde ha gelo espesso.
-        if (cfg_write_fixdiag) then
-            call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_if,  rc=rc)
-            call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr, rc=rc)
-            call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=p_idr, rc=rc)
-            rc = ESMF_SUCCESS
-            if (associated(p_if) .and. associated(p_vdr) .and. associated(p_idr)) then
-              write(diag_msgB2,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-                'FIX-DIAG-SPRINTB2-01: f_ifrac_atm min=', minval(p_if), &
-                ' max=', maxval(p_if), &
-                ' | f_alb_vdr_ice min=', minval(p_vdr), ' max=', maxval(p_vdr), &
-                ' | f_alb_idr_ice min=', minval(p_idr), ' max=', maxval(p_idr)
-              call ESMF_LogWrite(trim(diag_msgB2), ESMF_LOGMSG_INFO)
-            end if
-        end if
-      end if
-    else
-      ! Routehandles nao criados: usa SST padrao (ja preenchido em InitializeRealize)
-      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
-    end if
+    call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
 
     !==========================================================================
     ! 3b. Si_ifrac — Sprint B.1.1: fill_ifrac_from_oisst apenas no 1º passo
@@ -2213,32 +2088,7 @@ contains
     !   use_docn_ice=F              → regrid OCN sigmoid via importState.
     !==========================================================================
     ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
-    if (cfg_use_docn_ice .and. &
-        (.not. cfg_docn_ice_init_only .or. .not. med_ifrac_init_done)) then
-      call fill_ifrac_from_oisst(is, clock, rc)
-      if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! não fatal
-      med_ifrac_init_done = .true.               ! inicializado em t=0
-
-    else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
-             med_ifrac_init_done) then
-      ! Sprint B.1.1: decaimento exponencial do campo OISST retido em
-      ! is%f_ifrac_atm.  O campo NÃO foi zerado (fix BUG-MED-ZERO acima).
-      ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
-      ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
-      ! de desaparecer instantaneamente no passo seguinte ao t=0.
-        call ESMF_FieldGet(is%f_ifrac_atm, localDeCount=ldec, rc=rc)
-        if (rc == ESMF_SUCCESS .and. ldec > 0) then
-          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifrac_ptr, rc=rc)
-          if (rc == ESMF_SUCCESS .and. associated(ifrac_ptr)) then
-            ifrac_ptr = ifrac_ptr * SI_IFRAC_DECAY_MED
-            where (ifrac_ptr < 0.0_ESMF_KIND_R8) ifrac_ptr = 0.0_ESMF_KIND_R8
-          end if
-        end if
-        rc = ESMF_SUCCESS
-        call ESMF_LogWrite( &
-          'MED(B.1.1): Si_ifrac decaimento aplicado (SI_IFRAC_DECAY_MED=0.9592)', &
-          ESMF_LOGMSG_INFO)
-    end if
+    call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
     ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
     ! use_docn_ice=F: is%f_ifrac_atm foi zerado acima; permanece zero
 
@@ -2284,7 +2134,7 @@ contains
     !==========================================================================
     if (associated(sen_mpas) .and. associated(lat_mpas) .and. &
         associated(taux_mpas) .and. associated(tauy_mpas)) then
-      call substitute_native_fluxes()
+      call substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
       call ESMF_LogWrite( &
         'MED(Fase3): fluxos nativos MONAN-A (sen/evap/taux/tauy) aplicados ' // &
         'sobre o resultado do bulk NCAR', ESMF_LOGMSG_INFO)
@@ -2325,14 +2175,101 @@ contains
     ! discriminar terra/oceano, nao precisao subcelular). Usado abaixo no
     ! Sprint A.5.1 no lugar da heuristica SST~=271,35K, que colidia com
     ! agua aberta genuina no ponto de congelamento (borda do gelo).
+    call export_to_components(is, importState, exportState, rc)
+    if (allocated(uas_g)) deallocate(uas_g)
+    if (allocated(vas_g)) deallocate(vas_g)
+    if (allocated(tas_g)) deallocate(tas_g)
+    if (allocated(psl_g)) deallocate(psl_g)
+    if (allocated(swdn_g)) deallocate(swdn_g)
+    if (allocated(lwdn_g)) deallocate(lwdn_g)
+    if (allocated(rain_g)) deallocate(rain_g)
+    if (allocated(shum_g)) deallocate(shum_g)
+    if (allocated(snow_g)) deallocate(snow_g)
+    if (allocated(tmp_local)) deallocate(tmp_local)
+
+    ! Atualizar timestamps do exportState
+    call stamp_export_fields(exportState, field, stampTime, rc)
+
+    call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
+
+    ! ── BUG-OUT-01 fix v4: diagnóstico de importação inline ──────────────────
+    ! Implementação direta em MED_cap_MONAN.F90 — sem dependência de
+    ! MOM_cap_methods (lib pré-compilada) nem de coupler_config_mod.
+    ! Lê mom6_output.nml com namelist local de 2 variáveis (sem ios/=0).
+    ! Usa netcdf (já importado neste módulo) para escrever os campos.
+    ! ─────────────────────────────────────────────────────────────────────────
+    ! ── Fase 2: RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
+    ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
+    ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
+    ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
+    ! Sem esta chamada, o MPAS recebe exportState vazio (campos zerados).
+    if (is%use_med_to_mpas) then
+      call RouteOcnToAtm(importState, exportState, clock, is, rc)
+      if (rc /= ESMF_SUCCESS) then
+        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
+          ESMF_LOGMSG_WARNING)
+        rc = ESMF_SUCCESS
+      end if
+    end if
+
+    ! FIX-DIAG-BITSUM-01 (etapa 4 de 4): Si_ifrac como sai do mediador,
+    ! no exportState, depois do RouteOcnToAtm. E' o que o conector entrega
+    ! ao MPAS e o que aparece no monan2_import_*.nc.
+    if (cfg_write_fixdiag) then
+        call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_bs, rc=rc_bs_2)
+        if (rc_bs_2 == ESMF_SUCCESS) then
+          call diag_bitsum_log('etapa4 Si_ifrac exportState para MPAS', f_bs, rc_bs_2)
+        else
+          call ESMF_LogWrite('FIX-DIAG-BITSUM-01: etapa4 Si_ifrac ausente do ' // &
+            'exportState; etapa NAO medida', ESMF_LOGMSG_WARNING)
+        end if
+    end if
+
+    call med_write_import_fields(exportState, stampTime, is, rc)
+    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
+    ! Liberar arrays temporarios de defaults Fase 2 (se alocados)
+    if (associated(shum_local)) then
+      deallocate(shum_local); nullify(shum_local)
+    end if
+    if (associated(snow_local)) then
+      deallocate(snow_local); nullify(snow_local)
+    end if
+  end subroutine MediatorAdvance
+
+  subroutine stamp_export_fields(exportState, field, stampTime, rc)
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Field), intent(inout) :: field
+    type(ESMF_Time), intent(inout) :: stampTime
+    integer, intent(inout) :: rc
+    integer :: fieldCount
+    character(len=64), allocatable :: fieldNameList(:)
+    integer :: k
+    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    allocate(fieldNameList(fieldCount))
+    call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
+    do k = 1, fieldCount
+      call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
+        field=field, rc=rc)
+      call NUOPC_SetTimestamp(field, stampTime, rc=rc)   ! BUG-SEQ-STAMP-01
+    end do
+    deallocate(fieldNameList)
+  end subroutine stamp_export_fields
+
+  subroutine export_to_components(is, importState, exportState, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_State), intent(inout) :: exportState
+    integer, intent(inout) :: rc
+    integer :: rc_sst
+    real(ESMF_KIND_R8), pointer :: sst_diag(:,:)
     if (.not. is%landmask_done) then
-      call regrid_land_mask()
+      call regrid_land_mask(is, importState)
     end if
     ! (So_omask e' estatico no tempo -- uma vez regridada corretamente na
     ! 1a chamada, is%f_omask_atm permanece valida sem precisar refazer o
     ! regrid a cada passo.)
 
-    call zero_fluxes_over_land()
+    call zero_fluxes_over_land(is, rc)
 
     call RegridOrCopy(is%f_taux_atm,   exportState, "Foxx_taux",      is, rc)
     call RegridOrCopy(is%f_tauy_atm,   exportState, "Foxx_tauy",      is, rc)
@@ -2357,7 +2294,7 @@ contains
     ! mapeada -> zerada), agora na direcao oposta, perto do mesmo fold
     ! tripolar. Resultado observado: manchas isoladas em vez de calota
     ! continua, mesmo com is%f_ifrac_atm ja correto na entrada.
-    call export_ice_fraction()
+    call export_ice_fraction(is, exportState, rc)
     call RegridOrCopy(is%f_duu10n_atm, exportState, "So_duu10n",      is, rc)
     ! FIX B-DIAGMASK-01 (Set/2026): mascara terra/oceano REAL do MOM6 no
     ! exportState. is%f_omask_atm ja' esta' pronta neste ponto (regridada
@@ -2403,7 +2340,7 @@ contains
     ! SEPARADO, is%f_tsfc_atm, exportado sob um StandardName NOVO,
     ! "Sx_tsfc", que so' o MPAS-A importa (ver mpas_cap_MONAN.F90 —
     ! IMP_NAMES trocado de "So_t" para "Sx_tsfc" para atm_bnd%sst).
-    call export_surface_temperature()
+    call export_surface_temperature(is)
 
     ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector MED→MPAS
     ! Diagnóstico: imprimir min/max de is%f_sst_atm para confirmar que tem dados reais.
@@ -2476,852 +2413,991 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    if (allocated(uas_g)) deallocate(uas_g)
-    if (allocated(vas_g)) deallocate(vas_g)
-    if (allocated(tas_g)) deallocate(tas_g)
-    if (allocated(psl_g)) deallocate(psl_g)
-    if (allocated(swdn_g)) deallocate(swdn_g)
-    if (allocated(lwdn_g)) deallocate(lwdn_g)
-    if (allocated(rain_g)) deallocate(rain_g)
-    if (allocated(shum_g)) deallocate(shum_g)
-    if (allocated(snow_g)) deallocate(snow_g)
-    if (allocated(tmp_local)) deallocate(tmp_local)
+  end subroutine export_to_components
 
-    ! Atualizar timestamps do exportState
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    allocate(fieldNameList(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
-        field=field, rc=rc)
-      call NUOPC_SetTimestamp(field, stampTime, rc=rc)   ! BUG-SEQ-STAMP-01
-    end do
-    deallocate(fieldNameList)
+  subroutine update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_Clock), intent(inout) :: clock
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:)
+    integer :: ldec
+    if (cfg_use_docn_ice .and. &
+        (.not. cfg_docn_ice_init_only .or. .not. med_ifrac_init_done)) then
+      call fill_ifrac_from_oisst(is, clock, rc)
+      if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! não fatal
+      med_ifrac_init_done = .true.               ! inicializado em t=0
 
-    call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
-
-    ! ── BUG-OUT-01 fix v4: diagnóstico de importação inline ──────────────────
-    ! Implementação direta em MED_cap_MONAN.F90 — sem dependência de
-    ! MOM_cap_methods (lib pré-compilada) nem de coupler_config_mod.
-    ! Lê mom6_output.nml com namelist local de 2 variáveis (sem ios/=0).
-    ! Usa netcdf (já importado neste módulo) para escrever os campos.
-    ! ─────────────────────────────────────────────────────────────────────────
-    ! ── Fase 2: RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
-    ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
-    ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
-    ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
-    ! Sem esta chamada, o MPAS recebe exportState vazio (campos zerados).
-    if (is%use_med_to_mpas) then
-      call RouteOcnToAtm(importState, exportState, clock, is, rc)
-      if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
-          ESMF_LOGMSG_WARNING)
-        rc = ESMF_SUCCESS
-      end if
-    end if
-
-    ! FIX-DIAG-BITSUM-01 (etapa 4 de 4): Si_ifrac como sai do mediador,
-    ! no exportState, depois do RouteOcnToAtm. E' o que o conector entrega
-    ! ao MPAS e o que aparece no monan2_import_*.nc.
-    if (cfg_write_fixdiag) then
-        call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_bs, rc=rc_bs_2)
-        if (rc_bs_2 == ESMF_SUCCESS) then
-          call diag_bitsum_log('etapa4 Si_ifrac exportState para MPAS', f_bs, rc_bs_2)
-        else
-          call ESMF_LogWrite('FIX-DIAG-BITSUM-01: etapa4 Si_ifrac ausente do ' // &
-            'exportState; etapa NAO medida', ESMF_LOGMSG_WARNING)
+    else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
+             med_ifrac_init_done) then
+      ! Sprint B.1.1: decaimento exponencial do campo OISST retido em
+      ! is%f_ifrac_atm.  O campo NÃO foi zerado (fix BUG-MED-ZERO acima).
+      ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
+      ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
+      ! de desaparecer instantaneamente no passo seguinte ao t=0.
+        call ESMF_FieldGet(is%f_ifrac_atm, localDeCount=ldec, rc=rc)
+        if (rc == ESMF_SUCCESS .and. ldec > 0) then
+          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifrac_ptr, rc=rc)
+          if (rc == ESMF_SUCCESS .and. associated(ifrac_ptr)) then
+            ifrac_ptr = ifrac_ptr * SI_IFRAC_DECAY_MED
+            where (ifrac_ptr < 0.0_ESMF_KIND_R8) ifrac_ptr = 0.0_ESMF_KIND_R8
+          end if
         end if
+        rc = ESMF_SUCCESS
+        call ESMF_LogWrite( &
+          'MED(B.1.1): Si_ifrac decaimento aplicado (SI_IFRAC_DECAY_MED=0.9592)', &
+          ESMF_LOGMSG_INFO)
     end if
+  end subroutine update_ice_fraction_from_docn
 
-    call med_write_import_fields(exportState, stampTime, is, rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
-    ! Liberar arrays temporarios de defaults Fase 2 (se alocados)
-    if (associated(shum_local)) then
-      deallocate(shum_local); nullify(shum_local)
-    end if
-    if (associated(snow_local)) then
-      deallocate(snow_local); nullify(snow_local)
-    end if
+  subroutine update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field), intent(inout) :: field
+    logical, intent(inout) :: raw_sst_diag_done
+    integer, intent(inout) :: rc
+    character(len=300) :: dbgmsg2
+    character(len=220) :: diag_msgB2
+    integer :: i1r
+    integer :: i2r
+    integer :: j1r
+    integer :: mid_r
+    real(ESMF_KIND_R8), pointer :: p_idr(:,:)
+    real(ESMF_KIND_R8), pointer :: p_if(:,:)
+    real(ESMF_KIND_R8), pointer :: p_vdr(:,:)
+    integer :: rc_diag
+    real(ESMF_KIND_R8), pointer :: sst(:,:)
+    real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
+    if (is%regrid%has('ocn2atm')) then
+      call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
+
+      ! DIAGNOSTICO TEMPORARIO B-OCNGRID-02: valores BRUTOS de So_t (antes de
+      ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
+      ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
+        if (.not. raw_sst_diag_done) then
+          call ESMF_FieldGet(field, localDe=0, farrayPtr=sst_raw, rc=rc_diag)
+          if (rc_diag == ESMF_SUCCESS .and. associated(sst_raw)) then
+            i1r = lbound(sst_raw,1); i2r = ubound(sst_raw,1)
+            j1r = lbound(sst_raw,2)
+            mid_r = (i1r + i2r) / 2
+            write(dbgmsg2,'(A,I0,A,I0,A,I0)') &
+              'MED B-OCNGRID-02 DIAG: So_t BRUTO (OCN, DE local) i=[', i1r, &
+              ',', i2r, '] j1=', j1r
+            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
+            write(dbgmsg2,'(A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
+              '  sst_raw(i1,j1)=', sst_raw(i1r,j1r), &
+              ' sst_raw(mid,j1)=', sst_raw(mid_r,j1r), &
+              ' sst_raw(i2,j1)=', sst_raw(i2r,j1r), &
+              ' min_row=', minval(sst_raw(:,j1r))
+            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
+            raw_sst_diag_done = .true.
+          end if
+        end if
 
 
-  contains
+      ! ?? Opção 1 (v4.18, corrigido v5.0): regrid SST ciente da mascara real
+      !    do oceano (So_omask) + extrapolação de vizinhança para a costa. ??
+      if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
 
-    subroutine export_surface_temperature()
-      real(ESMF_KIND_R8), pointer :: p_sst_src(:,:), p_tice_comp(:,:), p_ifrac_comp(:,:)
-      real(ESMF_KIND_R8), pointer :: p_tsfc_out(:,:)
-      integer :: rc_tsfc
-      real(ESMF_KIND_R8) :: ifrac_c
-      integer :: ii_c, jj_c
-            character(len=220) :: diag_msg_tsfc
-      call ESMF_FieldGet(is%f_sst_atm,   farrayPtr=p_sst_src,   rc=rc_tsfc)
-      call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=p_tice_comp, rc=rc_tsfc)
-      call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_comp,rc=rc_tsfc)
-      call ESMF_FieldGet(is%f_tsfc_atm,  farrayPtr=p_tsfc_out,  rc=rc_tsfc)
-      if (associated(p_sst_src) .and. associated(p_tice_comp) .and. &
-          associated(p_ifrac_comp) .and. associated(p_tsfc_out)) then
-        do jj_c = lbound(p_sst_src,2), ubound(p_sst_src,2)
-          do ii_c = lbound(p_sst_src,1), ubound(p_sst_src,1)
-            ! Clamp defensivo local — nao confia cegamente nas extrapolacoes
-            ! upstream, mesma filosofia dos guards de NaN/faixa fisica
-            ! usados no resto do arquivo (ex. clamp de Sf_albedo, So_t).
-            ifrac_c = p_ifrac_comp(ii_c,jj_c)
-            if (ifrac_c /= ifrac_c) ifrac_c = 0.0_ESMF_KIND_R8   ! NaN guard
-            ifrac_c = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifrac_c))
-            if (p_tice_comp(ii_c,jj_c) == p_tice_comp(ii_c,jj_c) .and. &
-                p_tice_comp(ii_c,jj_c) > 180.0_ESMF_KIND_R8 .and. &
-                p_tice_comp(ii_c,jj_c) < 280.0_ESMF_KIND_R8) then
-              p_tsfc_out(ii_c,jj_c) = (1.0_ESMF_KIND_R8 - ifrac_c) * p_sst_src(ii_c,jj_c) &
-                                       + ifrac_c * p_tice_comp(ii_c,jj_c)
-            else
-              ! Si_t_sis2 nao regridou/extrapolou para um valor fisico
-              ! nesta celula — mantem SST pura em vez de contaminar com
-              ! um valor suspeito, mesma logica defensiva do fallback de
-              ! Sf_albedo.
-              p_tsfc_out(ii_c,jj_c) = p_sst_src(ii_c,jj_c)
-            end if
-          end do
-        end do
+      if (is%regrid%has('ocn2atm_sst')) then
+        call is%regrid%apply('ocn2atm_sst', field, is%f_sst_atm, rc, zero_total=.true.)
+      else
+        call is%regrid%apply('ocn2atm', field, is%f_sst_atm, rc, zero_total=.true.)
+      end if
+      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
+
+      ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
+      if (associated(sst)) then
+        call fill_sst_gaps(sst)
+      end if
+
+      ! BUG-CALC-DUU (fix v13.0): regrid de correntes oceânicas OCN → ATM.
+      ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid).
+      ! ESMF_StateGet é seguro — sem risco de "Not found" no log.
+      ! Fallback seguro: se regrid falhar, mantém zeros em f_uocn_atm/f_vocn_atm.
+      call regrid_ocean_currents(is, importState, zero_on_error=.false.)
+
+      ! ── Sprint B.2 (Set/2026) + FIX B-ICEREGRID-01: Si_ifrac_sis2 real +
+      !    albedo + T_gelo, regridados via RouteHandle MASCARADO dedicado
+      !    (rh_ocn2atm_ice), com extrapolacao por vizinhanca pos-regrid —
+      !    mesmo tratamento ja validado para So_t (rh_ocn2atm_sst), agora
+      !    estendido ao gelo. Antes usava rh_ocn2atm generico (sem mascara,
+      !    sem extrapolacao), problematico justamente porque o gelo se
+      !    concentra na regiao de deformacao da malha tripolar (alta
+      !    latitude) — o mesmo tipo de artefato que ja exigiu tratamento
+      !    especial para SST, so' que sem diluicao no resto do dominio.
+      if (cfg_use_sis2_dynamic) then
+        call update_ice_fields_on_atm_grid(is, importState)
+
+        ! FIX-DIAG-SPRINTB2-01: validacao. is%f_ifrac_atm deve agora
+        ! refletir o Ice%part_size real (ver FIX-DIAG-FASTSYNC-01 no cap do
+        ! gelo) regridado para a grade ATM — nao mais zero nem OISST
+        ! sintetico. Os 4 bandos de albedo devem estar entre o fallback
+        ! (0,65) e valores de neve fria (~0,85-0,9) onde ha gelo espesso.
         if (cfg_write_fixdiag) then
-            write(diag_msg_tsfc,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-              'FIX-DIAG-TSFCCOMP-01: Sx_tsfc(composto) min=', minval(p_tsfc_out), &
-              ' max=', maxval(p_tsfc_out), ' | So_t(pura, INTOCADA) min=', &
-              minval(p_sst_src), ' max=', maxval(p_sst_src)
-            call ESMF_LogWrite(trim(diag_msg_tsfc), ESMF_LOGMSG_INFO)
+            call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_if,  rc=rc)
+            call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr, rc=rc)
+            call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=p_idr, rc=rc)
+            rc = ESMF_SUCCESS
+            if (associated(p_if) .and. associated(p_vdr) .and. associated(p_idr)) then
+              write(diag_msgB2,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
+                'FIX-DIAG-SPRINTB2-01: f_ifrac_atm min=', minval(p_if), &
+                ' max=', maxval(p_if), &
+                ' | f_alb_vdr_ice min=', minval(p_vdr), ' max=', maxval(p_vdr), &
+                ' | f_alb_idr_ice min=', minval(p_idr), ' max=', maxval(p_idr)
+              call ESMF_LogWrite(trim(diag_msgB2), ESMF_LOGMSG_INFO)
+            end if
         end if
+      end if
+    else
+      ! Routehandles nao criados: usa SST padrao (ja preenchido em InitializeRealize)
+      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
+    end if
+  end subroutine update_ocean_fields_on_atm_grid
+
+  subroutine zero_med_fluxes(is, rc)
+    type(MED_InternalState), pointer :: is
+    integer, intent(inout) :: rc
+    call ZeroInternalField(is%f_taux_atm,   rc)
+    call ZeroInternalField(is%f_tauy_atm,   rc)
+    call ZeroInternalField(is%f_sen_atm,    rc)
+    call ZeroInternalField(is%f_evap_atm,   rc)
+    call ZeroInternalField(is%f_lwnet_atm,  rc)
+    call ZeroInternalField(is%f_swvdr_atm,  rc)
+    call ZeroInternalField(is%f_swvdf_atm,  rc)
+    call ZeroInternalField(is%f_swidr_atm,  rc)
+    call ZeroInternalField(is%f_swidf_atm,  rc)
+    call ZeroInternalField(is%f_rain_atm,   rc)
+    call ZeroInternalField(is%f_snow_atm,   rc)
+    call ZeroInternalField(is%f_pslv_atm,   rc)
+    ! BUG-MED-ZERO (v2.5): NÃO zerar is%f_ifrac_atm incondicionalmente.
+    ! Em Sprint B.1.1 (use_docn_ice=T, init_only=T, med_ifrac_init_done=T),
+    ! fill_ifrac_from_oisst é pulado após o primeiro passo, então zerando aqui
+    ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
+    ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
+    ! No Sprint B.1.1, o decaimento é aplicado no bloco 3b abaixo.
+    if (.not. (cfg_use_docn_ice .and. &
+               cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
+      call ZeroInternalField(is%f_ifrac_atm, rc)
+    end if
+    call ZeroInternalField(is%f_duu10n_atm, rc)
+    ! BUG-CALC-DUU (fix v13.0): zerar correntes para evitar persistência
+    call ZeroInternalField(is%f_uocn_atm,   rc)
+    call ZeroInternalField(is%f_vocn_atm,   rc)
+    rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
+  end subroutine zero_med_fluxes
+
+  subroutine export_surface_temperature(is)
+    type(MED_InternalState), pointer :: is
+    real(ESMF_KIND_R8), pointer :: p_sst_src(:,:), p_tice_comp(:,:), p_ifrac_comp(:,:)
+    real(ESMF_KIND_R8), pointer :: p_tsfc_out(:,:)
+    integer :: rc_tsfc
+    real(ESMF_KIND_R8) :: ifrac_c
+    integer :: ii_c, jj_c
+    character(len=220) :: diag_msg_tsfc
+
+    call ESMF_FieldGet(is%f_sst_atm,   farrayPtr=p_sst_src,   rc=rc_tsfc)
+    call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=p_tice_comp, rc=rc_tsfc)
+    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_comp,rc=rc_tsfc)
+    call ESMF_FieldGet(is%f_tsfc_atm,  farrayPtr=p_tsfc_out,  rc=rc_tsfc)
+    if (associated(p_sst_src) .and. associated(p_tice_comp) .and. &
+        associated(p_ifrac_comp) .and. associated(p_tsfc_out)) then
+      do jj_c = lbound(p_sst_src,2), ubound(p_sst_src,2)
+        do ii_c = lbound(p_sst_src,1), ubound(p_sst_src,1)
+          ! Clamp defensivo local — nao confia cegamente nas extrapolacoes
+          ! upstream, mesma filosofia dos guards de NaN/faixa fisica
+          ! usados no resto do arquivo (ex. clamp de Sf_albedo, So_t).
+          ifrac_c = p_ifrac_comp(ii_c,jj_c)
+          if (ifrac_c /= ifrac_c) ifrac_c = 0.0_ESMF_KIND_R8   ! NaN guard
+          ifrac_c = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifrac_c))
+          if (p_tice_comp(ii_c,jj_c) == p_tice_comp(ii_c,jj_c) .and. &
+              p_tice_comp(ii_c,jj_c) > 180.0_ESMF_KIND_R8 .and. &
+              p_tice_comp(ii_c,jj_c) < 280.0_ESMF_KIND_R8) then
+            p_tsfc_out(ii_c,jj_c) = (1.0_ESMF_KIND_R8 - ifrac_c) * p_sst_src(ii_c,jj_c) &
+                                     + ifrac_c * p_tice_comp(ii_c,jj_c)
+          else
+            ! Si_t_sis2 nao regridou/extrapolou para um valor fisico
+            ! nesta celula — mantem SST pura em vez de contaminar com
+            ! um valor suspeito, mesma logica defensiva do fallback de
+            ! Sf_albedo.
+            p_tsfc_out(ii_c,jj_c) = p_sst_src(ii_c,jj_c)
+          end if
+        end do
+      end do
+      if (cfg_write_fixdiag) then
+          write(diag_msg_tsfc,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
+            'FIX-DIAG-TSFCCOMP-01: Sx_tsfc(composto) min=', minval(p_tsfc_out), &
+            ' max=', maxval(p_tsfc_out), ' | So_t(pura, INTOCADA) min=', &
+            minval(p_sst_src), ' max=', maxval(p_sst_src)
+          call ESMF_LogWrite(trim(diag_msg_tsfc), ESMF_LOGMSG_INFO)
+      end if
+    else
+      ! Sem dado para compor — Sx_tsfc degrada para SST pura (mesmo
+      ! comportamento que o MPAS-A teria antes de qualquer Fase 4b).
+      if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
+        p_tsfc_out(:,:) = p_sst_src(:,:)
+      call ESMF_LogWrite('MED(B-TSFC-DUALEXPORT-01): AVISO — ponteiros ' // &
+        'de So_t/Si_t_sis2/Si_ifrac indisponiveis, Sx_tsfc degradado ' // &
+        'para SST pura', ESMF_LOGMSG_WARNING)
+    end if
+  end subroutine export_surface_temperature
+
+  subroutine export_ice_fraction(is, exportState, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: exportState
+    integer, intent(inout) :: rc
+    type(ESMF_Field) :: f_ifrac_exp
+    integer :: rc_ifrac2
+    real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
+    integer :: rc_store2
+    character(len=200) :: diag_msg_ifrac2
+
+    call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_ifrac2)
+    if (rc_ifrac2 == ESMF_SUCCESS) then
+      call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
+
+      ! FIX B-CONSERVE-05 (Set/2026): CONSERVE reativado aqui tambem —
+      ! ver comentario completo em B-ICEREGRID-01 (bloco rh_ocn2atm_ice)
+      ! sobre por que a reversao anterior (B-CONSERVE-04) tinha
+      ! diagnostico errado (causa real era B-NEIGHBORFILL-02, nao o
+      ! metodo de regrid).
+      if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
+        call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
+          is%f_ifrac_atm, f_ifrac_exp, rc_store2, fallback='atm2ocn')
+
+      if (is%regrid%has('atm2ocn_ice')) then
+        call is%regrid%apply('atm2ocn_ice', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
+          zero_total=.false.)
       else
-        ! Sem dado para compor — Sx_tsfc degrada para SST pura (mesmo
-        ! comportamento que o MPAS-A teria antes de qualquer Fase 4b).
-        if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
-          p_tsfc_out(:,:) = p_sst_src(:,:)
-        call ESMF_LogWrite('MED(B-TSFC-DUALEXPORT-01): AVISO — ponteiros ' // &
-          'de So_t/Si_t_sis2/Si_ifrac indisponiveis, Sx_tsfc degradado ' // &
-          'para SST pura', ESMF_LOGMSG_WARNING)
+        call is%regrid%apply('atm2ocn', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
+          zero_total=.true.)
       end if
-    end subroutine export_surface_temperature
-
-    subroutine export_ice_fraction()
-      type(ESMF_Field) :: f_ifrac_exp
-      integer :: rc_ifrac2
-      real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
-            integer :: rc_store2
-            character(len=200) :: diag_msg_ifrac2
-      call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_ifrac2)
-      if (rc_ifrac2 == ESMF_SUCCESS) then
-        call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
-
-        ! FIX B-CONSERVE-05 (Set/2026): CONSERVE reativado aqui tambem —
-        ! ver comentario completo em B-ICEREGRID-01 (bloco rh_ocn2atm_ice)
-        ! sobre por que a reversao anterior (B-CONSERVE-04) tinha
-        ! diagnostico errado (causa real era B-NEIGHBORFILL-02, nao o
-        ! metodo de regrid).
-        if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
-          call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
-            is%f_ifrac_atm, f_ifrac_exp, rc_store2, fallback='atm2ocn')
-
-        if (is%regrid%has('atm2ocn_ice')) then
-          call is%regrid%apply('atm2ocn_ice', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
-            zero_total=.false.)
-        else
-          call is%regrid%apply('atm2ocn', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
-            zero_total=.true.)
-        end if
-        call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
-        if (associated(p_ifrac_exp)) &
-          call neighbor_fill(p_ifrac_exp, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
-        if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
-            write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
-              'FIX-DIAG-ICEREGRID04-01: Si_ifrac(exportState, pos ATM->OCN+' // &
-              'extrapolacao) min=', minval(p_ifrac_exp), ' max=', maxval(p_ifrac_exp)
-            call ESMF_LogWrite(trim(diag_msg_ifrac2), ESMF_LOGMSG_INFO)
-        end if
-      else
-        ! Fallback: exportState sem Si_ifrac realizado (nao deveria
-        ! acontecer) -- mantem o comportamento antigo em vez de travar.
-        call RegridOrCopy(is%f_ifrac_atm, exportState, "Si_ifrac", is, rc)
+      call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
+      if (associated(p_ifrac_exp)) &
+        call neighbor_fill(p_ifrac_exp, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
+      if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
+          write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
+            'FIX-DIAG-ICEREGRID04-01: Si_ifrac(exportState, pos ATM->OCN+' // &
+            'extrapolacao) min=', minval(p_ifrac_exp), ' max=', maxval(p_ifrac_exp)
+          call ESMF_LogWrite(trim(diag_msg_ifrac2), ESMF_LOGMSG_INFO)
       end if
-    end subroutine export_ice_fraction
+    else
+      ! Fallback: exportState sem Si_ifrac realizado (nao deveria
+      ! acontecer) -- mantem o comportamento antigo em vez de travar.
+      call RegridOrCopy(is%f_ifrac_atm, exportState, "Si_ifrac", is, rc)
+    end if
+  end subroutine export_ice_fraction
 
-    subroutine zero_fluxes_over_land()
-      integer :: n_land_masked
-      real(ESMF_KIND_R8), pointer :: p_taux(:,:), p_tauy(:,:), p_sen(:,:)
-      real(ESMF_KIND_R8), pointer :: p_evap(:,:), p_lwnet(:,:)
-      real(ESMF_KIND_R8), pointer :: p_swvdr(:,:), p_swvdf(:,:)
-      real(ESMF_KIND_R8), pointer :: p_swidr(:,:), p_swidf(:,:)
-      real(ESMF_KIND_R8), pointer :: p_rain(:,:),  p_snow(:,:)
-      real(ESMF_KIND_R8), pointer :: p_omask(:,:)
-      logical, allocatable :: land_mask(:,:)
-          character(len=160) :: logmsg
+  subroutine zero_fluxes_over_land(is, rc)
+    type(MED_InternalState), pointer :: is
+    integer, intent(inout) :: rc
+    integer :: n_land_masked
+    real(ESMF_KIND_R8), pointer :: p_taux(:,:), p_tauy(:,:), p_sen(:,:)
+    real(ESMF_KIND_R8), pointer :: p_evap(:,:), p_lwnet(:,:)
+    real(ESMF_KIND_R8), pointer :: p_swvdr(:,:), p_swvdf(:,:)
+    real(ESMF_KIND_R8), pointer :: p_swidr(:,:), p_swidf(:,:)
+    real(ESMF_KIND_R8), pointer :: p_rain(:,:),  p_snow(:,:)
+    real(ESMF_KIND_R8), pointer :: p_omask(:,:)
+    logical, allocatable :: land_mask(:,:)
+    character(len=160) :: logmsg
 
-      nullify(p_taux, p_tauy, p_sen, p_evap, p_lwnet)
-      nullify(p_swvdr, p_swvdf, p_swidr, p_swidf, p_rain, p_snow, p_omask)
+    nullify(p_taux, p_tauy, p_sen, p_evap, p_lwnet)
+    nullify(p_swvdr, p_swvdf, p_swidr, p_swidf, p_rain, p_snow, p_omask)
 
-      call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask, rc=rc)
-      if (associated(p_omask)) then
-        ! FIX B-LANDMASK-01: mascara REAL (So_omask regridada), nao mais
-        ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
-        ! 0=terra e 1=oceano; robusto a pequena mistura de borda do
-        ! regrid NEAREST_STOD, que deveria ser quase sempre exatamente
-        ! 0 ou 1 de qualquer forma).
-        allocate(land_mask(lbound(p_omask,1):ubound(p_omask,1), &
-                           lbound(p_omask,2):ubound(p_omask,2)))
-        land_mask = (p_omask < 0.5_ESMF_KIND_R8)
-        n_land_masked = count(land_mask)
+    call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask, rc=rc)
+    if (associated(p_omask)) then
+      ! FIX B-LANDMASK-01: mascara REAL (So_omask regridada), nao mais
+      ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
+      ! 0=terra e 1=oceano; robusto a pequena mistura de borda do
+      ! regrid NEAREST_STOD, que deveria ser quase sempre exatamente
+      ! 0 ou 1 de qualquer forma).
+      allocate(land_mask(lbound(p_omask,1):ubound(p_omask,1), &
+                         lbound(p_omask,2):ubound(p_omask,2)))
+      land_mask = (p_omask < 0.5_ESMF_KIND_R8)
+      n_land_masked = count(land_mask)
 
-        ! Helper macro: aplicar mascara em cada fluxo
-        call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=p_taux,  rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_taux))  &
-          where (land_mask) p_taux  = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=p_tauy,  rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_tauy))  &
-          where (land_mask) p_tauy  = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen,   rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_sen))   &
-          where (land_mask) p_sen   = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=p_evap,  rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_evap))  &
-          where (land_mask) p_evap  = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=p_lwnet, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_lwnet)) &
-          where (land_mask) p_lwnet = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=p_swvdr, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_swvdr)) &
-          where (land_mask) p_swvdr = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_swvdf_atm, farrayPtr=p_swvdf, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_swvdf)) &
-          where (land_mask) p_swvdf = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_swidr_atm, farrayPtr=p_swidr, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_swidr)) &
-          where (land_mask) p_swidr = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_swidf_atm, farrayPtr=p_swidf, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_swidf)) &
-          where (land_mask) p_swidf = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_rain_atm,  farrayPtr=p_rain,  rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_rain))  &
-          where (land_mask) p_rain  = 0.0_ESMF_KIND_R8
-        call ESMF_FieldGet(is%f_snow_atm,  farrayPtr=p_snow,  rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(p_snow))  &
-          where (land_mask) p_snow  = 0.0_ESMF_KIND_R8
-        rc = ESMF_SUCCESS
-
-        ! Log diagnostico
-          write(logmsg, '(A,I0,A)') &
-            'MED Sprint A.5.1: fluxos zerados em ', n_land_masked, &
-            ' celulas de terra (mascara real So_omask, ver B-LANDMASK-01)'
-          call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
-
-        deallocate(land_mask)
-      end if
-    end subroutine zero_fluxes_over_land
-
-    subroutine regrid_land_mask()
-      type(ESMF_Field) :: omask_src_field
-      integer :: rc_lm
-      call ESMF_StateGet(importState, itemName="So_omask", &
-        field=omask_src_field, rc=rc_lm)
-      if (rc_lm == ESMF_SUCCESS) then
-        call is%regrid%add('ocn2atm_landmask', regrid_spec('nearest_stod'), &
-          omask_src_field, is%f_omask_atm, rc_lm)
-        if (rc_lm == ESMF_SUCCESS) then
-          call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%f_omask_atm, rc_lm, &
-            zero_total=.false.)
-          call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
-            ESMF_LOGMSG_INFO)
-        else
-          ! is%f_omask_atm continua 1.0 (tudo oceano)
-          call ESMF_LogWrite('MED: falha no regrid da mascara So_omask; ' // &
-            'mantido tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
-        end if
-      else
-        call ESMF_LogWrite('MED B-LANDMASK-01: So_omask indisponivel -- ' // &
-          'mantendo fallback tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
-      end if
-      is%landmask_done = .true.
-    end subroutine regrid_land_mask
-
-    subroutine substitute_native_fluxes()
-      real(ESMF_KIND_R8), allocatable :: sen_g2(:,:), lat_g2(:,:)
-      real(ESMF_KIND_R8), allocatable :: taux_g2(:,:), tauy_g2(:,:), tmp2(:,:)
-      real(ESMF_KIND_R8), pointer     :: fptr_sen(:,:), fptr_evap(:,:)
-      real(ESMF_KIND_R8), pointer     :: fptr_taux(:,:), fptr_tauy(:,:)
-      integer :: gi2, gj2, ierr2, ii, jj
-      integer, parameter :: NXG2 = 360, NYG2 = 180
-
-      nullify(fptr_sen, fptr_evap, fptr_taux, fptr_tauy)
-      allocate(sen_g2(NXG2,NYG2), lat_g2(NXG2,NYG2))
-      allocate(taux_g2(NXG2,NYG2), tauy_g2(NXG2,NYG2), tmp2(NXG2,NYG2))
-
-      ! Gather global (mesmo padrao BUG-CALC-08: SUM com tiles disjuntos)
-      tmp2 = 0.0_ESMF_KIND_R8
-      do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
-        do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
-          if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
-            tmp2(gi2,gj2) = sen_mpas(gi2,gj2)
-        end do
-      end do
-      call MPI_Allreduce(tmp2, sen_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, ierr2)
-
-      tmp2 = 0.0_ESMF_KIND_R8
-      do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
-        do gi2 = lbound(lat_mpas,1), ubound(lat_mpas,1)
-          if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
-            tmp2(gi2,gj2) = lat_mpas(gi2,gj2)
-        end do
-      end do
-      call MPI_Allreduce(tmp2, lat_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, ierr2)
-
-      tmp2 = 0.0_ESMF_KIND_R8
-      do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
-        do gi2 = lbound(taux_mpas,1), ubound(taux_mpas,1)
-          if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
-            tmp2(gi2,gj2) = taux_mpas(gi2,gj2)
-        end do
-      end do
-      call MPI_Allreduce(tmp2, taux_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, ierr2)
-
-      tmp2 = 0.0_ESMF_KIND_R8
-      do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
-        do gi2 = lbound(tauy_mpas,1), ubound(tauy_mpas,1)
-          if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
-            tmp2(gi2,gj2) = tauy_mpas(gi2,gj2)
-        end do
-      end do
-      call MPI_Allreduce(tmp2, tauy_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, ierr2)
-
-      call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
-      call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr_evap, rc=rc)
-      call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr_taux, rc=rc)
-      call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=fptr_tauy, rc=rc)
+      ! Helper macro: aplicar mascara em cada fluxo
+      call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=p_taux,  rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_taux))  &
+        where (land_mask) p_taux  = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=p_tauy,  rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_tauy))  &
+        where (land_mask) p_tauy  = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen,   rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_sen))   &
+        where (land_mask) p_sen   = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=p_evap,  rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_evap))  &
+        where (land_mask) p_evap  = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=p_lwnet, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_lwnet)) &
+        where (land_mask) p_lwnet = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=p_swvdr, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_swvdr)) &
+        where (land_mask) p_swvdr = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_swvdf_atm, farrayPtr=p_swvdf, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_swvdf)) &
+        where (land_mask) p_swvdf = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_swidr_atm, farrayPtr=p_swidr, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_swidr)) &
+        where (land_mask) p_swidr = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_swidf_atm, farrayPtr=p_swidf, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_swidf)) &
+        where (land_mask) p_swidf = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_rain_atm,  farrayPtr=p_rain,  rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_rain))  &
+        where (land_mask) p_rain  = 0.0_ESMF_KIND_R8
+      call ESMF_FieldGet(is%f_snow_atm,  farrayPtr=p_snow,  rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(p_snow))  &
+        where (land_mask) p_snow  = 0.0_ESMF_KIND_R8
       rc = ESMF_SUCCESS
 
-      if (associated(fptr_sen) .and. associated(fptr_evap) .and. &
-          associated(fptr_taux) .and. associated(fptr_tauy)) then
-        do jj = lbound(fptr_sen,2), ubound(fptr_sen,2)
-          do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
-            if (ii >= 1 .and. ii <= NXG2 .and. jj >= 1 .and. jj <= NYG2) then
-              ! so sobrescreve onde ha dado nativo real (fora do fill=0
-              ! dos PETs sem tile MONAN-A local — mesmo criterio BUG-CALC-08)
-              if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
-                fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
-                fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s
-                fptr_taux(ii,jj) = taux_g2(ii,jj)
-                fptr_tauy(ii,jj) = tauy_g2(ii,jj)
+      ! Log diagnostico
+        write(logmsg, '(A,I0,A)') &
+          'MED Sprint A.5.1: fluxos zerados em ', n_land_masked, &
+          ' celulas de terra (mascara real So_omask, ver B-LANDMASK-01)'
+        call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+
+      deallocate(land_mask)
+    end if
+  end subroutine zero_fluxes_over_land
+
+  subroutine regrid_land_mask(is, importState)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field) :: omask_src_field
+    integer :: rc_lm
+
+    call ESMF_StateGet(importState, itemName="So_omask", &
+      field=omask_src_field, rc=rc_lm)
+    if (rc_lm == ESMF_SUCCESS) then
+      call is%regrid%add('ocn2atm_landmask', regrid_spec('nearest_stod'), &
+        omask_src_field, is%f_omask_atm, rc_lm)
+      if (rc_lm == ESMF_SUCCESS) then
+        call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%f_omask_atm, rc_lm, &
+          zero_total=.false.)
+        call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
+          ESMF_LOGMSG_INFO)
+      else
+        ! is%f_omask_atm continua 1.0 (tudo oceano)
+        call ESMF_LogWrite('MED: falha no regrid da mascara So_omask; ' // &
+          'mantido tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
+      end if
+    else
+      call ESMF_LogWrite('MED B-LANDMASK-01: So_omask indisponivel -- ' // &
+        'mantendo fallback tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
+    end if
+    is%landmask_done = .true.
+  end subroutine regrid_land_mask
+
+  subroutine substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
+    type(MED_InternalState), pointer :: is
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)
+    real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)
+    real(ESMF_KIND_R8), pointer :: taux_mpas(:,:)
+    real(ESMF_KIND_R8), pointer :: tauy_mpas(:,:)
+    real(ESMF_KIND_R8), allocatable :: sen_g2(:,:), lat_g2(:,:)
+    real(ESMF_KIND_R8), allocatable :: taux_g2(:,:), tauy_g2(:,:), tmp2(:,:)
+    real(ESMF_KIND_R8), pointer     :: fptr_sen(:,:), fptr_evap(:,:)
+    real(ESMF_KIND_R8), pointer     :: fptr_taux(:,:), fptr_tauy(:,:)
+    integer :: gi2, gj2, ierr2, ii, jj
+    integer, parameter :: NXG2 = 360, NYG2 = 180
+
+    nullify(fptr_sen, fptr_evap, fptr_taux, fptr_tauy)
+    allocate(sen_g2(NXG2,NYG2), lat_g2(NXG2,NYG2))
+    allocate(taux_g2(NXG2,NYG2), tauy_g2(NXG2,NYG2), tmp2(NXG2,NYG2))
+
+    ! Gather global (mesmo padrao BUG-CALC-08: SUM com tiles disjuntos)
+    tmp2 = 0.0_ESMF_KIND_R8
+    do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
+      do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
+        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+          tmp2(gi2,gj2) = sen_mpas(gi2,gj2)
+      end do
+    end do
+    call MPI_Allreduce(tmp2, sen_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+      MPI_SUM, med_mpi_comm, ierr2)
+
+    tmp2 = 0.0_ESMF_KIND_R8
+    do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
+      do gi2 = lbound(lat_mpas,1), ubound(lat_mpas,1)
+        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+          tmp2(gi2,gj2) = lat_mpas(gi2,gj2)
+      end do
+    end do
+    call MPI_Allreduce(tmp2, lat_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+      MPI_SUM, med_mpi_comm, ierr2)
+
+    tmp2 = 0.0_ESMF_KIND_R8
+    do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
+      do gi2 = lbound(taux_mpas,1), ubound(taux_mpas,1)
+        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+          tmp2(gi2,gj2) = taux_mpas(gi2,gj2)
+      end do
+    end do
+    call MPI_Allreduce(tmp2, taux_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+      MPI_SUM, med_mpi_comm, ierr2)
+
+    tmp2 = 0.0_ESMF_KIND_R8
+    do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
+      do gi2 = lbound(tauy_mpas,1), ubound(tauy_mpas,1)
+        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+          tmp2(gi2,gj2) = tauy_mpas(gi2,gj2)
+      end do
+    end do
+    call MPI_Allreduce(tmp2, tauy_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+      MPI_SUM, med_mpi_comm, ierr2)
+
+    call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
+    call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr_evap, rc=rc)
+    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr_taux, rc=rc)
+    call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=fptr_tauy, rc=rc)
+    rc = ESMF_SUCCESS
+
+    if (associated(fptr_sen) .and. associated(fptr_evap) .and. &
+        associated(fptr_taux) .and. associated(fptr_tauy)) then
+      do jj = lbound(fptr_sen,2), ubound(fptr_sen,2)
+        do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
+          if (ii >= 1 .and. ii <= NXG2 .and. jj >= 1 .and. jj <= NYG2) then
+            ! so sobrescreve onde ha dado nativo real (fora do fill=0
+            ! dos PETs sem tile MONAN-A local — mesmo criterio BUG-CALC-08)
+            if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
+              fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
+              fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s
+              fptr_taux(ii,jj) = taux_g2(ii,jj)
+              fptr_tauy(ii,jj) = tauy_g2(ii,jj)
+            end if
+          end if
+        end do
+      end do
+    end if
+
+    deallocate(sen_g2, lat_g2, taux_g2, tauy_g2, tmp2)
+  end subroutine substitute_native_fluxes
+
+  subroutine update_ice_fields_on_atm_grid(is, importState)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field) :: f_ifrac_src, f_avsdr_src, f_avsdf_src
+    type(ESMF_Field) :: f_anidr_src, f_anidf_src, f_tice_src
+    integer :: rc_ice
+    real(ESMF_KIND_R8), pointer :: p_ifrac_out(:,:), p_vdr_out(:,:)
+    real(ESMF_KIND_R8), pointer :: p_vdf_out(:,:), p_idr_out(:,:)
+    real(ESMF_KIND_R8), pointer :: p_idf_out(:,:), p_tice_out(:,:)
+    integer :: rc_nfe
+    real(ESMF_KIND_R8), pointer :: omask_src(:,:)
+    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
+    type(ESMF_Field) :: omask_field
+    integer :: lde_s
+    integer :: ldec_ocn
+    integer :: rc_omask
+    integer :: rc_store
+    integer :: n_land_ice
+    integer :: n_sea_ice
+    character(len=200) :: diag_msg_mask
+    real(ESMF_KIND_R8), pointer :: p_ifrac_in(:,:)
+    character(len=300) :: diag_msg_src
+    integer :: rc_src
+    integer :: rc_bs
+    real(ESMF_KIND_R8), pointer :: p_ifrac_dst(:,:)
+    character(len=300) :: diag_msg_dst
+    integer :: rc_dst
+    integer :: n_sent
+    real(ESMF_KIND_R8), pointer :: p_ifrac_raw(:,:)
+    character(len=250) :: diag_msg_raw
+    integer :: n_exact_zero
+    integer :: n_total
+    real(ESMF_KIND_R8), parameter :: LAT_MAX_GELO = 55.0_ESMF_KIND_R8
+    integer, parameter :: NXG_GEO = 360
+    integer, parameter :: NYG_GEO = 180
+    integer :: ii_geo
+    integer :: jj_geo
+    integer :: n_bad_geo
+    real(ESMF_KIND_R8) :: lat_bad
+    real(ESMF_KIND_R8) :: lon_bad
+    real(ESMF_KIND_R8) :: val_bad
+    character(len=250) :: diag_msg_geo
+    real(ESMF_KIND_R8) :: lat_here
+    real(ESMF_KIND_R8) :: lon_here
+
+    call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
+      field=f_ifrac_src, rc=rc_ice)
+
+    ! ── FIX B-ICEREGRID-01: criar rh_ocn2atm_ice uma unica vez ────────
+    ! Reusa a mascara de is%ocn_grid (So_omask, 1=oceano/0=terra) ja
+    ! populada pelo bloco de So_t acima (rh_ocn2atm_sst) — idempotente
+    ! se chamado de novo aqui, garantindo independencia de ordem.
+    if (.not. is%regrid%has('ocn2atm_ice') .and. rc_ice == ESMF_SUCCESS) then
+        n_land_ice = 0; n_sea_ice = 0
+        call ESMF_StateGet(importState, itemName="So_omask", &
+          field=omask_field, rc=rc_omask)
+        if (rc_omask == ESMF_SUCCESS) then
+          call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc_store)
+          if (rc_store == ESMF_SUCCESS) then
+            do lde_s = 0, ldec_ocn - 1
+              call ESMF_FieldGet(omask_field, localDe=lde_s, &
+                farrayPtr=omask_src, rc=rc_store)
+              if (rc_store /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
+              call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+                staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
+                farrayPtr=maskptr, rc=rc_store)
+              if (rc_store == ESMF_SUCCESS .and. associated(maskptr)) then
+                maskptr = nint(omask_src)
+                ! FIX-DIAG-ICEMASK-01: conta terra/oceano vistos por
+                ! ESTE PET, para confirmar que So_omask foi de fato
+                ! encontrada e tem uma mistura sensata dos dois
+                ! valores (nao tudo-terra nem tudo-oceano por engano).
+                n_land_ice = n_land_ice + count(maskptr == 0)
+                n_sea_ice  = n_sea_ice  + count(maskptr == 1)
               end if
+            end do
+          end if
+        end if
+        if (cfg_write_fixdiag) then
+            write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
+              'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
+              (rc_omask == ESMF_SUCCESS), ' n_land=', n_land_ice, &
+              ' n_sea=', n_sea_ice
+            call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
+        end if
+        ! FIX B-CONSERVE-05 (Set/2026): CONSERVE REATIVADO. O
+        ! B-CONSERVE-04 revertera para BILINEAR suspeitando de
+        ! desalinhamento de indice canto<->centro por DE, mas ficou
+        ! confirmado depois (usuario relatou e checamos) que a mesma
+        ! mancha geografica implausivel JA' EXISTIA antes do CONSERVE
+        ! entrar em cena -- ou seja, a causa nao era o metodo de
+        ! regrid. A causa real era o alcance sem limite de
+        ! NeighborFillExtrapolate (corrigido em B-NEIGHBORFILL-02),
+        ! que "vazava" valor real de gelo por dezenas de graus de
+        ! distancia atraves de qualquer regiao invalida grande —
+        ! acontecia igual com BILINEAR ou CONSERVE por baixo, porque
+        ! a extrapolacao roda DEPOIS do regrid, como pos-processamento
+        ! independente do metodo. Com a causa raiz corrigida,
+        ! reativa CONSERVE (fisica de conservacao de area, mais
+        ! apropriado para fracao de gelo que bilinear pontual).
+        call is%regrid%add('ocn2atm_ice', regrid_spec('conserve,bilinear', mask_src=.true.), &
+          f_ifrac_src, is%f_ifrac_atm, rc_store, fallback='ocn2atm')
+    end if
+
+    ! ── FIX B-ICEREGRID-02: sentinela fora da faixa valida + ─────────
+    ! zeroregion=ESMF_REGION_SELECT em vez de ESMF_REGION_TOTAL.
+    ! Causa raiz confirmada por FIX-DIAG-ICEMASK-02: com REGION_TOTAL,
+    ! TODA celula nao-mapeada pelo regrid mascarado (bilinear perto do
+    ! fold tripolar, onde o stencil de 4 vizinhos frequentemente nao
+    ! fecha) virava 0,0 — um valor DENTRO da faixa valida [0,1], que a
+    ! NeighborFillExtrapolate nunca detectava como invalido (~42-52%
+    ! do dominio nos PETs polares, contra uma fisica real de SIS2
+    ! saudavel confirmada por FIX-DIAG-FASTSYNC-01). REGION_SELECT so'
+    ! escreve onde o regrid de fato mapeou algo, deixando o sentinela
+    ! (fora de [0,1]) nas demais — agora sim detectavel e corrigivel
+    ! pela extrapolacao de vizinhanca que ja existia.
+    call FillInternalField(is%f_ifrac_atm,   -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%f_alb_vdr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%f_alb_vdf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%f_alb_idr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%f_alb_idf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%f_tice_atm,     -999.0_ESMF_KIND_R8, rc_ice)
+
+    !--------------------------------------------------------------------
+    ! FIX-DIAG-ICESRC-01 (Set/2026): o campo de ORIGEM, antes do regrid.
+    !
+    ! PARA QUE SERVE. A bateria de 18/09/2026 localizou a divergencia
+    ! entre duas etapas: a mascara do regrid do gelo e' IDENTICA nas
+    ! quatro execucoes (n_land=45 n_sea=355), e o ifrac de DESTINO, medido
+    ! pelo FIX-DIAG-ICEMASK-02 logo apos o regrid e antes da
+    ! extrapolacao, JA' diverge. Faltava saber de que lado da seta esta' a
+    ! origem: se o Si_ifrac_sis2 que o SIS2 entrega ja' difere, o regrid
+    ! e' mensageiro e o alvo e' o gelo; se ele e' identico e o destino
+    ! difere, o alvo e' o regrid CONSERVE mascarado. Nao havia nenhum
+    ! diagnostico do lado da origem: o FIX-DIAG-SPRINTB2-01, apesar do
+    ! nome sugestivo, imprime f_ifrac_atm, que e' o DESTINO.
+    !
+    ! FORMATO. Quinze digitos significativos, e nao os quatro do
+    ! ICEMASK-02. Com quatro digitos a divergencia so' apareceu na 12a
+    ! troca de acoplamento, o que sugeria acumulo gradual; com quinze,
+    ! sabe-se se ela comeca antes e estava apenas escondida pelo
+    ! arredondamento da impressao. A SOMA global entra porque min e max
+    ! nao detectam divergencia no meio da distribuicao.
+    !
+    ! ESCOPO. p_ifrac_in aponta para a fatia do DE local, entao os
+    ! valores sao locais ao PET, nao globais. Divergencia aqui e'
+    ! conclusiva; ausencia de divergencia neste PET nao exclui
+    ! divergencia em outro, e os PETs polares sao os que importam para
+    ! gelo. Comparar o mesmo PET entre execucoes, nunca PETs diferentes.
+    !
+    ! CUSTO. Tres reducoes locais sobre um campo 2D, uma vez por troca de
+    ! acoplamento, atras de cfg_write_fixdiag. Nao altera comportamento.
+    !--------------------------------------------------------------------
+    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+        call ESMF_FieldGet(f_ifrac_src, farrayPtr=p_ifrac_in, rc=rc_src)
+        if (rc_src == ESMF_SUCCESS .and. associated(p_ifrac_in)) then
+          write(diag_msg_src,'(A,ES24.16,A,ES24.16,A,ES24.16,A,I0)') &
+            'FIX-DIAG-ICESRC-01: Si_ifrac_sis2 (ORIGEM, pre-regrid)' // &
+            ' min=', minval(p_ifrac_in), &
+            ' max=', maxval(p_ifrac_in), &
+            ' soma=', sum(p_ifrac_in),   &
+            ' n_local=', size(p_ifrac_in)
+          call ESMF_LogWrite(trim(diag_msg_src), ESMF_LOGMSG_INFO)
+        else
+          call ESMF_LogWrite('FIX-DIAG-ICESRC-01: farrayPtr de ' // &
+            'Si_ifrac_sis2 indisponivel; origem NAO medida', &
+            ESMF_LOGMSG_WARNING)
+        end if
+    end if
+
+    ! FIX-DIAG-BITSUM-01 (etapa 1 de 4): checksum exato, por PET, da
+    ! ORIGEM (Si_ifrac_sis2 na grade do oceano), antes do regrid.
+    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+        call diag_bitsum_log('etapa1 Si_ifrac_sis2 ORIGEM pre-regrid', &
+                             f_ifrac_src, rc_bs)
+    end if
+
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%f_ifrac_atm, rc_ice, &
+        zero_total=.false.)
+
+    !--------------------------------------------------------------------
+    ! FIX-DIAG-ICESRC-02: o campo de DESTINO com quinze digitos.
+    !
+    ! Par do ICESRC-01, medido no mesmo instante e no mesmo PET, logo
+    ! apos o regrid e antes da extrapolacao. Existe porque o
+    ! FIX-DIAG-ICEMASK-02, que mede o mesmo ponto, imprime quatro
+    ! digitos e por isso nao permite comparar origem e destino na mesma
+    ! precisao. Mantido separado do ICEMASK-02 para nao alterar o formato
+    ! de um diagnostico que ja' tem historico de leitura.
+    !--------------------------------------------------------------------
+    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+        call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_dst, rc=rc_dst)
+        if (rc_dst == ESMF_SUCCESS .and. associated(p_ifrac_dst)) then
+          ! A sentinela -999 marca celula nao mapeada pelo regrid; ela
+          ! domina min e soma, entao entra contada a parte para que o
+          ! numero de nao mapeadas seja comparavel entre execucoes.
+          n_sent = count(p_ifrac_dst < -900.0_ESMF_KIND_R8)
+          write(diag_msg_dst,'(A,ES24.16,A,ES24.16,A,I0,A,I0)') &
+            'FIX-DIAG-ICESRC-02: f_ifrac_atm (DESTINO, pos-regrid)' // &
+            ' max=', maxval(p_ifrac_dst), &
+            ' soma_validos=', &
+            sum(p_ifrac_dst, mask=(p_ifrac_dst > -900.0_ESMF_KIND_R8)), &
+            ' n_sentinela=', n_sent, &
+            ' n_local=', size(p_ifrac_dst)
+          call ESMF_LogWrite(trim(diag_msg_dst), ESMF_LOGMSG_INFO)
+        end if
+    end if
+
+    ! FIX-DIAG-BITSUM-01 (etapa 2 de 4): f_ifrac_atm logo apos o regrid,
+    ! antes da extrapolacao (celulas nao mapeadas ainda com -999).
+    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
+        call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
+                             is%f_ifrac_atm, rc_bs)
+    end if
+
+    ! FIX-DIAG-ICEMASK-02: ifrac LOGO APOS o regrid bruto, ANTES da
+    ! extrapolacao — conta celulas exatamente = 0.0 (candidato a
+    ! "nao mapeado, zerado pelo zeroregion=TOTAL") separado de
+    ! celulas com ifrac realmente pequeno mas nao-zero. Se
+    ! n_exact_zero for uma fracao grande do total aqui, o problema
+    ! esta' no regrid/mascara, nao na fisica do SIS2 (que ja' foi
+    ! confirmada saudavel via FIX-DIAG-FASTSYNC-01).
+    if (cfg_write_fixdiag) then
+        call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_raw, rc=rc_ice)
+        if (associated(p_ifrac_raw)) then
+          n_exact_zero = count(p_ifrac_raw == 0.0_ESMF_KIND_R8)
+          n_total = size(p_ifrac_raw)
+          write(diag_msg_raw,'(A,ES10.3,A,ES10.3,A,I0,A,I0)') &
+            'FIX-DIAG-ICEMASK-02: ifrac (bruto, pre-extrapolacao) min=', &
+            minval(p_ifrac_raw), ' max=', maxval(p_ifrac_raw), &
+            ' | n_exact_zero=', n_exact_zero, ' de n_total=', n_total
+          call ESMF_LogWrite(trim(diag_msg_raw), ESMF_LOGMSG_INFO)
+        end if
+        rc_ice = ESMF_SUCCESS
+    end if
+
+    call ESMF_StateGet(importState, itemName="Si_avsdr_sis2", &
+      field=f_avsdr_src, rc=rc_ice)
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_avsdr_src, is%f_alb_vdr_ice, rc_ice, &
+        zero_total=.false.)
+
+    call ESMF_StateGet(importState, itemName="Si_avsdf_sis2", &
+      field=f_avsdf_src, rc=rc_ice)
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_avsdf_src, is%f_alb_vdf_ice, rc_ice, &
+        zero_total=.false.)
+
+    call ESMF_StateGet(importState, itemName="Si_anidr_sis2", &
+      field=f_anidr_src, rc=rc_ice)
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_anidr_src, is%f_alb_idr_ice, rc_ice, &
+        zero_total=.false.)
+
+    call ESMF_StateGet(importState, itemName="Si_anidf_sis2", &
+      field=f_anidf_src, rc=rc_ice)
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_anidf_src, is%f_alb_idf_ice, rc_ice, &
+        zero_total=.false.)
+
+    ! Fase 3 (B-ICE-FLUX-DIFF-01)
+    call ESMF_StateGet(importState, itemName="Si_t_sis2", &
+      field=f_tice_src, rc=rc_ice)
+    if (rc_ice == ESMF_SUCCESS) &
+      call is%regrid%apply('ocn2atm_ice', f_tice_src, is%f_tice_atm, rc_ice, &
+        zero_total=.false.)
+
+    ! ── FIX B-ICEREGRID-01: extrapolacao por vizinhanca pos-regrid ────
+    ! Fecha buracos/costura na regiao de deformacao tripolar, mesmo
+    ! algoritmo validado para So_t (NeighborFillExtrapolate), com
+    ! faixa fisica valida e fallback proprios de cada campo.
+    call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_ifrac_out, rc=rc_nfe)
+    if (associated(p_ifrac_out)) &
+      call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
+
+    ! FIX-DIAG-BITSUM-01 (etapa 3 de 4): f_ifrac_atm depois da
+    ! extrapolacao por vizinhanca.
+    if (cfg_write_fixdiag) then
+        call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
+                             is%f_ifrac_atm, rc_bs)
+    end if
+
+    ! FIX-DIAG-ICEGEO-01 (Set/2026): checagem de plausibilidade fisica
+    ! independente de qual PET/componente e' dono de qual pedaco do
+    ! dominio (a correspondencia PET<->geografia entre ICE/MED sob
+    ! coupling_mode=concurrent + pet_layout=split se mostrou nao-trivial
+    ! de inferir so' pelo numero do PET — ver conversa). Em vez de
+    ! adivinhar, calcula lat/lon REAL (formula analitica da grade ATM
+    ! 360x180, mesma usada em toda parte do arquivo) de qualquer
+    ! celula com ifrac>0.05 fora da faixa |lat|<55 graus — limite
+    ! generoso, pois gelo marinho real (Artico OU Antartico) nunca
+    ! chega perto disso em nenhuma epoca do ano. Reporta a PRIMEIRA
+    ! ocorrencia encontrada por PET, com a coordenada exata, para
+    ! localizar o artefato sem depender de suposicao de PET.
+    if (cfg_write_fixdiag .and. associated(p_ifrac_out)) then
+        n_bad_geo = 0; lat_bad = -999.0_ESMF_KIND_R8
+        lon_bad = -999.0_ESMF_KIND_R8; val_bad = -999.0_ESMF_KIND_R8
+        do jj_geo = lbound(p_ifrac_out,2), ubound(p_ifrac_out,2)
+          do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
+            if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
+                lon_here = (real(ii_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
+                           (360.0_ESMF_KIND_R8/NXG_GEO) + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/NXG_GEO)
+                lat_here = -90.0_ESMF_KIND_R8 + (real(jj_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
+                           (180.0_ESMF_KIND_R8/NYG_GEO) + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/NYG_GEO)
+                if (abs(lat_here) < LAT_MAX_GELO) then
+                  n_bad_geo = n_bad_geo + 1
+                  if (lat_bad < -900.0_ESMF_KIND_R8) then
+                    lat_bad = lat_here; lon_bad = lon_here
+                    val_bad = p_ifrac_out(ii_geo,jj_geo)
+                  end if
+                end if
             end if
           end do
         end do
-      end if
+        if (n_bad_geo > 0) then
+          write(diag_msg_geo,'(A,I0,A,ES10.3,A,ES10.3,A,ES10.3)') &
+            'FIX-DIAG-ICEGEO-01: ALERTA -- ', n_bad_geo, &
+            ' celula(s) com ifrac>0,05 em |lat|<55 (implausivel). ' // &
+            'Primeira ocorrencia: lat=', lat_bad, ' lon=', lon_bad, &
+            ' ifrac=', val_bad
+          call ESMF_LogWrite(trim(diag_msg_geo), ESMF_LOGMSG_WARNING)
+        end if
+    end if
 
-      deallocate(sen_g2, lat_g2, taux_g2, tauy_g2, tmp2)
-    end subroutine substitute_native_fluxes
+    call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr_out, rc=rc_nfe)
+    if (associated(p_vdr_out)) &
+      call neighbor_fill(p_vdr_out, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
 
-    subroutine update_ice_fields_on_atm_grid()
-      type(ESMF_Field) :: f_ifrac_src, f_avsdr_src, f_avsdf_src
-      type(ESMF_Field) :: f_anidr_src, f_anidf_src, f_tice_src
-      integer :: rc_ice
-      real(ESMF_KIND_R8), pointer :: p_ifrac_out(:,:), p_vdr_out(:,:)
-      real(ESMF_KIND_R8), pointer :: p_vdf_out(:,:), p_idr_out(:,:)
-      real(ESMF_KIND_R8), pointer :: p_idf_out(:,:), p_tice_out(:,:)
-      integer :: rc_nfe
-          real(ESMF_KIND_R8), pointer :: omask_src(:,:)
-          integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-          type(ESMF_Field) :: omask_field
-          integer :: lde_s
-          integer :: ldec_ocn
-          integer :: rc_omask
-          integer :: rc_store
-          integer :: n_land_ice
-          integer :: n_sea_ice
-          character(len=200) :: diag_msg_mask
-          real(ESMF_KIND_R8), pointer :: p_ifrac_in(:,:)
-          character(len=300) :: diag_msg_src
-          integer :: rc_src
-          integer :: rc_bs
-          real(ESMF_KIND_R8), pointer :: p_ifrac_dst(:,:)
-          character(len=300) :: diag_msg_dst
-          integer :: rc_dst
-          integer :: n_sent
-          real(ESMF_KIND_R8), pointer :: p_ifrac_raw(:,:)
-          character(len=250) :: diag_msg_raw
-          integer :: n_exact_zero
-          integer :: n_total
-          real(ESMF_KIND_R8), parameter :: LAT_MAX_GELO = 55.0_ESMF_KIND_R8
-          integer, parameter :: NXG_GEO = 360
-          integer, parameter :: NYG_GEO = 180
-          integer :: ii_geo
-          integer :: jj_geo
-          integer :: n_bad_geo
-          real(ESMF_KIND_R8) :: lat_bad
-          real(ESMF_KIND_R8) :: lon_bad
-          real(ESMF_KIND_R8) :: val_bad
-          character(len=250) :: diag_msg_geo
-          real(ESMF_KIND_R8) :: lat_here
-          real(ESMF_KIND_R8) :: lon_here
+    call ESMF_FieldGet(is%f_alb_vdf_ice, farrayPtr=p_vdf_out, rc=rc_nfe)
+    if (associated(p_vdf_out)) &
+      call neighbor_fill(p_vdf_out, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
 
-      call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
-        field=f_ifrac_src, rc=rc_ice)
+    call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=p_idr_out, rc=rc_nfe)
+    if (associated(p_idr_out)) &
+      call neighbor_fill(p_idr_out, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
 
-      ! ── FIX B-ICEREGRID-01: criar rh_ocn2atm_ice uma unica vez ────────
-      ! Reusa a mascara de is%ocn_grid (So_omask, 1=oceano/0=terra) ja
-      ! populada pelo bloco de So_t acima (rh_ocn2atm_sst) — idempotente
-      ! se chamado de novo aqui, garantindo independencia de ordem.
-      if (.not. is%regrid%has('ocn2atm_ice') .and. rc_ice == ESMF_SUCCESS) then
-          n_land_ice = 0; n_sea_ice = 0
-          call ESMF_StateGet(importState, itemName="So_omask", &
-            field=omask_field, rc=rc_omask)
-          if (rc_omask == ESMF_SUCCESS) then
-            call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc_store)
-            if (rc_store == ESMF_SUCCESS) then
-              do lde_s = 0, ldec_ocn - 1
-                call ESMF_FieldGet(omask_field, localDe=lde_s, &
-                  farrayPtr=omask_src, rc=rc_store)
-                if (rc_store /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
-                call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-                  staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-                  farrayPtr=maskptr, rc=rc_store)
-                if (rc_store == ESMF_SUCCESS .and. associated(maskptr)) then
-                  maskptr = nint(omask_src)
-                  ! FIX-DIAG-ICEMASK-01: conta terra/oceano vistos por
-                  ! ESTE PET, para confirmar que So_omask foi de fato
-                  ! encontrada e tem uma mistura sensata dos dois
-                  ! valores (nao tudo-terra nem tudo-oceano por engano).
-                  n_land_ice = n_land_ice + count(maskptr == 0)
-                  n_sea_ice  = n_sea_ice  + count(maskptr == 1)
-                end if
-              end do
-            end if
+    call ESMF_FieldGet(is%f_alb_idf_ice, farrayPtr=p_idf_out, rc=rc_nfe)
+    if (associated(p_idf_out)) &
+      call neighbor_fill(p_idf_out, regrid_fill_t(enabled=.true., &
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
+
+    call ESMF_FieldGet(is%f_tice_atm, farrayPtr=p_tice_out, rc=rc_nfe)
+    if (associated(p_tice_out)) &
+      call neighbor_fill(p_tice_out, regrid_fill_t(enabled=.true., &
+        vmin=180.0_ESMF_KIND_R8, vmax=273.16_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8))
+
+    call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
+      'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &
+      ESMF_LOGMSG_INFO)
+  end subroutine update_ice_fields_on_atm_grid
+
+  !> Preenche a SST na grade ATM onde a interpolação não trouxe valor
+  !! válido (costa, costura tripolar): média dos vizinhos válidos, em até
+  !! 40 passadas; o que sobrar recebe 271,35 K. Valores acima de 310 K
+  !! recebem 271,35 K antes da difusão.
+  subroutine fill_sst_gaps(sst)
+    real(ESMF_KIND_R8), pointer :: sst(:,:)
+    type(regrid_fill_t), parameter :: SST_FILL = regrid_fill_t(enabled=.true.,     &
+    vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8, &
+    max_iter=40, skip_fraction=1.0_ESMF_KIND_R8, overflow_to_fill=.true.)
+    integer :: n_invalid, n_left
+    character(len=120) :: msg
+
+    n_invalid = count(.not. (sst >= SST_FILL%vmin .and. sst <= SST_FILL%vmax) &
+                      .and. .not. (sst > SST_FILL%vmax))
+    call neighbor_fill(sst, SST_FILL, n_left)
+    if (n_invalid > 0) then
+      write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
+        ' celulas (', n_left, ' com valor fixo)'
+      call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    end if
+  end subroutine fill_sst_gaps
+
+  subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field), intent(inout) :: sst_ocn   !< So_t na grade do oceano
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
+    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
+    type(ESMF_Field) :: omask_field
+    integer :: lde_s, n_land, ldec_ocn, n_sea, rc_omask
+    integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
+    type(ESMF_VM) :: vm
+    logical :: got_omask
+    real(ESMF_KIND_R8), pointer :: sst_src(:,:)
+    real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
+
+    call ESMF_VMGetCurrent(vm, rc=rc)
+    n_land = 0; n_sea = 0
+    got_omask = .false.
+
+    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra).
+    call ESMF_StateGet(importState, itemName="So_omask", &
+      field=omask_field, rc=rc_omask)
+    if (rc_omask == ESMF_SUCCESS) then
+      call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
+      if (rc == ESMF_SUCCESS) then
+        do lde_s = 0, ldec_ocn - 1
+          call ESMF_FieldGet(omask_field, localDe=lde_s, &
+            farrayPtr=omask_src, rc=rc)
+          if (rc /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
+          call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+            staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
+            farrayPtr=maskptr, rc=rc)
+          if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
+            ! So_omask: 1=oceano valido, 0=terra (mesma convencao do
+            ! GRIDITEM_MASK aqui: valores em srcMaskValues sao EXCLUIDOS
+            ! da fonte do regrid, logo terra=0 e' o valor a excluir).
+            maskptr = nint(omask_src)
+            n_land = n_land + count(maskptr == 0)
+            n_sea  = n_sea  + count(maskptr == 1)
+            got_omask = .true.
           end if
-          if (cfg_write_fixdiag) then
-              write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
-                'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
-                (rc_omask == ESMF_SUCCESS), ' n_land=', n_land_ice, &
-                ' n_sea=', n_sea_ice
-              call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
-          end if
-          ! FIX B-CONSERVE-05 (Set/2026): CONSERVE REATIVADO. O
-          ! B-CONSERVE-04 revertera para BILINEAR suspeitando de
-          ! desalinhamento de indice canto<->centro por DE, mas ficou
-          ! confirmado depois (usuario relatou e checamos) que a mesma
-          ! mancha geografica implausivel JA' EXISTIA antes do CONSERVE
-          ! entrar em cena -- ou seja, a causa nao era o metodo de
-          ! regrid. A causa real era o alcance sem limite de
-          ! NeighborFillExtrapolate (corrigido em B-NEIGHBORFILL-02),
-          ! que "vazava" valor real de gelo por dezenas de graus de
-          ! distancia atraves de qualquer regiao invalida grande —
-          ! acontecia igual com BILINEAR ou CONSERVE por baixo, porque
-          ! a extrapolacao roda DEPOIS do regrid, como pos-processamento
-          ! independente do metodo. Com a causa raiz corrigida,
-          ! reativa CONSERVE (fisica de conservacao de area, mais
-          ! apropriado para fracao de gelo que bilinear pontual).
-          call is%regrid%add('ocn2atm_ice', regrid_spec('conserve,bilinear', mask_src=.true.), &
-            f_ifrac_src, is%f_ifrac_atm, rc_store, fallback='ocn2atm')
+        end do
       end if
+    else
+      call ESMF_LogWrite( &
+        'MED: So_omask indisponivel no importState - usando ' // &
+        'fallback por limiar de SST (menos confiavel na costa)', &
+        ESMF_LOGMSG_WARNING)
+    end if
 
-      ! ── FIX B-ICEREGRID-02: sentinela fora da faixa valida + ─────────
-      ! zeroregion=ESMF_REGION_SELECT em vez de ESMF_REGION_TOTAL.
-      ! Causa raiz confirmada por FIX-DIAG-ICEMASK-02: com REGION_TOTAL,
-      ! TODA celula nao-mapeada pelo regrid mascarado (bilinear perto do
-      ! fold tripolar, onde o stencil de 4 vizinhos frequentemente nao
-      ! fecha) virava 0,0 — um valor DENTRO da faixa valida [0,1], que a
-      ! NeighborFillExtrapolate nunca detectava como invalido (~42-52%
-      ! do dominio nos PETs polares, contra uma fisica real de SIS2
-      ! saudavel confirmada por FIX-DIAG-FASTSYNC-01). REGION_SELECT so'
-      ! escreve onde o regrid de fato mapeou algo, deixando o sentinela
-      ! (fora de [0,1]) nas demais — agora sim detectavel e corrigivel
-      ! pela extrapolacao de vizinhanca que ja existia.
-      call FillInternalField(is%f_ifrac_atm,   -999.0_ESMF_KIND_R8, rc_ice)
-      call FillInternalField(is%f_alb_vdr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-      call FillInternalField(is%f_alb_vdf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-      call FillInternalField(is%f_alb_idr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-      call FillInternalField(is%f_alb_idf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-      call FillInternalField(is%f_tice_atm,     -999.0_ESMF_KIND_R8, rc_ice)
-
-      !--------------------------------------------------------------------
-      ! FIX-DIAG-ICESRC-01 (Set/2026): o campo de ORIGEM, antes do regrid.
-      !
-      ! PARA QUE SERVE. A bateria de 18/09/2026 localizou a divergencia
-      ! entre duas etapas: a mascara do regrid do gelo e' IDENTICA nas
-      ! quatro execucoes (n_land=45 n_sea=355), e o ifrac de DESTINO, medido
-      ! pelo FIX-DIAG-ICEMASK-02 logo apos o regrid e antes da
-      ! extrapolacao, JA' diverge. Faltava saber de que lado da seta esta' a
-      ! origem: se o Si_ifrac_sis2 que o SIS2 entrega ja' difere, o regrid
-      ! e' mensageiro e o alvo e' o gelo; se ele e' identico e o destino
-      ! difere, o alvo e' o regrid CONSERVE mascarado. Nao havia nenhum
-      ! diagnostico do lado da origem: o FIX-DIAG-SPRINTB2-01, apesar do
-      ! nome sugestivo, imprime f_ifrac_atm, que e' o DESTINO.
-      !
-      ! FORMATO. Quinze digitos significativos, e nao os quatro do
-      ! ICEMASK-02. Com quatro digitos a divergencia so' apareceu na 12a
-      ! troca de acoplamento, o que sugeria acumulo gradual; com quinze,
-      ! sabe-se se ela comeca antes e estava apenas escondida pelo
-      ! arredondamento da impressao. A SOMA global entra porque min e max
-      ! nao detectam divergencia no meio da distribuicao.
-      !
-      ! ESCOPO. p_ifrac_in aponta para a fatia do DE local, entao os
-      ! valores sao locais ao PET, nao globais. Divergencia aqui e'
-      ! conclusiva; ausencia de divergencia neste PET nao exclui
-      ! divergencia em outro, e os PETs polares sao os que importam para
-      ! gelo. Comparar o mesmo PET entre execucoes, nunca PETs diferentes.
-      !
-      ! CUSTO. Tres reducoes locais sobre um campo 2D, uma vez por troca de
-      ! acoplamento, atras de cfg_write_fixdiag. Nao altera comportamento.
-      !--------------------------------------------------------------------
-      if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
-          call ESMF_FieldGet(f_ifrac_src, farrayPtr=p_ifrac_in, rc=rc_src)
-          if (rc_src == ESMF_SUCCESS .and. associated(p_ifrac_in)) then
-            write(diag_msg_src,'(A,ES24.16,A,ES24.16,A,ES24.16,A,I0)') &
-              'FIX-DIAG-ICESRC-01: Si_ifrac_sis2 (ORIGEM, pre-regrid)' // &
-              ' min=', minval(p_ifrac_in), &
-              ' max=', maxval(p_ifrac_in), &
-              ' soma=', sum(p_ifrac_in),   &
-              ' n_local=', size(p_ifrac_in)
-            call ESMF_LogWrite(trim(diag_msg_src), ESMF_LOGMSG_INFO)
-          else
-            call ESMF_LogWrite('FIX-DIAG-ICESRC-01: farrayPtr de ' // &
-              'Si_ifrac_sis2 indisponivel; origem NAO medida', &
-              ESMF_LOGMSG_WARNING)
-          end if
-      end if
-
-      ! FIX-DIAG-BITSUM-01 (etapa 1 de 4): checksum exato, por PET, da
-      ! ORIGEM (Si_ifrac_sis2 na grade do oceano), antes do regrid.
-      if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
-          call diag_bitsum_log('etapa1 Si_ifrac_sis2 ORIGEM pre-regrid', &
-                               f_ifrac_src, rc_bs)
-      end if
-
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%f_ifrac_atm, rc_ice, &
-          zero_total=.false.)
-
-      !--------------------------------------------------------------------
-      ! FIX-DIAG-ICESRC-02: o campo de DESTINO com quinze digitos.
-      !
-      ! Par do ICESRC-01, medido no mesmo instante e no mesmo PET, logo
-      ! apos o regrid e antes da extrapolacao. Existe porque o
-      ! FIX-DIAG-ICEMASK-02, que mede o mesmo ponto, imprime quatro
-      ! digitos e por isso nao permite comparar origem e destino na mesma
-      ! precisao. Mantido separado do ICEMASK-02 para nao alterar o formato
-      ! de um diagnostico que ja' tem historico de leitura.
-      !--------------------------------------------------------------------
-      if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
-          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_dst, rc=rc_dst)
-          if (rc_dst == ESMF_SUCCESS .and. associated(p_ifrac_dst)) then
-            ! A sentinela -999 marca celula nao mapeada pelo regrid; ela
-            ! domina min e soma, entao entra contada a parte para que o
-            ! numero de nao mapeadas seja comparavel entre execucoes.
-            n_sent = count(p_ifrac_dst < -900.0_ESMF_KIND_R8)
-            write(diag_msg_dst,'(A,ES24.16,A,ES24.16,A,I0,A,I0)') &
-              'FIX-DIAG-ICESRC-02: f_ifrac_atm (DESTINO, pos-regrid)' // &
-              ' max=', maxval(p_ifrac_dst), &
-              ' soma_validos=', &
-              sum(p_ifrac_dst, mask=(p_ifrac_dst > -900.0_ESMF_KIND_R8)), &
-              ' n_sentinela=', n_sent, &
-              ' n_local=', size(p_ifrac_dst)
-            call ESMF_LogWrite(trim(diag_msg_dst), ESMF_LOGMSG_INFO)
-          end if
-      end if
-
-      ! FIX-DIAG-BITSUM-01 (etapa 2 de 4): f_ifrac_atm logo apos o regrid,
-      ! antes da extrapolacao (celulas nao mapeadas ainda com -999).
-      if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
-          call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
-                               is%f_ifrac_atm, rc_bs)
-      end if
-
-      ! FIX-DIAG-ICEMASK-02: ifrac LOGO APOS o regrid bruto, ANTES da
-      ! extrapolacao — conta celulas exatamente = 0.0 (candidato a
-      ! "nao mapeado, zerado pelo zeroregion=TOTAL") separado de
-      ! celulas com ifrac realmente pequeno mas nao-zero. Se
-      ! n_exact_zero for uma fracao grande do total aqui, o problema
-      ! esta' no regrid/mascara, nao na fisica do SIS2 (que ja' foi
-      ! confirmada saudavel via FIX-DIAG-FASTSYNC-01).
-      if (cfg_write_fixdiag) then
-          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_raw, rc=rc_ice)
-          if (associated(p_ifrac_raw)) then
-            n_exact_zero = count(p_ifrac_raw == 0.0_ESMF_KIND_R8)
-            n_total = size(p_ifrac_raw)
-            write(diag_msg_raw,'(A,ES10.3,A,ES10.3,A,I0,A,I0)') &
-              'FIX-DIAG-ICEMASK-02: ifrac (bruto, pre-extrapolacao) min=', &
-              minval(p_ifrac_raw), ' max=', maxval(p_ifrac_raw), &
-              ' | n_exact_zero=', n_exact_zero, ' de n_total=', n_total
-            call ESMF_LogWrite(trim(diag_msg_raw), ESMF_LOGMSG_INFO)
-          end if
-          rc_ice = ESMF_SUCCESS
-      end if
-
-      call ESMF_StateGet(importState, itemName="Si_avsdr_sis2", &
-        field=f_avsdr_src, rc=rc_ice)
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_avsdr_src, is%f_alb_vdr_ice, rc_ice, &
-          zero_total=.false.)
-
-      call ESMF_StateGet(importState, itemName="Si_avsdf_sis2", &
-        field=f_avsdf_src, rc=rc_ice)
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_avsdf_src, is%f_alb_vdf_ice, rc_ice, &
-          zero_total=.false.)
-
-      call ESMF_StateGet(importState, itemName="Si_anidr_sis2", &
-        field=f_anidr_src, rc=rc_ice)
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_anidr_src, is%f_alb_idr_ice, rc_ice, &
-          zero_total=.false.)
-
-      call ESMF_StateGet(importState, itemName="Si_anidf_sis2", &
-        field=f_anidf_src, rc=rc_ice)
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_anidf_src, is%f_alb_idf_ice, rc_ice, &
-          zero_total=.false.)
-
-      ! Fase 3 (B-ICE-FLUX-DIFF-01)
-      call ESMF_StateGet(importState, itemName="Si_t_sis2", &
-        field=f_tice_src, rc=rc_ice)
-      if (rc_ice == ESMF_SUCCESS) &
-        call is%regrid%apply('ocn2atm_ice', f_tice_src, is%f_tice_atm, rc_ice, &
-          zero_total=.false.)
-
-      ! ── FIX B-ICEREGRID-01: extrapolacao por vizinhanca pos-regrid ────
-      ! Fecha buracos/costura na regiao de deformacao tripolar, mesmo
-      ! algoritmo validado para So_t (NeighborFillExtrapolate), com
-      ! faixa fisica valida e fallback proprios de cada campo.
-      call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_ifrac_out, rc=rc_nfe)
-      if (associated(p_ifrac_out)) &
-        call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
-
-      ! FIX-DIAG-BITSUM-01 (etapa 3 de 4): f_ifrac_atm depois da
-      ! extrapolacao por vizinhanca.
-      if (cfg_write_fixdiag) then
-          call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
-                               is%f_ifrac_atm, rc_bs)
-      end if
-
-      ! FIX-DIAG-ICEGEO-01 (Set/2026): checagem de plausibilidade fisica
-      ! independente de qual PET/componente e' dono de qual pedaco do
-      ! dominio (a correspondencia PET<->geografia entre ICE/MED sob
-      ! coupling_mode=concurrent + pet_layout=split se mostrou nao-trivial
-      ! de inferir so' pelo numero do PET — ver conversa). Em vez de
-      ! adivinhar, calcula lat/lon REAL (formula analitica da grade ATM
-      ! 360x180, mesma usada em toda parte do arquivo) de qualquer
-      ! celula com ifrac>0.05 fora da faixa |lat|<55 graus — limite
-      ! generoso, pois gelo marinho real (Artico OU Antartico) nunca
-      ! chega perto disso em nenhuma epoca do ano. Reporta a PRIMEIRA
-      ! ocorrencia encontrada por PET, com a coordenada exata, para
-      ! localizar o artefato sem depender de suposicao de PET.
-      if (cfg_write_fixdiag .and. associated(p_ifrac_out)) then
-          n_bad_geo = 0; lat_bad = -999.0_ESMF_KIND_R8
-          lon_bad = -999.0_ESMF_KIND_R8; val_bad = -999.0_ESMF_KIND_R8
-          do jj_geo = lbound(p_ifrac_out,2), ubound(p_ifrac_out,2)
-            do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
-              if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
-                  lon_here = (real(ii_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                             (360.0_ESMF_KIND_R8/NXG_GEO) + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/NXG_GEO)
-                  lat_here = -90.0_ESMF_KIND_R8 + (real(jj_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                             (180.0_ESMF_KIND_R8/NYG_GEO) + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/NYG_GEO)
-                  if (abs(lat_here) < LAT_MAX_GELO) then
-                    n_bad_geo = n_bad_geo + 1
-                    if (lat_bad < -900.0_ESMF_KIND_R8) then
-                      lat_bad = lat_here; lon_bad = lon_here
-                      val_bad = p_ifrac_out(ii_geo,jj_geo)
-                    end if
-                  end if
-              end if
-            end do
-          end do
-          if (n_bad_geo > 0) then
-            write(diag_msg_geo,'(A,I0,A,ES10.3,A,ES10.3,A,ES10.3)') &
-              'FIX-DIAG-ICEGEO-01: ALERTA -- ', n_bad_geo, &
-              ' celula(s) com ifrac>0,05 em |lat|<55 (implausivel). ' // &
-              'Primeira ocorrencia: lat=', lat_bad, ' lon=', lon_bad, &
-              ' ifrac=', val_bad
-            call ESMF_LogWrite(trim(diag_msg_geo), ESMF_LOGMSG_WARNING)
-          end if
-      end if
-
-      call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr_out, rc=rc_nfe)
-      if (associated(p_vdr_out)) &
-        call neighbor_fill(p_vdr_out, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-
-      call ESMF_FieldGet(is%f_alb_vdf_ice, farrayPtr=p_vdf_out, rc=rc_nfe)
-      if (associated(p_vdf_out)) &
-        call neighbor_fill(p_vdf_out, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-
-      call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=p_idr_out, rc=rc_nfe)
-      if (associated(p_idr_out)) &
-        call neighbor_fill(p_idr_out, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-
-      call ESMF_FieldGet(is%f_alb_idf_ice, farrayPtr=p_idf_out, rc=rc_nfe)
-      if (associated(p_idf_out)) &
-        call neighbor_fill(p_idf_out, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-
-      call ESMF_FieldGet(is%f_tice_atm, farrayPtr=p_tice_out, rc=rc_nfe)
-      if (associated(p_tice_out)) &
-        call neighbor_fill(p_tice_out, regrid_fill_t(enabled=.true., &
-          vmin=180.0_ESMF_KIND_R8, vmax=273.16_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8))
-
-      call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
-        'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &
-        ESMF_LOGMSG_INFO)
-    end subroutine update_ice_fields_on_atm_grid
-
-    !> Preenche a SST na grade ATM onde a interpolação não trouxe valor
-    !! válido (costa, costura tripolar): média dos vizinhos válidos, em até
-    !! 40 passadas; o que sobrar recebe 271,35 K. Valores acima de 310 K
-    !! recebem 271,35 K antes da difusão.
-    subroutine fill_sst_gaps()
-      type(regrid_fill_t), parameter :: SST_FILL = regrid_fill_t(enabled=.true.,     &
-        vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8, &
-        max_iter=40, skip_fraction=1.0_ESMF_KIND_R8, overflow_to_fill=.true.)
-      integer :: n_invalid, n_left
-      character(len=120) :: msg
-
-      n_invalid = count(.not. (sst >= SST_FILL%vmin .and. sst <= SST_FILL%vmax) &
-                        .and. .not. (sst > SST_FILL%vmax))
-      call neighbor_fill(sst, SST_FILL, n_left)
-      if (n_invalid > 0) then
-        write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
-          ' celulas (', n_left, ' com valor fixo)'
-        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-      end if
-    end subroutine fill_sst_gaps
-
-    subroutine set_ocean_mask_for_sst()
-      real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
-      integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-      type(ESMF_Field) :: omask_field
-      integer :: lde_s, n_land, ldec_ocn, n_sea, rc_omask
-      integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
-      type(ESMF_VM) :: vm
-      logical :: got_omask
-          real(ESMF_KIND_R8), pointer :: sst_src(:,:)
-          real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
-      call ESMF_VMGetCurrent(vm, rc=rc)
-      n_land = 0; n_sea = 0
-      got_omask = .false.
-
-      ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra).
-      call ESMF_StateGet(importState, itemName="So_omask", &
-        field=omask_field, rc=rc_omask)
-      if (rc_omask == ESMF_SUCCESS) then
+    ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
+    ! realizado): mantem o comportamento antigo em vez de travar.
+    if (.not. got_omask) then
+        n_land = 0; n_sea = 0
         call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
         if (rc == ESMF_SUCCESS) then
           do lde_s = 0, ldec_ocn - 1
-            call ESMF_FieldGet(omask_field, localDe=lde_s, &
-              farrayPtr=omask_src, rc=rc)
-            if (rc /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
+            call ESMF_FieldGet(sst_ocn, localDe=lde_s, farrayPtr=sst_src, rc=rc)
+            if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
             call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
               staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
               farrayPtr=maskptr, rc=rc)
             if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
-              ! So_omask: 1=oceano valido, 0=terra (mesma convencao do
-              ! GRIDITEM_MASK aqui: valores em srcMaskValues sao EXCLUIDOS
-              ! da fonte do regrid, logo terra=0 e' o valor a excluir).
-              maskptr = nint(omask_src)
+              where (sst_src < LAND_FILL_MAX)
+                maskptr = 0
+              elsewhere
+                maskptr = 1
+              end where
               n_land = n_land + count(maskptr == 0)
               n_sea  = n_sea  + count(maskptr == 1)
-              got_omask = .true.
             end if
           end do
         end if
-      else
-        call ESMF_LogWrite( &
-          'MED: So_omask indisponivel no importState - usando ' // &
-          'fallback por limiar de SST (menos confiavel na costa)', &
-          ESMF_LOGMSG_WARNING)
-      end if
+    end if
 
-      ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
-      ! realizado): mantem o comportamento antigo em vez de travar.
-      if (.not. got_omask) then
-          n_land = 0; n_sea = 0
-          call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
-          if (rc == ESMF_SUCCESS) then
-            do lde_s = 0, ldec_ocn - 1
-              call ESMF_FieldGet(field, localDe=lde_s, farrayPtr=sst_src, rc=rc)
-              if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
-              call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-                staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-                farrayPtr=maskptr, rc=rc)
-              if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
-                where (sst_src < LAND_FILL_MAX)
-                  maskptr = 0
-                elsewhere
-                  maskptr = 1
-                end where
-                n_land = n_land + count(maskptr == 0)
-                n_sea  = n_sea  + count(maskptr == 1)
-              end if
-            end do
-          end if
-      end if
+    n_land_s(1) = n_land; n_sea_s(1) = n_sea
+    call ESMF_VMAllReduce(vm, n_land_s, n_land_g, 1, ESMF_REDUCE_SUM, rc=rc)
+    if (rc /= ESMF_SUCCESS) n_land_g(1) = n_land
+    call ESMF_VMAllReduce(vm, n_sea_s,  n_sea_g,  1, ESMF_REDUCE_SUM, rc=rc)
+    if (rc /= ESMF_SUCCESS) n_sea_g(1) = n_sea
+    if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
+      ! Máscara ainda uniforme (bootstrap): So_t usa a rota ocn2atm neste
+      ! passo e a rota mascarada é tentada de novo no próximo.
+      call ESMF_LogWrite('MED: mascara oceanica uniforme, rota ocn2atm_sst adiada', &
+        ESMF_LOGMSG_INFO)
+    else
+      ! Conservativo contorna a deformação da costura tripolar; bilinear
+      ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
+      call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.true.), &
+        sst_ocn, is%f_sst_atm, rc, fallback='ocn2atm')
+    end if
+  end subroutine set_ocean_mask_for_sst
 
-      n_land_s(1) = n_land; n_sea_s(1) = n_sea
-      call ESMF_VMAllReduce(vm, n_land_s, n_land_g, 1, ESMF_REDUCE_SUM, rc=rc)
-      if (rc /= ESMF_SUCCESS) n_land_g(1) = n_land
-      call ESMF_VMAllReduce(vm, n_sea_s,  n_sea_g,  1, ESMF_REDUCE_SUM, rc=rc)
-      if (rc /= ESMF_SUCCESS) n_sea_g(1) = n_sea
-      if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
-        ! Máscara ainda uniforme (bootstrap): So_t usa a rota ocn2atm neste
-        ! passo e a rota mascarada é tentada de novo no próximo.
-        call ESMF_LogWrite('MED: mascara oceanica uniforme, rota ocn2atm_sst adiada', &
-          ESMF_LOGMSG_INFO)
-      else
-        ! Conservativo contorna a deformação da costura tripolar; bilinear
-        ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
-        call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.true.), &
-          field, is%f_sst_atm, rc, fallback='ocn2atm')
-      end if
-    end subroutine set_ocean_mask_for_sst
+  subroutine log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
+    integer, parameter :: NY_G = 180
+    integer, parameter :: NX_G = 360
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: uas_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: tas_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: psl_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: swdn_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: vas_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: shum_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: rain_g(:,:)
+    real(ESMF_KIND_R8), allocatable, target, intent(in) :: lwdn_g(:,:)
+    integer :: my_pet, n_nz_uas, n_nz_psl, n_nz_swdn, n_nz_tas
+    type(ESMF_VM) :: diag_vm
+    logical, save :: first_call_diag = .true.
 
-    subroutine log_atm_forcing_summary()
-      integer :: my_pet, n_nz_uas, n_nz_psl, n_nz_swdn, n_nz_tas
-      type(ESMF_VM) :: diag_vm
-      logical, save :: first_call_diag = .true.
-      call ESMF_VMGetCurrent(diag_vm, rc=rc)
-      call ESMF_VMGet(diag_vm, localPet=my_pet, rc=rc)
-      if (my_pet == 0 .and. first_call_diag) then
-        first_call_diag = .false.
-        n_nz_uas  = count(abs(uas_g)  > 1.0e-10_ESMF_KIND_R8)
-        n_nz_tas  = count(tas_g       > 100.0_ESMF_KIND_R8)
-        n_nz_psl  = count(psl_g       > 1.0_ESMF_KIND_R8)
-        n_nz_swdn = count(swdn_g      > 1.0e-10_ESMF_KIND_R8)
-        write(*,'(A)') '######## [MED BUG-CALC-08 + BUG-MPAS-01 DIAG] ########'
-        write(*,'(A,I0,A,I0,A,F9.4,A,F9.4)') &
-          '   uas_g: nonzero=', n_nz_uas, '/', NX_G*NY_G, &
-          '  min=', minval(uas_g), '  max=', maxval(uas_g)
-        write(*,'(A,I0,A,F9.3,A,F9.3)') &
-          '   tas_g: nonzero>100K=', n_nz_tas, &
-          '  min=', minval(tas_g), '  max=', maxval(tas_g)
-        write(*,'(A,I0,A,F11.3,A,F11.3)') &
-          '   psl_g: nonzero>1Pa=', n_nz_psl, &
-          '  min=', minval(psl_g), '  max=', maxval(psl_g)
-        write(*,'(A,I0,A,F10.3,A,F10.3)') &
-          '  swdn_g: nonzero=', n_nz_swdn, &
-          '  min=', minval(swdn_g), '  max=', maxval(swdn_g)
-        write(*,'(A,F9.4,A,F9.4)') &
-          '   vas_g min=', minval(vas_g), '  max=', maxval(vas_g)
-        write(*,'(A,F11.6,A,F11.6)') &
-          '  shum_g min=', minval(shum_g), '  max=', maxval(shum_g)
-        write(*,'(A,F12.6,A,F12.6)') &
-          '  rain_g min=', minval(rain_g), '  max=', maxval(rain_g)
-        write(*,'(A,F10.3,A,F10.3)') &
-          '  lwdn_g min=', minval(lwdn_g), '  max=', maxval(lwdn_g)
-        write(*,'(A,I0,A,I0)') &
-          '   NX_G=', NX_G, '  NY_G=', NY_G
-        write(*,'(A)') '########################################'
-        flush(6)
-      end if
-    end subroutine log_atm_forcing_summary
-  end subroutine MediatorAdvance
+    call ESMF_VMGetCurrent(diag_vm, rc=rc)
+    call ESMF_VMGet(diag_vm, localPet=my_pet, rc=rc)
+    if (my_pet == 0 .and. first_call_diag) then
+      first_call_diag = .false.
+      n_nz_uas  = count(abs(uas_g)  > 1.0e-10_ESMF_KIND_R8)
+      n_nz_tas  = count(tas_g       > 100.0_ESMF_KIND_R8)
+      n_nz_psl  = count(psl_g       > 1.0_ESMF_KIND_R8)
+      n_nz_swdn = count(swdn_g      > 1.0e-10_ESMF_KIND_R8)
+      write(*,'(A)') '######## [MED BUG-CALC-08 + BUG-MPAS-01 DIAG] ########'
+      write(*,'(A,I0,A,I0,A,F9.4,A,F9.4)') &
+        '   uas_g: nonzero=', n_nz_uas, '/', NX_G*NY_G, &
+        '  min=', minval(uas_g), '  max=', maxval(uas_g)
+      write(*,'(A,I0,A,F9.3,A,F9.3)') &
+        '   tas_g: nonzero>100K=', n_nz_tas, &
+        '  min=', minval(tas_g), '  max=', maxval(tas_g)
+      write(*,'(A,I0,A,F11.3,A,F11.3)') &
+        '   psl_g: nonzero>1Pa=', n_nz_psl, &
+        '  min=', minval(psl_g), '  max=', maxval(psl_g)
+      write(*,'(A,I0,A,F10.3,A,F10.3)') &
+        '  swdn_g: nonzero=', n_nz_swdn, &
+        '  min=', minval(swdn_g), '  max=', maxval(swdn_g)
+      write(*,'(A,F9.4,A,F9.4)') &
+        '   vas_g min=', minval(vas_g), '  max=', maxval(vas_g)
+      write(*,'(A,F11.6,A,F11.6)') &
+        '  shum_g min=', minval(shum_g), '  max=', maxval(shum_g)
+      write(*,'(A,F12.6,A,F12.6)') &
+        '  rain_g min=', minval(rain_g), '  max=', maxval(rain_g)
+      write(*,'(A,F10.3,A,F10.3)') &
+        '  lwdn_g min=', minval(lwdn_g), '  max=', maxval(lwdn_g)
+      write(*,'(A,I0,A,I0)') &
+        '   NX_G=', NX_G, '  NY_G=', NY_G
+      write(*,'(A)') '########################################'
+      flush(6)
+    end if
+  end subroutine log_atm_forcing_summary
 
 
   !> Correntes oceânicas So_u/So_v para a grade ATM (rota ocn2atm).
