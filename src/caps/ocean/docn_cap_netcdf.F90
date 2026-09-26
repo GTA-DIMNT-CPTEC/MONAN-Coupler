@@ -23,6 +23,7 @@ module docn_cap_netcdf_mod
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
   use netcdf
+  use nc_writer_mod, only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use mpi
   use coupler_utils_mod, only: ChkErr, int_to_str, real_to_str
 
@@ -298,6 +299,7 @@ contains
     character(len=19)  :: tstamp
     integer :: ncid_r, ncid_w
     integer :: varid_src, ncstat
+    logical :: ok
     integer :: varid_sst, varid_ice, varid_u, varid_v
     integer :: varid_lat, varid_lon, dimid_lon, dimid_lat
     integer :: ntime, dimid_nt, tidx0, tidx1
@@ -462,17 +464,12 @@ contains
       lat_ax(j) = -90.0_ESMF_KIND_R8 + real(j-1, ESMF_KIND_R8) * (180.0_ESMF_KIND_R8 / (nlat_diag-1))
     end do
 
-    ncstat = nf90_create(trim(fname), NF90_CLOBBER, ncid_w)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('WriteDOCNDiag: nf90_create falhou: '// &
-        trim(nf90_strerror(ncstat)), ESMF_LOGMSG_WARNING)
-      goto 99
-    end if
+    if (.not. nc_create(fname, ncid_w, 'WriteDOCNDiag')) goto 99
 
-    ncstat = nf90_put_att(ncid_w, NF90_GLOBAL, 'Conventions',  'CF-1.8')
-    ncstat = nf90_put_att(ncid_w, NF90_GLOBAL, 'title', &
-      'DOCN importState — SST/gelo interpolados por passo (campo global)')
-    ncstat = nf90_put_att(ncid_w, NF90_GLOBAL, 'institution', 'INPE/CGCT/DIMNT — GT Acoplamento de Modelos')
+    call nc_global_header(ncid_w, &
+      title='DOCN importState — SST/gelo interpolados por passo (campo global)', &
+      institution='INPE/CGCT/DIMNT — GT Acoplamento de Modelos', &
+      source='docn_cap_netcdf.F90::WriteDOCNDiag')
     write(tstamp,'(I4.4,A,I2.2,A,I2.2,A,I2.2,A,I2.2,A,I2.2)') &
       yy,'-',mm,'-',dd,'T',hh,':',mn,':',ss
     ncstat = nf90_put_att(ncid_w, NF90_GLOBAL, 'valid_time',   trim(tstamp))
@@ -489,37 +486,26 @@ contains
       'PET0 direct re-read (B-58v2) — grid='//trim(merge('1440x720','360x180 ', &
        trim(cfg_docn_mode)=='netcdf')))
 
-    ncstat = nf90_def_dim(ncid_w, 'lon', nlon_diag, dimid_lon)
-    ncstat = nf90_def_dim(ncid_w, 'lat', nlat_diag, dimid_lat)
+    if (.not. nc_def_latlon(ncid_w, nlon_diag, nlat_diag, dimid_lon, dimid_lat, &
+                            varid_lon, varid_lat, 'WriteDOCNDiag')) then
+      ncstat = nf90_close(ncid_w); goto 99
+    end if
 
-    ncstat = nf90_def_var(ncid_w, 'lon',  NF90_DOUBLE, [dimid_lon], varid_lon)
-    ncstat = nf90_put_att(ncid_w, varid_lon, 'units', 'degrees_east')
-    ncstat = nf90_def_var(ncid_w, 'lat',  NF90_DOUBLE, [dimid_lat], varid_lat)
-    ncstat = nf90_put_att(ncid_w, varid_lat, 'units', 'degrees_north')
-
-    ncstat = nf90_def_var(ncid_w, 'So_t',     NF90_DOUBLE, [dimid_lon,dimid_lat], varid_sst)
-    ncstat = nf90_put_att(ncid_w, varid_sst, 'long_name', 'SST interpolada (OISST→NUOPC)')
-    ncstat = nf90_put_att(ncid_w, varid_sst, 'units',     'K')
+    ok = nc_def_field2d(ncid_w, 'So_t', dimid_lon, dimid_lat, varid_sst, 'WriteDOCNDiag', &
+           long_name='SST interpolada (OISST→NUOPC)', units='K', fill_r8=fill_val)
     ncstat = nf90_put_att(ncid_w, varid_sst, 'valid_min', 250.0_ESMF_KIND_R8)
     ncstat = nf90_put_att(ncid_w, varid_sst, 'valid_max', 315.0_ESMF_KIND_R8)
-    ncstat = nf90_put_att(ncid_w, varid_sst, '_FillValue', fill_val)
 
-    ncstat = nf90_def_var(ncid_w, 'Si_ifrac', NF90_DOUBLE, [dimid_lon,dimid_lat], varid_ice)
-    ncstat = nf90_put_att(ncid_w, varid_ice, 'long_name', 'Fracao de gelo marinho')
-    ncstat = nf90_put_att(ncid_w, varid_ice, 'units',     '1')
+    ok = nc_def_field2d(ncid_w, 'Si_ifrac', dimid_lon, dimid_lat, varid_ice, 'WriteDOCNDiag', &
+           long_name='Fracao de gelo marinho', units='1', fill_r8=fill_val)
     ncstat = nf90_put_att(ncid_w, varid_ice, 'valid_min', 0.0_ESMF_KIND_R8)
     ncstat = nf90_put_att(ncid_w, varid_ice, 'valid_max', 1.0_ESMF_KIND_R8)
-    ncstat = nf90_put_att(ncid_w, varid_ice, '_FillValue', fill_val)
 
-    ncstat = nf90_def_var(ncid_w, 'So_u', NF90_DOUBLE, [dimid_lon,dimid_lat], varid_u)
-    ncstat = nf90_put_att(ncid_w, varid_u, 'long_name', 'Corrente zonal (zero se cur_file vazio)')
-    ncstat = nf90_put_att(ncid_w, varid_u, 'units',     'm/s')
-    ncstat = nf90_put_att(ncid_w, varid_u, '_FillValue', fill_val)
+    ok = nc_def_field2d(ncid_w, 'So_u', dimid_lon, dimid_lat, varid_u, 'WriteDOCNDiag', &
+           long_name='Corrente zonal (zero se cur_file vazio)', units='m/s', fill_r8=fill_val)
 
-    ncstat = nf90_def_var(ncid_w, 'So_v', NF90_DOUBLE, [dimid_lon,dimid_lat], varid_v)
-    ncstat = nf90_put_att(ncid_w, varid_v, 'long_name', 'Corrente meridional')
-    ncstat = nf90_put_att(ncid_w, varid_v, 'units',     'm/s')
-    ncstat = nf90_put_att(ncid_w, varid_v, '_FillValue', fill_val)
+    ok = nc_def_field2d(ncid_w, 'So_v', dimid_lon, dimid_lat, varid_v, 'WriteDOCNDiag', &
+           long_name='Corrente meridional', units='m/s', fill_r8=fill_val)
 
     ncstat = nf90_enddef(ncid_w)
     ncstat = nf90_put_var(ncid_w, varid_lon, lon_ax)

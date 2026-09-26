@@ -9,6 +9,11 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Módulo comum dos gravadores NetCDF (R-FASE3-02).** Novo `src/shared/nc_writer.F90` com `nc_create`, `nc_global_header`, `nc_def_latlon`, `nc_def_field2d` e `nc_ok` (falha do NetCDF registrada no log com a mensagem de `nf90_strerror`). Os quatro gravadores de diagnóstico passam a usá-lo para criar o arquivo, gravar o cabeçalho CF, definir os eixos e definir os campos: exportação da atmosfera e diagnóstico de importação da atmosfera (`mpas_cap_netcdf.F90`), importação do oceano no mediador (`med_cap_netcdf.F90`) e oceano de dados (`docn_cap_netcdf.F90`). Os dados gravados não mudam. Nos metadados:
+  - diagnóstico de importação da atmosfera e oceano de dados: `lat` e `lon` ganham `long_name`, `standard_name` e `axis`, como já tinham os outros dois gravadores;
+  - oceano de dados: ganha o atributo global `source`, e a dimensão `lat` passa a ser definida antes de `lon`;
+  - nos demais casos muda só a ordem dos atributos.
+
 - **Calendário do gravador NetCDF do cap atmosférico pelo ESMF (R-FASE3-01).** O instante inicial gravado em `time:units` ("seconds since ...") dos arquivos `monan_export_*.nc` era calculado por uma conta manual de datas que não recuava para o mês anterior: com o instante atual em 1º de abril e 1 dia decorrido, gravava "2026-04-00"; em 2 de abril com 3 dias, "2026-04--1". Passa a ser calculado com `ESMF_Time` e calendário gregoriano (`start_time_from_elapsed`); saem `datetime_add_seconds` e `is_leap_year`. Conferido contra a conta antiga em 8 casos: resultado igual quando o intervalo não cruza o início do mês (caso da linha de base), correto quando cruza. Só o atributo `units` da variável `time` muda, e só nesses casos.
   - `compute_instantaneous_fluxes` (`mpas_atm_model.F90`): `n` e `atm_public` passam a `intent(in)`, porque só são lidos.
 

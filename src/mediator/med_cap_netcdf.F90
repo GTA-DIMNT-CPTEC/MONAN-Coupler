@@ -17,6 +17,7 @@ module med_cap_netcdf_mod
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY, FILL_VALUE_R8
   use netcdf
+  use nc_writer_mod, only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use mpi
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
 
@@ -225,18 +226,14 @@ contains
 
     ! PET0: criar arquivo NetCDF
     if (med_local_pet == 0) then
-      ios = nf90_create(trim(fname), NF90_CLOBBER, ncid)
-      if (ios /= NF90_NOERR) then
-        call ESMF_LogWrite(subname//': falha nf90_create: '//trim(fname), ESMF_LOGMSG_WARNING)
+      if (.not. nc_create(fname, ncid, subname)) then
         deallocate(fieldNameList); return
       end if
 
-      ios = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions', 'CF-1.8')
-      ios = nf90_put_att(ncid, NF90_GLOBAL, 'title', &
-        'MED exportState (= MOM6 importState) — Fluxos MONAN-A x MOM6')
-      ios = nf90_put_att(ncid, NF90_GLOBAL, 'institution', 'INPE/CGCT/DIMNT')
-      ios = nf90_put_att(ncid, NF90_GLOBAL, 'source', &
-        'med_cap_netcdf.F90::med_write_import_fields v1.0 (migrado de MED_cap_MONAN)')
+      call nc_global_header(ncid, &
+        title='MED exportState (= MOM6 importState) — Fluxos MONAN-A x MOM6', &
+        institution='INPE/CGCT/DIMNT', &
+        source='med_cap_netcdf.F90::med_write_import_fields v1.0 (migrado de MED_cap_MONAN)')
         write(iso_time,'(I4.4,A,I2.2,A,I2.2,A,I2.2,A,I2.2,A,I2.2)') &
           yy,'-',mm,'-',dd,'T',hh,':',mn,':',ss
         ios = nf90_put_att(ncid, NF90_GLOBAL, 'valid_time', trim(iso_time))
@@ -249,20 +246,8 @@ contains
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'ny_global', ny_global)
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'petCount',  med_pet_count)
 
-      ios = nf90_def_dim(ncid, 'lat', ny_global, dimid_lat); if (ios/=NF90_NOERR) goto 999
-      ios = nf90_def_dim(ncid, 'lon', nx_global, dimid_lon); if (ios/=NF90_NOERR) goto 999
-
-      ios = nf90_def_var(ncid, 'lat', NF90_DOUBLE, [dimid_lat], varid_lat)
-      ios = nf90_put_att(ncid, varid_lat, 'long_name',     'latitude')
-      ios = nf90_put_att(ncid, varid_lat, 'units',         'degrees_north')
-      ios = nf90_put_att(ncid, varid_lat, 'standard_name', 'latitude')
-      ios = nf90_put_att(ncid, varid_lat, 'axis',          'Y')
-
-      ios = nf90_def_var(ncid, 'lon', NF90_DOUBLE, [dimid_lon], varid_lon)
-      ios = nf90_put_att(ncid, varid_lon, 'long_name',     'longitude')
-      ios = nf90_put_att(ncid, varid_lon, 'units',         'degrees_east')
-      ios = nf90_put_att(ncid, varid_lon, 'standard_name', 'longitude')
-      ios = nf90_put_att(ncid, varid_lon, 'axis',          'X')
+      if (.not. nc_def_latlon(ncid, nx_global, ny_global, dimid_lon, dimid_lat, &
+                              varid_lon, varid_lat, subname)) goto 999
 
       ios = nf90_def_var(ncid, 'time', NF90_DOUBLE, varid_t)
       ios = nf90_put_att(ncid, varid_t, 'units', &
@@ -271,13 +256,9 @@ contains
 
       do n = 1, fieldCount
         ! BUG-NC-03: NF90_FLOAT em vez de NF90_DOUBLE
-        ios = nf90_def_var(ncid, trim(fieldNameList(n)), NF90_FLOAT, &
-          [dimid_lon, dimid_lat], varid)
-        if (ios == NF90_NOERR) then
-          ios = nf90_put_att(ncid, varid, '_FillValue',    FILL_IMP4)
-          ios = nf90_put_att(ncid, varid, 'missing_value', FILL_IMP4)
+        if (nc_def_field2d(ncid, fieldNameList(n), dimid_lon, dimid_lat, varid, subname, &
+                           fill_r4=FILL_IMP4, missing=.true.)) &
           call put_field_metadata(fieldNameList, n, ios, ncid, varid)
-        end if
       end do
 
       ios = nf90_enddef(ncid)

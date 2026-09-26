@@ -80,6 +80,7 @@ module mpas_cap_netcdf_mod
   use mpi_allreduce_wrappers_mod, only : allreduce_r8, allreduce_i4
   use netcdf
   use coupler_utils_mod,  only : ChkErr, int_to_str
+  use nc_writer_mod,      only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   ! Tipos MPAS e configurações necessários para o diagnóstico de importação
   use mpas_atm_types_mod,  only : atm_ocean_boundary_type, MPAS_RKIND
   use coupler_config_mod, only : cfg_import_diag_dir, cfg_grid_res_deg
@@ -411,23 +412,17 @@ contains
 
       allocate(grid_2d(NLON, NLAT))
 
-      ncstat = nf90_create(trim(fname), NF90_CLOBBER, ncid)
-      if (ncstat /= NF90_NOERR) then
-        write(*,'(3A)') '[NetCDF] ERRO ao criar ', trim(fname), &
-          ': '//trim(nf90_strerror(ncstat))
+      ! ── Atributos globais CF-1.8 ────────────────────────────────────────
+      if (.not. nc_create(fname, ncid, subname)) then
         call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': nf90_create falhou', &
              line=__LINE__, file=u_FILE_u, rcToReturn=rc)
         return
       end if
 
-      ! ── Atributos globais CF-1.8 ────────────────────────────────────────
-      ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions',    'CF-1.8')
-      ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'title',          &
-               'MPAS-A exportState — grade regular 1° lat/lon — NUOPC/CMEPS')
-      ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'source',         &
-               'NUOPC-MPAS-Integrado v5.2 (mpas_cap_netcdf_mod v2.7)')
-      ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'institution',    &
-               'INPE / CGCT / DIMNT')
+      call nc_global_header(ncid, &
+        title='MPAS-A exportState — grade regular 1° lat/lon — NUOPC/CMEPS', &
+        institution='INPE / CGCT / DIMNT', &
+        source='NUOPC-MPAS-Integrado v5.2 (mpas_cap_netcdf_mod v2.7)')
       ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'valid_time',     &
                trim(valid_time_iso))
       ncstat = nf90_put_att(ncid, NF90_GLOBAL, 'start_time',     &
@@ -445,27 +440,13 @@ contains
 
       ! ── Dimensões ────────────────────────────────────────────────────────
       ! lat e lon — sem dimensão time (1 arquivo por passo)
-      ncstat = nf90_def_dim(ncid, 'lat', NLAT, dimid_lat)
-      if (ncstat /= NF90_NOERR) then
-        write(*,'(A)') '[NetCDF] ERRO nf90_def_dim(lat): '//trim(nf90_strerror(ncstat))
+      ! ── Variáveis de coordenada ──────────────────────────────────────────
+      if (.not. nc_def_latlon(ncid, NLON, NLAT, dimid_lon, dimid_lat, &
+                              varid_lon, varid_lat, subname)) then
         ncstat = nf90_close(ncid)
-        call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': nf90_def_dim falhou', &
+        call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': definicao de lat/lon falhou', &
              line=__LINE__, file=u_FILE_u, rcToReturn=rc); return
       end if
-      ncstat = nf90_def_dim(ncid, 'lon', NLON, dimid_lon)
-
-      ! ── Variáveis de coordenada ──────────────────────────────────────────
-      ncstat = nf90_def_var(ncid, 'lat', NF90_DOUBLE, [dimid_lat], varid_lat)
-      ncstat = nf90_put_att(ncid, varid_lat, 'long_name',     'latitude')
-      ncstat = nf90_put_att(ncid, varid_lat, 'units',         'degrees_north')
-      ncstat = nf90_put_att(ncid, varid_lat, 'standard_name', 'latitude')
-      ncstat = nf90_put_att(ncid, varid_lat, 'axis',          'Y')
-
-      ncstat = nf90_def_var(ncid, 'lon', NF90_DOUBLE, [dimid_lon], varid_lon)
-      ncstat = nf90_put_att(ncid, varid_lon, 'long_name',     'longitude')
-      ncstat = nf90_put_att(ncid, varid_lon, 'units',         'degrees_east')
-      ncstat = nf90_put_att(ncid, varid_lon, 'standard_name', 'longitude')
-      ncstat = nf90_put_att(ncid, varid_lon, 'axis',          'X')
 
       ncstat = nf90_def_dim(ncid, 'time', NF90_UNLIMITED, dimid_t)
       ncstat = nf90_def_var(ncid, 'time', NF90_DOUBLE, [dimid_t], varid_t)
@@ -479,22 +460,12 @@ contains
       ! ── Variáveis dos campos (lon, lat) em Fortran column-major ──────────
       ! Python: nc['campo'][:] → shape (NLAT, NLON) = (181, 360)  ✓
       do i = 1, itemCount
-        ncstat = nf90_def_var(ncid, trim(fldnames(i)), NF90_DOUBLE, &
-                              [dimid_lon, dimid_lat], varid)
-        if (ncstat /= NF90_NOERR) then
-          write(*,'(3A)') '[NetCDF] AVISO nf90_def_var: ', &
-            trim(fldnames(i)), ' — '//trim(nf90_strerror(ncstat))
-          cycle
-        end if
-        ncstat = nf90_put_att(ncid, varid, 'long_name',     &
-                 field_long_name(fldnames(i)))
-        ncstat = nf90_put_att(ncid, varid, 'units',         &
-                 field_units(fldnames(i)))
-        ncstat = nf90_put_att(ncid, varid, 'standard_name', &
-                 field_stdname(fldnames(i)))
-        ncstat = nf90_put_att(ncid, varid, 'CMEPS_name',    trim(fldnames(i)))
-        ncstat = nf90_put_att(ncid, varid, '_FillValue',    FILL_VALUE_R8)
-        ncstat = nf90_put_att(ncid, varid, 'missing_value', FILL_VALUE_R8)
+        if (.not. nc_def_field2d(ncid, fldnames(i), dimid_lon, dimid_lat, varid, subname, &
+                                 long_name=field_long_name(fldnames(i)),             &
+                                 units=field_units(fldnames(i)),                     &
+                                 standard_name=field_stdname(fldnames(i)),           &
+                                 fill_r8=FILL_VALUE_R8, missing=.true.)) cycle
+        ncstat = nf90_put_att(ncid, varid, 'CMEPS_name', trim(fldnames(i)))
       end do
 
       ncstat = nf90_enddef(ncid)
@@ -957,6 +928,7 @@ contains
     character(len=*), parameter :: subname = '(write_mpas_import_diag)'
     character(len=256) :: fname
     integer :: ncid, ios
+    logical :: ok
     integer :: dimid_lat, dimid_lon
     integer :: varid_lat, varid_lon
     integer :: varid_sot, varid_ifrac, varid_zorl
@@ -1166,68 +1138,46 @@ contains
       lon_axis(i) = (i - 0.5_ESMF_KIND_R8) * dlon - 180.0_ESMF_KIND_R8
     end do
 
-    ios = nf90_create(trim(fname), NF90_CLOBBER, ncid)
-    if (ios /= NF90_NOERR) goto 999
+    if (.not. nc_create(fname, ncid, 'write_mpas_import_diag')) goto 999
+    if (.not. nc_def_latlon(ncid, nlon, nlat, dimid_lon, dimid_lat, varid_lon, varid_lat, &
+                            'write_mpas_import_diag')) goto 999
 
-    ios = nf90_def_dim(ncid, 'lat', nlat, dimid_lat)
-    ios = nf90_def_dim(ncid, 'lon', nlon, dimid_lon)
-    ios = nf90_def_var(ncid, 'lat', NF90_DOUBLE, [dimid_lat], varid_lat)
-    ios = nf90_def_var(ncid, 'lon', NF90_DOUBLE, [dimid_lon], varid_lon)
-    ios = nf90_put_att(ncid, varid_lat, 'units', 'degrees_north')
-    ios = nf90_put_att(ncid, varid_lon, 'units', 'degrees_east')
+    ok = nc_def_field2d(ncid, 'So_t', dimid_lon, dimid_lat, varid_sot, 'write_mpas_import_diag', &
+           long_name='SST dinamica MOM6 importada pelo MPAS', &
+           units='K', standard_name='sea_surface_temperature', fill_r8=-9.99e+20_ESMF_KIND_R8)
 
-    ios = nf90_def_var(ncid, 'So_t',    NF90_DOUBLE, [dimid_lon, dimid_lat], varid_sot)
-    ios = nf90_put_att(ncid, varid_sot,   'units',         'K')
-    ios = nf90_put_att(ncid, varid_sot,   'long_name',     'SST dinamica MOM6 importada pelo MPAS')
-    ios = nf90_put_att(ncid, varid_sot,   'standard_name', 'sea_surface_temperature')
-    ios = nf90_put_att(ncid, varid_sot,   '_FillValue',    -9.99e+20_ESMF_KIND_R8)
+    ok = nc_def_field2d(ncid, 'Si_ifrac', dimid_lon, dimid_lat, varid_ifrac, 'write_mpas_import_diag', &
+           long_name='Fracao de gelo marinho importada pelo MPAS', &
+           units='1', standard_name='sea_ice_area_fraction', fill_r8=-9.99e+20_ESMF_KIND_R8)
 
-    ios = nf90_def_var(ncid, 'Si_ifrac', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_ifrac)
-    ios = nf90_put_att(ncid, varid_ifrac, 'units',         '1')
-    ios = nf90_put_att(ncid, varid_ifrac, 'long_name',     'Fracao de gelo marinho importada pelo MPAS')
-    ios = nf90_put_att(ncid, varid_ifrac, 'standard_name', 'sea_ice_area_fraction')
-    ios = nf90_put_att(ncid, varid_ifrac, '_FillValue',    -9.99e+20_ESMF_KIND_R8)
-
-    ios = nf90_def_var(ncid, 'Sf_zorl',  NF90_DOUBLE, [dimid_lon, dimid_lat], varid_zorl)
-    ios = nf90_put_att(ncid, varid_zorl,  'units',         'm')
-    ios = nf90_put_att(ncid, varid_zorl,  'long_name',     'Rugosidade superficial Charnock+Smith importada pelo MPAS')
-    ios = nf90_put_att(ncid, varid_zorl,  'standard_name', 'surface_roughness_length')
-    ios = nf90_put_att(ncid, varid_zorl,  '_FillValue',    -9.99e+20_ESMF_KIND_R8)
+    ok = nc_def_field2d(ncid, 'Sf_zorl', dimid_lon, dimid_lat, varid_zorl, 'write_mpas_import_diag', &
+           long_name='Rugosidade superficial Charnock+Smith importada pelo MPAS', &
+           units='m', standard_name='surface_roughness_length', fill_r8=-9.99e+20_ESMF_KIND_R8)
 
     ! B-DIAG-IMPORT-INCOMPLETO-01: correntes de superficie e albedo.
-    ios = nf90_def_var(ncid, 'So_u', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_uocn)
-    ios = nf90_put_att(ncid, varid_uocn,  'units',         'm s-1')
-    ios = nf90_put_att(ncid, varid_uocn,  'long_name',     'Corrente oceanica zonal importada pelo MPAS')
-    ios = nf90_put_att(ncid, varid_uocn,  'standard_name', 'eastward_sea_water_velocity')
-    ios = nf90_put_att(ncid, varid_uocn,  '_FillValue',    FILL_VALUE_R8)
+    ok = nc_def_field2d(ncid, 'So_u', dimid_lon, dimid_lat, varid_uocn, 'write_mpas_import_diag', &
+           long_name='Corrente oceanica zonal importada pelo MPAS', &
+           units='m s-1', standard_name='eastward_sea_water_velocity', fill_r8=FILL_VALUE_R8)
 
-    ios = nf90_def_var(ncid, 'So_v', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_vocn)
-    ios = nf90_put_att(ncid, varid_vocn,  'units',         'm s-1')
-    ios = nf90_put_att(ncid, varid_vocn,  'long_name',     'Corrente oceanica meridional importada pelo MPAS')
-    ios = nf90_put_att(ncid, varid_vocn,  'standard_name', 'northward_sea_water_velocity')
-    ios = nf90_put_att(ncid, varid_vocn,  '_FillValue',    FILL_VALUE_R8)
+    ok = nc_def_field2d(ncid, 'So_v', dimid_lon, dimid_lat, varid_vocn, 'write_mpas_import_diag', &
+           long_name='Corrente oceanica meridional importada pelo MPAS', &
+           units='m s-1', standard_name='northward_sea_water_velocity', fill_r8=FILL_VALUE_R8)
 
-    ios = nf90_def_var(ncid, 'Sf_albedo', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_alb)
-    ios = nf90_put_att(ncid, varid_alb,   'units',         '1')
-    ios = nf90_put_att(ncid, varid_alb,   'long_name',     'Albedo de superficie importado pelo MPAS')
-    ios = nf90_put_att(ncid, varid_alb,   'standard_name', 'surface_albedo')
-    ios = nf90_put_att(ncid, varid_alb,   '_FillValue',    FILL_VALUE_R8)
+    ok = nc_def_field2d(ncid, 'Sf_albedo', dimid_lon, dimid_lat, varid_alb, 'write_mpas_import_diag', &
+           long_name='Albedo de superficie importado pelo MPAS', &
+           units='1', standard_name='surface_albedo', fill_r8=FILL_VALUE_R8)
 
     ! B-DIAGMASK-01: a propria mascara vira variavel do arquivo, para que o
     ! pos-processamento nao precise readivinha-la a partir de _FillValue.
-    ios = nf90_def_var(ncid, 'Sx_omask', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_omask)
-    ios = nf90_put_att(ncid, varid_omask, 'units',         '1')
-    ios = nf90_put_att(ncid, varid_omask, 'long_name',     'Mascara oceano/terra do MOM6 (1=oceano, 0=terra)')
-    ios = nf90_put_att(ncid, varid_omask, 'standard_name', 'sea_binary_mask')
-    ios = nf90_put_att(ncid, varid_omask, '_FillValue',    FILL_VALUE_R8)
+    ok = nc_def_field2d(ncid, 'Sx_omask', dimid_lon, dimid_lat, varid_omask, 'write_mpas_import_diag', &
+           long_name='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)', &
+           units='1', standard_name='sea_binary_mask', fill_r8=FILL_VALUE_R8)
 
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions',  'CF-1.8')
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'title', &
-      'MONAN-A 2.0 importState (= MED exportState MED->MPAS) — Campos OCN->ATM')
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'institution',  'INPE/CGCT/DIMNT')
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'source', &
-      'mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + So_u + '// &
-      'So_v + Sf_zorl + Sf_albedo + Sx_omask)')
+    call nc_global_header(ncid, &
+      title='MONAN-A 2.0 importState (= MED exportState MED->MPAS) — Campos OCN->ATM', &
+      institution='INPE/CGCT/DIMNT', &
+      source='mpas_cap_netcdf.F90::write_mpas_import_diag (So_t + Si_ifrac + So_u + '// &
+             'So_v + Sf_zorl + Sf_albedo + Sx_omask)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'code_version', &
       'v3.1-2026-09 (B-DIAG-IMPORT-INCOMPLETO-01: 7 de 7 campos importados; '// &
       'antes 4 de 7 — So_u, So_v e Sf_albedo ficavam de fora em silencio)')
