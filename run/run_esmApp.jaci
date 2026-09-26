@@ -817,7 +817,7 @@ if [[ -f "${EXECUTABLE}" ]] && command -v strings >/dev/null 2>&1; then
   _minha_inst="$(cd "${COUPLER_ROOT}/.." 2>/dev/null && pwd)"
   _outras=$(strings -a "${EXECUTABLE}" 2>/dev/null \
             | grep -oE '/[^[:space:]"]*/Coupler-Install' | sort -u \
-            | grep -vxF "${_minha_inst}" | head -3)
+            | grep -vxF "${_minha_inst}" | head -3 || true)   # sem ocorrência, grep devolve 1 (set -e)
   if [[ -n "${_outras}" ]]; then
     printf "  %-8s: %s\n" "AVISO" "o executável contém código de outra instalação:"
     echo "${_outras}" | sed 's/^/             /'
