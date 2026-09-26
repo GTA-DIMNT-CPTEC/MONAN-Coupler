@@ -9,6 +9,11 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Inicialização do mediador e mapeamento do cap atmosférico em etapas (R-FASE2B-03).**
+  - `InitializeRealize` do mediador passou de 359 para 62 linhas de código próprias, com as etapas `create_atm_grid`, `create_ocn_grid`, `realize_component_fields` e `create_internal_fields`, procedimentos de módulo com argumentos explícitos. A decomposição da grade em blocos por PET, que estava escrita duas vezes (grade ATM e grade OCN), virou a função `grid_regdecomp`.
+  - `state_set_field_1d` do cap atmosférico passou de 243 para 106 linhas: o mapeamento das células do MPAS para a grade regular (acumulação, redução entre processos, média, preenchimento de lacunas e cópia para o campo local) virou o procedimento `map_cells_to_regular_grid`, com 7 argumentos; as 40 variáveis de trabalho passaram a ser locais dele.
+  - Nas etapas que podem terminar com erro, o `rc` volta a indicar sucesso no fim normal da etapa, e quem chama confere o `rc` logo depois da chamada. O comportamento é o de antes: um erro interrompe a rotina que chamou a etapa, e um `rc` de falha tolerado dentro dela não interrompe.
+
 - **Constantes e grade do MOM6 num só lugar (R-FASE2B-02).** Validado sem mudança de resultado: os valores e tipos são os mesmos de antes.
   - Novo `src/shared/coupler_constants.F90`: grade atmosférica do mediador (`ATM_NX` = 360, `ATM_NY` = 180, antes repetida como `NLON`, `NX_G`, `NX_ATM_ZEN`, `NX_MED_ATM` em cinco arquivos), constantes físicas (gravidade, 0 °C, congelamento da água do mar, densidade e calor específico do ar, calor latente, Stefan-Boltzmann, coeficientes da pressão de vapor), `RAD2DEG`, `FILL_VALUE_R8` e `SI_IFRAC_DECAY`. Constantes de mesmo nome e valor diferente (π com 15 algarismos no ângulo zenital; as de `mpas_atm_model.F90`, em precisão do MPAS) ficaram onde estavam, registradas no fim do módulo.
   - Novo `src/shared/mom6_supergrid.F90`: leitura das dimensões, dos centros e dos cantos da grade T do MOM6 a partir do `ocean_hgrid.nc`. Substitui as duas cópias que existiam, `MED_*` em `MED_cap.F90` e `ICE_*` em `sis_cap_MONAN.F90`, que só diferiam nas mensagens de log; o prefixo das mensagens passa a ser um argumento.

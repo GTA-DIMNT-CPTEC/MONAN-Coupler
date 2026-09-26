@@ -315,18 +315,12 @@ contains
     integer, intent(out) :: rc
 
     type(ESMF_Grid)  :: atm_grid, ocn_grid
-    type(ESMF_Field) :: tmp_field
     type(ESMF_VM)    :: vm
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
-    integer :: nx_atm, ny_atm, nx_ocn, ny_ocn, i, j, n
-    integer :: petCount, regDecomp(2), localDeCount_atm, localDeCount_ocn
-    integer :: nx_max, ny_tiles, lde
-    integer :: nx_tiles_target  ! B-57
-    real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
+    integer :: nx_atm, ny_atm, nx_ocn, ny_ocn
+    integer :: petCount
     character(len=256)  :: msg_tmp  ! FIX B-OCNGRID-01
-      integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-      integer :: lde_m
       type(ESMF_VM) :: med_vm
 
     rc = ESMF_SUCCESS
@@ -408,18 +402,106 @@ contains
     ! nrow<=ny_atm. Idêntico ao fix aplicado em mpas_cap_methods (grade do cap).
     !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
     ! -------------------------------------------------------------------------
-    nx_tiles_target = max(1, int(sqrt(real(petCount))))
-    ny_tiles = 1
-    do lde = nx_tiles_target, 1, -1
-      if (mod(petCount, lde) == 0 .and. lde <= ny_atm &
-          .and. (petCount / lde) <= nx_atm / 2) then
-        ny_tiles = lde
+    call create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    !--------------------------------------------------------------------------
+    !--- Criar grade OCN com dimensões de nuopc.input (cfg_docn_nx x cfg_docn_ny) ---
+    !--------------------------------------------------------------------------
+    ! B-52 (fix B-51+B-50): regDecomp 2D universal para grade OCN.
+    ! largura 1 para qualquer petCount. Grade alinhada com DOCN_cap (OISST 0.25°)
+    ! → conector DOCN→MED usa redistribuição (zero-copy) em vez de bilinear.
+    !   N=512: ny=4 → regDecomp=(/128,4/) → 512 DEs=512 PETs, 2 col, 39 lin ✓
+    !
+    ! BUG-CALC-08-COV (fix B-58): mesma fatoração exata da grade ATM. Garante
+    ! totalDEs = petCount (1 DE por PET), evitando DEs órfãos. Respeita
+    ! ncol<=nx_ocn/2 e nrow<=ny_ocn.
+    call create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    !--------------------------------------------------------------------------
+    ! Realizar campos de import conforme a fonte atmosferica configurada.
+    ! Espelha exatamente o que foi anunciado em InitializeAdvertise.
+    !--------------------------------------------------------------------------
+    call realize_component_fields(is, importState, exportState, atm_grid, ocn_grid, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    !--------------------------------------------------------------------------
+    ! Atualizar estado interno com grades criadas nesta fase.
+    ! NAO re-alocar iswrap%wrap: ja alocado em InitializeAdvertise.
+    !--------------------------------------------------------------------------
+    is%atm_grid   = atm_grid
+    is%ocn_grid   = ocn_grid
+    ! use_mpas_atm ja lido logo apos GetInternalState (ver acima).
+    ! Nao sobrescrever com .false. aqui.
+
+
+    ! Criar campos internos na grade ATM
+    call create_internal_fields(is, atm_grid, rc)
+
+    call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    ! BUG-OUT-01 fix v4: ler config de diagnóstico de importação
+    call med_read_import_config()
+
+    ! FIX-IMP-01: salvar informação MPI do mediador para uso em med_write_import_fields
+    !
+    ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
+    ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
+    ! med_write_import_fields. No modo concurrent o MED tem seu próprio
+    ! comunicador de componente; substituí-lo silenciosamente por
+    ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
+    ! componente causaria mismatch / deadlock. Falhar cedo é o correto —
+    ! um erro de VM é excepcional e deve abortar, não ser mascarado.
+      call ESMF_VMGetCurrent(med_vm, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg='MED: falha ESMF_VMGetCurrent em InitializeRealize', &
+        line=__LINE__, file=__FILE__)) return
+      call ESMF_VMGet(med_vm, localPet=med_local_pet, petCount=med_pet_count, &
+        mpiCommunicator=med_mpi_comm, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg='MED: falha ESMF_VMGet mpiCommunicator em InitializeRealize', &
+        line=__LINE__, file=__FILE__)) return
+
+
+    call ESMF_LogWrite('MED: InitializeRealize concluido', ESMF_LOGMSG_INFO)
+  end subroutine InitializeRealize
+
+  !> Decomposição regular (colunas x linhas) de uma grade nx x ny em petCount
+  !! DEs, um por PET: linhas = o maior divisor de petCount que não passe de
+  !! sqrt(petCount) nem de ny, com colunas <= nx/2 (cada DE com pelo menos 2
+  !! colunas); colunas = petCount / linhas. Garante colunas x linhas = petCount.
+  function grid_regdecomp(petCount, nx, ny) result(regDecomp)
+    integer, intent(in) :: petCount, nx, ny
+    integer :: regDecomp(2)
+    integer :: nrows, n
+
+    nrows = 1
+    do n = max(1, int(sqrt(real(petCount)))), 1, -1
+      if (mod(petCount, n) == 0 .and. n <= ny .and. (petCount / n) <= nx / 2) then
+        nrows = n
         exit
       end if
     end do
-    nx_max       = petCount / ny_tiles
-    regDecomp(1) = nx_max          ! colunas (lon)
-    regDecomp(2) = ny_tiles        ! linhas (lat)
+    regDecomp(1) = petCount / nrows   ! colunas (lon)
+    regDecomp(2) = nrows              ! linhas (lat)
+  end function grid_regdecomp
+
+  subroutine create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
+    integer, intent(in) :: petCount
+    integer, intent(in) :: nx_atm
+    integer, intent(in) :: ny_atm
+    type(ESMF_Grid), intent(inout) :: atm_grid
+    integer, intent(inout) :: rc
+    integer :: regDecomp(2)
+    real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
+    integer :: i
+    integer :: j
+    integer :: lde
+    integer :: localDeCount_atm
+    nullify(coordX, coordY)
+    regDecomp = grid_regdecomp(petCount, nx_atm, ny_atm)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
     ! Loops bulk usam lbound/ubound - agnósticos ao indexflag do MPAS.
@@ -497,29 +579,27 @@ contains
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade ATM ' // &
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
 
-    !--------------------------------------------------------------------------
-    !--- Criar grade OCN com dimensões de nuopc.input (cfg_docn_nx x cfg_docn_ny) ---
-    !--------------------------------------------------------------------------
-    ! B-52 (fix B-51+B-50): regDecomp 2D universal para grade OCN.
-    ! largura 1 para qualquer petCount. Grade alinhada com DOCN_cap (OISST 0.25°)
-    ! → conector DOCN→MED usa redistribuição (zero-copy) em vez de bilinear.
-    !   N=512: ny=4 → regDecomp=(/128,4/) → 512 DEs=512 PETs, 2 col, 39 lin ✓
-    !
-    ! BUG-CALC-08-COV (fix B-58): mesma fatoração exata da grade ATM. Garante
-    ! totalDEs = petCount (1 DE por PET), evitando DEs órfãos. Respeita
-    ! ncol<=nx_ocn/2 e nrow<=ny_ocn.
-    nx_tiles_target = max(1, int(sqrt(real(petCount))))
-    ny_tiles = 1
-    do lde = nx_tiles_target, 1, -1
-      if (mod(petCount, lde) == 0 .and. lde <= ny_ocn &
-          .and. (petCount / lde) <= nx_ocn / 2) then
-        ny_tiles = lde
-        exit
-      end if
-    end do
-    nx_max       = petCount / ny_tiles
-    regDecomp(1) = nx_max          ! colunas (lon)
-    regDecomp(2) = ny_tiles        ! linhas (lat)
+    ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
+    ! tolerado acima não interrompe a inicialização).
+    rc = ESMF_SUCCESS
+  end subroutine create_atm_grid
+
+  subroutine create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
+    integer, intent(in) :: petCount
+    integer, intent(in) :: nx_ocn
+    integer, intent(in) :: ny_ocn
+    type(ESMF_Grid), intent(inout) :: ocn_grid
+    integer, intent(inout) :: rc
+    integer :: regDecomp(2)
+    real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
+    integer :: i
+    integer :: j
+    integer :: lde
+    integer :: lde_m
+    integer :: localDeCount_ocn
+    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
+    nullify(coordX, coordY)
+    regDecomp = grid_regdecomp(petCount, nx_ocn, ny_ocn)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
     ! FIX B-OCNGRID-03 (Ago 2026): a grade OCN era criada SEM dimensao
@@ -658,10 +738,20 @@ contains
         if (rc == ESMF_SUCCESS .and. associated(maskptr)) maskptr = 0
       end do
 
-    !--------------------------------------------------------------------------
-    ! Realizar campos de import conforme a fonte atmosferica configurada.
-    ! Espelha exatamente o que foi anunciado em InitializeAdvertise.
-    !--------------------------------------------------------------------------
+    ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
+    ! tolerado acima não interrompe a inicialização).
+    rc = ESMF_SUCCESS
+  end subroutine create_ocn_grid
+
+  subroutine realize_component_fields(is, importState, exportState, atm_grid, ocn_grid, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Grid), intent(in) :: atm_grid
+    type(ESMF_Grid), intent(in) :: ocn_grid
+    integer, intent(inout) :: rc
+    integer :: n
+    type(ESMF_Field) :: tmp_field
     if (is%use_mpas_atm) then
       do n = 1, n_import_mpas
         tmp_field = ESMF_FieldCreate(grid=atm_grid, typekind=ESMF_TYPEKIND_R8, &
@@ -771,17 +861,15 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    !--------------------------------------------------------------------------
-    ! Atualizar estado interno com grades criadas nesta fase.
-    ! NAO re-alocar iswrap%wrap: ja alocado em InitializeAdvertise.
-    !--------------------------------------------------------------------------
-    is%atm_grid   = atm_grid
-    is%ocn_grid   = ocn_grid
-    ! use_mpas_atm ja lido logo apos GetInternalState (ver acima).
-    ! Nao sobrescrever com .false. aqui.
+    ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
+    ! tolerado acima não interrompe a inicialização).
+    rc = ESMF_SUCCESS
+  end subroutine realize_component_fields
 
-
-    ! Criar campos internos na grade ATM
+  subroutine create_internal_fields(is, atm_grid, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_Grid), intent(inout) :: atm_grid
+    integer, intent(inout) :: rc
     call CreateInternalField(is%f_taux_atm,   atm_grid, "med_taux",   rc)
     call CreateInternalField(is%f_tauy_atm,   atm_grid, "med_tauy",   rc)
     call CreateInternalField(is%f_sen_atm,    atm_grid, "med_sen",    rc)
@@ -883,34 +971,7 @@ contains
     ! Sprint C: rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
     ! Substituida no primeiro passo pela parametrizacao Charnock no bulk NCAR.
     call FillInternalField(is%f_zorl_atm, 0.01_ESMF_KIND_R8, rc)
-
-    call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! BUG-OUT-01 fix v4: ler config de diagnóstico de importação
-    call med_read_import_config()
-
-    ! FIX-IMP-01: salvar informação MPI do mediador para uso em med_write_import_fields
-    !
-    ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
-    ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
-    ! med_write_import_fields. No modo concurrent o MED tem seu próprio
-    ! comunicador de componente; substituí-lo silenciosamente por
-    ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
-    ! componente causaria mismatch / deadlock. Falhar cedo é o correto —
-    ! um erro de VM é excepcional e deve abortar, não ser mascarado.
-      call ESMF_VMGetCurrent(med_vm, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg='MED: falha ESMF_VMGetCurrent em InitializeRealize', &
-        line=__LINE__, file=__FILE__)) return
-      call ESMF_VMGet(med_vm, localPet=med_local_pet, petCount=med_pet_count, &
-        mpiCommunicator=med_mpi_comm, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg='MED: falha ESMF_VMGet mpiCommunicator em InitializeRealize', &
-        line=__LINE__, file=__FILE__)) return
-
-    call ESMF_LogWrite('MED: InitializeRealize concluido', ESMF_LOGMSG_INFO)
-  end subroutine InitializeRealize
+  end subroutine create_internal_fields
 
   subroutine check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
     type(ESMF_Grid), intent(inout) :: ocn_grid

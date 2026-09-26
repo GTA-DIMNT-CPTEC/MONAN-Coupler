@@ -897,49 +897,6 @@ contains
     integer :: n_esmf, fld_rank, i, j, idx
     character(len=*), parameter  :: subname = '(state_set_field_1d)'
       integer :: localDeCount_ss
-          integer :: icell
-          integer :: ig
-          integer :: jg
-          integer :: mpi_comm_use
-          integer :: ii
-          integer :: jj
-          real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
-          real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
-          real(ESMF_KIND_R8) :: lon_d
-          real(ESMF_KIND_R8) :: lat_d
-          real(ESMF_KIND_R8), allocatable :: sum_local(:,:)
-          real(ESMF_KIND_R8), allocatable :: sum_global(:,:)
-          real(ESMF_KIND_R8), allocatable :: count_local(:,:)
-          real(ESMF_KIND_R8), allocatable :: count_global(:,:)
-          real(ESMF_KIND_R8), allocatable :: buf_global(:,:)
-          type(ESMF_VM) :: vm_local
-          integer :: nPets_red
-          integer :: myRank_red
-          integer :: iPet_red
-          integer :: ierr_red
-          real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
-          real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
-          integer :: ii_f
-          integer :: jj_f
-          integer :: di_f
-          integer :: dj_f
-          integer :: ia_f
-          integer :: ja_f
-          integer :: n_nbr_f
-          integer :: n_it
-          real(ESMF_KIND_R8) :: sum_nbr_f
-          integer, parameter :: N_FILL_ITER = 12
-          integer :: n_holes_pre
-          integer :: n_holes_post
-          integer :: my_pet
-          type(ESMF_VM) :: vm_v
-          character(len=240) :: vmsg
-          integer :: n_cov
-          integer :: n_max_dup
-          real(ESMF_KIND_R8) :: avg_dup_val
-          real(ESMF_KIND_R8) :: lon_ii_d
-          real(ESMF_KIND_R8) :: lon_0360_d
-          integer :: ig_buf
 
     rc = ESMF_SUCCESS
     nullify(fptr1d, fptr2d)
@@ -997,6 +954,76 @@ contains
       if (present(lon_rad) .and. present(lat_rad) .and. &
           size(lon_rad) >= n .and. size(lat_rad) >= n) then
 
+          call map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
+          if (ChkErr(rc, __LINE__, __FILE__)) return
+      else
+        ! Fallback legado: mapeamento column-major (sem garantia geográfica)
+        idx = 0
+        outer: do j = lbound(fptr2d,2), ubound(fptr2d,2)
+          do i = lbound(fptr2d,1), ubound(fptr2d,1)
+            idx = idx + 1
+            if (idx > n_esmf) exit outer
+            fptr2d(i,j) = real(data(idx), ESMF_KIND_R8)
+          end do
+        end do outer
+      end if
+      nullify(fptr2d)
+    end if
+    rc = ESMF_SUCCESS
+  end subroutine state_set_field_1d
+
+  subroutine map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
+    real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
+    integer, parameter :: N_FILL_ITER = 12
+    real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
+    character(len=*), parameter :: subname = '(state_set_field_1d)'
+    integer, intent(in) :: n
+    character(len=*), intent(in) :: fldname
+    integer, intent(inout) :: rc
+    real(MPAS_RKIND), optional, intent(in) :: lon_rad(:)
+    real(MPAS_RKIND), optional, intent(in) :: lat_rad(:)
+    real(MPAS_RKIND), intent(in) :: data(n)
+    real(ESMF_KIND_R8), pointer :: fptr2d(:,:)
+    real(ESMF_KIND_R8) :: avg_dup_val
+    real(ESMF_KIND_R8), allocatable :: buf_global(:,:)
+    real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
+    real(ESMF_KIND_R8), allocatable :: count_global(:,:)
+    real(ESMF_KIND_R8), allocatable :: count_local(:,:)
+    integer :: di_f
+    integer :: dj_f
+    integer :: ia_f
+    integer :: icell
+    integer :: ierr_red
+    integer :: ig
+    integer :: ig_buf
+    integer :: ii
+    integer :: ii_f
+    integer :: iPet_red
+    integer :: ja_f
+    integer :: jg
+    integer :: jj
+    integer :: jj_f
+    real(ESMF_KIND_R8) :: lat_d
+    real(ESMF_KIND_R8) :: lon_0360_d
+    real(ESMF_KIND_R8) :: lon_d
+    real(ESMF_KIND_R8) :: lon_ii_d
+    integer :: mpi_comm_use
+    integer :: my_pet
+    integer :: myRank_red
+    integer :: n_cov
+    integer :: n_holes_post
+    integer :: n_holes_pre
+    integer :: n_it
+    integer :: n_max_dup
+    integer :: n_nbr_f
+    integer :: nPets_red
+    real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
+    real(ESMF_KIND_R8), allocatable :: sum_global(:,:)
+    real(ESMF_KIND_R8), allocatable :: sum_local(:,:)
+    real(ESMF_KIND_R8) :: sum_nbr_f
+    type(ESMF_VM) :: vm_local
+    type(ESMF_VM) :: vm_v
+    character(len=240) :: vmsg
           allocate(sum_local(ATM_NX, ATM_NY),   sum_global(ATM_NX, ATM_NY))
           allocate(count_local(ATM_NX, ATM_NY), count_global(ATM_NX, ATM_NY))
           allocate(buf_global(ATM_NX, ATM_NY))
@@ -1246,22 +1273,11 @@ contains
         if (allocated(buf_global)) deallocate(buf_global)
         if (allocated(sum_gath)) deallocate(sum_gath)
         if (allocated(cnt_gath)) deallocate(cnt_gath)
-      else
-        ! Fallback legado: mapeamento column-major (sem garantia geográfica)
-        idx = 0
-        outer: do j = lbound(fptr2d,2), ubound(fptr2d,2)
-          do i = lbound(fptr2d,1), ubound(fptr2d,1)
-            idx = idx + 1
-            if (idx > n_esmf) exit outer
-            fptr2d(i,j) = real(data(idx), ESMF_KIND_R8)
-          end do
-        end do outer
-      end if
-      nullify(fptr2d)
-    end if
-    rc = ESMF_SUCCESS
 
-  end subroutine state_set_field_1d
+    ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
+    ! tolerado acima não interrompe quem chamou a etapa).
+    rc = ESMF_SUCCESS
+  end subroutine map_cells_to_regular_grid
 
 
 end module mpas_cap_methods_mod
