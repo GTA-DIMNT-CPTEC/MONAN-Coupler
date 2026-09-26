@@ -401,8 +401,9 @@ contains
       fname          = trim(OUTPUT_DIR)//'/'//trim(fname_base)
       valid_time_iso = datetime_to_iso(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
       ! startTime = currTime - elapsed_s (para CF time_units "seconds since startTime")
-      call datetime_add_seconds(s_yr,s_mo,s_dy,s_hr,s_mn,s_sc, -elapsed_s, &
-                                 st_yr,st_mo,st_dy,st_hr,st_mn,st_sc)
+      call start_time_from_elapsed(s_yr,s_mo,s_dy,s_hr,s_mn,s_sc, elapsed_s, &
+                                   st_yr,st_mo,st_dy,st_hr,st_mn,st_sc, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
       time_units_str = datetime_to_cf_base(st_yr,st_mo,st_dy,st_hr,st_mn,st_sc)
       time_val       = real(elapsed_s, ESMF_KIND_R8)
 
@@ -831,38 +832,27 @@ contains
     end select
   end function field_stdname
 
-  ! ── Utilitários de conversão ──────────────────────────────────────────────
+  !> Instante inicial = instante atual menos 'elapsed' segundos, pelo
+  !! calendário gregoriano do ESMF. Substitui a conta manual de datas, que
+  !! não tratava o recuo para o mês anterior (dia 0 ou negativo quando o
+  !! intervalo cruzava o início do mês).
+  subroutine start_time_from_elapsed(yr, mo, dy, hr, mn, sc, elapsed, &
+                                     yr_o, mo_o, dy_o, hr_o, mn_o, sc_o, rc)
+    integer, intent(in)  :: yr, mo, dy, hr, mn, sc, elapsed
+    integer, intent(out) :: yr_o, mo_o, dy_o, hr_o, mn_o, sc_o
+    integer, intent(out) :: rc
+    type(ESMF_Time)         :: t_now, t_start
+    type(ESMF_TimeInterval) :: dt
 
-
-  ! ── Aritmética de calendário gregoriano proléptico ────────────────────────
-
-  pure logical function is_leap_year(yr)
-    integer, intent(in) :: yr
-    is_leap_year = (mod(yr,4)==0 .and. mod(yr,100)/=0) .or. mod(yr,400)==0
-  end function is_leap_year
-
-  subroutine datetime_add_seconds(yr,mo,dy,hr,mn,sc, nadd, &
-                                   yr_o,mo_o,dy_o,hr_o,mn_o,sc_o)
-    integer, intent(in)  :: yr,mo,dy,hr,mn,sc, nadd
-    integer, intent(out) :: yr_o,mo_o,dy_o,hr_o,mn_o,sc_o
-    integer :: dim(12), tot, extra, dsec
-    tot   = hr*3600 + mn*60 + sc + nadd
-    extra = tot / 86400
-    dsec  = mod(tot, 86400)
-    if (dsec < 0) then; extra = extra - 1; dsec = dsec + 86400; end if
-    sc_o = mod(dsec, 60); mn_o = mod(dsec/60, 60); hr_o = dsec/3600
-    yr_o = yr; mo_o = mo; dy_o = dy + extra
-    dim  = [31,28,31,30,31,30,31,31,30,31,30,31]
-    if (is_leap_year(yr_o)) dim(2) = 29
-    do while (dy_o > dim(mo_o))
-      dy_o = dy_o - dim(mo_o); mo_o = mo_o + 1
-      if (mo_o > 12) then
-        mo_o = 1; yr_o = yr_o + 1
-        dim = [31,28,31,30,31,30,31,31,30,31,30,31]
-        if (is_leap_year(yr_o)) dim(2) = 29
-      end if
-    end do
-  end subroutine datetime_add_seconds
+    call ESMF_TimeSet(t_now, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, &
+                      calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call ESMF_TimeIntervalSet(dt, s=elapsed, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    t_start = t_now - dt
+    call ESMF_TimeGet(t_start, yy=yr_o, mm=mo_o, dd=dy_o, h=hr_o, m=mn_o, s=sc_o, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+  end subroutine start_time_from_elapsed
 
   ! ── Formatadores de data/hora ─────────────────────────────────────────────
 

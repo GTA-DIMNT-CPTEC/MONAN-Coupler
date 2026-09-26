@@ -9,6 +9,9 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Calendário do gravador NetCDF do cap atmosférico pelo ESMF (R-FASE3-01).** O instante inicial gravado em `time:units` ("seconds since ...") dos arquivos `monan_export_*.nc` era calculado por uma conta manual de datas que não recuava para o mês anterior: com o instante atual em 1º de abril e 1 dia decorrido, gravava "2026-04-00"; em 2 de abril com 3 dias, "2026-04--1". Passa a ser calculado com `ESMF_Time` e calendário gregoriano (`start_time_from_elapsed`); saem `datetime_add_seconds` e `is_leap_year`. Conferido contra a conta antiga em 8 casos: resultado igual quando o intervalo não cruza o início do mês (caso da linha de base), correto quando cruza. Só o atributo `units` da variável `time` muda, e só nesses casos.
+  - `compute_instantaneous_fluxes` (`mpas_atm_model.F90`): `n` e `atm_public` passam a `intent(in)`, porque só são lidos.
+
 - **Inicialização do mediador e mapeamento do cap atmosférico em etapas (R-FASE2B-03).**
   - `InitializeRealize` do mediador passou de 359 para 62 linhas de código próprias, com as etapas `create_atm_grid`, `create_ocn_grid`, `realize_component_fields` e `create_internal_fields`, procedimentos de módulo com argumentos explícitos. A decomposição da grade em blocos por PET, que estava escrita duas vezes (grade ATM e grade OCN), virou a função `grid_regdecomp`.
   - `state_set_field_1d` do cap atmosférico passou de 243 para 106 linhas: o mapeamento das células do MPAS para a grade regular (acumulação, redução entre processos, média, preenchimento de lacunas e cópia para o campo local) virou o procedimento `map_cells_to_regular_grid`, com 7 argumentos; as 40 variáveis de trabalho passaram a ser locais dele.

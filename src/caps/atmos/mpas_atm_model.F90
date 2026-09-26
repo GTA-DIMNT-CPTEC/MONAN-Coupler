@@ -1104,8 +1104,8 @@ contains
 
   subroutine compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_bnd)
     integer, intent(in) :: dt_coupling
-    integer, intent(inout) :: n
-    type(mpas_atm_public_type), intent(inout) :: atm_public
+    integer, intent(in) :: n
+    type(mpas_atm_public_type), intent(in) :: atm_public
     type(atm_ocean_boundary_type), intent(in) :: atm_bnd
     real(MPAS_RKIND) :: dt_r, precip_now   ! Sprint A: spd removido (usado agora no bloco have_currents)
     integer          :: k
