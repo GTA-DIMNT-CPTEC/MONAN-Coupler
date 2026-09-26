@@ -30,6 +30,7 @@
 module mpas_cap_MONAN_mod
 
   use ESMF
+  use coupler_constants_mod, only : RAD2DEG
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
@@ -232,7 +233,6 @@ contains
     type(ESMF_Field)   :: field
     type(ESMF_VM)      :: vm
     integer            :: i, localMpiComm, localPet
-    real(ESMF_KIND_R8), parameter   :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
     character(len=*), parameter :: subname = '(mpas_cap:InitializeRealize)'
       real(ESMF_KIND_R8), allocatable :: lon_local_nc(:)
       real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)

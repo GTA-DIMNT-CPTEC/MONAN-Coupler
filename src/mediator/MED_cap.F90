@@ -16,6 +16,7 @@
 
 module MED_cap_MONAN_mod
   use ESMF
+  use coupler_constants_mod, only : ATM_NX, ATM_NY, SI_IFRAC_DECAY
   use ESMF, only: ESMF_State, ESMF_StateGet
   use mpi
   use diag_bitsum_mod, only: diag_bitsum_log
@@ -23,6 +24,8 @@ module MED_cap_MONAN_mod
   use regrid_manager_mod,  only: regrid_spec
   use coupler_utils_mod, only: ChkErr
   use netcdf
+  use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords, &
+                                 mom6_supergrid_corners
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn_ice,                 &
                                   cfg_write_fixdiag,                &
@@ -84,7 +87,6 @@ module MED_cap_MONAN_mod
   !   acoplamento (dt=3600 s, τ=86400 s):  exp(-dt/τ) = exp(-1/24) ≈ 0.9592.
   !   Sincronizado com SI_IFRAC_DECAY em mom_cap_MONAN.F90.
   logical,                         save :: med_ifrac_init_done = .false.
-  real(ESMF_KIND_R8),  parameter        :: SI_IFRAC_DECAY_MED  = 0.95924_ESMF_KIND_R8
 
 
 
@@ -352,8 +354,8 @@ contains
     !        Garante cobertura global via redistribuição ESMF (zero-copy).
     !   OCN: cfg_docn_nx x cfg_docn_ny — lidos de nuopc.input &nuopc_docn.
     !        Alinhada com DOCN_cap (OISST) — redistribuição zero-copy.
-    nx_atm = 360
-    ny_atm = 180
+    nx_atm = ATM_NX
+    ny_atm = ATM_NY
     ! FIX B-OCNGRID-01 (Ago 2026): cfg_docn_nx/ny (1440x720) sao a grade do
     ! DOCN/OISST (0.25 grau, regular). Quando o OCN real e' o MOM6+SIS2
     ! dinamico (cfg_use_docn=.false., modo de producao), a grade T real do
@@ -371,7 +373,7 @@ contains
       nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
       ny_ocn = cfg_docn_ny  ! Grade DOCN de nuopc.input (ex: OISST 0.25° =  720)
     else
-      call MED_ReadMom6TGridDims(trim(cfg_mom6_mesh_ocn), nx_ocn, ny_ocn, rc)
+      call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ocn, ny_ocn, rc, tag='MED B-OCNGRID-01')
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="MED: falha ao ler dimensoes reais de ocean_hgrid.nc " // &
             "(NIGLOBAL/NJGLOBAL do MOM6) - verifique cfg_mom6_mesh_ocn", &
@@ -587,7 +589,7 @@ contains
         ! do supergrid ocean_hgrid.nc (NAO uniformes; convergem no polo Norte).
         ! Sem isso, o conector NUOPC OCN->MED interpola usando posicoes erradas
         ! e a costa fica sistematicamente deslocada em todo o dominio.
-        call MED_FillMom6TGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
+        call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='MED B-OCNGRID-01')
         if (ESMF_LogFoundError(rcToCheck=rc, &
           msg="MED: falha ao ler coordenadas T reais de ocean_hgrid.nc " // &
               "para o DE local - grade OCN do mediador ficara incorreta", &
@@ -624,7 +626,7 @@ contains
         end do
       else
         ! MOM6 tripolar real: vertices verdadeiros do supergrid ocean_hgrid.nc.
-        call MED_FillMom6CornerGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
+        call mom6_supergrid_corners(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='MED B-CONSERVE-01')
         if (ESMF_LogFoundError(rcToCheck=rc, &
           msg="MED B-CONSERVE-01: falha ao ler cantos de ocean_hgrid.nc " // &
               "para o DE local - regrid conservativo ficara indisponivel", &
@@ -1002,293 +1004,6 @@ contains
     end if
   end subroutine check_corner_coordinates
 
-  !============================================================================
-  ! FIX B-OCNGRID-01 (Ago 2026)
-  !
-  ! CAUSA-RAIZ: a grade "ocn_grid" que o MEDIADOR usa internamente para o
-  ! regrid OCN<->ATM era construida com as dimensoes do DOCN/OISST
-  ! (cfg_docn_nx x cfg_docn_ny = 1440x720) e coordenadas lat/lon UNIFORMES,
-  ! mesmo quando o componente OCN real e' o MOM6+SIS2 dinamico (grade
-  ! tripolar, NAO uniforme). Em producao (cfg_use_docn=.false.) a grade T
-  ! real do MOM6 (NIGLOBAL x NJGLOBAL no MOM_input) e' MUITO menor e
-  ! geometricamente diferente (ex.: 180x155 medido em campo vs 1440x720
-  ! assumido pelo mediador). Como os dois lados (OCN real, MED fabricado)
-  ! sao objetos ESMF geometricamente distintos, o NUOPC monta um regrid
-  ! AUTOMATICO entre eles usando as coordenadas erradas do MED ? isso
-  ! contamina todos os campos OCN->MED (So_t, So_u, So_v, So_omask) com um
-  ! deslocamento geografico sistematico, mais visivel exatamente na costa
-  ! (onde pequenos erros de posicao cruzam a fronteira terra/mar).
-  !
-  ! FIX: quando cfg_use_docn=.false. (MOM6 ativo), a grade T real e' lida
-  ! diretamente do supergrid FRE-NCtools (ocean_hgrid.nc, mesmo arquivo
-  ! apontado por mesh_ocn em nuopc.input): dimensoes = nx/ny do arquivo / 2;
-  ! coordenadas T = pontos pares do supergrid (indice 2*i, 2*j). Ambas as
-  ! subrotinas abaixo sao chamadas a partir de InitializeRealize, ANTES de
-  ! qualquer ESMF_FieldRegridStore, para que TODOS os campos OCN<->MED
-  ! herdem a geometria correta (nao so' o SST mascarado).
-  !============================================================================
-
-  !----------------------------------------------------------------------------
-  ! MED_ReadMom6TGridDims ? le as dimensoes do supergrid (variaveis 'nx'/'ny'
-  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
-  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
-  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
-  !----------------------------------------------------------------------------
-
-
-  !----------------------------------------------------------------------------
-  ! MED_ReadMom6TGridDims — le as dimensoes do supergrid (variaveis 'nx'/'ny'
-  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
-  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
-  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
-  !----------------------------------------------------------------------------
-  subroutine MED_ReadMom6TGridDims(filename, ni, nj, rc)
-    character(len=*), intent(in)  :: filename
-    integer,           intent(out) :: ni, nj
-    integer,           intent(out) :: rc
-    integer :: ncid, dimid, nx_super, ny_super, ncstat
-
-    rc = ESMF_SUCCESS
-    ni = 0; nj = 0
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao abrir ' // trim(filename) // &
-        ' para ler dimensoes da grade T real do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_dimid(ncid, 'nx', dimid)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=nx_super)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler dimensao "nx" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ncstat = nf90_inq_dimid(ncid, 'ny', dimid)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=ny_super)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler dimensao "ny" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ncstat = nf90_close(ncid)
-
-    if (mod(nx_super,2) /= 0 .or. mod(ny_super,2) /= 0) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: AVISO - nx/ny impar em ' // &
-        trim(filename) // ' (formato inesperado; nao parece supergrid ' // &
-        'FRE-NCtools padrao). Prosseguindo com divisao inteira por 2.', &
-        ESMF_LOGMSG_WARNING)
-    end if
-
-    ni = nx_super / 2
-    nj = ny_super / 2
-  end subroutine MED_ReadMom6TGridDims
-
-  !----------------------------------------------------------------------------
-  ! MED_FillMom6TGridCoords - preenche coordX/coordY (bounds em indice GLOBAL,
-  ! pois ocn_grid usa ESMF_INDEX_GLOBAL) com as coordenadas T REAIS lidas do
-  ! supergrid ocean_hgrid.nc via hyperslab com stride=2 (pula os pontos de
-  ! vertice/aresta do supergrid, mantendo so' os centros das celulas T).
-  ! Convencao FRE-NCtools: celula T global (i,j), i=1..NIGLOBAL, j=1..NJGLOBAL,
-  ! esta no indice de supergrid (2*i, 2*j), 1-based.
-  !----------------------------------------------------------------------------
-  subroutine MED_FillMom6TGridCoords(filename, coordX, coordY, rc)
-    character(len=*),    intent(in)    :: filename
-    real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
-    integer,              intent(out)  :: rc
-    integer :: ncid, varid_x, varid_y, ncstat
-    integer :: i1, i2, j1, j2, ni_local, nj_local
-    integer :: start2(2), count2(2), stride2(2)
-      character(len=300) :: dbgmsg
-      real(ESMF_KIND_R8) :: x_row_min
-      real(ESMF_KIND_R8) :: x_row_max
-      real(ESMF_KIND_R8) :: y_col_min
-      real(ESMF_KIND_R8) :: y_col_max
-
-    rc = ESMF_SUCCESS
-    if (.not. associated(coordX) .or. .not. associated(coordY)) return
-
-    i1 = lbound(coordX,1); i2 = ubound(coordX,1)
-    j1 = lbound(coordX,2); j2 = ubound(coordX,2)
-    ni_local = i2 - i1 + 1
-    nj_local = j2 - j1 + 1
-    if (ni_local <= 0 .or. nj_local <= 0) return
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao abrir ' // trim(filename) // &
-        ' para ler coordenadas T reais do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_varid(ncid, 'x', varid_x)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: variaveis "x"/"y" nao encontradas em ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
-    ! stride=2 le direto os centros, sem carregar o supergrid inteiro (2x
-    ! resolucao) na memoria de cada PET.
-    start2  = (/ 2*i1, 2*j1 /)
-    count2  = (/ ni_local, nj_local /)
-    stride2 = (/ 2, 2 /)
-
-    ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler "x" (lon) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ! FIX B-OCNGRID-03: normaliza longitude bruta do supergrid (ex.: -300..60,
-    ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
-    ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
-    ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
-    where (coordX < 0.0_ESMF_KIND_R8)
-      coordX = coordX + 360.0_ESMF_KIND_R8
-    end where
-    where (coordX >= 360.0_ESMF_KIND_R8)
-      coordX = coordX - 360.0_ESMF_KIND_R8
-    end where
-
-    ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-OCNGRID-01: falha ao ler "y" (lat) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ncstat = nf90_close(ncid)
-
-    ! DIAGNOSTICO TEMPORARIO B-OCNGRID-01b: comprova o que foi lido de fato.
-    ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
-    ! (exceto perto do fold tripolar); coordY o oposto. Se coordX nao variar
-    ! com i, a longitude "colapsou" e o regrid produz bandas puramente
-    ! zonais (sem estrutura leste-oeste) ? exatamente o sintoma relatado.
-      if (ni_local >= 2 .and. nj_local >= 1) then
-        x_row_min = minval(coordX(:, j1))
-        x_row_max = maxval(coordX(:, j1))
-      else
-        x_row_min = -999.0_ESMF_KIND_R8; x_row_max = -999.0_ESMF_KIND_R8
-      end if
-      if (nj_local >= 2 .and. ni_local >= 1) then
-        y_col_min = minval(coordY(i1, :))
-        y_col_max = maxval(coordY(i1, :))
-      else
-        y_col_min = -999.0_ESMF_KIND_R8; y_col_max = -999.0_ESMF_KIND_R8
-      end if
-      write(dbgmsg,'(A,I0,A,I0,A,I0,A,I0,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
-        'MED B-OCNGRID-01b DIAG: DE i=[',i1,',',i2,'] j=[',j1,',',j2, &
-        '] coordX(i,j1) min=', x_row_min, ' max=', x_row_max, &
-        ' | coordY(i1,j) min=', y_col_min, ' max=', y_col_max, &
-        ' | coordX(i1,j1)=', coordX(i1,j1), ' coordX(i2,j1)=', coordX(i2,j1), &
-        ' | coordY(i1,j1)=', coordY(i1,j1), ' coordY(i1,j2)=', coordY(i1,j2)
-      call ESMF_LogWrite(trim(dbgmsg), ESMF_LOGMSG_INFO)
-  end subroutine MED_FillMom6TGridCoords
-
-  !----------------------------------------------------------------------------
-  ! FIX B-CONSERVE-01 (Set/2026): MED_FillMom6CornerGridCoords — le os
-  ! VERTICES (cantos) das celulas T do MOM6, necessarios para regrid
-  ! conservativo (ESMF_REGRIDMETHOD_CONSERVE), que calcula peso por
-  ! sobreposicao de AREA entre celulas fonte e destino — exige os 4 cantos
-  ! de cada celula, nao so' o centro.
-  !
-  ! Mesma logica de MED_FillMom6TGridCoords (mesmo arquivo ocean_hgrid.nc,
-  ! mesmo stride=2), com UM offset de indice diferente: celula T (i,j) esta
-  ! no vertice de supergrid (2*i, 2*j); o canto inferior-esquerdo dessa
-  ! MESMA celula esta em (2*i-1, 2*j-1). Como o canto (i,j) e' compartilhado
-  ! pelas celulas T vizinhas, um array de cantos (ni+1)x(nj+1) cobre uma
-  ! grade (ni)x(nj) de celulas por completo — o proprio ESMF ja' aloca o
-  ! array de cantos com o tamanho certo (incluindo periodicidade) quando
-  ! ESMF_GridAddCoord(staggerloc=CORNER) e' chamado; esta rotina so' preenche
-  ! o que coordX/coordY (ja' alocados pelo ESMF) pedirem, usando lbound/ubound
-  ! deles — nao supoe o tamanho a priori.
-  !----------------------------------------------------------------------------
-  subroutine MED_FillMom6CornerGridCoords(filename, coordX, coordY, rc)
-    character(len=*),    intent(in)    :: filename
-    real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
-    integer,              intent(out)  :: rc
-    integer :: ncid, varid_x, varid_y, ncstat
-    integer :: i1, i2, j1, j2, ni_local, nj_local
-    integer :: start2(2), count2(2), stride2(2)
-
-    rc = ESMF_SUCCESS
-    if (.not. associated(coordX) .or. .not. associated(coordY)) return
-
-    i1 = lbound(coordX,1); i2 = ubound(coordX,1)
-    j1 = lbound(coordX,2); j2 = ubound(coordX,2)
-    ni_local = i2 - i1 + 1
-    nj_local = j2 - j1 + 1
-    if (ni_local <= 0 .or. nj_local <= 0) return
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-CONSERVE-01: falha ao abrir ' // trim(filename) // &
-        ' para ler cantos (vertices) do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_varid(ncid, 'x', varid_x)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-CONSERVE-01: variaveis "x"/"y" nao encontradas em ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
-    ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
-    start2  = (/ 2*i1 - 1, 2*j1 - 1 /)
-    count2  = (/ ni_local, nj_local /)
-    stride2 = (/ 2, 2 /)
-
-    ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-CONSERVE-01: falha ao ler "x" (lon, canto) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ! Mesma normalizacao de longitude 0..360 usada para o centro (B-OCNGRID-03).
-    where (coordX < 0.0_ESMF_KIND_R8)
-      coordX = coordX + 360.0_ESMF_KIND_R8
-    end where
-    where (coordX >= 360.0_ESMF_KIND_R8)
-      coordX = coordX - 360.0_ESMF_KIND_R8
-    end where
-
-    ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('MED B-CONSERVE-01: falha ao ler "y" (lat, canto) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ncstat = nf90_close(ncid)
-
-  end subroutine MED_FillMom6CornerGridCoords
-
 
   !============================================================================
   ! InitializeDataComplete - cria routehandles
@@ -1656,8 +1371,6 @@ contains
       integer :: gi
       integer :: gj
       integer :: mpi_ierr_g
-      integer, parameter :: NX_G = 360
-      integer, parameter :: NY_G = 180
         real(ESMF_KIND_R8), pointer :: fpt_probe(:,:)
         logical, save :: raw_sst_diag_done = .false.
         real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
@@ -1911,10 +1624,10 @@ contains
     ! Trocar bounds do loop bulk para 1..nx_atm, 1..ny_atm.
     !==========================================================================
 
-      allocate(uas_g(NX_G,NY_G),  vas_g(NX_G,NY_G),  tas_g(NX_G,NY_G))
-      allocate(psl_g(NX_G,NY_G),  swdn_g(NX_G,NY_G), lwdn_g(NX_G,NY_G))
-      allocate(rain_g(NX_G,NY_G), shum_g(NX_G,NY_G), snow_g(NX_G,NY_G))
-      allocate(tmp_local(NX_G,NY_G))
+      allocate(uas_g(ATM_NX,ATM_NY),  vas_g(ATM_NX,ATM_NY),  tas_g(ATM_NX,ATM_NY))
+      allocate(psl_g(ATM_NX,ATM_NY),  swdn_g(ATM_NX,ATM_NY), lwdn_g(ATM_NX,ATM_NY))
+      allocate(rain_g(ATM_NX,ATM_NY), shum_g(ATM_NX,ATM_NY), snow_g(ATM_NX,ATM_NY))
+      allocate(tmp_local(ATM_NX,ATM_NY))
 
       ! Gather global por MPI_Allreduce(MAX) — campos com 'fill=0' fora do tile
       ! local. MAX combina contribuições de todos os PETs corretamente.
@@ -1929,67 +1642,67 @@ contains
       ! UAS
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) then
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) then
           tmp_local(gi,gj) = uas(gi,gj)
         end if
       end do; end do
-      call MPI_Allreduce(tmp_local, uas_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, uas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! VAS
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = vas(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = vas(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, vas_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, vas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! TAS
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = tas(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = tas(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, tas_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, tas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! PSL
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = psl(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = psl(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, psl_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, psl_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! SWDN
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = swdn(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = swdn(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, swdn_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, swdn_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! LWDN
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = lwdn(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = lwdn(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, lwdn_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, lwdn_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! RAIN
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = rain(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = rain(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, rain_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, rain_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! SHUM (com fallback)
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = shum(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = shum(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, shum_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, shum_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
       ! Onde shum_g=0 (não preenchido) e shum tem fallback, usar SHUM_OCEAN_DEFAULT
       where (shum_g <= 0.0_ESMF_KIND_R8) shum_g = SHUM_OCEAN_DEFAULT
@@ -1997,9 +1710,9 @@ contains
       ! SNOW (fase 2 opcional — zero default)
       tmp_local = 0.0_ESMF_KIND_R8
       do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= NX_G .and. gj >= 1 .and. gj <= NY_G) tmp_local(gi,gj) = snow(gi,gj)
+        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = snow(gi,gj)
       end do; end do
-      call MPI_Allreduce(tmp_local, snow_g, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+      call MPI_Allreduce(tmp_local, snow_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
       ! DIAGNÓSTICO BUG-CALC-08 + BUG-MPAS-01: vai para stdout (= esmApp_run.log).
@@ -2032,8 +1745,8 @@ contains
           j1 = lbound(fpt_probe,2); j2 = ubound(fpt_probe,2)
           ! Clampar aos limites globais (1..NX_G, 1..NY_G) para evitar acesso
           ! a uas_g fora dos bounds alocados.
-          i1 = max(1, i1); i2 = min(NX_G, i2)
-          j1 = max(1, j1); j2 = min(NY_G, j2)
+          i1 = max(1, i1); i2 = min(ATM_NX, i2)
+          j1 = max(1, j1); j2 = min(ATM_NY, j2)
         else
           ! PET sem DE local — bounds vazios → loops não executam
           i1 = 1; i2 = 0
@@ -2438,7 +2151,7 @@ contains
         if (rc == ESMF_SUCCESS .and. ldec > 0) then
           call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifrac_ptr, rc=rc)
           if (rc == ESMF_SUCCESS .and. associated(ifrac_ptr)) then
-            ifrac_ptr = ifrac_ptr * SI_IFRAC_DECAY_MED
+            ifrac_ptr = ifrac_ptr * SI_IFRAC_DECAY
             where (ifrac_ptr < 0.0_ESMF_KIND_R8) ifrac_ptr = 0.0_ESMF_KIND_R8
           end if
         end if
@@ -2802,51 +2515,50 @@ contains
     real(ESMF_KIND_R8), pointer     :: fptr_sen(:,:), fptr_evap(:,:)
     real(ESMF_KIND_R8), pointer     :: fptr_taux(:,:), fptr_tauy(:,:)
     integer :: gi2, gj2, ierr2, ii, jj
-    integer, parameter :: NXG2 = 360, NYG2 = 180
 
     nullify(fptr_sen, fptr_evap, fptr_taux, fptr_tauy)
-    allocate(sen_g2(NXG2,NYG2), lat_g2(NXG2,NYG2))
-    allocate(taux_g2(NXG2,NYG2), tauy_g2(NXG2,NYG2), tmp2(NXG2,NYG2))
+    allocate(sen_g2(ATM_NX,ATM_NY), lat_g2(ATM_NX,ATM_NY))
+    allocate(taux_g2(ATM_NX,ATM_NY), tauy_g2(ATM_NX,ATM_NY), tmp2(ATM_NX,ATM_NY))
 
     ! Gather global (mesmo padrao BUG-CALC-08: SUM com tiles disjuntos)
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
       do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
-        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+        if (gi2 >= 1 .and. gi2 <= ATM_NX .and. gj2 >= 1 .and. gj2 <= ATM_NY) &
           tmp2(gi2,gj2) = sen_mpas(gi2,gj2)
       end do
     end do
-    call MPI_Allreduce(tmp2, sen_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+    call MPI_Allreduce(tmp2, sen_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
       MPI_SUM, med_mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
       do gi2 = lbound(lat_mpas,1), ubound(lat_mpas,1)
-        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+        if (gi2 >= 1 .and. gi2 <= ATM_NX .and. gj2 >= 1 .and. gj2 <= ATM_NY) &
           tmp2(gi2,gj2) = lat_mpas(gi2,gj2)
       end do
     end do
-    call MPI_Allreduce(tmp2, lat_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+    call MPI_Allreduce(tmp2, lat_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
       MPI_SUM, med_mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
       do gi2 = lbound(taux_mpas,1), ubound(taux_mpas,1)
-        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+        if (gi2 >= 1 .and. gi2 <= ATM_NX .and. gj2 >= 1 .and. gj2 <= ATM_NY) &
           tmp2(gi2,gj2) = taux_mpas(gi2,gj2)
       end do
     end do
-    call MPI_Allreduce(tmp2, taux_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+    call MPI_Allreduce(tmp2, taux_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
       MPI_SUM, med_mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
       do gi2 = lbound(tauy_mpas,1), ubound(tauy_mpas,1)
-        if (gi2 >= 1 .and. gi2 <= NXG2 .and. gj2 >= 1 .and. gj2 <= NYG2) &
+        if (gi2 >= 1 .and. gi2 <= ATM_NX .and. gj2 >= 1 .and. gj2 <= ATM_NY) &
           tmp2(gi2,gj2) = tauy_mpas(gi2,gj2)
       end do
     end do
-    call MPI_Allreduce(tmp2, tauy_g2, NXG2*NYG2, MPI_DOUBLE_PRECISION, &
+    call MPI_Allreduce(tmp2, tauy_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
       MPI_SUM, med_mpi_comm, ierr2)
 
     call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
@@ -2859,7 +2571,7 @@ contains
         associated(fptr_taux) .and. associated(fptr_tauy)) then
       do jj = lbound(fptr_sen,2), ubound(fptr_sen,2)
         do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
-          if (ii >= 1 .and. ii <= NXG2 .and. jj >= 1 .and. jj <= NYG2) then
+          if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
             ! so sobrescreve onde ha dado nativo real (fora do fill=0
             ! dos PETs sem tile MONAN-A local — mesmo criterio BUG-CALC-08)
             if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
@@ -2909,8 +2621,6 @@ contains
     integer :: n_exact_zero
     integer :: n_total
     real(ESMF_KIND_R8), parameter :: LAT_MAX_GELO = 55.0_ESMF_KIND_R8
-    integer, parameter :: NXG_GEO = 360
-    integer, parameter :: NYG_GEO = 180
     integer :: ii_geo
     integer :: jj_geo
     integer :: n_bad_geo
@@ -3179,9 +2889,9 @@ contains
           do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
             if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
                 lon_here = (real(ii_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                           (360.0_ESMF_KIND_R8/NXG_GEO) + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/NXG_GEO)
+                           (360.0_ESMF_KIND_R8/ATM_NX) + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
                 lat_here = -90.0_ESMF_KIND_R8 + (real(jj_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                           (180.0_ESMF_KIND_R8/NYG_GEO) + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/NYG_GEO)
+                           (180.0_ESMF_KIND_R8/ATM_NY) + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
                 if (abs(lat_here) < LAT_MAX_GELO) then
                   n_bad_geo = n_bad_geo + 1
                   if (lat_bad < -900.0_ESMF_KIND_R8) then
@@ -3348,8 +3058,6 @@ contains
   end subroutine set_ocean_mask_for_sst
 
   subroutine log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
-    integer, parameter :: NY_G = 180
-    integer, parameter :: NX_G = 360
     integer, intent(inout) :: rc
     real(ESMF_KIND_R8), allocatable, target, intent(in) :: uas_g(:,:)
     real(ESMF_KIND_R8), allocatable, target, intent(in) :: tas_g(:,:)
@@ -3373,7 +3081,7 @@ contains
       n_nz_swdn = count(swdn_g      > 1.0e-10_ESMF_KIND_R8)
       write(*,'(A)') '######## [MED BUG-CALC-08 + BUG-MPAS-01 DIAG] ########'
       write(*,'(A,I0,A,I0,A,F9.4,A,F9.4)') &
-        '   uas_g: nonzero=', n_nz_uas, '/', NX_G*NY_G, &
+        '   uas_g: nonzero=', n_nz_uas, '/', ATM_NX*ATM_NY, &
         '  min=', minval(uas_g), '  max=', maxval(uas_g)
       write(*,'(A,I0,A,F9.3,A,F9.3)') &
         '   tas_g: nonzero>100K=', n_nz_tas, &
@@ -3393,7 +3101,7 @@ contains
       write(*,'(A,F10.3,A,F10.3)') &
         '  lwdn_g min=', minval(lwdn_g), '  max=', maxval(lwdn_g)
       write(*,'(A,I0,A,I0)') &
-        '   NX_G=', NX_G, '  NY_G=', NY_G
+        '   NX_G=', ATM_NX, '  NY_G=', ATM_NY
       write(*,'(A)') '########################################'
       flush(6)
     end if
@@ -3471,7 +3179,7 @@ contains
 
     ! Dimensões das grades
     nx_o = cfg_docn_nx;   ny_o = cfg_docn_ny
-    nx_a = 360;           ny_a = 180
+    nx_a = ATM_NX;        ny_a = ATM_NY
     dx_o = 360.0_ESMF_KIND_R8 / real(nx_o, ESMF_KIND_R8)
     dy_o = 180.0_ESMF_KIND_R8 / real(ny_o, ESMF_KIND_R8)
     dx_a = 360.0_ESMF_KIND_R8 / real(nx_a, ESMF_KIND_R8)

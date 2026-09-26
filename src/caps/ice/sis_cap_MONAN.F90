@@ -59,8 +59,8 @@ module sis_cap_MONAN_mod
 
   use time_utils_mod, only : esmf2fms_time
 
-  use netcdf   ! FIX-GRADE-ICE: leitura direta de ocean_hgrid.nc (mesmo padrao
-               ! ja usado e testado em MED_cap.F90, FIX B-OCNGRID-01/03)
+  use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords
+  use coupler_constants_mod, only : TICE_FALLBACK => T_FREEZE_SEAWATER
   use coupler_config_mod, only : cfg_mom6_mesh_ocn, cfg_write_fixdiag
 
   ! FIX SIS2-ATIVACAO: API do SIS2, confirmada lendo a fonte real em
@@ -427,12 +427,10 @@ contains
     call ESMF_LogWrite('ICE(SIS2): ice_model_init concluido', ESMF_LOGMSG_INFO)
 
     ! ── 4. Grade ESMF (mesma grade tripolar do OCN, ocean_hgrid.nc) ──────────
-    ! FIX-GRADE-ICE: reaproveita o mesmo padrao ja testado em MED_cap.F90
-    ! (FIX B-OCNGRID-01/03) — dimensao real lida do supergrid, coordenadas T
-    ! reais (nao-uniformes), periodicidade leste-oeste. Ver
-    ! ICE_ReadMom6TGridDims/ICE_FillMom6TGridCoords abaixo.
+    ! Dimensões e coordenadas T lidas do supergrid do MOM6, pela mesma rotina
+    ! do mediador (src/shared/mom6_supergrid.F90); periodicidade leste-oeste.
 
-      call ICE_ReadMom6TGridDims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc)
+      call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, tag='ICE(SIS2)')
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
         'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
@@ -496,7 +494,7 @@ contains
         staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      call ICE_FillMom6TGridCoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc)
+      call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='ICE(SIS2)')
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
         'coordenadas T reais de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
@@ -1292,7 +1290,6 @@ contains
     ! usado so' onde a fracao de gelo e desprezivel ou o campo nao esta
     ! associado — o peso do termo de gelo no blend a jusante torna esse
     ! valor quase irrelevante nesses casos.
-    real(ESMF_KIND_R8), parameter :: TICE_FALLBACK = 271.35_ESMF_KIND_R8
         character(len=150) :: diag_msg8
 
     rc = ESMF_SUCCESS
@@ -1358,16 +1355,6 @@ contains
 
   end subroutine ModelFinalize
 
-  !----------------------------------------------------------------------------
-  ! ICE_ReadMom6TGridDims / ICE_FillMom6TGridCoords — adaptadas quase
-  ! verbatim de MED_cap.F90 (MED_ReadMom6TGridDims/MED_FillMom6TGridCoords,
-  ! FIX B-OCNGRID-01/03), ja testadas e confirmadas funcionando naquele
-  ! contexto (leitura real do supergrid ocean_hgrid.nc, periodicidade,
-  ! normalizacao de longitude). Duplicadas aqui em vez de compartilhadas via
-  ! modulo utilitario por simplicidade — considerar refatorar para um
-  ! modulo comum (ex.: mom6_grid_utils_mod) se o time preferir evitar a
-  ! duplicacao entre MED_cap.F90 e sis_cap_MONAN.F90.
-  !----------------------------------------------------------------------------
   !> B-ICE-DECOMP-01: a partir dos blocos de todos os PETs (inicio e fim
   !! globais em i e em j, na ordem dos PETs), monta a decomposicao retangular
   !! que o ESMF precisa: tamanho de cada coluna (cntx), de cada linha (cnty) e
@@ -1470,120 +1457,6 @@ contains
     end subroutine ordena
 
   end subroutine ICE_DecompFromBlocks
-
-  subroutine ICE_ReadMom6TGridDims(filename, ni, nj, rc)
-    character(len=*), intent(in)  :: filename
-    integer,           intent(out) :: ni, nj
-    integer,           intent(out) :: rc
-    integer :: ncid, dimid, nx_super, ny_super, ncstat
-
-    rc = ESMF_SUCCESS
-    ni = 0; nj = 0
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao abrir ' // trim(filename) // &
-        ' para ler dimensoes da grade T real do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_dimid(ncid, 'nx', dimid)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=nx_super)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao ler dimensao "nx" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ncstat = nf90_inq_dimid(ncid, 'ny', dimid)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=ny_super)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao ler dimensao "ny" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ncstat = nf90_close(ncid)
-
-    if (mod(nx_super,2) /= 0 .or. mod(ny_super,2) /= 0) then
-      call ESMF_LogWrite('ICE(SIS2): AVISO — nx/ny impar em ' // &
-        trim(filename) // ' (formato inesperado).', ESMF_LOGMSG_WARNING)
-    end if
-
-    ni = nx_super / 2
-    nj = ny_super / 2
-  end subroutine ICE_ReadMom6TGridDims
-
-  subroutine ICE_FillMom6TGridCoords(filename, coordX, coordY, rc)
-    character(len=*),    intent(in)    :: filename
-    real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
-    integer,              intent(out)  :: rc
-    integer :: ncid, varid_x, varid_y, ncstat
-    integer :: i1, i2, j1, j2, ni_local, nj_local
-    integer :: start2(2), count2(2), stride2(2)
-
-    rc = ESMF_SUCCESS
-    if (.not. associated(coordX) .or. .not. associated(coordY)) return
-
-    i1 = lbound(coordX,1); i2 = ubound(coordX,1)
-    j1 = lbound(coordX,2); j2 = ubound(coordX,2)
-    ni_local = i2 - i1 + 1
-    nj_local = j2 - j1 + 1
-    if (ni_local <= 0 .or. nj_local <= 0) return
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao abrir ' // trim(filename) // &
-        ' para ler coordenadas T reais do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_varid(ncid, 'x', varid_x)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): variaveis "x"/"y" nao encontradas em ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    start2  = (/ 2*i1, 2*j1 /)
-    count2  = (/ ni_local, nj_local /)
-    stride2 = (/ 2, 2 /)
-
-    ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao ler "x" (lon) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ! Mesma normalizacao 0..360 ja usada/testada em MED_cap.F90.
-    where (coordX < 0.0_ESMF_KIND_R8)
-      coordX = coordX + 360.0_ESMF_KIND_R8
-    end where
-    where (coordX >= 360.0_ESMF_KIND_R8)
-      coordX = coordX - 360.0_ESMF_KIND_R8
-    end where
-
-    ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('ICE(SIS2): falha ao ler "y" (lat) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ncstat = nf90_close(ncid)
-  end subroutine ICE_FillMom6TGridCoords
 
   !> @brief Checksum inteiro de part_size, no mesmo espirito do chksum do SIS2.
   !!

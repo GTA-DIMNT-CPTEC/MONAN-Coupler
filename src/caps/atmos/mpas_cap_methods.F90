@@ -13,6 +13,7 @@
 module mpas_cap_methods_mod
 
   use ESMF
+  use coupler_constants_mod, only : ATM_NX, ATM_NY, RAD2DEG
   use mpi
   use mpas_atm_types_mod, only : mpas_atm_public_type,   &
                                   atm_ocean_boundary_type, &
@@ -473,8 +474,6 @@ contains
     type(ESMF_Grid), intent(out) :: grid
     integer,         intent(out) :: rc
 
-    integer, parameter            :: NLON = 360
-    integer, parameter            :: NLAT = 180
     real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
 
@@ -541,7 +540,7 @@ contains
     ny_tiles = 1
     do j = nx_tiles_target, 1, -1
       if (mod(petCount, j) == 0) then
-        if (j <= NLAT .and. (petCount / j) <= NLON / 2) then
+        if (j <= ATM_NY .and. (petCount / j) <= ATM_NX / 2) then
           ny_tiles = j            ! linhas (lat) = menor fator
           exit
         end if
@@ -559,7 +558,7 @@ contains
     ! a longitude geográfica correta para o deslocamento buf_global→fptr2d.
     grid = ESMF_GridCreate1PeriDim( &
       minIndex   = (/1, 1/),           &
-      maxIndex   = (/NLON, NLAT/),     &
+      maxIndex   = (/ATM_NX, ATM_NY/),     &
       regDecomp  = regDecomp,          &
       indexflag  = ESMF_INDEX_GLOBAL,  &
       coordSys   = ESMF_COORDSYS_SPH_DEG, &
@@ -717,11 +716,8 @@ contains
     integer :: n_esmf, fld_rank
     character(len=*), parameter  :: subname = '(state_get_field_1d)'
       integer :: localDeCount_sg
-        integer, parameter :: NLON = 360
-        integer, parameter :: NLAT = 180
         real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
         real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
-        real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
         real(ESMF_KIND_R8), parameter :: FILL_THR = 1.0e19_ESMF_KIND_R8
         real(ESMF_KIND_R8), allocatable :: buf2d(:,:)
         real(ESMF_KIND_R8), allocatable :: buf1d(:)
@@ -808,7 +804,7 @@ contains
         if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; return; end if
 
         ! 1) Reunir o campo distribuído (ordem de índice global) no PET 0.
-        allocate(buf2d(NLON, NLAT))
+        allocate(buf2d(ATM_NX, ATM_NY))
         buf2d = -9.99e+20_ESMF_KIND_R8
         call ESMF_FieldGather(field, farray=buf2d, rootPet=0, rc=rc)
         if (rc /= ESMF_SUCCESS) then
@@ -816,13 +812,13 @@ contains
         end if
 
         ! 2) Difundir a cópia global a todos os PETs (buffer contíguo 1-D).
-        allocate(buf1d(NLON*NLAT))
-        if (localPet_l == 0) buf1d = reshape(buf2d, [NLON*NLAT])
-        call ESMF_VMBroadcast(vm_l, buf1d, NLON*NLAT, 0, rc=rc)
+        allocate(buf1d(ATM_NX*ATM_NY))
+        if (localPet_l == 0) buf1d = reshape(buf2d, [ATM_NX*ATM_NY])
+        call ESMF_VMBroadcast(vm_l, buf1d, ATM_NX*ATM_NY, 0, rc=rc)
         if (rc /= ESMF_SUCCESS) then
           deallocate(buf2d, buf1d); rc = ESMF_SUCCESS; return
         end if
-        buf2d = reshape(buf1d, [NLON, NLAT])
+        buf2d = reshape(buf1d, [ATM_NX, ATM_NY])
 
         ! 3) Mapeamento geográfico nearest-neighbor para TODAS as células MPAS.
         if (present(lon_rad) .and. present(lat_rad) .and. &
@@ -845,8 +841,8 @@ contains
                             * 360.0_ESMF_KIND_R8          ! → [-180, +180)
             ig = int((lon_d + 180.0_ESMF_KIND_R8) / DLON) + 1
             jg = int((lat_d +  90.0_ESMF_KIND_R8) / DLAT) + 1
-            ig = max(1, min(ig, NLON))
-            jg = max(1, min(jg, NLAT))
+            ig = max(1, min(ig, ATM_NX))
+            jg = max(1, min(jg, ATM_NY))
             val = buf2d(ig, jg)
             ! Só sobrescreve com valor VÁLIDO (oceano). Pontos de fill (terra,
             ! ou sem cobertura do regrid MED) preservam o default já em data() —
@@ -858,7 +854,7 @@ contains
         else
           ! Fallback sem coordenadas: ordem global linear (válido só sem halos).
           ! Não zera o restante — preserva o default (evita clamp irreal).
-          n_esmf = min(NLON*NLAT, n)
+          n_esmf = min(ATM_NX*ATM_NY, n)
           data(1:n_esmf) = real(buf1d(1:n_esmf), MPAS_RKIND)
         end if
 
@@ -907,11 +903,8 @@ contains
           integer :: mpi_comm_use
           integer :: ii
           integer :: jj
-          real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
           real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
           real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
-          integer, parameter :: NX_G = 360
-          integer, parameter :: NY_G = 180
           real(ESMF_KIND_R8) :: lon_d
           real(ESMF_KIND_R8) :: lat_d
           real(ESMF_KIND_R8), allocatable :: sum_local(:,:)
@@ -1004,9 +997,9 @@ contains
       if (present(lon_rad) .and. present(lat_rad) .and. &
           size(lon_rad) >= n .and. size(lat_rad) >= n) then
 
-          allocate(sum_local(NX_G, NY_G),   sum_global(NX_G, NY_G))
-          allocate(count_local(NX_G, NY_G), count_global(NX_G, NY_G))
-          allocate(buf_global(NX_G, NY_G))
+          allocate(sum_local(ATM_NX, ATM_NY),   sum_global(ATM_NX, ATM_NY))
+          allocate(count_local(ATM_NX, ATM_NY), count_global(ATM_NX, ATM_NY))
+          allocate(buf_global(ATM_NX, ATM_NY))
           sum_local    = 0.0_ESMF_KIND_R8
           count_local  = 0.0_ESMF_KIND_R8
 
@@ -1017,8 +1010,8 @@ contains
             lon_d = lon_d - floor(lon_d / 360.0_ESMF_KIND_R8) * 360.0_ESMF_KIND_R8
             ig = int(lon_d / DLON) + 1
             jg = int((lat_d + 90.0_ESMF_KIND_R8) / DLAT) + 1
-            ig = max(1, min(ig, NX_G))
-            jg = max(1, min(jg, NY_G))
+            ig = max(1, min(ig, ATM_NX))
+            jg = max(1, min(jg, ATM_NY))
             sum_local(ig, jg)   = sum_local(ig, jg) + real(data(icell), ESMF_KIND_R8)
             count_local(ig, jg) = count_local(ig, jg) + 1.0_ESMF_KIND_R8
           end do
@@ -1091,19 +1084,19 @@ contains
             call MPI_Comm_rank(mpi_comm_use, myRank_red, ierr_red)
 
             if (myRank_red == 0) then
-              allocate(sum_gath(NX_G, NY_G, nPets_red))
-              allocate(cnt_gath(NX_G, NY_G, nPets_red))
+              allocate(sum_gath(ATM_NX, ATM_NY, nPets_red))
+              allocate(cnt_gath(ATM_NX, ATM_NY, nPets_red))
             else
               ! Alocacao minima: o buffer de recepcao so' e' lido no raiz, mas
               ! precisa existir como argumento valido em todos os ranks.
               allocate(sum_gath(1,1,1), cnt_gath(1,1,1))
             end if
 
-            call MPI_Gather(sum_local,  NX_G*NY_G, MPI_DOUBLE_PRECISION, &
-                            sum_gath,   NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+            call MPI_Gather(sum_local,  ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                            sum_gath,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
                             0, mpi_comm_use, ierr_red)
-            call MPI_Gather(count_local, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
-                            cnt_gath,    NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+            call MPI_Gather(count_local, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                            cnt_gath,    ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
                             0, mpi_comm_use, ierr_red)
 
             if (myRank_red == 0) then
@@ -1116,9 +1109,9 @@ contains
               end do
             end if
 
-            call MPI_Bcast(sum_global,   NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+            call MPI_Bcast(sum_global,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
                            0, mpi_comm_use, ierr_red)
-            call MPI_Bcast(count_global, NX_G*NY_G, MPI_DOUBLE_PRECISION, &
+            call MPI_Bcast(count_global, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
                            0, mpi_comm_use, ierr_red)
 
             deallocate(sum_gath, cnt_gath)
@@ -1151,16 +1144,16 @@ contains
             n_holes_pre = count(count_global < 0.5_ESMF_KIND_R8)
 
             do n_it = 1, N_FILL_ITER
-              do jj_f = 1, NY_G
-                do ii_f = 1, NX_G
+              do jj_f = 1, ATM_NY
+                do ii_f = 1, ATM_NX
                   if (count_global(ii_f, jj_f) < 0.5_ESMF_KIND_R8) then
                     n_nbr_f   = 0
                     sum_nbr_f = 0.0_ESMF_KIND_R8
                     do dj_f = -1, 1
                       do di_f = -1, 1
                         if (di_f == 0 .and. dj_f == 0) cycle
-                        ia_f = mod(ii_f + di_f - 1 + NX_G, NX_G) + 1
-                        ja_f = max(1, min(jj_f + dj_f, NY_G))
+                        ia_f = mod(ii_f + di_f - 1 + ATM_NX, ATM_NX) + 1
+                        ja_f = max(1, min(jj_f + dj_f, ATM_NY))
                         if (count_global(ia_f, ja_f) >= 0.5_ESMF_KIND_R8) then
                           sum_nbr_f = sum_nbr_f + buf_global(ia_f, ja_f)
                           n_nbr_f   = n_nbr_f + 1
@@ -1233,13 +1226,13 @@ contains
           fptr2d = 0.0_ESMF_KIND_R8
           do jj = lbound(fptr2d,2), ubound(fptr2d,2)
             do ii = lbound(fptr2d,1), ubound(fptr2d,1)
-              if (ii >= 1 .and. ii <= NX_G .and. jj >= 1 .and. jj <= NY_G) then
+              if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
                   lon_ii_d   = -180.0_ESMF_KIND_R8 + &
                                (real(ii, ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * DLON
                   lon_0360_d = lon_ii_d
                   if (lon_0360_d < 0.0_ESMF_KIND_R8) lon_0360_d = lon_0360_d + 360.0_ESMF_KIND_R8
                   ig_buf = int(lon_0360_d / DLON) + 1
-                  ig_buf = max(1, min(ig_buf, NX_G))
+                  ig_buf = max(1, min(ig_buf, ATM_NX))
                   fptr2d(ii, jj) = buf_global(ig_buf, jj)
               end if
             end do

@@ -15,6 +15,7 @@
 module med_cap_netcdf_mod
 
   use ESMF
+  use coupler_constants_mod, only : ATM_NX, ATM_NY, FILL_VALUE_R8
   use netcdf
   use mpi
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
@@ -141,12 +142,9 @@ contains
     character(len=20)   :: tstamp
     character(len=64),  allocatable :: fieldNameList(:)
     real(ESMF_KIND_R8), allocatable :: lat_global(:), lon_global(:)
-    real(ESMF_KIND_R8), parameter :: FILL_IMP  = -9.99e+20_ESMF_KIND_R8
     ! BUG-NC-03: _FillValue NC_FLOAT deve ser real(4) — tipo deve bater com NF90_FLOAT.
     real(4), parameter :: FILL_IMP4 = -9.99e+20_4
     ! Grade MED interna — alinhada com InitializeRealize (360×180 ATM)
-    real(ESMF_KIND_R8), parameter :: NX_MED_ATM = 360.0_ESMF_KIND_R8
-    real(ESMF_KIND_R8), parameter :: NY_MED_ATM = 180.0_ESMF_KIND_R8
     character(len=*), parameter :: subname = 'MED:med_write_import_fields'
         character(len=19) :: iso_time
       integer :: ldec_mask
@@ -222,8 +220,8 @@ contains
     end if
 
     ! BUG-IMP-02: grade MED regular e conhecida a priori: 360×180
-    nx_global = int(NX_MED_ATM)
-    ny_global = int(NY_MED_ATM)
+    nx_global = ATM_NX
+    ny_global = ATM_NY
 
     ! PET0: criar arquivo NetCDF
     if (med_local_pet == 0) then
@@ -429,7 +427,7 @@ contains
         rc = ESMF_SUCCESS; cycle
       end if
 
-      grid_local = FILL_IMP
+      grid_local = FILL_VALUE_R8
 
       ! Scatter direto: grade ATM 360×180 = grade de saída → mapeamento 1:1
         i1a = max(1, lbound(fptr2d,1));  i2a = min(nx_global, ubound(fptr2d,1))
@@ -460,14 +458,14 @@ contains
 
       ! BUG-NC-03: guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
-        grid_global = FILL_IMP
+        grid_global = FILL_VALUE_R8
       end where
 
       ! FIX B-DIAGMASK-01: continentes saem como _FillValue. A propria
       ! mascara e' a excecao obvia — mascara-la apagaria a informacao de
       ! onde a terra fica, que e' o unico conteudo dela.
       if (mask_ok .and. trim(fieldNameList(n)) /= 'Sx_omask') then
-        where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_IMP
+        where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_VALUE_R8
       end if
 
       if (med_local_pet == 0) then

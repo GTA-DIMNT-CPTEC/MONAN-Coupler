@@ -15,6 +15,7 @@
 module med_cap_types_mod
 
   use ESMF
+  use coupler_constants_mod, only : rho_air, Cp_air, L_evap, T_freeze => T0_KELVIN, eps_q, es_coef_a, es_coef_b, es_coef_c, sigma_sb
   use regrid_manager_mod, only : regrid_manager_t
 
   implicit none
@@ -23,20 +24,12 @@ module med_cap_types_mod
   character(len=*), parameter :: u_FILE_u = __FILE__
 
   !----------------------------------------------------------------------------
-  ! Constantes físicas (Large & Yeager 2009)
+  ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
+  ! As constantes físicas vêm de coupler_constants_mod e são re-exportadas aqui.
   !----------------------------------------------------------------------------
-  real(ESMF_KIND_R8), parameter :: rho_air    = 1.225_ESMF_KIND_R8   !< Densidade do ar [kg/m³]
   real(ESMF_KIND_R8), parameter :: Cd_neut    = 1.3e-3_ESMF_KIND_R8  !< Coef. arrasto neutro
   real(ESMF_KIND_R8), parameter :: Ch_neut    = 1.0e-3_ESMF_KIND_R8  !< Coef. calor sensível
   real(ESMF_KIND_R8), parameter :: Ce_neut    = 1.15e-3_ESMF_KIND_R8 !< Coef. calor latente
-  real(ESMF_KIND_R8), parameter :: Cp_air     = 1004.67_ESMF_KIND_R8 !< Calor específico do ar [J/kg/K]
-  real(ESMF_KIND_R8), parameter :: L_evap     = 2.501e6_ESMF_KIND_R8 !< Calor latente de evaporação [J/kg]
-  real(ESMF_KIND_R8), parameter :: T_freeze   = 273.15_ESMF_KIND_R8  !< 0 °C em Kelvin
-  real(ESMF_KIND_R8), parameter :: eps_q      = 0.622_ESMF_KIND_R8   !< Razão molar água/ar seco
-  real(ESMF_KIND_R8), parameter :: es_coef_a  = 611.2_ESMF_KIND_R8   !< Coef. Clausius-Clapeyron [Pa]
-  real(ESMF_KIND_R8), parameter :: es_coef_b  = 17.67_ESMF_KIND_R8   !< Coef. Clausius-Clapeyron
-  real(ESMF_KIND_R8), parameter :: es_coef_c  = 243.5_ESMF_KIND_R8   !< Coef. Clausius-Clapeyron [°C]
-  real(ESMF_KIND_R8), parameter :: sigma_sb   = 5.67e-8_ESMF_KIND_R8 !< Constante de Stefan-Boltzmann
   real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.06_ESMF_KIND_R8    !< Albedo médio do oceano
   !real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.26_ESMF_KIND_R8    !< Albedo médio do oceano
   !> SST de segurança para bulk quando o valor recebido está fora de [271, 308] K.

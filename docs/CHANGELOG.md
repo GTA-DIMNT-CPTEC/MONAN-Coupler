@@ -9,6 +9,12 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Constantes e grade do MOM6 num só lugar (R-FASE2B-02).** Validado sem mudança de resultado: os valores e tipos são os mesmos de antes.
+  - Novo `src/shared/coupler_constants.F90`: grade atmosférica do mediador (`ATM_NX` = 360, `ATM_NY` = 180, antes repetida como `NLON`, `NX_G`, `NX_ATM_ZEN`, `NX_MED_ATM` em cinco arquivos), constantes físicas (gravidade, 0 °C, congelamento da água do mar, densidade e calor específico do ar, calor latente, Stefan-Boltzmann, coeficientes da pressão de vapor), `RAD2DEG`, `FILL_VALUE_R8` e `SI_IFRAC_DECAY`. Constantes de mesmo nome e valor diferente (π com 15 algarismos no ângulo zenital; as de `mpas_atm_model.F90`, em precisão do MPAS) ficaram onde estavam, registradas no fim do módulo.
+  - Novo `src/shared/mom6_supergrid.F90`: leitura das dimensões, dos centros e dos cantos da grade T do MOM6 a partir do `ocean_hgrid.nc`. Substitui as duas cópias que existiam, `MED_*` em `MED_cap.F90` e `ICE_*` em `sis_cap_MONAN.F90`, que só diferiam nas mensagens de log; o prefixo das mensagens passa a ser um argumento.
+  - `tools/dev/valida_rodada.bash`: prepara, submete e compara uma rodada de validação, um comando por vez. Recusa um executável com código de outra instalação. `docs/validacao-refatoracao.md` passa a usá-lo.
+  - `run_esmApp.jaci --check` (B-RUN-EXE-02): avisa quando o executável contém código de outra instalação.
+
 - **Procedimentos de módulo com argumentos explícitos (R-FASE2B-01).** Os procedimentos internos criados na eliminação dos BLOCKs passaram a procedimentos de módulo: cada um declara na própria assinatura o que recebe, com `intent(in)` para o que só lê e `intent(inout)` para o que altera (conferido pelo compilador). Variáveis que só um procedimento usava passaram a ser locais dele. Afeta `MED_cap.F90`, `med_bulk_ncar.F90`, `med_cap_netcdf.F90`, `mpas_cap_methods.F90`, `mpas_cap_netcdf.F90`, `mpas_atm_model.F90` e `sis_cap_MONAN.F90`. Nos dois últimos, que não compilam fora da Jaci, os argumentos que não são ponteiros ficaram `intent(inout)`.
   - `MediatorAdvance` dividido em etapas nomeadas: `zero_med_fluxes`, `update_ocean_fields_on_atm_grid`, `update_ice_fraction_from_docn`, `export_to_components` e `stamp_export_fields`, além das que já existiam. Passou de 495 para 310 linhas de código próprias (eram 1 257 antes da refatoração).
   - `compara-linha-base.bash -e`: ignora as saídas que a rodada grava na raiz (`MONAN_DIAG_*.nc`, `reprodiag.nc` e outras), também em linhas de base antigas.

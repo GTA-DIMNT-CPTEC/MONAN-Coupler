@@ -96,6 +96,7 @@ module MOM_cap_MONAN_mod
 
   ! ── Infraestrutura ESMF/NUOPC ─────────────────────────────────────────────
   use ESMF
+  use coupler_constants_mod, only : SI_IFRAC_DECAY, T_FREEZE => T_FREEZE_SEAWATER
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
@@ -210,7 +211,7 @@ module MOM_cap_MONAN_mod
   ! si_ifrac_mem_valid : .true. a partir do segundo passo (após primeira inicialização)
   real(ESMF_KIND_R8), allocatable, save :: si_ifrac_mem(:,:)
   logical,                         save :: si_ifrac_mem_valid = .false.
-  real(ESMF_KIND_R8), parameter :: SI_IFRAC_DECAY = 0.95924_ESMF_KIND_R8  ! ≈ exp(-1/24)
+  ! SI_IFRAC_DECAY vem de coupler_constants_mod (≈ exp(-1/24)).
 
   ! ── Estado interno do componente oceânico ─────────────────────────────────
   !> Agrega os três tipos MOM6 que precisam sobreviver entre chamadas NUOPC.
@@ -1360,7 +1361,6 @@ contains
     !     do acoplamento.  A sigmoide ainda é monotônica e contínua.
     !
     ! EXP_CLAMP : limite para o argumento do exponencial (evita overflow)
-    real(ESMF_KIND_R8), parameter :: T_FREEZE  = 271.35_ESMF_KIND_R8  ! [K]
     real(ESMF_KIND_R8), parameter :: DT_TRANS  = 2.0_ESMF_KIND_R8     ! [K]  BUG-PROXY-DT fix
     real(ESMF_KIND_R8), parameter :: EXP_CLAMP = 50.0_ESMF_KIND_R8    ! evita overflow
 

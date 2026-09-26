@@ -42,6 +42,7 @@
 module DOCN_cap_mod
 
   use ESMF
+  use coupler_constants_mod, only : T0_KELVIN
   use ESMF, only: ESMF_GridComp, ESMF_GridCompGet, ESMF_GridCompSetEntryPoint
   use ESMF, only: ESMF_GridCompGetInternalState, ESMF_GridCompSetInternalState
   use ESMF, only: ESMF_State, ESMF_StateGet
@@ -101,7 +102,6 @@ module DOCN_cap_mod
 
   ! ── Conversão de unidades ──────────────────────────────────────────────────
   ! OISST v2.1 armazena SST em °C. Ajuste para 0.0 se o arquivo já for em K.
-  real(ESMF_KIND_R8), parameter :: SST_CELSIUS_TO_K = 273.15_ESMF_KIND_R8
 
   ! ── Rugosidade oceânica padrão ─────────────────────────────────────────────
   real(ESMF_KIND_R8), parameter :: ZORL_DEFAULT = 0.001_ESMF_KIND_R8  ! [m]
@@ -540,7 +540,7 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg="DOCN: falha ao ler SST", &
       line=__LINE__, file=__FILE__)) return
     ! Conversão °C → K (OISST armazena em °C)
-    is%sst = is%sst + SST_CELSIUS_TO_K
+    is%sst = is%sst + T0_KELVIN
 
     call ReadOcnFieldInterp(gcomp, trim(cfg_docn_ice_file), &
       trim(cfg_docn_ice_varname), &

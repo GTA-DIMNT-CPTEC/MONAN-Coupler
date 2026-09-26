@@ -71,6 +71,7 @@
 module mpas_cap_netcdf_mod
 
   use ESMF
+  use coupler_constants_mod, only : FILL_VALUE_R8
   use mpi
   ! W1-FIX (v12.0): wrappers tipadas em módulo separado — mpi_allreduce_wrappers.F90.
   ! O ftn/gfortran cruza tipos de MPI_Allreduce entre chamadas no mesmo módulo
@@ -105,7 +106,6 @@ module mpas_cap_netcdf_mod
   real(ESMF_KIND_R8), save :: DLAT = 1.0_ESMF_KIND_R8  ! passo em lat
 
   ! Fill value para pontos da grade sem nenhuma célula Voronoi
-  real(ESMF_KIND_R8), parameter :: FILL_VALUE = -9.99e+20_ESMF_KIND_R8
 
   ! ── Coordenadas globais (módulo save — preenchidas por netcdf_init_coords)
   real(ESMF_KIND_R8), allocatable, save :: g_lon_global(:)  ! (nGlobal) graus
@@ -492,8 +492,8 @@ contains
         ncstat = nf90_put_att(ncid, varid, 'standard_name', &
                  field_stdname(fldnames(i)))
         ncstat = nf90_put_att(ncid, varid, 'CMEPS_name',    trim(fldnames(i)))
-        ncstat = nf90_put_att(ncid, varid, '_FillValue',    FILL_VALUE)
-        ncstat = nf90_put_att(ncid, varid, 'missing_value', FILL_VALUE)
+        ncstat = nf90_put_att(ncid, varid, '_FillValue',    FILL_VALUE_R8)
+        ncstat = nf90_put_att(ncid, varid, 'missing_value', FILL_VALUE_R8)
       end do
 
       ncstat = nf90_enddef(ncid)
@@ -615,7 +615,7 @@ contains
       call allreduce_i4(cnt_local, cnt_global, NLON*NLAT, mpiComm, mpi_ierr)
 
       if (localPet == 0) then
-        grid_2d = FILL_VALUE
+        grid_2d = FILL_VALUE_R8
         where (cnt_global > 0) grid_2d = acc_global / real(cnt_global, ESMF_KIND_R8)
         ncstat = nf90_inq_varid(ncid, trim(fldnames(i)), varid)
         if (ncstat == NF90_NOERR) then
@@ -991,7 +991,6 @@ contains
     ! os tres precisam concordar, senao a linha de costa do diagnostico do
     ! MPAS nao bate com a do diagnostico do MED.
     real(ESMF_KIND_R8), parameter :: OMASK_MIN = 0.5_ESMF_KIND_R8
-    real(ESMF_KIND_R8), parameter :: FILL_DIAG = -9.99e+20_ESMF_KIND_R8
     real(ESMF_KIND_R8), allocatable :: lon_global(:), lat_global(:)
     integer :: nGlobal, nLocal
     real(ESMF_KIND_R8) :: res_deg, dlon, dlat
@@ -1210,19 +1209,19 @@ contains
     ios = nf90_put_att(ncid, varid_uocn,  'units',         'm s-1')
     ios = nf90_put_att(ncid, varid_uocn,  'long_name',     'Corrente oceanica zonal importada pelo MPAS')
     ios = nf90_put_att(ncid, varid_uocn,  'standard_name', 'eastward_sea_water_velocity')
-    ios = nf90_put_att(ncid, varid_uocn,  '_FillValue',    FILL_DIAG)
+    ios = nf90_put_att(ncid, varid_uocn,  '_FillValue',    FILL_VALUE_R8)
 
     ios = nf90_def_var(ncid, 'So_v', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_vocn)
     ios = nf90_put_att(ncid, varid_vocn,  'units',         'm s-1')
     ios = nf90_put_att(ncid, varid_vocn,  'long_name',     'Corrente oceanica meridional importada pelo MPAS')
     ios = nf90_put_att(ncid, varid_vocn,  'standard_name', 'northward_sea_water_velocity')
-    ios = nf90_put_att(ncid, varid_vocn,  '_FillValue',    FILL_DIAG)
+    ios = nf90_put_att(ncid, varid_vocn,  '_FillValue',    FILL_VALUE_R8)
 
     ios = nf90_def_var(ncid, 'Sf_albedo', NF90_DOUBLE, [dimid_lon, dimid_lat], varid_alb)
     ios = nf90_put_att(ncid, varid_alb,   'units',         '1')
     ios = nf90_put_att(ncid, varid_alb,   'long_name',     'Albedo de superficie importado pelo MPAS')
     ios = nf90_put_att(ncid, varid_alb,   'standard_name', 'surface_albedo')
-    ios = nf90_put_att(ncid, varid_alb,   '_FillValue',    FILL_DIAG)
+    ios = nf90_put_att(ncid, varid_alb,   '_FillValue',    FILL_VALUE_R8)
 
     ! B-DIAGMASK-01: a propria mascara vira variavel do arquivo, para que o
     ! pos-processamento nao precise readivinha-la a partir de _FillValue.
@@ -1230,7 +1229,7 @@ contains
     ios = nf90_put_att(ncid, varid_omask, 'units',         '1')
     ios = nf90_put_att(ncid, varid_omask, 'long_name',     'Mascara oceano/terra do MOM6 (1=oceano, 0=terra)')
     ios = nf90_put_att(ncid, varid_omask, 'standard_name', 'sea_binary_mask')
-    ios = nf90_put_att(ncid, varid_omask, '_FillValue',    FILL_DIAG)
+    ios = nf90_put_att(ncid, varid_omask, '_FillValue',    FILL_VALUE_R8)
 
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'Conventions',  'CF-1.8')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'title', &
@@ -1273,21 +1272,21 @@ contains
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_sot, grid_2d)
 
     call voronoi_to_grid(recvBuf_ifrac, lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_ifrac, grid_2d)
 
     call voronoi_to_grid(recvBuf_zorl,  lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=1.0e-5_ESMF_KIND_R8, vmax=0.1_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_zorl, grid_2d)
 
     ! B-DIAG-IMPORT-INCOMPLETO-01: correntes e albedo, mesmo binning e mesma
@@ -1302,14 +1301,14 @@ contains
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=-5.0_ESMF_KIND_R8, vmax=5.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_uocn, grid_2d)
 
     call voronoi_to_grid(recvBuf_vocn,  lon_global, lat_global, nGlobal, &
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=-5.0_ESMF_KIND_R8, vmax=5.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_vocn, grid_2d)
 
     ! Albedo em [0, 1]: faixa de definicao da grandeza, nao faixa esperada.
@@ -1320,7 +1319,7 @@ contains
                          grid_2d, nlon, nlat, dlon, dlat, &
                          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, &
                          ocean_frac_min=0.5_ESMF_KIND_R8)
-    where (mask_2d < OMASK_MIN) grid_2d = FILL_DIAG
+    where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_alb, grid_2d)
 
     ! A mascara vai binaria e sem mascarar a si mesma: e' ela que diz onde
@@ -1330,7 +1329,7 @@ contains
     ! ordem de avaliacao passaria a importar para quem for reler isto.
       allocate(is_ocean(nlon, nlat), is_land(nlon, nlat))
       is_ocean = (mask_2d >= OMASK_MIN)
-      is_land  = (.not. is_ocean) .and. (mask_2d > 0.5_ESMF_KIND_R8 * FILL_DIAG)
+      is_land  = (.not. is_ocean) .and. (mask_2d > 0.5_ESMF_KIND_R8 * FILL_VALUE_R8)
       where (is_ocean) mask_2d = 1.0_ESMF_KIND_R8
       where (is_land)  mask_2d = 0.0_ESMF_KIND_R8
       deallocate(is_ocean, is_land)

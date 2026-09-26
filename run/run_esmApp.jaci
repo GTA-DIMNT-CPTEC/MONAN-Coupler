@@ -808,6 +808,22 @@ fi
 
 echo "--- Executável ---"
 _req "${EXECUTABLE}"
+# B-RUN-EXE-02: o executável não deve conter código de outra instalação. Com -g,
+# os caminhos dos fontes das bibliotecas ligadas ficam gravados no binário; se
+# aparecer um Coupler-Install diferente do deste COUPLER_ROOT, o setenv foi
+# carregado com outra instalação (caso real: bibliotecas do MPAS e do MOM6 de
+# coupling/ num executável de refatorado/, e resultados diferentes da base).
+if [[ -f "${EXECUTABLE}" ]] && command -v strings >/dev/null 2>&1; then
+  _minha_inst="$(cd "${COUPLER_ROOT}/.." 2>/dev/null && pwd)"
+  _outras=$(strings -a "${EXECUTABLE}" 2>/dev/null \
+            | grep -oE '/[^[:space:]"]*/Coupler-Install' | sort -u \
+            | grep -vxF "${_minha_inst}" | head -3)
+  if [[ -n "${_outras}" ]]; then
+    printf "  %-8s: %s\n" "AVISO" "o executável contém código de outra instalação:"
+    echo "${_outras}" | sed 's/^/             /'
+    echo "             Recompile com COUPLER_ROOT=${COUPLER_ROOT} definido antes do setenv."
+  fi
+fi
 echo ""
 
 echo "--- Configuração do acoplamento ---"

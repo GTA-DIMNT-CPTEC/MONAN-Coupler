@@ -17,6 +17,7 @@
 module med_bulk_ncar_mod
 
   use ESMF
+  use coupler_constants_mod, only : GRAV, T_FREEZE_SEAWATER, ATM_NX, ATM_NY
 
   use coupler_config_mod, only: cfg_use_docn_ice,        &
                                 cfg_use_sis2_dynamic,     &
@@ -390,7 +391,6 @@ contains
     type(ESMF_Field) :: f_ifrac_src
     integer          :: rc_if
     logical          :: regrid_ok
-    real(ESMF_KIND_R8), parameter :: T_FILL_LAND = 271.35_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: TOL_LAND = 1.0e-6_ESMF_KIND_R8
     integer :: n_ifrac_land
     character(len=160) :: logmsg
@@ -429,9 +429,9 @@ contains
             where (fptr /= fptr)            fptr = 0.0_ESMF_KIND_R8  ! NaN
             ! Sprint A.5.2: defesa em profundidade — zera ifrac onde sst = T_FILL_LAND
               if (associated(sst)) then
-                n_ifrac_land = count(abs(sst - T_FILL_LAND) < TOL_LAND &
+                n_ifrac_land = count(abs(sst - T_FREEZE_SEAWATER) < TOL_LAND &
                                      .and. fptr > 0.0_ESMF_KIND_R8)
-                where (abs(sst - T_FILL_LAND) < TOL_LAND) fptr = 0.0_ESMF_KIND_R8
+                where (abs(sst - T_FREEZE_SEAWATER) < TOL_LAND) fptr = 0.0_ESMF_KIND_R8
                 if (n_ifrac_land > 0) then
                     write(logmsg,'(A,I0,A)') &
                       'MED Sprint A.5.2: Si_ifrac zerado em ', &
@@ -482,7 +482,6 @@ contains
     integer :: j
     real(ESMF_KIND_R8), parameter :: ALPHA_CHARNOCK = 0.018_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: BETA_SMITH     = 0.11_ESMF_KIND_R8
-    real(ESMF_KIND_R8), parameter :: G_GRAV         = 9.81_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: NU_AIR         = 1.5e-5_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: USTAR_MIN      = 1.0e-4_ESMF_KIND_R8
     real(ESMF_KIND_R8), parameter :: Z0_MIN         = 1.0e-5_ESMF_KIND_R8
@@ -509,7 +508,7 @@ contains
           tau_mag     = sqrt(p_taux(i,j)**2 + p_tauy(i,j)**2)
           ustar       = sqrt(tau_mag / rho_air)
           ustar       = max(ustar, USTAR_MIN)
-          z0_charnock = ALPHA_CHARNOCK * ustar**2 / G_GRAV
+          z0_charnock = ALPHA_CHARNOCK * ustar**2 / GRAV
           z0_smith    = BETA_SMITH * NU_AIR / ustar
           z0_total    = max(Z0_MIN, min(Z0_MAX, z0_charnock + z0_smith))
           ! Sobre terra (mascara real So_omask, ver B-LANDMASK-01): usar default
@@ -550,7 +549,6 @@ contains
     real(ESMF_KIND_R8) :: tice_eff, qsat_ice, rib, stab_fac
     integer :: rc_ice2
     real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referencia [m]
-    real(ESMF_KIND_R8), parameter :: G_ACCEL = 9.81_ESMF_KIND_R8    ! gravidade [m/s^2]
     real(ESMF_KIND_R8), parameter :: LOUIS_B = 5.0_ESMF_KIND_R8     ! Louis (1979), caso estavel
     real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instavel
     real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ nao zerar o fluxo
@@ -605,7 +603,7 @@ contains
           tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
         ! Numero de Richardson bulk; positivo = estratificacao estavel
         ! (ar mais quente que a superficie — caso tipico sobre gelo).
-        rib = G_ACCEL * Z_REF * (tas(i,j) - tice_eff) / &
+        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
               (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
         if (rib > 0.0_ESMF_KIND_R8) then
           stab_fac = 1.0_ESMF_KIND_R8 / &
@@ -635,7 +633,7 @@ contains
         wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
         tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
           tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-        rib = G_ACCEL * Z_REF * (tas(i,j) - tice_eff) / &
+        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
               (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
         if (rib > 0.0_ESMF_KIND_R8) then
           stab_fac = 1.0_ESMF_KIND_R8 / &
@@ -670,7 +668,7 @@ contains
           ! congelamento (mesmo fallback usado la).
           tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
             tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-          rib = G_ACCEL * Z_REF * (tas(i,j) - tice_eff) / &
+          rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
                 (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
           if (rib > 0.0_ESMF_KIND_R8) then
             stab_fac = 1.0_ESMF_KIND_R8 / &
@@ -730,7 +728,7 @@ contains
         ! Mesmo Rib/fator de estabilidade do calor sensivel acima —
         ! teoria de similaridade usa a MESMA funcao de estabilidade para
         ! calor e umidade (ambos escalares passivos).
-        rib = G_ACCEL * Z_REF * (tas(i,j) - tice_eff) / &
+        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
               (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
         if (rib > 0.0_ESMF_KIND_R8) then
           stab_fac = 1.0_ESMF_KIND_R8 / &
@@ -797,8 +795,6 @@ contains
   end subroutine compute_ice_fluxes
 
   subroutine blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
-    integer, parameter :: NY_ATM_ZEN = 180
-    integer, parameter :: NX_ATM_ZEN = 360
     real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
     type(MED_InternalState), intent(inout) :: is
     integer, intent(in) :: j1
@@ -866,10 +862,10 @@ contains
           fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
           ! Fase 2.5: lat/lon analiticos da grade ATM 360x180 (mesma formula
           ! usada na criacao da grade em MED_cap.F90::InitializeRealize).
-          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/NX_ATM_ZEN) &
-                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/NX_ATM_ZEN)
-          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/NY_ATM_ZEN) &
-                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/NY_ATM_ZEN)
+          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
+                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
+          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/ATM_NY) &
+                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
           hour_angle = (PI_ZEN/12.0_ESMF_KIND_R8) * (utc_hour + lon_ij/15.0_ESMF_KIND_R8 - 12.0_ESMF_KIND_R8)
           coszen_ij = sin(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * sin(decl) + &
                       cos(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * cos(decl) * cos(hour_angle)
@@ -915,10 +911,10 @@ contains
         call ESMF_FieldGet(is%f_swidr_ice,  farrayPtr=fptr_ice2, rc=rc)
         do j=j1,j2; do i=i1,i2
           fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/NX_ATM_ZEN) &
-                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/NX_ATM_ZEN)
-          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/NY_ATM_ZEN) &
-                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/NY_ATM_ZEN)
+          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
+                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
+          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/ATM_NY) &
+                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
           hour_angle = (PI_ZEN/12.0_ESMF_KIND_R8) * (utc_hour + lon_ij/15.0_ESMF_KIND_R8 - 12.0_ESMF_KIND_R8)
           coszen_ij = sin(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * sin(decl) + &
                       cos(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * cos(decl) * cos(hour_angle)
