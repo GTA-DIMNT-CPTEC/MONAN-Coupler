@@ -12,6 +12,8 @@ Roteiro para confirmar que uma alteração de código (refatoração, reorganiza
 
 Todas usam a mesma configuração: `pet_layout = split`, 128 + 20 + 4 PETs (152), modo concorrente com SIS2 dinâmico, rodada de 1 dia (24 passos de 3600 s).
 
+Antes de levar uma mudança à Jaci, faça as conferências locais de [`conferencias-locais.md`](conferencias-locais.md): compilação fora da Jaci, constantes de texto, instruções e, quando for o caso, o teste dos gravadores. Elas evitam rodadas perdidas, mas não substituem a comparação abaixo.
+
 ## 1. Compilar
 
 Numa sessão nova, defina `COUPLER_ROOT` **antes** de carregar o ambiente. Sem isso o `setenv-gnu.bash` usa as bibliotecas de outra instalação, e o executável liga o MPAS e o MOM6 de lá (caso real: FAIL sem nenhuma mudança de cálculo).

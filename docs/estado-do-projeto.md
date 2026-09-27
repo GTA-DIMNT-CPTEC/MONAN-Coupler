@@ -42,9 +42,10 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE3-04 | linha de base padrão R-NOFMA-02; este documento |
 | R-FASE4-01 | `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano divididos em etapas |
 | R-FASE4-02 | `anota-linha-base.bash`; `valida_rodada compara` distingue "comparação não feita" de FAIL e devolve o código da comparação |
-| R-FASE4-03 | `MediatorAdvance` dividida em etapas (validação na Jaci pendente) |
+| R-FASE4-03 | `MediatorAdvance` dividida em etapas |
+| R-FASE4-04 | ferramentas de conferência local no repositório; documentação (validação na Jaci pendente) |
 
-O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 2).
+O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 3, que cobre todas as etapas até a R-FASE4-03).
 
 ## 4. Linhas de base
 
@@ -93,16 +94,35 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | `tools/dev/compara-linha-base.bash` | compara dados (`nccmp -d`) e metadados; opção `-e` confere entradas |
 | `tools/dev/anota-linha-base.bash` | anota o MANIFEST de uma base congelada e atualiza a soma dele (`-r` registra uma edição já feita) |
 | `tests/regrid/` | testes MPI do framework de interpolação (`make test NP=4`) |
+| `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci (ESMF local e interfaces mínimas de `tests/interfaces/`) |
+| `tools/dev/confere-literais.py` | compara as constantes de texto com as de um commit |
+| `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit |
+| `tests/writers/compara-gravadores.bash` | compara byte a byte os arquivos dos gravadores de diagnóstico de duas versões |
+
+O uso das quatro últimas, antes de levar uma mudança à Jaci, está em `docs/conferencias-locais.md`.
 
 ## 8. Pendências e próximos passos
 
-1. Enviar a refatoração ao GitHub num ramo próprio e abrir um pedido de integração (pull request) para o `develop`.
-2. Verificação automática de compilação a cada envio ao repositório. Os fontes que não dependem do MPAS, MOM6 e FMS compilam com ESMF e NetCDF instalados; os demais precisam das bibliotecas dos modelos.
-3. Refinar os `intent` dos procedimentos do cap do gelo (hoje `intent(inout)` por precaução).
-4. Decidir se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados; decisão científica).
-5. Decidir o destino do DATM, que o driver não registra (o script `roda_repro_datm_mom6.sh` depende dele).
-6. Trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`.
-7. Dividir as rotinas que ainda passam de 200 linhas de código (sem comentários): `compute_ice_fluxes` (224), `update_ice_fields_on_atm_grid` (222), `WriteDOCNDiag` (210) e `InitializeRealize` do cap do gelo (202). O `config_read` (267) é quase todo declaração de namelist e pode ficar como está. As quatro rotinas listadas antes foram divididas na R-FASE4-01, e a `MediatorAdvance` (308) na R-FASE4-03.
+Sequência combinada em 27/09/2026. Cada item de código é um patch validado na Jaci contra a R-NOFMA-02 antes do seguinte.
+
+| Ordem | Etapa | Conteúdo | Situação |
+| --- | --- | --- | --- |
+| 1 | R-FASE4-04 | ferramentas de conferência local no repositório (`compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, interfaces mínimas, teste dos gravadores); documentação pendente | entregue, a validar |
+| 2 | (Daniel) | enviar `refactor/principal` ao GitHub e abrir o pedido de integração para o `develop`, com o RPQ v3 e o CHANGELOG | a fazer |
+| 3 | R-FASE4-05 | verificação automática de compilação a cada envio ao repositório, com as ferramentas da R-FASE4-04; o ESMF 8.9.1 (cerca de 40 min para compilar) precisa ficar em cache | a fazer |
+| 4 | R-FASE4-06 | dividir `update_ice_fields_on_atm_grid` (`MED_cap`, 222 linhas de código) e `compute_ice_fluxes` (`med_bulk_ncar`, 224), numa rodada só; a segunda é cálculo de fluxo, e a ordem das operações tem de ficar intacta | a fazer |
+| 5 | R-FASE4-07 | dividir `WriteDOCNDiag` (`docn_cap_netcdf`, 210); estender o teste dos gravadores a ele, porque a linha de base não roda com DOCN | a fazer |
+| 6 | R-FASE4-08 | cap do gelo: dividir o `InitializeRealize` (202) e refinar os `intent` hoje `intent(inout)` por precaução; antes, escrever interfaces mínimas do SIS2 para compilar `sis_cap_MONAN.F90` fora da Jaci | a fazer |
+| 7 | R-FASE4-09 | trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`; antes, confirmar na Jaci que o `cray-mpich` oferece o módulo `mpi_f08` com o gfortran | a fazer |
+
+Numeração dos patches: provisória a partir da R-FASE4-05, na ordem da tabela.
+
+Fora da sequência, em paralelo:
+
+- **Decisões do GT (não são refatoração):** se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados e exige nova linha de base); e o destino do DATM, que o driver não registra (o `roda_repro_datm_mom6.sh` depende dele).
+- **Opcional:** `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) já está abaixo do limite. O `config_read` (267) é quase todo declaração de namelist e fica como está.
+
+Já concluído: as rotinas `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano (R-FASE4-01) e `MediatorAdvance` (R-FASE4-03).
 
 ## 9. Convenções
 
@@ -118,3 +138,5 @@ Envie, no início da conversa:
 - o código atual: um arquivo `.tar.gz` do repositório no ramo `refactor/principal`, sem `build/`, `bin/` e `models/`, ou o link do ramo no GitHub, se o assistente tiver acesso.
 
 E descreva o que quer fazer a seguir, por exemplo um dos itens da seção 8.
+
+Para as conferências locais (`docs/conferencias-locais.md`), o assistente precisa compilar o ESMF 8.9.1 no próprio ambiente, o que leva cerca de 40 minutos no início da sessão; depois disso, `compila-local.bash` leva menos de um minuto.

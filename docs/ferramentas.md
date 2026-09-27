@@ -100,6 +100,11 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | `tools/dev/cria-linha-base.bash` | congela uma execução de referência: saídas, configuração, código e ambiente | `docs/uso-linha-base.md` |
 | `tools/dev/compara-linha-base.bash` | compara a execução atual com uma linha de base, com `nccmp -d` | `docs/uso-linha-base.md` |
 | `tools/dev/anota-linha-base.bash` | acrescenta uma observação ao MANIFEST de uma base congelada e atualiza a soma dele no `SHA256SUMS` | `docs/uso-linha-base.md` |
+| `tools/dev/valida_rodada.bash` | prepara, submete e compara uma rodada de validação na Jaci | `docs/validacao-refatoracao.md` |
+| `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
+| `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
+| `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit (etapas que só movem código) | `docs/conferencias-locais.md` |
+| `tests/writers/compara-gravadores.bash` | executa os gravadores de diagnóstico de duas versões com os mesmos dados e compara os arquivos byte a byte | `docs/conferencias-locais.md` |
 
 A linha de base responde se uma alteração de código mudou o resultado; a bateria do `mede-taxa-repro.sh` responde se a configuração é reprodutível. São perguntas diferentes: uma alteração pode ser reprodutível e ainda assim mudar o resultado.
 

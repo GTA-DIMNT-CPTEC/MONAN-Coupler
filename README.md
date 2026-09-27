@@ -114,6 +114,8 @@ make clean      # remove build/ e bin/; distclean remove também lib/ e mod/
 make help       # lista os alvos
 ```
 
+Fora da Jaci, sem as bibliotecas dos modelos, `tools/dev/compila-local.bash` compila os fontes do acoplador contra um ESMF local e as interfaces mínimas de `tests/interfaces/`. Com `confere-literais.py`, `confere-instrucoes.py` e o teste dos gravadores (`tests/writers/`), forma o conjunto de conferências feitas antes de levar uma mudança à Jaci; ver [`docs/conferencias-locais.md`](docs/conferencias-locais.md).
+
 O código do acoplador é compilado sem fusão de multiplicação e soma (`-ffp-contract=off`, variável `FP_CONTRACT` do Makefile). Com a fusão ligada, o compilador escolhe onde usar a instrução FMA conforme a organização do código, e uma refatoração que não muda nenhum cálculo altera o último bit do resultado. O custo medido foi nulo (rodada de 1 dia com 152 PETs: 142,5 s sem FMA, 144,4 s com). Para ligar a fusão, `make FP_CONTRACT=fast`; isso exige uma linha de base própria.
 
 ## Saídas e pós-processamento
@@ -153,7 +155,9 @@ Guias de uso das ferramentas:
 | [`uso-smoke-tests.md`](docs/uso-smoke-tests.md) | `test-concurrent.bash`, `test-sequential-split.bash` |
 | [`uso-mede-taxa-repro.md`](docs/uso-mede-taxa-repro.md) | `mede-taxa-repro.sh` |
 | [`uso-duplas-rodadas-repro.md`](docs/uso-duplas-rodadas-repro.md) | `roda-repro-reprodiag.sh`, `roda_repro_producao.sh`, `roda_repro_datm_mom6.sh`, `roda-repro-mpas-standalone.sh`, `set-nccmp-jaci.bash` |
-| [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash` |
+| [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash`, `anota-linha-base.bash` |
+| [`validacao-refatoracao.md`](docs/validacao-refatoracao.md) | `valida_rodada.bash` |
+| [`conferencias-locais.md`](docs/conferencias-locais.md) | `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash` |
 
 ## Créditos
 
