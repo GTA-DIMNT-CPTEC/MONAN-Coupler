@@ -405,14 +405,16 @@
 !   dinâmico) — a RunSequence correta é selecionada automaticamente. O ganho
 !   de concorrência é maior na Fase 2, onde o OCN é caro.
 !-----------------------------------------------------------------------
+! Valores abaixo: configuração dos experimentos de reprodutibilidade e da
+! linha de base de validação (152 PETs = 128 ATM + 20 OCN + 4 ICE).
 &nuopc_petlayout
   coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
   pet_layout    = 'split'        ! 'shared' | 'split'
-  atm_pet_count = 32             ! split: nº PETs do ATM (0 = auto: metade)
-  ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
+  atm_pet_count = 128            ! split: nº PETs do ATM (0 = auto: metade)
+  ocn_pet_count = 20             ! split: nº PETs do OCN (0 = auto: resto)
   use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
   ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)
-  seq_repro     = .true.        ! .true. → sequential+split+SIS2 REPRODUTIVEL
+  seq_repro     = .true.         ! .true. → sequential+split+SIS2 REPRODUTIVEL
                                  !   (fluxo de dados idêntico ao concurrent+split,
                                  !   bit-a-bit). Só efetivo com coupling_mode=
                                  !   'sequential' + use_med_to_mpas + use_sis2_

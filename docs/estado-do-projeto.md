@@ -46,9 +46,9 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE4-04 | ferramentas de conferência local no repositório; documentação (sem mudança em `src/`: validada pela compilação na Jaci, tag `fase4-04-validada`) |
 | R-FASE4-05 | `update_ice_fields_on_atm_grid` e `compute_ice_fluxes` divididas em etapas; teste da física bulk (`tests/bulk`) |
 | R-FASE4-06 | `WriteDOCNDiag` dividida em etapas; teste dos gravadores estendido ao DOCN |
-| R-FASE4-07 | `InitializeRealize` do cap do gelo dividida em etapas; `intent` refinados; interfaces mínimas do SIS2 (validação pendente) |
+| R-FASE4-07 | `InitializeRealize` do cap do gelo dividida em etapas; `intent` refinados; interfaces mínimas do SIS2 |
 
-O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 3, que cobre todas as etapas até a R-FASE4-03).
+O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 4, que cobre todas as etapas até a R-FASE4-07).
 
 ## 4. Linhas de base
 
@@ -115,10 +115,11 @@ Sequência combinada em 27/09/2026. Cada item de código é um patch validado na
 | 2 | (Daniel) | enviar `refactor/principal` ao GitHub (sem pedido de integração por enquanto) e repetir o envio a cada etapa validada | feito em 27/09/2026 (`9ef3183`, tags `fase4-01-validada` a `fase4-04-validada`) |
 | 3 | R-FASE4-05 | dividir `update_ice_fields_on_atm_grid` (`MED_cap`, 222 linhas de código) e `compute_ice_fluxes` (`med_bulk_ncar`, 224), numa rodada só; a segunda é cálculo de fluxo, e a ordem das operações tem de ficar intacta | concluída (PASS, 73 iguais, tag `fase4-05-validada`) |
 | 4 | R-FASE4-06 | dividir `WriteDOCNDiag` (`docn_cap_netcdf`, 210); estender o teste dos gravadores a ele, porque a linha de base não roda com DOCN | concluída (PASS, 73 iguais, tag `fase4-06-validada`) |
-| 5 | R-FASE4-07 | cap do gelo: dividir o `InitializeRealize` (202) e refinar os `intent` hoje `intent(inout)` por precaução; antes, escrever interfaces mínimas do SIS2 para compilar `sis_cap_MONAN.F90` fora da Jaci | entregue, a validar |
-| 6 | R-FASE4-08 | trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`; antes, confirmar na Jaci que o `cray-mpich` oferece o módulo `mpi_f08` com o gfortran | em avaliação: sem ganho de desempenho; o benefício é a conferência de tipos pelo compilador, mas a migração alcança cerca de 50 chamadas MPI em oito fontes. Recomendação: tirar da sequência principal e, se houver interesse, só juntar os três arquivos numa interface genérica `allreduce_sum` com `use mpi` |
+| 5 | R-FASE4-07 | cap do gelo: dividir o `InitializeRealize` (202) e refinar os `intent` hoje `intent(inout)` por precaução; antes, escrever interfaces mínimas do SIS2 para compilar `sis_cap_MONAN.F90` fora da Jaci | concluída (PASS, 73 iguais, tag `fase4-07-validada`) |
+| 6 | R-FASE4-08 | `nuopc.input` do repositório com as contagens de PETs da configuração de validação (128 + 20 + 4), as mesmas dos experimentos de reprodutibilidade; só mudam `atm_pet_count` e `ocn_pet_count` | entregue, a validar |
+| 7 | (opcional) | trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`; antes, confirmar na Jaci que o `cray-mpich` oferece o módulo `mpi_f08` com o gfortran | em avaliação (o `cray-mpich` 8.1.31 da Jaci oferece o `mpi_f08` para o gfortran 12.3, conferido em 27/09/2026): sem ganho de desempenho; o benefício é a conferência de tipos pelo compilador, mas a migração alcança cerca de 50 chamadas MPI em oito fontes. Recomendação: tirar da sequência principal e, se houver interesse, só juntar os três arquivos numa interface genérica `allreduce_sum` com `use mpi` |
 
-Numeração dos patches: provisória a partir da R-FASE4-08, na ordem da tabela.
+A troca pelo `mpi_f08` ficou sem número de etapa: só entra na sequência se for decidida.
 
 Decisões de 27/09/2026:
 
@@ -130,7 +131,7 @@ Fora da sequência, em paralelo:
 - **Decisões do GT (não são refatoração):** se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados e exige nova linha de base); e o destino do DATM, que o driver não registra (o `roda_repro_datm_mom6.sh` depende dele).
 - **Opcional:** `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) já está abaixo do limite. O `config_read` (267) é quase todo declaração de namelist e fica como está.
 
-Já concluído: as rotinas `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano (R-FASE4-01), `MediatorAdvance` (R-FASE4-03), `update_ice_fields_on_atm_grid` e `compute_ice_fluxes` (R-FASE4-05), `WriteDOCNDiag` (R-FASE4-06) e o `InitializeRealize` do gelo (R-FASE4-07, a validar).
+Já concluído: as rotinas `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano (R-FASE4-01), `MediatorAdvance` (R-FASE4-03), `update_ice_fields_on_atm_grid` e `compute_ice_fluxes` (R-FASE4-05), `WriteDOCNDiag` (R-FASE4-06) e o `InitializeRealize` do gelo (R-FASE4-07). Com isso, nenhuma rotina própria passa de 200 linhas de código, exceto o `config_read` (267, quase todo declaração de namelist).
 
 ## 9. Convenções
 
