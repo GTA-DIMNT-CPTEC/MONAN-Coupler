@@ -29,13 +29,13 @@
 !!             MOM_ocean_model_nuopc, MOM_surface_forcing_nuopc,
 !!             MOM_grid, MOM_domains, FMS (mpp_domains_mod).
 !!
-!! Versão 2.6 — BUG-MEM-GUARD: salvamento si_ifrac_mem após guard PET (Maio 2026):
-!!   Em v2.5, set_si_ifrac_from_file salvava si_ifrac_mem APÓS o guard B-45
+!! Versão 2.6 — salvamento si_ifrac_mem após guard PET (Maio 2026):
+!! Em v2.5, set_si_ifrac_from_file salvava si_ifrac_mem APÓS o guard
 !!   (localDeCount_f == 0), mas esse guard retornava com early return ANTES
 !!   que o preenchimento de ptr_ifrac fosse executado — logo, localDeCount_f==0
 !!   nunca chegava ao bloco de salvamento.  O problema real é diferente:
 !!   o salvamento estava APÓS deallocate(ice_global) mas ANTES do write() final.
-!!   A análise da linha 1218 confirma: Guard B-45 retorna antes do loop de
+!! A análise da linha 1218 confirma: Guard retorna antes do loop de
 !!   preenchimento de ptr_ifrac, então ptr_ifrac nunca recebe valores de OISST
 !!   para esses PETs.  Para PETs com DE local (localDeCount_f > 0), o loop
 !!   de preenchimento roda corretamente, mas a versão compilada no servidor era
@@ -47,7 +47,7 @@
 !!   Adicionalmente: log de confirmação em set_si_ifrac_from_file após salvar
 !!   si_ifrac_mem (bounds do campo ESMF).
 !!
-!! Versão 2.5 — BUG-MEM: persistência de Si_ifrac entre passos (Maio 2026):
+!! Versão 2.5 — persistência de Si_ifrac entre passos (Maio 2026):
 !!   compute_si_ifrac_proxy reiniciava ptr_ifrac=0 a cada chamada, descartando
 !!   o campo OISST de 7918 células inicializado em t=0 por set_si_ifrac_from_file.
 !!   Resultado: Si_ifrac caía de 7918→38 células no passo t=1 (primeira chamada
@@ -60,7 +60,7 @@
 !!   Implementação: set_si_ifrac_from_file salva o campo OISST em si_ifrac_mem;
 !!   compute_si_ifrac_proxy aplica persistência e atualiza si_ifrac_mem.
 !!
-!! Versão 2.4 — BUG-PROXY-DT: DT_TRANS alargado 0.5→2.0 K (Maio 2026):
+!! Versão 2.4 — DT_TRANS alargado 0.5→2.0 K (Maio 2026):
 !!   compute_si_ifrac_proxy usava DT_TRANS=0.5 K — zona de transição da
 !!   sigmoide demasiadamente estreita. Si_ifrac > 0.01 apenas para
 !!   SST < 273.7 K. Após o primeiro passo de acoplamento, SST polar sobe
@@ -71,7 +71,7 @@
 !!   Adicionalmente, frazil agora usa escala contínua (min(1, frazil/100 W/m²))
 !!   em vez de binária, evitando Si_ifrac=1.0 por frazil numericamente ruidosa.
 !!
-!! Versão 2.3 — Sprint B.1: docn_ice_init_only (Maio 2026):
+!! Versão 2.3 —.1: docn_ice_init_only (Maio 2026):
 !!   cfg_docn_ice_init_only=.true. em &nuopc_mode faz set_si_ifrac_from_file
 !!   ser chamada apenas em InitializeDataComplete (t=0). Em ModelAdvance (t≥1)
 !!   usa compute_si_ifrac_proxy (sigmoide da SST dinâmica do MOM6), permitindo
@@ -81,13 +81,13 @@
 !!   Quando cfg_use_docn_ice=.true. em nuopc.input (&nuopc_mode), Si_ifrac
 !!   é lido diretamente do arquivo OISST v2.1 (cfg_docn_ice_file) com
 !!   interpolação temporal linear via ReadOcnFieldInterp (docn_cap_netcdf_mod).
-!!   O proxy sigmoide (Sprint A.5) permanece como fallback.
+!! O proxy sigmoide (.5) permanece como fallback.
 !!   Nova rotina privada: set_si_ifrac_from_file.
 !!
-!! Versão 2.1.1 — Sprint A.5.1 (Maio 2026):
+!! Versão 2.1.1 —.5.1 (Maio 2026):
 !!   compute_si_ifrac_proxy com guard mask2dT — continentes em Si_ifrac=0.
 !!
-!! Versão 2.1 — Sprint A.5 (Maio 2026):
+!! Versão 2.1 —.5 (Maio 2026):
 !!   Si_ifrac via sigmoide refinada (substitui proxy binário).
 !!
 !! Versão 2.0 — acoplamento real MOM6 (substitui stub v1.0).
@@ -129,7 +129,7 @@ module MOM_cap_MONAN_mod
   ! Conversao ESMF->FMS via ESMF_TimeGet(yy,mm,...) + set_date.
   use time_utils_mod,          only : esmf2fms_time
 
-  ! Alternativa 1 + Sprint B.1 — leitura de Si_ifrac de arquivo OISST
+  ! Alternativa 1 +.1 — leitura de Si_ifrac de arquivo OISST
   use docn_cap_netcdf_mod,     only : ReadOcnFieldInterp
   use coupler_config_mod,     only : cfg_use_docn_ice,        &
                                        cfg_docn_ice_init_only,  &
@@ -173,7 +173,7 @@ module MOM_cap_MONAN_mod
 
   ! ── Nomes dos campos NUOPC ────────────────────────────────────────────────
   ! Campos exportados pelo OCN (→ MED e → MPAS via Fase 2)
-  ! Si_ifrac: proxy de gelo derivado de frazil/SST (BUG-IFRAC-02 fix).
+  ! Si_ifrac: proxy de gelo derivado de frazil/SST.
   ! O SIS2 é acoplado internamente ao MOM6; ocean_public não expõe
   ! ice_fraction diretamente. Calculamos Si_ifrac = 1 onde frazil > 0
   ! (formação ativa de frazil indica congelamento superficial) OU onde
@@ -194,7 +194,7 @@ module MOM_cap_MONAN_mod
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
-  ! ── Persistência de Si_ifrac entre passos de acoplamento (Sprint B.1) ──────
+  ! ── Persistência de Si_ifrac entre passos de acoplamento (.1) ──────
   !
   ! Problema: compute_si_ifrac_proxy recalcula Si_ifrac do ZERO a cada passo,
   ! descartando o estado OISST inicializado em t=0 por set_si_ifrac_from_file.
@@ -243,7 +243,7 @@ contains
     call NUOPC_CompDerive(gcomp, model_routine_SS, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Fase 0: seleciona versão IPDv03
+    ! seleciona versão IPDv03
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
       userRoutine=InitializeP0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -426,7 +426,7 @@ contains
     ! NOTA: is%ocean_state NAO deve ser pre-alocado.
     ! ocean_model_init verifica: if (associated(OS)) e aborta.
     ! ocean_model_init faz 'allocate(OS)' internamente.
-    is%ocean_state => null()  ! FIX-1: ponteiro null antes de ocean_model_init
+    is%ocean_state => null()  ! ponteiro null antes de ocean_model_init
     allocate(is%ice_ocn_bnd)  ! aloca o tipo; arrays internos alocados abaixo
 
     ! ── 4. Inicializar MOM6 (lê MOM_input, grid, restart) ────────────────
@@ -434,7 +434,7 @@ contains
     call ESMF_LogWrite('OCN(MOM6): ocean_model_init concluido', ESMF_LOGMSG_INFO)
 
     ! ── 5. Obter grade MOM6 e limites do domínio computacional ───────────
-    ! FIX-DEADLOCK: NÃO retornar prematuramente em PETs land-only.
+    ! NÃO retornar prematuramente em PETs land-only.
     ! O NUOPC exige que TODOS os PETs participem das fases IPDv de forma
     ! coletiva — PETs que pulam NUOPC_Realize causam deadlock nos conectores.
     ! PETs land-only (is_ocean_pe=.false.) usam isc=iec=jsc=jec=0 e criam
@@ -503,7 +503,7 @@ contains
     is%ice_ocn_bnd%p               = 0.0
     is%ice_ocn_bnd%lrunoff         = 0.0
     is%ice_ocn_bnd%frunoff         = 0.0
-    ! [FIX-ICE-NCAT] ice_ncat NÃO é inicializado por ocean_model_init neste
+    ! ice_ncat NÃO é inicializado por ocean_model_init neste
     ! acoplamento; sem esta atribuição ele conteria lixo de memória. Se esse
     ! lixo for > 0, a guarda 'if (ice_ncat > 0)' em mom_import (mom_cap_methods
     ! .F90, linha 432) passaria e o código acessaria afracr/swnet_afracr/
@@ -519,7 +519,7 @@ contains
     call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
 
     ! ── 6–8. Criar ESMF_Mesh e realizar campos do OCN ───────────────────────
-    ! [FIX-MESHGLOBALID] Reescrita completa da construção da Mesh (v10.1).
+    ! Reescrita completa da construção da Mesh (v10.1).
     !
     ! Causa raiz do erro 'node ids must be >= 1' (ESMCI_Mesh_Glue.C:189):
     !   No ESMF 8.9.x, ESMF_MeshAddNodes exige que os nodeIds sejam
@@ -553,10 +553,10 @@ contains
     !   Mesh apenas como topologia (inteiros), evitando bloqueio de
     !   coordenadas, e (b) ESMF_MESHLOC_ELEMENT produz Fields rank-1 por
     !   elemento, compatível com State_SetExport/Import (farrayPtr 1D).
-    !   O deadlock anterior foi resolvido pelo FIX-DEADLOCK (return
+    ! O deadlock anterior foi resolvido pelo (return
     !   prematuro removido em is_ocean_pe), não pela Mesh.
     ! ── 6–8. Criar ESMF_Grid (deBlockList MOM6) e realizar campos do OCN ────
-    ! [FIX-GRID-v5] ESMF_Grid com deBlockList — solução definitiva.
+    ! [v5] ESMF_Grid com deBlockList — solução definitiva.
     !
     ! Histórico completo das tentativas e diagnósticos:
     !   v1: ESMF_MeshAddNodes, IDs locais → "node ids must be >= 1" (IDs dup.)
@@ -769,7 +769,7 @@ contains
     ! Obtém grade para mom_export
     call get_ocean_grid(is%ocean_state, ocean_grid)
 
-    ! ── FIX B-SEQINIT-02 (v14.21) ────────────────────────────────────────
+    ! ── (v14.21) ────────────────────────────────────────
     ! ocean_model_init NÃO preenche ocean_public%t_surf. O array é apenas
     ! ALOCADO (mom_ocean_model_nuopc.F90:865); quem o escreve é
     ! convert_state_to_ocean_type, e dentro de ocean_model_init essa chamada
@@ -807,7 +807,7 @@ contains
     ! Exporta Si_ifrac(t=0):
     ! Alternativa 1 (cfg_use_docn_ice=.true.): arquivo OISST — dado observacional
     !   desde t=0, eliminando o bootstrap zero no primeiro passo de acoplamento.
-    ! Fallback (cfg_use_docn_ice=.false.): proxy sigmoide Sprint A.5/A.5.1.
+    ! Fallback (cfg_use_docn_ice=.false.): proxy sigmoide.5/A.5.1.
     if (cfg_use_docn_ice) then
       call set_si_ifrac_from_file(gcomp, ocean_grid, exportState, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
@@ -908,7 +908,7 @@ contains
     call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
 
     ! ── Obter grade MOM6 para mom_import e mom_export ─────────────────────
-    ! FIX-2: PETs nao oceanicas nao executam o advance
+    ! PETs nao oceanicas nao executam o advance
     if (.not. is%ocean_public%is_ocean_pe) return
 
     call get_ocean_grid(is%ocean_state, ocean_grid)
@@ -941,15 +941,15 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha mom_export', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3b: Si_ifrac — despacho por cfg_use_docn_ice / Sprint B.1 ───
+    ! ── Passo 3b: Si_ifrac — despacho por cfg_use_docn_ice /.1 ───
     !
     ! Tabela de modos (nuopc.input &nuopc_mode):
     !   use_docn_ice=T  init_only=F  → Alternativa 1 original:
     !     lê OISST a cada passo (campo congelado dentro do dia).
-    !   use_docn_ice=T  init_only=T  → Sprint B.1:
+    ! use_docn_ice=T init_only=T →.1:
     !     OISST já foi aplicado em InitializeDataComplete (t=0).
     !     Aqui usa sigmoide da SST dinâmica — Si_ifrac evolui.
-    !   use_docn_ice=F              → proxy sigmoide puro (Sprint A.5).
+    ! use_docn_ice=F → proxy sigmoide puro (.5).
     !
     if (cfg_use_docn_ice .and. .not. cfg_docn_ice_init_only) then
       ! Alternativa 1 original: OISST prescrito a cada passo de acoplamento
@@ -958,7 +958,7 @@ contains
         msg='OCN: falha set_si_ifrac_from_file', &
         line=__LINE__, file=__FILE__)) return
     else
-      ! Sprint B.1 (init_only=T) ou sigmoide pura (use_docn_ice=F):
+      ! 1 (init_only=T) ou sigmoide pura (use_docn_ice=F):
       ! Si_ifrac derivado da SST dinâmica do MOM6 — campo evolui.
       call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
@@ -1133,7 +1133,7 @@ contains
   ! ============================================================================
   !> @brief Calcula a fracao de gelo marinho via funcao sigmoide refinada.
   !!
-  !! Sprint A.5 (Maio 2026): substitui o proxy binario por uma derivacao
+  !! 5 (Maio 2026): substitui o proxy binario por uma derivacao
   !! continua que captura pack ice consolidado, nao apenas gelo recem-formado.
   !!
   !! CONTEXTO:
@@ -1171,7 +1171,7 @@ contains
   !! LIMITACAO:
   !!   Aproximacao baseada em variaveis termodinamicas, nao na dinamica real
   !!   do SIS2. A solucao definitiva exige refatoracao para expor SIS2 como
-  !!   componente NUOPC separado (cap ICE) — fora do escopo do Sprint A.5.
+  !! componente NUOPC separado (cap ICE) — fora do escopo do.5.
   ! ============================================================================
   !> @brief Alternativa 1 — preenche Si_ifrac a partir de arquivo OISST (v2.5).
   !!
@@ -1254,7 +1254,7 @@ contains
       deallocate(ice_global); return
     end if
 
-    ! Guard B-45: PETs sem DE local não acessam farrayPtr
+    ! Guard PETs sem DE local não acessam farrayPtr
     call ESMF_FieldGet(f_ifrac, localDeCount=localDeCount_f, rc=rc)
     if (rc /= ESMF_SUCCESS .or. localDeCount_f == 0) then
       deallocate(ice_global)
@@ -1307,10 +1307,10 @@ contains
 
     deallocate(ice_global)
 
-    ! ── Salvar campo OISST em si_ifrac_mem para persistência Sprint B.1 ──────
-    ! BUG-MEM-GUARD (v2.6): o salvamento deve ocorrer APÓS o preenchimento do
+    ! ── Salvar campo OISST em si_ifrac_mem para persistência.1 ──────
+    ! (v2.6): o salvamento deve ocorrer APÓS o preenchimento do
     ! campo e fora de qualquer guard de PET — todos os PETs com DE local chegam
-    ! aqui. O guard Guard B-45 (localDeCount == 0) retornava ANTES do
+    ! aqui. O guard Guard (localDeCount == 0) retornava ANTES do
     ! salvamento, mantendo si_ifrac_mem_valid = .false. em todos os PETs.
     if (.not. allocated(si_ifrac_mem)) then
       allocate(si_ifrac_mem(lb1:ub1, lb2:ub2))
@@ -1330,7 +1330,7 @@ contains
 
   subroutine compute_si_ifrac_proxy(ocean_public, ocean_grid, exportState, rc)
     type(ocean_public_type),       intent(in)    :: ocean_public
-    type(ocean_grid_type), pointer, intent(in)   :: ocean_grid  ! Sprint A.5.1
+    type(ocean_grid_type), pointer, intent(in)   :: ocean_grid  ! 5.1
     type(ESMF_State),              intent(inout) :: exportState
     integer,                       intent(out)   :: rc
 
@@ -1347,12 +1347,12 @@ contains
     ! DT_TRANS : largura da zona de transição da sigmoide [K]
     !
     ! HISTÓRICO DA LARGURA DT_TRANS:
-    !   v2.1 (Sprint A.5) — DT_TRANS = 0.5 K (original)
+    ! v2.1 (.5) — DT_TRANS = 0.5 K (original)
     !     Demasiadamente estreito: Si_ifrac > 0.01 apenas para SST < 273.7 K.
     !     Após o primeiro passo de acoplamento, a SST polar sobe para 278–282 K
     !     (fluxos atmosféricos de inicialização mais quentes do que o estado
     !     de restart do gelo) → proxy retorna zero em praticamente todo o oceano
-    !     polar → mapas Si_ifrac essencialmente em branco (BUG-PROXY-DT).
+    ! polar → mapas Si_ifrac essencialmente em branco.
     !
     !   v2.3 (atual) — DT_TRANS = 2.0 K (corrigido)
     !     Si_ifrac > 0.01 para SST < 271.35 + 2.0·ln(99) ≈ 280.6 K.
@@ -1361,7 +1361,7 @@ contains
     !     do acoplamento.  A sigmoide ainda é monotônica e contínua.
     !
     ! EXP_CLAMP : limite para o argumento do exponencial (evita overflow)
-    real(ESMF_KIND_R8), parameter :: DT_TRANS  = 2.0_ESMF_KIND_R8     ! [K]  BUG-PROXY-DT fix
+    real(ESMF_KIND_R8), parameter :: DT_TRANS  = 2.0_ESMF_KIND_R8  ! [K]
     real(ESMF_KIND_R8), parameter :: EXP_CLAMP = 50.0_ESMF_KIND_R8    ! evita overflow
 
     ! Parâmetros da contribuição de frazil
@@ -1392,7 +1392,7 @@ contains
     ! PETs land-only: nada a calcular
     if (.not. ocean_public%is_ocean_pe) return
 
-    ! Sprint A.5.1: ocean_grid é necessário para acessar mask2dT.
+    ! 5.1: ocean_grid é necessário para acessar mask2dT.
     ! Se não foi passado, retorna zeros — comportamento seguro.
     if (.not. associated(ocean_grid)) then
       call ESMF_LogWrite( &
@@ -1406,7 +1406,7 @@ contains
 
     ! Loop sobre o domínio ESMF, mapeando para índices MOM6 via offset.
     !
-    ! Sprint A.5.1: aplicação da máscara terra/oceano via ocean_grid%mask2dT.
+    ! 5.1: aplicação da máscara terra/oceano via ocean_grid%mask2dT.
     !   mask2dT > 0 → célula oceânica → calcular sigmoide + frazil
     !   mask2dT = 0 → célula terra    → Si_ifrac = 0 (já inicializado)
     !
@@ -1420,7 +1420,7 @@ contains
         if (ii_mom < isc_loc .or. ii_mom > iec_loc) cycle
         if (jj_mom < jsc_loc .or. jj_mom > jec_loc) cycle
 
-        ! Sprint A.5.1: pular células terra (mask2dT == 0)
+        ! 5.1: pular células terra (mask2dT == 0)
         mask_val = ocean_grid%mask2dT(ig, jg)
         if (mask_val <= 0.0_ESMF_KIND_R8) cycle
 
@@ -1462,9 +1462,9 @@ contains
     where (ptr_ifrac < 0.0_ESMF_KIND_R8) ptr_ifrac = 0.0_ESMF_KIND_R8
     where (ptr_ifrac > 1.0_ESMF_KIND_R8) ptr_ifrac = 1.0_ESMF_KIND_R8
 
-    ! ── Persistência Sprint B.1: combinar proxy com estado anterior ──────────
+    ! ── Persistência.1: combinar proxy com estado anterior ──────────
     !
-    ! BUG-MEM-GUARD (v2.6): diagnostico confirma se si_ifrac_mem_valid chegou
+    ! (v2.6): diagnostico confirma se si_ifrac_mem_valid chegou
     ! .true. neste PET.  Procurar no log ESMF:
     !   'OCN(proxy): si_ifrac_mem_valid=T' → persistência ativa ✓
     !   'OCN(proxy): si_ifrac_mem_valid=F' → salvamento não ocorreu → bug ativo

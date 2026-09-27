@@ -35,7 +35,7 @@ module mpas_atm_model_mod
                                   atm_ocean_boundary_type
 
   use mpas_kind_types,    only : RKIND, StrKIND
-  ! B-INJECT-HALO-01: field1DReal (de mpas_field_types.inc, incluido em
+  ! field1DReal (de mpas_field_types.inc, incluido em
   ! mpas_derived_types) e mpas_dmpar_exch_halo_field sao necessarios para
   ! propagar aos halos os campos de contorno injetados pelo acoplador.
   use mpas_dmpar,         only : mpas_dmpar_exch_halo_field
@@ -63,7 +63,7 @@ module mpas_atm_model_mod
                                   mpas_pool_get_config,       &
                                   mpas_pool_begin_iteration,  &
                                   mpas_pool_get_next_member,  &
-                                  mpas_pool_get_field   ! B-INJECT-HALO-01
+                                  mpas_pool_get_field
 
   use mpas_bootstrapping, only : mpas_bootstrap_framework_phase1, &
                                   mpas_bootstrap_framework_phase2
@@ -126,7 +126,7 @@ module mpas_atm_model_mod
   real(MPAS_RKIND), allocatable, target, private, save :: g_q2m_buf(:)        ! kg/kg
   real(MPAS_RKIND), allocatable, target, private, save :: g_prec_rain_buf(:)  ! kg/m²/s
   real(MPAS_RKIND), allocatable, target, private, save :: g_prec_snow_buf(:)  ! kg/m²/s
-  ! BUG-WIND-01 fix: buffers para u10/v10 calculados por fallback logarítmico
+  ! buffers para u10/v10 calculados por fallback logarítmico
   ! Usados quando bl_mynn_in=F e bl_ysu_in=F (u10/v10 ausentes do pool 'diag').
   real(MPAS_RKIND), allocatable, target, private, save :: g_u10_buf(:)    ! m/s
   real(MPAS_RKIND), allocatable, target, private, save :: g_v10_buf(:)    ! m/s
@@ -210,10 +210,10 @@ contains
     type(mpas_pool_type), pointer :: diagPhysPool => null()
 
     integer, pointer :: nCells_ptr      => null()
-    integer, pointer :: nCellsSolve_ptr => null()   ! B-32: células próprias (sem halos)
+    integer, pointer :: nCellsSolve_ptr => null()  ! células próprias (sem halos)
     integer, pointer :: nVertLev_ptr    => null()
     integer          :: n, nSolve, ierr
-    ! B-STARTSTAMP-LEN-01 (Set/2026): StrKIND (=512), nao 64.
+    ! StrKIND (=512), nao 64.
     !
     ! Esta variavel e' passada a core_init, cujo dummy e' character(len=*),
     ! logo o comprimento do ATUAL se propaga intacto. Dentro de atm_core_init
@@ -293,7 +293,7 @@ contains
     !    Qualquer mpas_log_write ANTES deste ponto → g_domain%logInfo
     !    não inicializado → SIGSEGV.
     !
-    !    B-35 (fix): removida chamada prematura a mpas_log_write que existia
+    ! removida chamada prematura a mpas_log_write que existia
     !    logo após atm_setup_domain — era a causa raiz do SIGSEGV observado
     !    em todos os 128 ranks (backtrace: mpas_atm_model.F90:251).
     !    Mensagens de progresso anteriores a este ponto devem usar write(*,…).
@@ -482,7 +482,7 @@ contains
     end if
 
     call mpas_pool_get_dimension(meshPool, 'nCells',      nCells_ptr)
-    call mpas_pool_get_dimension(meshPool, 'nCellsSolve', nCellsSolve_ptr)  ! B-32
+    call mpas_pool_get_dimension(meshPool, 'nCellsSolve', nCellsSolve_ptr)
     call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLev_ptr)
 
     if (.not. associated(nCells_ptr)) then
@@ -492,7 +492,7 @@ contains
 
     n = nCells_ptr
 
-    ! B-33: merge() avalia AMBOS os argumentos (tsource e fsource) antes de
+    ! merge avalia AMBOS os argumentos (tsource e fsource) antes de
     ! aplicar a máscara — comportamento mandatório do padrão Fortran (7.1.5.2).
     ! Se nCellsSolve_ptr for null(), a referência implícita ao ponteiro em tsource
     ! gera SIGSEGV independentemente do valor de mask=associated(...).
@@ -504,7 +504,7 @@ contains
       write(*,'(A)') 'AVISO mpas_atm_init: nCellsSolve ausente no pool mesh — usando nCells'
     end if
 
-    ! B-34: nVertLev_ptr pode ser null() se 'nVertLevels' não existir no pool
+    ! nVertLev_ptr pode ser null se 'nVertLevels' não existir no pool
     ! (e.g., nome divergente no Registry.xml de alguma versão). Desreferenciar
     ! um ponteiro null gera SIGSEGV. Guardar com associated() antes de usar.
     if (associated(nVertLev_ptr)) then
@@ -518,7 +518,7 @@ contains
 
     atm_state%nCells       = n
     atm_public%nCells      = n
-    atm_public%nCellsSolve = nSolve   ! B-32: expõe para netcdf_init_coords
+    atm_public%nCellsSolve = nSolve  ! expõe para netcdf_init_coords
 
     ! ------------------------------------------------------------------
     ! 7a. Ponteiros zero-copy: geometria (subpool 'mesh')
@@ -614,7 +614,7 @@ contains
     if (.not. associated(g_pool_ust)) &
       write(*,'(A)') 'AVISO mpas_atm_init: ust nulo — taux/tauy serao zero'
 
-    ! ── BUG-WIND-01 fix: fallback para u10/v10 quando CLP nao esta ativa ──────
+    ! ── fallback para u10/v10 quando CLP nao esta ativa ──────
     ! Com config_physics_suite='mesoscale_reference_monan' sem bl_mynn_in ou
     ! bl_ysu_in, os campos u10/v10 nao sao alocados no pool 'diag' (Registry.xml:
     ! packages="bl_mynn_in;bl_ysu_in"). atm_public%u10 e %v10 permanecem null()
@@ -732,7 +732,7 @@ contains
     ! ------------------------------------------------------------------
     ! 8. Aloca arrays de propriedade deste módulo
     !
-    ! Sprint A Fase 2 (Maio 2026): atm_bnd estendido com uocn/vocn
+    ! atm_bnd estendido com uocn/vocn
     ! (correntes superficiais do MOM6+SIS2). Inicializados a zero (oceano
     ! em repouso); preenchidos pelo mediador em mpas_import a cada passo.
     ! ------------------------------------------------------------------
@@ -745,21 +745,21 @@ contains
              atm_bnd%omask       (n))
     atm_bnd%sst          = real(cfg_sst_default,          MPAS_RKIND)
     atm_bnd%ice_fraction = real(cfg_ice_fraction_default, MPAS_RKIND)
-    atm_bnd%uocn         = 0.0_MPAS_RKIND   ! Sprint A: corrente zonal
-    atm_bnd%vocn         = 0.0_MPAS_RKIND   ! Sprint A: corrente meridional
+    atm_bnd%uocn         = 0.0_MPAS_RKIND  ! corrente zonal
+    atm_bnd%vocn         = 0.0_MPAS_RKIND  ! corrente meridional
     atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
-    ! Fase 2.6: default fisico de agua aberta (~0,08) ate a 1a troca real
+    ! default fisico de agua aberta (~0,08) ate a 1a troca real
     ! do mediador. Sem config dedicado (cfg_alb_default) para nao adicionar
     ! mais uma dependencia de namelist so' para um valor de bootstrap.
     atm_bnd%alb          = 0.08_MPAS_RKIND
-    ! B-DIAGMASK-01: default 1,0 (tudo oceano) ate a 1a troca real com o
+    ! default 1,0 (tudo oceano) ate a 1a troca real com o
     ! mediador. Mesmo criterio do fallback de is%f_omask_atm no MED: se a
     ! mascara nao chegar, o diagnostico sai como saia antes (sem mascarar),
     ! em vez de apagar o globo inteiro.
     atm_bnd%omask        = 1.0_MPAS_RKIND
 
     atm_state%initialized = .true.
-    ! B-32: nSolve = células próprias (sem halos); n = nCells total (com halos).
+    ! nSolve = células próprias (sem halos); n = nCells total (com halos).
     ! netcdf_init_coords deve usar nSolve → soma global = 40962.
     write(msg,'(A,I0,A,I0,A)') &
       'mpas_atm_init: OK (', nSolve, ' celulas proprias / ', n, ' com halos — SMIOL ativo)'
@@ -851,7 +851,7 @@ contains
     real(MPAS_RKIND), dimension(:), pointer :: sst_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: ice_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: zorl_field => null()
-    ! Fase 2.6 (B-ALBEDO-FEEDBACK-01): sfc_albedo real (Sf_albedo do
+    ! sfc_albedo real (Sf_albedo do
     ! mediador) -> physica do MONAN-A, substituindo a climatologia mensal
     ! (config_sfc_albedo=.false. necessario no namelist p/ nao ser
     ! sobrescrito pelo NOAH LSM). Ver diagnostico logo apos a injecao.
@@ -859,11 +859,11 @@ contains
     integer :: diag_alb_cell
     real(MPAS_RKIND) :: diag_alb_before
     integer :: n, ierr, iCell
-    ! B-INJECT-HALO-01: limite do laco de injecao. nCellsSolve vive em
+    ! limite do laco de injecao. nCellsSolve vive em
     ! atm_public (mpas_atm_types.F90), nao em atm_state.
     integer :: nSolve_inj
     character(len=256) :: msg
-    ! B-COLDSTART-01: na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
+    ! na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
     ! (lag de 1 passo, ver driver/esm.F90). Na 1a chamada de acoplamento de
     ! um COLD START o MOM6 ainda nao rodou nenhum passo dinamico: atm_bnd%sst
     ! chega com o fallback do mediador (bootstrap/T_FILL), nao com dado real.
@@ -882,7 +882,7 @@ contains
     rc = 0
     n  = atm_state%nCells
 
-    ! B-INJECT-HALO-01: a injecao escreve SO nas celulas proprias. Se
+    ! a injecao escreve SO nas celulas proprias. Se
     ! nCellsSolve nao tiver sido preenchido em mpas_atm_init, cair para nCells
     ! e' o comportamento antigo (escreve nos halos); isso e' um defeito, nao um
     ! default aceitavel, entao registra em nivel de erro em vez de seguir calado.
@@ -928,7 +928,7 @@ contains
       call mpas_pool_get_array(sfcInputPool, 'xice',        ice_field)
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
       call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
-      ! Fase 2.6: sfc_albedo vive em diag_physics (confirmado no Registry.xml
+      ! sfc_albedo vive em diag_physics (confirmado no Registry.xml
       ! real do MONAN-Model — mpas_atmphys_driver_lsm.F le/escreve de la,
       ! nao de sfc_input).
       call mpas_pool_get_array(diag_physicsPool, 'sfc_albedo', albedo_field)
@@ -943,7 +943,7 @@ contains
          end if
          if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
            ! so entre se nao utilizar dados de sst preescritos 
-            ! B-INJECT-HALO-01: o laco vai ate nCellsSolve (celulas PROPRIAS),
+            ! o laco vai ate nCellsSolve (celulas PROPRIAS),
             ! nao ate nCells (que inclui os halos). Ver o bloco de troca de
             ! halo logo apos o fim do laco para o motivo.
             DO iCell =1, nSolve_inj
@@ -959,12 +959,12 @@ contains
                      if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
                           zorl_field(iCell) = atm_bnd%zorl(iCell)
                      endif
-                     ! Fase 2.6 (B-ALBEDO-FEEDBACK-01): mesma guarda de
+                     ! mesma guarda de
                      ! xland>1.5 (oceano) e first_coupling_call/cold-start
                      ! ja usada para sst/ice/zorl acima.
                      if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
                        if (diag_alb_cell < 0) then
-                         ! FIX-DIAG-ALBFEEDBACK-01: guarda a 1a celula de
+                         ! guarda a 1a celula de
                          ! oceano injetada nesta chamada, para comparar
                          ! ANTES/DEPOIS de core_run logo abaixo — teste
                          ! empirico de se o NOAH LSM preserva ou sobrescreve
@@ -978,7 +978,7 @@ contains
                endif 
             end do
             !--------------------------------------------------------------
-            ! B-INJECT-HALO-01 (Set/2026): propaga aos halos os campos de
+            ! propaga aos halos os campos de
             ! contorno que acabaram de ser injetados.
             !
             ! O PROBLEMA. Antes desta correcao o laco acima percorria
@@ -993,7 +993,7 @@ contains
             !
             ! A EVIDENCIA. Medicao de 17/09/2026 com dt_coupling=43200, ou
             ! seja, duas janelas de acoplamento, das quais apenas a segunda
-            ! injeta (a primeira e' pulada pela guarda B-COLDSTART-01):
+            ! injeta (a primeira e' pulada pela guarda):
             ! quatro execucoes identicas, seis pares comparados, SEIS
             ! divergentes, TODOS a partir do registro 73 do reprodiag, que e'
             ! exatamente 12:00, o instante da injecao. Os 72 registros
@@ -1061,7 +1061,7 @@ contains
 
     call mpas_log_write('mpas_atm_run: core_run concluido')
 
-    ! FIX-DIAG-ALBFEEDBACK-01: reabre sfc_albedo (diag_physics) DEPOIS de
+    ! reabre sfc_albedo (diag_physics) DEPOIS de
     ! core_run e compara com o valor injetado ANTES (diag_alb_before), na
     ! mesma celula de oceano (diag_alb_cell). Ja validado em producao
     ! (Set/2026, preservado=T) — gated por cfg_write_fixdiag.
@@ -1107,7 +1107,7 @@ contains
     integer, intent(in) :: n
     type(mpas_atm_public_type), intent(in) :: atm_public
     type(atm_ocean_boundary_type), intent(in) :: atm_bnd
-    real(MPAS_RKIND) :: dt_r, precip_now   ! Sprint A: spd removido (usado agora no bloco have_currents)
+    real(MPAS_RKIND) :: dt_r, precip_now  ! spd removido (usado agora no bloco have_currents)
     integer          :: k
     real(MPAS_RKIND) :: z_sfc
     real(MPAS_RKIND) :: scale_fac
@@ -1212,7 +1212,7 @@ contains
         end do
     end if
 
-    ! ── BUG-WIND-01 fallback: calcular u10/v10 por perfil log. neutro ────
+    ! ── fallback: calcular u10/v10 por perfil log. neutro ────
     ! Ativo quando u10/v10 nao estao no pool (bl_mynn_in/bl_ysu_in=F).
     ! g_u10_buf/g_v10_buf sao alocados em mpas_atm_init se g_pool_uZonal disponivel.
     ! u10 = u_sfc × ln(10/z0) / ln(z_sfc/z0)
@@ -1241,7 +1241,6 @@ contains
 
     ! ── Stress superficial: τ = ρ · ust² · V_rel / |V_rel| ─────────────
     !
-    ! Sprint A Fase 2 (Maio 2026):
     ! Antes: τx = ρ · ust² · u10 / |V10|  (vento absoluto)
     ! Agora: τx = ρ · ust² · u_rel / |V_rel|  (vento relativo ao oceano)
     !
@@ -1377,11 +1376,11 @@ contains
     ! 4. Desaloca apenas arrays de propriedade deste módulo
     if (allocated(atm_bnd%sst))           deallocate(atm_bnd%sst)
     if (allocated(atm_bnd%ice_fraction))  deallocate(atm_bnd%ice_fraction)
-    if (allocated(atm_bnd%uocn))          deallocate(atm_bnd%uocn)   ! Sprint A
-    if (allocated(atm_bnd%vocn))          deallocate(atm_bnd%vocn)   ! Sprint A
+    if (allocated(atm_bnd%uocn))          deallocate(atm_bnd%uocn)
+    if (allocated(atm_bnd%vocn))          deallocate(atm_bnd%vocn)
     if (allocated(atm_bnd%zorl))          deallocate(atm_bnd%zorl)
     if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)     ! Fase 2.6
-    if (allocated(atm_bnd%omask))         deallocate(atm_bnd%omask)   ! B-DIAGMASK-01
+    if (allocated(atm_bnd%omask))         deallocate(atm_bnd%omask)
     ! Buffers de saída computados (propriedade deste módulo)
     if (allocated(g_prev_acswdnb)) deallocate(g_prev_acswdnb)
     if (allocated(g_prev_aclwdnb)) deallocate(g_prev_aclwdnb)
@@ -1395,7 +1394,7 @@ contains
     if (allocated(g_q2m_buf))      deallocate(g_q2m_buf)
     if (allocated(g_prec_rain_buf))deallocate(g_prec_rain_buf)
     if (allocated(g_prec_snow_buf))deallocate(g_prec_snow_buf)
-    ! BUG-WIND-01: deallocate buffers de fallback de vento (se alocados)
+    ! deallocate buffers de fallback de vento (se alocados)
     if (allocated(g_u10_buf))      deallocate(g_u10_buf)
     if (allocated(g_v10_buf))      deallocate(g_v10_buf)
     nullify(g_pool_uZonal, g_pool_vMerid, g_pool_zgrid)

@@ -55,7 +55,7 @@ contains
   !> @brief Lê um snapshot NetCDF global (chamado apenas em PET0).
   !!
   !! Abre o arquivo, localiza a variável e lê um único snapshot (tidx).
-  !! Verifica B-59: compatibilidade da ordem de eixos (lon, lat, time).
+  !! Verifica compatibilidade da ordem de eixos (lon, lat, time).
   !!
   !! @param[in]  filename  Caminho do arquivo NetCDF
   !! @param[in]  varname   Nome da variável a ler
@@ -94,7 +94,7 @@ contains
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 
-    ! B-59: verificar ordem dos eixos do arquivo NetCDF.
+    ! verificar ordem dos eixos do arquivo NetCDF.
     ! DOCN espera (lon, lat, time) em ordem Fortran = (time, lat, lon) em C/NetCDF.
     ! Se dim1_size /= nx, os eixos estão incompatíveis — abortar com mensagem clara.
       nc_rc_dim = nf90_inquire_variable(ncid, varid, ndims=ndims_var, dimids=dimids)
@@ -176,7 +176,7 @@ contains
 
     allocate(buf_global(nx*ny))
 
-    ! FIX-DEADLOCK (modo concurrent, v13.1): usar a VM do COMPONENTE, não a
+    ! (modo concurrent, v13.1): usar a VM do COMPONENTE, não a
     ! global. ESMF_VMGetGlobal retorna todos os PETs (8); o ESMF_VMBroadcast
     ! abaixo é coletivo sobre essa VM com rootPet=0. Em concurrent o OCN roda
     ! só nos seus PETs (ex.: 4..7): apenas eles chamariam o broadcast enquanto
@@ -209,7 +209,7 @@ contains
       return
     end if
 
-    ! B-54/B-55: ler ntime do arquivo para clampar índice (evita out-of-bounds)
+    ! ler ntime do arquivo para clampar índice (evita out-of-bounds)
     ntime = huge(ntime)
     nc_rc_nt = nf90_open(filename, NF90_NOWRITE, ncid_nt)
     if (nc_rc_nt == NF90_NOERR) then
@@ -260,7 +260,7 @@ contains
 
     deallocate(buf_global)
 
-    ! B-55b: formato corrigido — 5 strings antes do primeiro I5
+    ! formato corrigido — 5 strings antes do primeiro I5
     write(msg,'(A,A,A,A,A,I5,A,I5,A,F6.4)') &
       'DOCN: interp ', trim(varname), ' [', trim(filename), &
       '] tidx0=', tidx0, ' tidx1=', tidx1, ' alpha=', alpha
@@ -403,7 +403,7 @@ contains
     end if
 
     ! ── Correntes superficiais (opcional) ─────────────────────────────────────
-    ! B-59b: usar tidx calculado para o cur_file (ntime independente do SST)
+    ! usar tidx calculado para o cur_file (ntime independente do SST)
     if (len_trim(cfg_docn_cur_file) > 0) then
       ncstat = nf90_open(trim(cfg_docn_cur_file), NF90_NOWRITE, ncid_r)
       if (ncstat == NF90_NOERR) then

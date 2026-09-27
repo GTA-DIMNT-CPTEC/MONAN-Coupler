@@ -19,15 +19,15 @@ module mpas_cap_methods_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
-  ! Sprint C: cfg_zorl_default usado como fallback NaN-guard em mpas_import
-  ! FIX B-SST-GUARD-01 (Ago 2026): cfg_sst_default adicionado — usado como
+  ! cfg_zorl_default usado como fallback NaN-guard em mpas_import
+  ! cfg_sst_default adicionado — usado como
   ! fallback no guard de SST agora aplicado (ver abaixo).
   use coupler_config_mod, only : cfg_zorl_default,          &
                                    cfg_sst_default,           &
                                    cfg_write_import_diag,     &
                                    cfg_import_diag_dir,       &
                                    cfg_grid_res_deg
-  ! FIX-EXP: netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d
+  ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d
   use mpas_cap_netcdf_mod, only: netcdf_push_raw_field,     &
                                   netcdf_config_set,         &
                                   netcdf_init_coords,        &
@@ -48,9 +48,9 @@ contains
 
   !> @brief Importa campos do importState ESMF para atm_bnd.
   !!
-  !! Importa 5 campos do mediador MED->MPAS (Sprint C Fase 2):
+  !! Importa 5 campos do mediador MED->MPAS:
   !!   Sx_tsfc   -> atm_bnd%sst           Temp. de pele composta [K]
-  !!                (Fase 4b, B-TSFC-DUALEXPORT-01 — era So_t; So_t
+  !! (Fase 4b, era So_t; So_t
   !!                permanece SST pura, agora usada so' pelo SIS2 para o
   !!                fluxo de calor basal do gelo, nao mais pelo MPAS-A)
   !!   Si_ifrac  -> atm_bnd%ice_fraction  Fracao de gelo [0-1] do SIS2/proxy
@@ -58,7 +58,7 @@ contains
   !!   So_v      -> atm_bnd%vocn          Corrente merid [m/s] do MOM6 v_surf
   !!   Sf_zorl   -> atm_bnd%zorl          Rugosidade [m]       Charnock+Smith MED
   !!
-  !! BUG-ZORL-01 (Maio 2026): Sf_zorl chega no importState MPAS em rank-1
+  !! Sf_zorl chega no importState MPAS em rank-1
   !! (malha Voronoi, via conector MED->MPAS). A decomposicao OCN local do PET
   !! (nCells_OCN) difere da decomposicao MPAS (nCells_MPAS). A copia posicional
   !! no ramo rank-1 de state_get_field_1d cobria apenas nCells_OCN celulas e
@@ -87,14 +87,14 @@ contains
     rc = ESMF_SUCCESS
 
     ! -- Temperatura de pele composta [K] -----------------------------------
-    ! BUG-FIX-03: passa coordenadas para mapeamento geografico correto
-    ! Fase 4b (B-TSFC-DUALEXPORT-01): 'Sx_tsfc' (composto por Si_ifrac com
+    ! passa coordenadas para mapeamento geografico correto
+    ! Fase 4b: 'Sx_tsfc' (composto por Si_ifrac com
     ! Si_t_sis2), NAO 'So_t' (SST pura — essa agora e' consumida so' pelo
     ! SIS2 para o fluxo de calor basal do gelo). Ver docstring acima.
     call state_get_field_1d(importState, 'Sx_tsfc', nCells, atm_bnd%sst, rc, &
                             lonCell, latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    ! FIX B-SST-GUARD-01 (Ago 2026): SST era o UNICO dos 4 campos importados
+    ! SST era o UNICO dos 4 campos importados
     ! aqui sem clamp fisico nem guarda de NaN — Si_ifrac, So_u, So_v e Sf_zorl
     ! ja tinham essa protecao (ver abaixo), mas Sx_tsfc/So_t nao, apesar de
     ! ser usado
@@ -105,13 +105,13 @@ contains
     ! absurdo, alimentando core_run sem protecao — candidato direto para o
     ! SIGSEGV recorrente em core_run observado nesta sessao. Clamp usa a mesma
     ! faixa fisica ja adotada no mediador (MED_cap.F90: T_MIN=270, T_MAX=310).
-    ! FIX B-SST-GUARD-02 (Ago 2026): fallback agora depende da latitude — usar
+    ! fallback agora depende da latitude — usar
     ! cfg_sst_default (~298K, valor tropical) para QUALQUER celula invalida,
     ! inclusive polar, introduz um vies quente artificial de ~27K exatamente
     ! nas altas latitudes (>60°), onde a agua do mar real fica perto do ponto
     ! de congelamento (~271.35K = -1.8°C, T_FILL_POLAR abaixo — mesmo valor
     ! ja usado como T_FILL no mediador, MED_cap.F90).
-    ! FIX B-SST-GUARD-03 (Ago 2026): degrau abrupto em 60° trocado por
+    ! degrau abrupto em 60° trocado por
     ! interpolacao LINEAR continua em |latitude| (graus), de T_FILL_TROPICAL
     ! no equador (0°) ate T_FILL_POLAR no polo (90°). Mais realista que um
     ! degrau (o perfil zonal real de SST decai suavemente, nao em bloco) e
@@ -122,7 +122,7 @@ contains
     end if
 
     ! -- Fracao de gelo marinho [0-1] -------------------------------------
-    ! Sprint A: agora importado do SIS2 via mediador (era cfg_ice_fraction_default
+    ! agora importado do SIS2 via mediador (era cfg_ice_fraction_default
     ! fixo). Clamp fisico [0,1] aplicado defensivamente -- regrid bilinear pode
     ! extrapolar levemente fora do intervalo (tipico +/- 0.02 em fronteiras
     ! gelo/agua).
@@ -158,7 +158,7 @@ contains
     end if
 
     ! -- Corrente oceanica zonal So_u [m/s] -------------------------------
-    ! Sprint A: usado no esquema de superficie do MPAS para calcular tensao
+    ! usado no esquema de superficie do MPAS para calcular tensao
     ! de cisalhamento relativa ao oceano (vento aparente = V_atm - V_ocn).
     ! Erro tipico se ignorado: < 1% em oceano calmo, ate 15% em correntes
     ! fortes (Kuroshio, Brasil, Agulhas, ACC).
@@ -182,17 +182,17 @@ contains
     end if
 
     ! -- Rugosidade superficial Sf_zorl [m] -------------------------------
-    ! Sprint C (Maio 2026): rugosidade via Charnock + Smith calculada no MED
+    ! rugosidade via Charnock + Smith calculada no MED
     ! a partir de Foxx_taux/tauy (mesmas variaveis usadas para u* no bulk).
     ! Substitui o default fixo cfg_zorl_default = 0.01 m que vigorou ate o
-    ! Sprint B. Habilita feedback dinamico vento <-> rugosidade essencial em
+    ! Habilita feedback dinamico vento <-> rugosidade essencial em
     ! tempestades (sob ventos fortes a rugosidade aumenta a ordens de 10x).
     !
     ! Clamp fisico [Z0_MIN, Z0_MAX] aplicado defensivamente:
     !   Z0_MIN = 1e-5 m  (rugosidade molecular minima do ar)
     !   Z0_MAX = 0.1 m   (limite superior — alem disso spray cat-5+)
     if (allocated(atm_bnd%zorl)) then
-      ! BUG-ZORL-01 (fix): pré-inicializar com cfg_zorl_default antes de
+      ! pré-inicializar com cfg_zorl_default antes de
       ! state_get_field_1d. O ramo rank-1 de state_get_field_1d preserva
       ! o valor inicial em data() para células sem mapeamento geográfico
       ! (quando nCells_OCN < nCells_MPAS no PET). Sem isso, células não
@@ -214,7 +214,7 @@ contains
     ! do gelo (SIS2), ponderados por Si_ifrac. Substitui a climatologia
     ! mensal (albedo12m) do MONAN-A sobre agua/gelo — requer
     ! config_sfc_albedo=.false. no namelist (ver mpas_atm_model.F90,
-    ! FIX-DIAG-ALBFEEDBACK-01, para confirmacao empirica de que o NOAH LSM
+    ! para confirmacao empirica de que o NOAH LSM
     ! nao sobrescreve o valor apos core_run).
     if (allocated(atm_bnd%alb)) then
       atm_bnd%alb = 0.08_MPAS_RKIND   ! default agua aberta, mesmo padrao de zorl acima
@@ -227,7 +227,7 @@ contains
       where (atm_bnd%alb /= atm_bnd%alb)   atm_bnd%alb = 0.08_MPAS_RKIND
     end if
 
-    ! -- Mascara terra/oceano Sx_omask [0-1] (B-DIAGMASK-01) ---------------
+    ! Mascara terra/oceano Sx_omask [0-1] ---------------
     ! Mascara REAL do MOM6 (ocean_grid%mask2dT), vinda do mediador. Chega
     ! fracionaria porque atravessou dois regrids (OCN->ATM no MED, ATM->
     ! Voronoi no conector); NAO e' binarizada aqui de proposito — o corte
@@ -278,7 +278,7 @@ contains
     real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
     real(MPAS_RKIND) :: t_fill_tropical
     integer :: n
-    ! FIX B-SST-GUARD-04 (Ago 2026): usar nCells (argumento explicito da
+    ! usar nCells (argumento explicito da
     ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
     ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
     ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
@@ -314,7 +314,7 @@ contains
   !!   Sa_pslv_mpas, Sa_tbot_mpas, Sa_u10m_mpas, Sa_v10m_mpas, Sa_shum_mpas,
   !!   Faxa_swdn_mpas, Faxa_lwdn_mpas, Faxa_rain_mpas, Faxa_snow_mpas.
   !!
-  !! Fase 3 (adicionado): Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
+  !! (adicionado): Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
   !!   Faxa_tauy_mpas — fluxos JA calculados internamente pelo esquema de
   !!   camada limite do MONAN-A (atm_public%shflx/lhflx vindos de 'hfx'/'lh'
   !!   do pool diag/diag_physics; taux_sfc/tauy_sfc derivados de 'ust' em
@@ -345,10 +345,10 @@ contains
     rc = ESMF_SUCCESS
     call ESMF_VMGetCurrent(vm, rc=rc); if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
 
-    ! BUG-FIX-01: usar nCellsSolve (células próprias, sem halos)
+    ! usar nCellsSolve (células próprias, sem halos)
     n  = merge(atm_public%nCellsSolve, atm_public%nCells, atm_public%nCellsSolve > 0)
 
-    ! FIX-EXP: netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d.
+    ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d.
     ! Garante correspondência dado(k) ↔ g_lon_global(k) em voronoi_to_latlon.
     if (associated(atm_public%pslv)) then
       call netcdf_push_raw_field('Sa_pslv_mpas', atm_public%pslv, n, vm, rc)
@@ -413,7 +413,7 @@ contains
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    ! ── Fase 3: fluxos nativos do PBL (antes descartados, ver docstring) ──────
+    ! ── fluxos nativos do PBL (antes descartados, ver docstring) ──────
     if (associated(atm_public%shflx)) then
       call netcdf_push_raw_field('Faxa_sen_mpas', atm_public%shflx, n, vm, rc)
       rc = ESMF_SUCCESS
@@ -481,21 +481,21 @@ contains
     integer  :: i, j, clbX(2), cubX(2), clbY(2), cubY(2)
     integer  :: petCount, regDecomp(2), localDeCount
     integer  :: nx_max, ny_tiles, lde
-    integer  :: nx_tiles_target  ! B-57
+    integer  :: nx_tiles_target
     type(ESMF_VM) :: vm
     character(len=*), parameter :: subname = '(mpas_create_grid)'
 
     rc = ESMF_SUCCESS
 
-    ! B-57 (fix B-52): regDecomp 2D com tiles quadradas — evita strips extremos.
+    ! ): regDecomp 2D com tiles quadradas — evita strips extremos.
     !
-    ! PROBLEMA com B-52 (nx_max = NLON/2):
+    ! PROBLEMA com (nx_max = NLON/2):
     !   Grids grandes + muitos PETs geram strips ultra-estreitas.
     !   Ex: grade netcdf 1440×720 a 512 PETs → regDecomp=(/512,1/) →
     !   2-3 cols × 720 rows → aspecto 256:1. MOAB trava em ESMF_FieldBundleRegridStore
     !   (IPDvXp08 extro aparece mas o regrid store nunca retorna).
     !
-    ! SOLUCAO B-57: tiles quadradas via sqrt(petCount).
+    ! SOLUCAO tiles quadradas via sqrt(petCount).
     !   nx_tiles_target = nint(sqrt(N)) → aspect ratio ≈ 1.
     !   nx_max = min(target, NLON/2)   → garante col ≥ 2 (bilinear OK).
     !   ny_tiles = ceil(N/nx_max)       → cobre todos os PETs.
@@ -505,7 +505,7 @@ contains
     !   N=512: sqrt=23 → nx_max=min(23,180)=23 regDecomp=(/23,23/)=529  asp 0.5:1 ✓
     !
     ! -------------------------------------------------------------------------
-    ! BUG-MPAS-COV-32 (fix B-58): a lógica B-57 gera totalDEs = nx_max*ny_tiles
+    ! ): a lógica gera totalDEs = nx_max*ny_tiles
     ! que só coincide com petCount quando sqrt(petCount) é inteiro. Ex.:
     !   N=16: sqrt=4 exato → (4,4)=16 DEs = petCount            ✓ (cobertura total)
     !   N=32: sqrt≈5,66→6  → (6,6)=36 DEs ≠ 32  (4 DEs a mais)  ✗
@@ -517,15 +517,15 @@ contains
     ! globo com N=32). O MOM6 recebe forçante corrompida e aborta com
     ! "extreme surface values". Sintoma no log: uas_g nonzero=54000/64800.
     !
-    ! CORREÇÃO B-58: fatorar petCount EXATAMENTE em (ncol,nrow), ncol*nrow =
+    ! CORREÇÃO fatorar petCount EXATAMENTE em (ncol,nrow), ncol*nrow =
     ! petCount, escolhendo o par mais próximo de quadrado (menor fator <=
     ! sqrt(N) para as linhas; cofator para as colunas). Assim totalDEs =
     ! petCount sempre → 1 DE por PET → FieldGather reúne o campo completo.
-    ! Mantém a intenção B-57 (tiles ~quadradas) e respeita os limites físicos
+    ! Mantém a intenção (tiles ~quadradas) e respeita os limites físicos
     ! (ncol <= NLON/2, nrow <= NLAT). Casos comuns:
     !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
     ! Primo grande (raro) degenera para strip (N=17→17x1), aceitável e ainda
-    ! com cobertura total — melhor que o buraco silencioso do B-57.
+    ! com cobertura total — melhor que o buraco silencioso do.
     ! -------------------------------------------------------------------------
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -552,7 +552,7 @@ contains
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
 
     ! Grade regular 1 grau, periódica em lon.
-    ! BUG-MPAS-LON-SHIFT (pré-condição): indexflag=ESMF_INDEX_GLOBAL garante que
+    ! (pré-condição): indexflag=ESMF_INDEX_GLOBAL garante que
     ! lbound(fptr2d,1) seja o índice global real do PET (e.g., 61 para o segundo
     ! PET de 60 colunas), não 1. Sem isso, state_set_field_1d não consegue calcular
     ! a longitude geográfica correta para o deslocamento buf_global→fptr2d.
@@ -569,12 +569,12 @@ contains
     call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! B-52: guard localDeCount>0 — com regDecomp 2D e DEs>petCount,
+    ! guard localDeCount>0 — com regDecomp 2D e DEs>petCount,
     ! todos os PETs têm ≥1 DE; guard mantido por segurança para N > nx_max*ny_tiles.
     call ESMF_GridGet(grid, localDeCount=localDeCount, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! B-53 (fix B-52): com regDecomp 2D, DEs totais > petCount → alguns PETs têm
+    ! ): com regDecomp 2D, DEs totais > petCount → alguns PETs têm
     ! localDeCount=2. ESMF_GridGetCoord sem localDE= falha com "must provide localDe
     ! argument for localDeCount > 1". Solução: loop explícito sobre cada DE local.
     do lde = 0, localDeCount - 1
@@ -688,7 +688,7 @@ contains
   !! de tipo de ponteiro nem necessidade de iso_c_binding.
   !> @brief Copia campo do ESMF_State para array Fortran 1D.
   !!
-  !! BUG-FIX-03: quando lon_rad/lat_rad presentes, usa posição geográfica da célula
+  !! quando lon_rad/lat_rad presentes, usa posição geográfica da célula
   !! MPAS para selecionar o ponto correto na grade 2D (360×180, DLON=DLAT=1°).
   !! Sem esta correção, o mapeamento column-major coloca a SST de (lon=0°,lat=-90°)
   !! na célula MPAS #1, independentemente da localização real dessa célula.
@@ -740,7 +740,7 @@ contains
       return
     end if
 
-    ! B-45: verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
+    ! verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
       call ESMF_FieldGet(field, localDeCount=localDeCount_sg, rc=rc)
       if (rc /= ESMF_SUCCESS .or. localDeCount_sg == 0) then
         rc = ESMF_SUCCESS; return
@@ -755,7 +755,7 @@ contains
 
     if (fld_rank == 1) then
       ! Campo rank-1: ESMF_Mesh ou ESMF_Grid 1D
-      ! BUG-ZORL-01 (fix): o campo rank-1 pode ter decomposição diferente
+      ! o campo rank-1 pode ter decomposição diferente
       ! da malha MPAS local. Exemplo: Sf_zorl chega na malha Voronoi via
       ! conector MED→MPAS, mas o PET OCN tem nCells_OCN ≠ nCells_MPAS.
       ! Cópia posicional (i-ésimo OCN → i-ésima MPAS) é geograficamente
@@ -775,9 +775,9 @@ contains
     else
       ! ── Campo rank-2: ESMF_Grid regular 360×180 (g_grid, INDEX_GLOBAL) ──
       !
-      ! BUG-COBERTURA-PARCIAL — correção Maio 2026
+      ! correção Maio 2026
       ! ------------------------------------------------------------------
-      ! A versão anterior (BUG-FIX-03) lia fptr2d(ig,jg) APENAS quando o ponto
+      ! A versão anterior lia fptr2d(ig,jg) APENAS quando o ponto
       ! de grade global (ig,jg) pertencia ao tile LOCAL deste PET. Como a malha
       ! MPAS (que CONSOME o dado) e a grade g_grid (que o PRODUZ) têm
       ! decomposições MPI INDEPENDENTES, a maioria das células MPAS precisava
@@ -795,7 +795,7 @@ contains
       !
       ! Segurança coletiva: FieldGather/VMBroadcast são coletivas — todos os
       ! PETs devem alcançá-las. mpas_create_grid usa regDecomp que cobre
-      ! petCount, garantindo ≥1 DE por PET; logo o guard B-45 (localDeCount==0)
+      ! petCount, garantindo ≥1 DE por PET; logo o guard (localDeCount==0)
       ! acima não dispara para estes campos e não há risco de deadlock.
 
         call ESMF_VMGetCurrent(vm_l, rc=rc)
@@ -826,7 +826,7 @@ contains
           do icell = 1, n
             lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
             lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
-            ! BUG-LON-ORIGIN — correção Maio 2026
+            ! correção Maio 2026
             ! ------------------------------------------------------------
             ! A g_grid é criada em mpas_create_grid com longitudes de CENTRO
             ! coordX(ig) = -180 + (ig - 0.5)*DLON, ou seja ig=1 ↔ -179,5° e
@@ -873,7 +873,7 @@ contains
   !! valores do array data (celulas MPAS locais).
   !> @brief Copia array Fortran 1D para campo do ESMF_State.
   !!
-  !! BUG-FIX-03: quando lon_rad/lat_rad presentes, usa posição geográfica de cada
+  !! quando lon_rad/lat_rad presentes, usa posição geográfica de cada
   !! célula MPAS para escrevê-la na posição correta da grade 2D (360×180, 1°×1°).
   !! Sem esta correção, o mapeamento column-major colocava, por exemplo, o vento da
   !! célula MPAS #1 (possivelmente Oceano Austral) na posição (1,1) da grade regular
@@ -908,7 +908,7 @@ contains
       return
     end if
 
-    ! B-45: verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
+    ! verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
       call ESMF_FieldGet(field, localDeCount=localDeCount_ss, rc=rc)
       if (rc /= ESMF_SUCCESS .or. localDeCount_ss == 0) then
         rc = ESMF_SUCCESS; return
@@ -939,7 +939,7 @@ contains
       end if
       n_esmf = min(size(fptr2d), n)
 
-      ! BUG-FIX-03 v3 (BUG-MPAS-02): mapeamento geográfico via MEDIA MPI.
+      ! v3: mapeamento geográfico via MEDIA MPI.
       ! 
       ! Causa raiz do bug remanescente (Sa_pslv max=2017 hPa, dobrou):
       !   MPI_Allreduce(SUM) SOMA valores quando múltiplas células Voronoi de
@@ -1045,7 +1045,7 @@ contains
 
           ! 2. Obter comunicador MPI do VM ESMF (mesmo do MPAS-A)
           !
-          ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD.
+          ! (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD.
           ! No modo concurrent o MPAS roda em subconjunto próprio de PETs; os
           ! dois MPI_Allreduce abaixo gatheram os tiles Voronoi disjuntos SOBRE
           ! esse subconjunto. Usar MPI_COMM_WORLD (todos os ranks, inclusive os
@@ -1068,7 +1068,7 @@ contains
           !--------------------------------------------------------------------
           ! 3. Reducao das somas e contagens (tiles Voronoi disjuntos por PET)
           !
-          ! FIX B-EXPORT-ALLREDUCE-01 (Set/2026): Gather em ordem de rank mais
+          ! Gather em ordem de rank mais
           ! soma local, em lugar de MPI_Allreduce(MPI_SUM).
           !
           ! O PROBLEMA. Com avg_dup = 1,35 e max_dup = 2 (ver o diagnostico
@@ -1152,7 +1152,7 @@ contains
             buf_global = 0.0_ESMF_KIND_R8
           end where
 
-          ! BUG-SPARSE (fix v7.6): preenchimento espacial para células com count=0.
+          ! v7.6): preenchimento espacial para células com count=0.
           ! Quando a malha MPAS é mais esparsa que 1°×1°, alguns bins da grade
           ! regular ficam sem nenhum centro Voronoi → count_global=0 → buf=0.
           ! Resultado: listras verticais nos campos de fluxo (visualizadas nos
@@ -1162,8 +1162,8 @@ contains
           ! de largura. A faixa observada em i_nativo=172..177 (Pacífico,
           ! ~6° largura) era cortada pelo fill original (3 iter = 3 células).
           !
-          ! BUG-SPARSE-02 VERIFICAÇÃO BUILD: ao ser executado para Sa_u10m_mpas
-          ! no PET 0, escreve marca '##### BUG-SPARSE-02 v7.6 ATIVO #####' no log.
+          ! VERIFICAÇÃO BUILD: ao ser executado para Sa_u10m_mpas
+          ! no PET 0, escreve marca '##### v7.6 ATIVO #####' no log.
           ! Se você NÃO vê essa linha em logs/PET0.esmApp.log, o binário não
           ! tem este patch compilado.
 
@@ -1232,7 +1232,7 @@ contains
 
           ! 5. Copiar do buffer global para a porção LOCAL da fptr2d.
           !
-          ! BUG-MPAS-LON-SHIFT (fix): a grade MPAS (mpas_create_grid) usa a
+          ! a grade MPAS (mpas_create_grid) usa a
           ! convenção [-180°,180°] para longitude: coordX(ii) = -180+(ii-0.5)°.
           ! O buf_global usa a convenção [0°,360°): bin ig corresponde à faixa
           ! [(ig-1)°, ig°), centro ≈ ig-0.5°. A cópia direta fptr2d(ii)=buf_global(ii)

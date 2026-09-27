@@ -146,11 +146,11 @@ contains
   !! Deve ser chamada em InitializeRealize antes de netcdf_init_coords.
   !! @param[in] res_deg   Resolução da grade em graus (ex: 1.0, 0.5, 0.25)
   !! @param[in] out_dir   Diretório de saída para os arquivos NetCDF
-  !! @param[in] localPet  PET local do ESMF — suprime impressão em PETs > 0 (B-30)
+  !! @param[in] localPet PET local do ESMF — suprime impressão em PETs > 0
   subroutine netcdf_config_set(res_deg, out_dir, localPet)
     real,             intent(in) :: res_deg
     character(len=*), intent(in) :: out_dir
-    integer,          intent(in) :: localPet   ! B-30: guarda de rank
+    integer,          intent(in) :: localPet  ! guarda de rank
 
     GRID_RES   = res_deg
     DLON       = real(res_deg, ESMF_KIND_R8)
@@ -159,7 +159,7 @@ contains
     NLAT       = nint(180.0 / res_deg) + 1
     OUTPUT_DIR = trim(out_dir)
 
-    ! B-30: sem guarda, N PETs × N chamadas = N² mensagens em stdout.
+    ! sem guarda, N PETs × N chamadas = N² mensagens em stdout.
     ! Só PET 0 imprime; demais passam silenciosamente.
     if (localPet == 0) &
       write(*,'(A,F5.2,A,I0,A,I0,A,A)') &
@@ -282,7 +282,7 @@ contains
   !!
   !! Todos os campos chegam já em unidades instantâneas de mpas_atm_model.F90
   !! (sem conversão de acumulados aqui).
-  !> FIX-EXP v2: salva dado MPAS LOCAL deste PET — sem MPI aqui.
+  ! > v2: salva dado MPAS LOCAL deste PET — sem MPI aqui.
   !! Todos os PETs têm g_raw_local(nLocal, MAX_RAW) com seus próprios dados.
   subroutine netcdf_push_raw_field(fname, data1d, nLocal, vm, rc)
     character(len=*),   intent(in)    :: fname
@@ -490,7 +490,7 @@ contains
 
     end if   ! localPet == 0
 
-    ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce (FIX-EXP v2) ──────
+    ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce (v2) ──────
     call write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
         grid_2d, ncstat, ncid, varid, rc)
 
@@ -545,7 +545,7 @@ contains
 
       if (raw_idx > 0 .and. allocated(g_raw_local) .and. g_nLocal_saved > 0 .and. &
           allocated(g_lon_local_saved)) then
-        ! FIX-EXP v2: g_raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
+        ! v2: g_raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
         ! g_lon_local_saved — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
         call voronoi_accum_local( &
           g_raw_local(1:g_nLocal_saved, raw_idx), &
@@ -655,7 +655,7 @@ contains
 
   ! W2-FIX (v12.0): subroutine voronoi_to_latlon removida — dead code.
   ! Supersedida pela arquitetura distribuída voronoi_accum_local + MPI_Allreduce
-  ! introduzida na versão FIX-EXP v2. A lógica de spray por célula Voronoi foi
+  ! introduzida na versão v2. A lógica de spray por célula Voronoi foi
   ! preservada e incorporada em voronoi_accum_local (operação per-PET local).
 
   ! ============================================================================
@@ -676,7 +676,7 @@ contains
   !! Sa_u10m_mpas / Sa_v10m_mpas: vento 10 m. Valores > 10 m/s são NORMAIS
   !!   (jatos de baixos níveis, alísios fortes, ciclones extratropicais);
   !!   usar 10 m/s cortava 2.6% dos bins — justamente os de vento forte —
-  !!   reduzindo σ_cap em 7% vs σ_standalone (Bug B-28).
+  !! reduzindo σ_cap em 7% vs σ_standalone (Bug).
   !!   Limiar correto: 150 m/s (fisicamente impossível → só filtra garbage).
   !!
   !! Demais campos: 1e30 (captura apenas fill value -9.99e33).
@@ -881,7 +881,7 @@ contains
   !!   Sf_albedo  — albedo de superfície     — atm_bnd%alb
   !!   Sx_omask   — máscara oceano/terra     — atm_bnd%omask
   !!
-  !! FIX B-DIAG-IMPORT-INCOMPLETO-01 (Set/2026): acrescentados So_u, So_v e
+  !! acrescentados So_u, So_v e
   !!   Sf_albedo. Até aqui a rotina gravava 4 dos 7 campos importados, e a
   !!   ausência era silenciosa: nada no código nem no arquivo indicava que
   !!   três campos ficavam de fora. A consequência prática foi grave. A
@@ -900,14 +900,14 @@ contains
   !!   recebe atm_bnd, não o importState, e por isso não pode iterar sobre
   !!   os campos anunciados. A conferência é visual, contando membros.
   !!
-  !! NOTA SOBRE O RÓTULO So_t (ver B-DIAG-SOT-ROTULO-01): a variável se chama
+  !! NOTA SOBRE O RÓTULO So_t (ver): a variável se chama
   !!   So_t por compatibilidade com o pós-processamento e as animações, mas o
   !!   campo importado é Sx_tsfc, a temperatura de pele composta (ver
   !!   IMP_NAMES em mpas_cap_MONAN.F90). O nome NÃO foi alterado aqui para
   !!   não quebrar postproc_monan2_import.py e anim_monan2_import.py; a
   !!   renomeação, se feita, tem de ser coordenada com essas ferramentas.
   !!
-  !! FIX B-DIAGMASK-01 (Set/2026): continentes mascarados com a máscara REAL
+  !! continentes mascarados com a máscara REAL
   !!   do MOM6 (ocean_grid%mask2dT → So_omask → Sx_omask → atm_bnd%omask).
   !!   Antes havia apenas o filtro ocean_frac_min do binning, que mede
   !!   cobertura de célula Voronoi por bin e nada diz sobre terra/oceano.
@@ -932,24 +932,24 @@ contains
     integer :: dimid_lat, dimid_lon
     integer :: varid_lat, varid_lon
     integer :: varid_sot, varid_ifrac, varid_zorl
-    integer :: varid_omask                      ! B-DIAGMASK-01
-    integer :: varid_uocn, varid_vocn, varid_alb ! B-DIAG-IMPORT-INCOMPLETO-01
+    integer :: varid_omask
+    integer :: varid_uocn, varid_vocn, varid_alb
     integer :: nlat, nlon, i
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
-    real(ESMF_KIND_R8), allocatable :: mask_2d(:,:)   ! B-DIAGMASK-01
+    real(ESMF_KIND_R8), allocatable :: mask_2d(:,:)
     real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
     integer, allocatable  :: allCounts(:), displs(:)
     real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf_sot(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_ifrac(:), recvBuf_zorl(:)
-    real(ESMF_KIND_R8), allocatable :: recvBuf_omask(:)   ! B-DIAGMASK-01
-    ! B-DIAG-IMPORT-INCOMPLETO-01: os tres campos que faltavam.
+    real(ESMF_KIND_R8), allocatable :: recvBuf_omask(:)
+    ! os tres campos que faltavam.
     real(ESMF_KIND_R8), allocatable :: recvBuf_uocn(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_vocn(:)
     real(ESMF_KIND_R8), allocatable :: recvBuf_alb(:)
     ! Limiar de corte da mascara ja' binada. 0,5 e' o mesmo criterio usado
-    ! no MED (B-LANDMASK-01) e o mesmo ocean_frac_min do binning abaixo —
+    ! no MED e o mesmo ocean_frac_min do binning abaixo —
     ! os tres precisam concordar, senao a linha de costa do diagnostico do
     ! MPAS nao bate com a do diagnostico do MED.
     real(ESMF_KIND_R8), parameter :: OMASK_MIN = 0.5_ESMF_KIND_R8
@@ -1040,7 +1040,7 @@ contains
                      recvBuf_zorl, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
 
-    ! B-DIAGMASK-01: mascara terra/oceano do MOM6. Fallback 1,0 (tudo
+    ! mascara terra/oceano do MOM6. Fallback 1,0 (tudo
     ! oceano) quando o campo nao existe — nao mascara nada, que e' o
     ! comportamento anterior a esta correcao.
     if (allocated(atm_bnd%omask)) then
@@ -1052,9 +1052,9 @@ contains
                      recvBuf_omask, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
 
-    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes e albedo.
+    ! correntes e albedo.
     !
-    ! O fallback 0,0 nas correntes reproduz o default anterior ao Sprint A,
+    ! O fallback 0,0 nas correntes reproduz o default anterior ao,
     ! quando uocn/vocn nao vinham do MOM6 e o MPAS assumia oceano parado.
     ! No albedo o fallback 0,0 NAO e' um valor fisico plausivel (oceano
     ! aberto fica em torno de 0,06): e' um marcador deliberado. Se um mapa
@@ -1101,7 +1101,7 @@ contains
     dlon    = res_deg
     dlat    = res_deg
     nlon    = nint(360.0_ESMF_KIND_R8 / dlon)
-    ! BUG-LATGRID (correcao): a grade e' CENTRADA em celulas — lat_axis(i) =
+    ! (correcao): a grade e' CENTRADA em celulas — lat_axis(i) =
     ! -90 + (i-0.5)*dlat (ver loop abaixo). Para dlat=1 isso da' 180 celulas
     ! cobrindo -89,5..+89,5, exatamente como o lado do MOM6. O "+1" anterior
     ! criava uma linha ESPURIA (nlat=181) cujo centro caia em +90,5 N (alem do
@@ -1154,7 +1154,7 @@ contains
            long_name='Rugosidade superficial Charnock+Smith importada pelo MPAS', &
            units='m', standard_name='surface_roughness_length', fill_r8=-9.99e+20_ESMF_KIND_R8)
 
-    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes de superficie e albedo.
+    ! correntes de superficie e albedo.
     ok = nc_def_field2d(ncid, 'So_u', dimid_lon, dimid_lat, varid_uocn, 'write_mpas_import_diag', &
            long_name='Corrente oceanica zonal importada pelo MPAS', &
            units='m s-1', standard_name='eastward_sea_water_velocity', fill_r8=FILL_VALUE_R8)
@@ -1167,7 +1167,7 @@ contains
            long_name='Albedo de superficie importado pelo MPAS', &
            units='1', standard_name='surface_albedo', fill_r8=FILL_VALUE_R8)
 
-    ! B-DIAGMASK-01: a propria mascara vira variavel do arquivo, para que o
+    ! a propria mascara vira variavel do arquivo, para que o
     ! pos-processamento nao precise readivinha-la a partir de _FillValue.
     ok = nc_def_field2d(ncid, 'Sx_omask', dimid_lon, dimid_lat, varid_omask, 'write_mpas_import_diag', &
            long_name='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)', &
@@ -1195,7 +1195,7 @@ contains
     ios = nf90_put_var(ncid, varid_lat, lat_axis)
     ios = nf90_put_var(ncid, varid_lon, lon_axis)
 
-    ! B-DIAGMASK-01: a mascara e' binada PRIMEIRO, pela mesma rotina dos
+    ! a mascara e' binada PRIMEIRO, pela mesma rotina dos
     ! campos, para viver exatamente na mesma grade. ocean_frac_min=0.0 aqui
     ! de proposito: a mascara nao deve ser pre-filtrada, precisa cobrir todo
     ! bin que tenha ao menos uma celula Voronoi. Bin sem nenhuma celula sai
@@ -1229,7 +1229,7 @@ contains
     where (mask_2d < OMASK_MIN) grid_2d = FILL_VALUE_R8
     ios = nf90_put_var(ncid, varid_zorl, grid_2d)
 
-    ! B-DIAG-IMPORT-INCOMPLETO-01: correntes e albedo, mesmo binning e mesma
+    ! correntes e albedo, mesmo binning e mesma
     ! mascara dos demais campos, para que as sete variaveis vivam na mesma
     ! grade e sejam comparaveis entre si e com o diagnostico do MED.
     !
@@ -1290,7 +1290,7 @@ contains
     call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
 
 999 continue
-    ! B-DIAGMASK-01: o desvio para 999 (falha do nf90_create) ocorre DEPOIS
+    ! o desvio para 999 (falha do nf90_create) ocorre DEPOIS
     ! das alocacoes dos buffers de grade — vazavam em silencio. Guardados.
     if (allocated(grid_2d))  deallocate(grid_2d)
     if (allocated(mask_2d))  deallocate(mask_2d)
@@ -1340,7 +1340,7 @@ contains
       lon_n = lon_v(k)
       do while (lon_n >= 180.0_ESMF_KIND_R8);  lon_n = lon_n - 360.0_ESMF_KIND_R8; end do
       do while (lon_n < -180.0_ESMF_KIND_R8);  lon_n = lon_n + 360.0_ESMF_KIND_R8; end do
-      ! BUG-BIN-OFFSET (Mai/2026): floor é o inverso exato do eixo centrado em bins.
+      ! floor é o inverso exato do eixo centrado em bins.
       ic = floor((lon_n    + 180.0_ESMF_KIND_R8) / dlon) + 1
       jc = floor((lat_v(k) +  90.0_ESMF_KIND_R8) / dlat) + 1
       ic = min(max(ic, 1), nlon)

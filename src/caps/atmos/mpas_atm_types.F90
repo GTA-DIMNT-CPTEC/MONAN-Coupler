@@ -1,7 +1,7 @@
 !> @file mpas_atm_types.F90
 !! @brief Tipos públicos do cap MONAN-A 2.0 — sem dependência direta do ESMF.
 !!
-!! Versão 7.0 — Sprint A Fase 2 (Maio 2026):
+!! Versão 7.0 —
 !!   atm_ocean_boundary_type estendido com 2 campos do oceano dinâmico:
 !!     uocn, vocn : correntes superficiais [m/s] do MOM6 via mediador
 !!   Habilita cálculo correto do vento relativo ao oceano:
@@ -44,7 +44,7 @@ module mpas_atm_types_mod
   !
   type, public :: mpas_atm_public_type
     integer :: nCells      = 0  !< células locais incluindo halos (para zero-copy)
-    integer :: nCellsSolve = 0  !< células próprias sem halos (B-32 — para NetCDF/export)
+    integer :: nCellsSolve = 0  ! < células próprias sem halos (para NetCDF/export)
     integer :: nVertLevels = 0
 
     ! ── Geometria (ponteiros zero-copy → pool 'mesh') ─────────────────────
@@ -97,9 +97,9 @@ module mpas_atm_types_mod
   !   Si_ifrac  → ice_fraction  fração de gelo [0–1]
   !   So_u      → uocn          corrente zonal      a 0 m [m/s]
   !   So_v      → vocn          corrente meridional a 0 m [m/s]
-  !   Sf_zorl   → zorl          rugosidade [m]  (Charnock no MED — Sprint C)
+  ! Sf_zorl → zorl rugosidade [m] (Charnock no MED —)
   !
-  ! Sprint A (Maio 2026): adicionados uocn/vocn para habilitar vento
+  ! adicionados uocn/vocn para habilitar vento
   !   relativo ao oceano nos esquemas de superfície do MPAS-A.
   !   Antes: zorl/ice_fraction/uocn/vocn fixos em defaults; SST do MOM6.
   !   Agora: SST/ifrac/uocn/vocn dinâmicos do MOM6; zorl ainda default.
@@ -110,7 +110,7 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), allocatable :: vocn(:)         !< corrente meridional 0 m  [m/s]
     real(MPAS_RKIND), allocatable :: zorl(:)         !< rugosidade               [m]
     real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície (Fase 2.6) [0–1]
-    !> FIX B-DIAGMASK-01 (Set/2026): máscara terra/oceano REAL do MOM6
+    ! > máscara terra/oceano REAL do MOM6
     !! (ocean_grid%mask2dT), recebida do mediador como Sx_omask. Chega
     !! fracionária, porque atravessou dois regrids (OCN→ATM no MED e
     !! ATM→Voronoi no conector); o corte binário fica no consumidor final.

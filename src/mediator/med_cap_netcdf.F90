@@ -34,7 +34,7 @@ module med_cap_netcdf_mod
   public :: med_read_import_config    !< lê mom6_output.nml
   public :: med_write_import_fields   !< escreve campos importados em NetCDF
 
-  ! FIX-DIAG-NCWRITE-01 (Set/2026): garante que o diagnostico de fatia
+  ! garante que o diagnostico de fatia
   ! global por PET so' imprima uma vez (1a chamada de med_write_import_fields),
   ! nao a cada passo de acoplamento.
   logical, save :: first_write_diag = .true.
@@ -94,16 +94,16 @@ contains
   !! Lê dos campos ATM internos (grade 360×180 global), faz MPI_Allreduce(MAX)
   !! para montar o campo global completo, e PET0 cria o NetCDF.
   !!
-  !! FIX-IMP (GT Acoplamento de Modelos/INPE — Mai/2026):
-  !!   FIX-IMP-01: MPI gather global (Allreduce MAX) — campo completo no NetCDF.
-  !!   FIX-IMP-02: Coordenadas lat/lon variáveis CF com eixo centrado em células.
-  !!   FIX-IMP-03: Variável 'time' CF com units="hours since...".
-  !!   FIX-IMP-04: Centros de célula: lon_k = (k-0.5)*dx, dx=360/NX.
-  !!   FIX-IMP-05: standard_name para reconhecimento CF/ncview.
-  !!   FIX-IMP-06: valid_time em ISO 8601.
-  !!   FIX-IMP-07: Atributos globais revisados para clareza semântica.
+  !! (GT Acoplamento de Modelos/INPE — Mai/2026):
+  !! MPI gather global (Allreduce MAX) — campo completo no NetCDF.
+  !! Coordenadas lat/lon variáveis CF com eixo centrado em células.
+  !! Variável 'time' CF com units="hours since...".
+  !! Centros de célula: lon_k = (k-0.5)*dx, dx=360/NX.
+  !! standard_name para reconhecimento CF/ncview.
+  !! valid_time em ISO 8601.
+  !! Atributos globais revisados para clareza semântica.
   !!
-  !! FIX B-DIAGMASK-01 (Set/2026): continentes mascarados com a máscara REAL
+  !! continentes mascarados com a máscara REAL
   !!   do MOM6 (ocean_grid%mask2dT → So_omask → is%f_omask_atm). Célula de
   !!   terra passa a sair como _FillValue em vez de zero, e a própria máscara
   !!   é gravada na variável Sx_omask (1=oceano, 0=terra).
@@ -129,7 +129,7 @@ contains
     real(ESMF_KIND_R8), pointer     :: fptr2d(:,:)
     real(ESMF_KIND_R8), pointer     :: xcoord(:,:), ycoord(:,:)
     real(ESMF_KIND_R8), allocatable :: grid_local(:,:), grid_global(:,:)
-    ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6 na grade de saida.
+    ! mascara terra/oceano do MOM6 na grade de saida.
     real(ESMF_KIND_R8), allocatable :: mask_local(:,:), mask_global(:,:)
     real(ESMF_KIND_R8), pointer     :: pmask2d(:,:)
     logical :: mask_ok
@@ -143,7 +143,7 @@ contains
     character(len=20)   :: tstamp
     character(len=64),  allocatable :: fieldNameList(:)
     real(ESMF_KIND_R8), allocatable :: lat_global(:), lon_global(:)
-    ! BUG-NC-03: _FillValue NC_FLOAT deve ser real(4) — tipo deve bater com NF90_FLOAT.
+    ! _FillValue NC_FLOAT deve ser real(4) — tipo deve bater com NF90_FLOAT.
     real(4), parameter :: FILL_IMP4 = -9.99e+20_4
     ! Grade MED interna — alinhada com InitializeRealize (360×180 ATM)
     character(len=*), parameter :: subname = 'MED:med_write_import_fields'
@@ -185,7 +185,7 @@ contains
     call ESMF_StateGet(state, itemNameList=fieldNameList, rc=rc)
     if (rc /= ESMF_SUCCESS) then; deallocate(fieldNameList); return; end if
 
-    ! FIX-IMP: usar ESMF_GridGetCoord para coordenadas reais
+    ! usar ESMF_GridGetCoord para coordenadas reais
     nx_local = 0; ny_local = 0
     nullify(xcoord, ycoord, fptr2d)
 
@@ -220,7 +220,7 @@ contains
       deallocate(fieldNameList); return
     end if
 
-    ! BUG-IMP-02: grade MED regular e conhecida a priori: 360×180
+    ! grade MED regular e conhecida a priori: 360×180
     nx_global = ATM_NX
     ny_global = ATM_NY
 
@@ -237,7 +237,6 @@ contains
         write(iso_time,'(I4.4,A,I2.2,A,I2.2,A,I2.2,A,I2.2,A,I2.2)') &
           yy,'-',mm,'-',dd,'T',hh,':',mn,':',ss
         ios = nf90_put_att(ncid, NF90_GLOBAL, 'valid_time', trim(iso_time))
-      ! FIX B-DIAGMASK-01 (Set/2026)
       ios = nf90_put_att(ncid, NF90_GLOBAL, 'land_mask_source', &
         'MOM6 ocean_grid%mask2dT (So_omask, regridada para a grade ATM); '// &
         'celulas de terra gravadas como _FillValue; a mascara vai na '// &
@@ -255,7 +254,7 @@ contains
       ios = nf90_put_att(ncid, varid_t, 'calendar', 'gregorian')
 
       do n = 1, fieldCount
-        ! BUG-NC-03: NF90_FLOAT em vez de NF90_DOUBLE
+        ! NF90_FLOAT em vez de NF90_DOUBLE
         if (nc_def_field2d(ncid, fieldNameList(n), dimid_lon, dimid_lat, varid, subname, &
                            fill_r4=FILL_IMP4, missing=.true.)) &
           call put_field_metadata(fieldNameList, n, ios, ncid, varid)
@@ -265,13 +264,13 @@ contains
       if (ios /= NF90_NOERR) goto 999
 
       ! Coordenadas uniformes — centros de célula
-      ! BUG-NC-05: lat(k) = (k-0.5)*dy - 90, dy=180/ny_global
+      ! lat(k) = (k-0.5)*dy - 90, dy=180/ny_global
       allocate(lat_global(ny_global), lon_global(nx_global))
       do n = 1, ny_global
         lat_global(n) = -90.0_ESMF_KIND_R8 + (n - 0.5_ESMF_KIND_R8) * &
                         180.0_ESMF_KIND_R8 / real(ny_global, ESMF_KIND_R8)
       end do
-      ! BUG-IMP-04: lon_k = (k-0.5)*dx, dx=360/nx_global
+      ! lon_k = (k-0.5)*dx, dx=360/nx_global
       do n = 1, nx_global
         lon_global(n) = (n - 0.5_ESMF_KIND_R8) * 360.0_ESMF_KIND_R8 / real(nx_global, ESMF_KIND_R8)
       end do
@@ -286,11 +285,11 @@ contains
     allocate(grid_global(nx_global, ny_global))
 
     !--------------------------------------------------------------------------
-    ! FIX B-DIAGMASK-01 (Set/2026): mascara terra/oceano REAL do MOM6 montada
+    ! mascara terra/oceano REAL do MOM6 montada
     ! UMA vez por arquivo, pelo mesmo caminho de gather usado nos campos.
     !
     ! Ate' aqui o continente saia do diagnostico como ZERO (fluxos zerados
-    ! pelo Sprint A.5.1 antes do export). Zero e' um valor fisico legitimo de
+    ! pelo.5.1 antes do export). Zero e' um valor fisico legitimo de
     ! fluxo — o GrADS e o pos-processamento nao tinham como distinguir "fluxo
     ! nulo sobre oceano calmo" de "aqui nao ha oceano". Agora a celula de
     ! terra sai como _FillValue, que e' exatamente o que o mask2dT do MOM6
@@ -301,7 +300,7 @@ contains
     ! dono contribui com o valor real. Terra continua 0, oceano vira 1.
     !
     ! IMPORTANTE: a mascara e' aplicada em grid_global, buffer LOCAL deste
-    ! escritor. O exportState permanece com os zeros do Sprint A.5.1 — se
+    ! escritor. O exportState permanece com os zeros do.5.1 — se
     ! -9,99e20 vazasse para la', viraria forcante do MOM6.
     !--------------------------------------------------------------------------
     allocate(mask_local(nx_global, ny_global))
@@ -309,7 +308,7 @@ contains
     mask_local = 0.0_ESMF_KIND_R8
     mask_ok    = .false.
     nullify(pmask2d)
-    ! B-45: ESMF_FieldGet(farrayPtr) falha em PET sem DE local. Verificar
+    ! ESMF_FieldGet(farrayPtr) falha em PET sem DE local. Verificar
     ! antes de acessar, como ja' e' feito no resto do mediador — senao o
     ! ERROR do ESMF poluiria o log a cada passo nesses PETs.
       ldec_mask = 0
@@ -351,7 +350,7 @@ contains
     end if
 
     do n = 1, fieldCount
-      ! BUG-WRITE-OCN: ler dos campos ATM internos (grade 360×180 global)
+      ! ler dos campos ATM internos (grade 360×180 global)
       nullify(fptr2d)
       select case (trim(fieldNameList(n)))
         case ('Foxx_taux');      call ESMF_FieldGet(is%f_taux_atm,   farrayPtr=fptr2d, rc=rc)
@@ -369,12 +368,12 @@ contains
         case ('Si_ifrac');       call ESMF_FieldGet(is%f_ifrac_atm,  farrayPtr=fptr2d, rc=rc)
         case ('So_duu10n');      call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr2d, rc=rc)
         case ('So_t');           call ESMF_FieldGet(is%f_sst_atm,    farrayPtr=fptr2d, rc=rc)
-        ! BUG-NC-06: sem estas tres linhas os campos caiam no case default e
+        ! sem estas tres linhas os campos caiam no case default e
         ! eram pulados pelo 'cycle', ficando com _FillValue no arquivo.
         case ('So_u');           call ESMF_FieldGet(is%f_uocn_atm,   farrayPtr=fptr2d, rc=rc)
         case ('So_v');           call ESMF_FieldGet(is%f_vocn_atm,   farrayPtr=fptr2d, rc=rc)
         case ('Sf_zorl');        call ESMF_FieldGet(is%f_zorl_atm,   farrayPtr=fptr2d, rc=rc)
-        ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima)
+        ! (mesma causa raiz do acima)
         case ('Sf_albedo');      call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr2d, rc=rc)
         case ('Faxa_coszen');    call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr2d, rc=rc)
         case ('Fioi_taux');      call ESMF_FieldGet(is%f_taux_ice,   farrayPtr=fptr2d, rc=rc)
@@ -382,7 +381,7 @@ contains
         case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
         case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
         case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
-        ! FIX B-NC-ICESW-01 (Set/2026): mesma causa raiz do BUG-NC-06 — os quatro
+        ! mesma causa raiz do os quatro
         ! Fioi_swnet_* e o Sx_tsfc estavam em export_names (viravam variavel no
         ! arquivo) mas NAO tinham mapeamento aqui: caiam no case default/'cycle'
         ! e sim gravados APENAS com _FillValue (nunca preenchidos). Os campos
@@ -393,7 +392,7 @@ contains
         case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%f_swidr_ice,  farrayPtr=fptr2d, rc=rc)
         case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%f_swidf_ice,  farrayPtr=fptr2d, rc=rc)
         case ('Sx_tsfc');        call ESMF_FieldGet(is%f_tsfc_atm,   farrayPtr=fptr2d, rc=rc)
-        ! FIX B-DIAGMASK-01: a propria mascara vira variavel do arquivo.
+        ! a propria mascara vira variavel do arquivo.
         case ('Sx_omask');       call ESMF_FieldGet(is%f_omask_atm,  farrayPtr=fptr2d, rc=rc)
         case default
           ! Um campo do exportState sem mapeamento aqui vira variavel vazia no
@@ -416,7 +415,7 @@ contains
         if (i2a >= i1a .and. j2a >= j1a) &
           grid_local(i1a:i2a, j1a:j2a) = fptr2d(i1a:i2a, j1a:j2a)
 
-        ! FIX-DIAG-NCWRITE-01 (Set/2026): confirma/descarta a hipotese de
+        ! confirma/descarta a hipotese de
         ! sobreposicao de indice entre PETs no MAX-combine abaixo. Logado
         ! uma unica vez (1a chamada, so' para o campo Si_ifrac, que e' onde
         ! o artefato foi observado) — cada PET reporta a fatia GLOBAL que
@@ -437,12 +436,12 @@ contains
       call MPI_Allreduce(grid_local, grid_global, nx_global*ny_global, &
                          MPI_DOUBLE_PRECISION, MPI_MAX, med_mpi_comm, mpi_ierr)
 
-      ! BUG-NC-03: guardar NaN/Inf antes de escrever como NF90_FLOAT
+      ! guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
         grid_global = FILL_VALUE_R8
       end where
 
-      ! FIX B-DIAGMASK-01: continentes saem como _FillValue. A propria
+      ! continentes saem como _FillValue. A propria
       ! mascara e' a excecao obvia — mascara-la apagaria a informacao de
       ! onde a terra fica, que e' o unico conteudo dela.
       if (mask_ok .and. trim(fieldNameList(n)) /= 'Sx_omask') then
@@ -501,7 +500,7 @@ contains
       case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
       case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
       case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
-      ! BUG-NC-06: So_u, So_v e Sf_zorl faziam parte de export_names e
+      ! So_u, So_v e Sf_zorl faziam parte de export_names e
       ! portanto ganhavam variavel no arquivo, mas nao apareciam em
       ! NENHUM dos dois select case desta rotina. Caiam no case default,
       ! saiam com long_name generico e, pior, com o 'cycle' do select
@@ -510,7 +509,7 @@ contains
       case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
       case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
       case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
-      ! FIX B-NC-ALBFLUX-01 (mesma causa raiz do BUG-NC-06 acima):
+      ! (mesma causa raiz do acima):
       ! campos das Fases 2.5/2.6/3, presentes em export_names mas
       ! ausentes dos dois select case desta rotina — mesmo sintoma
       ! (GrADS "Entire Grid Undefined").
@@ -521,7 +520,7 @@ contains
       case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
       case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
       case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
-      ! FIX B-NC-UNITS-01 (Set/2026): Fioi_swnet_* e Sx_tsfc caiam no
+      ! Fioi_swnet_* e Sx_tsfc caiam no
       ! case default e saiam com units='1'/standard_name='unknown' — os
       ! quatro Fioi_swnet_* sao fluxos de onda curta (W m-2) e Sx_tsfc e'
       ! a temperatura de superficie (pele) usada pelo bulk sobre gelo (K).
@@ -530,7 +529,7 @@ contains
       case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
       case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
       case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
-      ! FIX B-DIAGMASK-01: mascara terra/oceano do MOM6. E' a UNICA
+      ! mascara terra/oceano do MOM6. E' a UNICA
       ! variavel do arquivo que nao recebe _FillValue sobre terra —
       ! e' justamente ela que diz onde a terra fica.
       case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'

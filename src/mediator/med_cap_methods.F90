@@ -7,7 +7,7 @@
 !! como parte da reorganização de responsabilidades (Passo 3):
 !!
 !!   CreateInternalField      — cria campo ESMF na grade interna
-!!   ZeroInternalField        — zera campo com guard B-45
+!! ZeroInternalField — zera campo com guard
 !!   FillInternalField        — preenche campo com valor constante
 !!   GetFieldPtr              — obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional      — obtém ponteiro sem erro de log para campos opcionais
@@ -61,9 +61,9 @@ contains
   end subroutine CreateInternalField
 
   !============================================================================
-  !> @brief Zera um campo ESMF com guard B-45 para PETs sem DE local.
+  ! > @brief Zera um campo ESMF com guard para PETs sem DE local.
   !!
-  !! B-45: ESMF_FieldGet(farrayPtr) falha com "localDe is out of range"
+  !! ESMF_FieldGet(farrayPtr) falha com "localDe is out of range"
   !! em PETs sem DE local (localDeCount=0). Verificar antes de acessar.
   !============================================================================
   subroutine ZeroInternalField(field, rc)
@@ -86,7 +86,7 @@ contains
 
   !============================================================================
   !> @brief Preenche campo ESMF com valor constante.
-  !! Guard B-45: PETs sem DE local não têm dados a preencher.
+  !! Guard PETs sem DE local não têm dados a preencher.
   !============================================================================
   subroutine FillInternalField(field, value, rc)
     type(ESMF_Field),   intent(inout) :: field
@@ -139,7 +139,7 @@ contains
   !!
   !! Enumera os itens do State e verifica existência do nome ANTES de chamar
   !! ESMF_StateGet pelo nome. Impede mensagens "no ESMF_Field found named: X"
-  !! no log para campos opcionais Fase 2 (Sa_shum_mpas, Faxa_snow_mpas).
+  !! no log para campos opcionais (Sa_shum_mpas, Faxa_snow_mpas).
   !============================================================================
   subroutine GetFieldPtrOptional(state, name, ptr, rc)
     type(ESMF_State),            intent(in)    :: state
@@ -239,7 +239,7 @@ contains
   !============================================================================
   !> @brief Roteia campos oceânicos para a atmosfera (Fase 2 — MOM6 dinâmico).
   !!
-  !! Fase 2 (MOM6 dinâmico — grade tripolar B-grid):
+  !! (MOM6 dinâmico — grade tripolar B-grid):
   !!   Chamada em MediatorAdvance quando use_med_to_mpas=.true. (nuopc.input).
   !!   O conector direto OCN→MPAS não existe neste modo; tudo passa pelo MED.
   !!

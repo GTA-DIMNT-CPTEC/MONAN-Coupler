@@ -9,7 +9,7 @@
 !!
 !! Formulações:
 !!   Large & Yeager (2009) — taux, tauy, fluxo sensível, evaporação, LW, SW
-!!   Smith (1988)           — rugosidade Charnock + viscosa (Sprint C Maio 2026)
+!! Smith (1988) — rugosidade Charnock + viscosa (Maio 2026)
 !!
 !! A sub-rotina recebe os campos ATM globais reunidos por MPI_Allreduce e
 !! escreve os resultados diretamente nos campos ESMF do estado interno (is).
@@ -21,7 +21,7 @@ module med_bulk_ncar_mod
 
   use coupler_config_mod, only: cfg_use_docn_ice,        &
                                 cfg_use_sis2_dynamic,     &
-                                cfg_docn_ice_init_only,   &  ! Sprint B.1
+                                cfg_docn_ice_init_only,   &  ! 1
                                 cfg_write_fixdiag
   use med_cap_types_mod, only: MED_InternalState,    &
                                 rho_air,              &
@@ -101,7 +101,7 @@ contains
     type(ESMF_Clock),        intent(in)    :: clock
     integer,                 intent(out)   :: rc
 
-    ! Fase 2.5 (B-ZENITH-01): angulo zenital solar, calculado uma vez por
+    ! angulo zenital solar, calculado uma vez por
     ! chamada (nao depende de i,j) e reaproveitado por todas as celulas.
     real(ESMF_KIND_R8) :: decl, gamma_doy
     real(ESMF_KIND_R8) :: utc_hour
@@ -125,7 +125,7 @@ contains
     nullify(fptr, sst, uocn, vocn)
 
     !==========================================================================
-    ! Fase 2.5 (B-ZENITH-01): dia-do-ano e hora UTC decimal, uma vez por
+    ! dia-do-ano e hora UTC decimal, uma vez por
     ! chamada (o angulo zenital muda por celula via lat/lon, mas doy/hora
     ! sao os mesmos para toda a grade neste instante de acoplamento).
     !==========================================================================
@@ -169,7 +169,7 @@ contains
     call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      ! BUG-CALC-05: clamp ±5 Pa (limite físico cat-5 ~3 Pa)
+      ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
       fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
         rho_air * Cd_neut * wspd * uas(i,j)))
     end do; end do
@@ -189,12 +189,12 @@ contains
     !==========================================================================
     call ESMF_FieldGet(is%f_sen_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
-      ! BUG-CALC-04: pular células sem tas físico (tas < 100 K = sem dado)
+      ! pular células sem tas físico (tas < 100 K = sem dado)
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
         associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
-      ! BUG-CALC-05: clamp ±500 W/m²
+      ! clamp ±500 W/m²
       fptr(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, &
         rho_air * Cp_air * Ch_neut * wspd * (tas(i,j) - sst_eff)))
     end do; end do
@@ -205,8 +205,8 @@ contains
     call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-      ! BUG-CALC-06 (v14.21): pular celulas sem psl fisico, simetrico as
-      ! guardas BUG-CALC-03 (lwdn) e BUG-CALC-04 (tas).
+      ! (v14.21): pular celulas sem psl fisico, simetrico as
+      ! guardas (lwdn) e (tas).
       !
       ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
       ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
@@ -228,8 +228,8 @@ contains
       qsat = eps_q * es_coef_a * &
         exp(es_coef_b*(sst_eff-T_freeze)/(sst_eff-T_freeze+es_coef_c)) / &
         max(psl(i,j), 1.0_ESMF_KIND_R8)
-      ! Convenção CMEPS: E > 0 = oceano → atmosfera  (BUG-FORT-EVAP fix)
-      ! BUG-CALC-05: clamp ±1e-4 kg/m²/s (~±8.6 mm/d)
+      ! Convenção CMEPS: E > 0 = oceano → atmosfera
+      ! clamp ±1e-4 kg/m²/s (~±8.6 mm/d)
       fptr(i,j) = max(-1.0e-4_ESMF_KIND_R8, min(1.0e-4_ESMF_KIND_R8, &
         rho_air * Ce_neut * wspd * (qsat - shum(i,j))))
     end do; end do
@@ -239,7 +239,7 @@ contains
     !==========================================================================
     call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
-      ! BUG-CALC-03: pular células sem lwdn real (lwdn=0 indica ausência)
+      ! pular células sem lwdn real (lwdn=0 indica ausência)
       if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
       sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
         associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
@@ -251,9 +251,9 @@ contains
     !==========================================================================
     ! Componentes SW: 4 bandas (vis-dir, vis-dif, nir-dir, nir-dif)
     !
-    ! Fase 2 (B-ICE-ALBEDO-01): o albedo efetivo de cada célula passa a ser
+    ! o albedo efetivo de cada célula passa a ser
     ! uma média ponderada pela fração de gelo real (is%f_ifrac_atm, regrid
-    ! Sprint B.2 de Si_ifrac_sis2) entre a constante de água aberta
+    ! 2 de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
     ! (is%f_alb_*_ice, regrid de Si_a*sdr/f_sis2 — ver export_si_albedo em
     ! sis_cap_MONAN.F90). Antes desta correção, toda celula — com ou sem
@@ -263,7 +263,7 @@ contains
     call blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
 
     !==========================================================================
-    ! Fase 3 (B-ICE-FLUX-DIFF-01): fluxos Fioi_* — mesma forma bulk NCAR
+    ! fluxos Fioi_* — mesma forma bulk NCAR
     ! acima, mas usando a temperatura de pele REAL do gelo (is%f_tice_atm,
     ! regrid de Si_t_sis2) em vez de SST. Antes desta correcao, o SIS2
     ! recebia os MESMOS Foxx_* calculados com SST que o MOM6 recebe —
@@ -279,7 +279,7 @@ contains
     ! ESTAVELMENTE estratificada (T_ar > T_gelo), onde a troca turbulenta
     ! REAL e' bem menor que a que os coeficientes "neutros" (calibrados
     ! para agua aberta, tipicamente proxima do neutro) preveem — sem essa
-    ! correcao, FIX-DIAG-ICESTAB-01 mostrou Fioi_sen saturando repetidamente
+    ! correcao, mostrou Fioi_sen saturando repetidamente
     ! no teto de seguranca de ±500 W/m^2 em varios PETs, sinal de
     ! superestimativa sistematica, nao de evento fisico isolado.
     !
@@ -317,7 +317,7 @@ contains
     end do; end do
 
     !==========================================================================
-    ! Sprint C (Maio 2026): rugosidade superficial via Charnock + Smith (1988)
+    ! rugosidade superficial via Charnock + Smith (1988)
     !
     ! z0 = alpha * u*² / g  +  beta * nu / u*
     !       (Charnock)              (Smith — termo viscoso)
@@ -331,7 +331,7 @@ contains
     call compute_roughness_length(is, j1, j2, i1, i2)
 
     !==========================================================================
-    ! duu10n = |V_atm − V_ocn|²  (protocolo CMEPS — BUG-CALC-DUU fix v13.0)
+    ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS — v13.0)
     !==========================================================================
     call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr, rc=rc)
     if (associated(uocn) .and. associated(vocn)) then
@@ -352,21 +352,21 @@ contains
     ! Si_ifrac: regrid OCN→ATM via rh_ocn2atm (SIS2) + mascara terra (A.5.2)
     ! Fallback: limiar de SST quando routehandle não disponível
     !==========================================================================
-    ! FIX B-IFRAC-OVERWRITE-01 (Set/2026): todo o bloco abaixo — que le
+    ! todo o bloco abaixo — que le
     ! "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2") via
     ! rh_ocn2atm generico SEM mascara, e ainda aplica a mascara SST~=
-    ! T_FILL_LAND (Sprint A.5.2) que zera ifrac tambem em agua aberta
+    ! T_FILL_LAND (.5.2) que zera ifrac tambem em agua aberta
     ! genuina proxima da borda do gelo (SST no congelamento e' fisicamente
     ! esperado ali, nao e' sinal de terra) — so' deveria rodar quando NAO
     ! ha fonte melhor disponivel. Antes so' era gated por cfg_use_docn_ice;
     ! como cfg_use_docn_ice=.false. e' o estado correto agora (ver correcao
     ! do decaimento OISST artificial, Set/2026), esse bloco passou a rodar
     ! INCONDICIONALMENTE, sobrescrevendo is%f_ifrac_atm por cima do
-    ! pipeline Sprint B.2/B-ICEREGRID-01..04 (mascarado, CONSERVE,
+    ! pipeline.2/..04 (mascarado, CONSERVE,
     ! extrapolacao com alcance limitado) que roda ANTES desta subrotina
     ! ser chamada (calc_bulk_ncar e' chamado depois de tudo isso em
     ! MED_cap.F90). Com cfg_use_sis2_dynamic=.true. (gelo real do SIS2
-    ! ativo), o pipeline Sprint B.2 e' a fonte AUTORITATIVA -- este bloco
+    ! ativo), o pipeline.2 e' a fonte AUTORITATIVA -- este bloco
     ! legado deve ficar totalmente inativo nesse caso, nao so' o ramo
     ! regrid_ok=T original.
     !==========================================================================
@@ -401,17 +401,17 @@ contains
     !     com OISST por fill_ifrac_from_oisst (Alternativa 1 original).
     !     regrid_ok=T pula o ESMF_FieldRegrid (rh_ocn2atm falha para
     !     Si_ifrac ≠ So_t) e o fallback SST.
-    !   use_docn_ice=T  init_only=T  → Sprint B.1:
+    ! use_docn_ice=T init_only=T →.1:
     !     fill_ifrac_from_oisst NÃO foi chamado em MediatorAdvance.
     !     Usar Si_ifrac do OCN (sigmoid) via importState.
     !   use_docn_ice=F              → sigmoid do OCN via importState.
     ! regrid_ok=T: usar is%f_ifrac_atm (de fill_ifrac_from_oisst).
     ! NÃO reutilizar rh_ocn2atm para Si_ifrac (específico de So_t).
-    ! Sprint B.2 criará rh dedicado para Si_ifrac dinâmico.
+    ! 2 criará rh dedicado para Si_ifrac dinâmico.
     if (cfg_use_docn_ice) then
       regrid_ok = .true.   ! is%f_ifrac_atm de fill_ifrac_from_oisst
     else
-      regrid_ok = .false.  ! OCN sigmoid via importState (Sprint B.2+)
+      regrid_ok = .false.  ! OCN sigmoid via importState (.2+)
     end if
 
     if (.not. regrid_ok .and. is%regrid%has('ocn2atm')) then
@@ -427,7 +427,7 @@ contains
             where (fptr < 0.0_ESMF_KIND_R8) fptr = 0.0_ESMF_KIND_R8
             where (fptr > 1.0_ESMF_KIND_R8) fptr = 1.0_ESMF_KIND_R8
             where (fptr /= fptr)            fptr = 0.0_ESMF_KIND_R8  ! NaN
-            ! Sprint A.5.2: defesa em profundidade — zera ifrac onde sst = T_FILL_LAND
+            ! 5.2: defesa em profundidade — zera ifrac onde sst = T_FILL_LAND
               if (associated(sst)) then
                 n_ifrac_land = count(abs(sst - T_FREEZE_SEAWATER) < TOL_LAND &
                                      .and. fptr > 0.0_ESMF_KIND_R8)
@@ -447,7 +447,7 @@ contains
       end if
     end if
 
-    ! Fallback: limiar de SST (Sprint A.5.2 — condicao mais restritiva)
+    ! Fallback: limiar de SST (.5.2 — condicao mais restritiva)
     if (.not. regrid_ok) then
       call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=fptr, rc=rc_if)
       if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
@@ -497,7 +497,7 @@ contains
     call ESMF_FieldGet(is%f_taux_atm, farrayPtr=p_taux, rc=rc_z)
     call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=p_tauy, rc=rc_z)
     call ESMF_FieldGet(is%f_zorl_atm, farrayPtr=p_zorl, rc=rc_z)
-    ! FIX B-LANDMASK-01: mascara real (So_omask regridada), nao mais
+    ! mascara real (So_omask regridada), nao mais
     ! heuristica de SST~=T_FILL_LAND (colidia com agua aberta genuina no
     ! ponto de congelamento, perto da borda do gelo).
     call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask_z, rc=rc_z)
@@ -511,7 +511,7 @@ contains
           z0_charnock = ALPHA_CHARNOCK * ustar**2 / GRAV
           z0_smith    = BETA_SMITH * NU_AIR / ustar
           z0_total    = max(Z0_MIN, min(Z0_MAX, z0_charnock + z0_smith))
-          ! Sobre terra (mascara real So_omask, ver B-LANDMASK-01): usar default
+          ! Sobre terra (mascara real So_omask, ver): usar default
           if (associated(p_omask_z)) then
             if (p_omask_z(i,j) < 0.5_ESMF_KIND_R8) z0_total = Z0_MIN
           end if
@@ -553,12 +553,12 @@ contains
     real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instavel
     real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ nao zerar o fluxo
     real(ESMF_KIND_R8), parameter :: STAB_FAC_MAX = 3.0_ESMF_KIND_R8   ! teto de seguranca (nao e' do Louis original)
-    ! FIX B-ICEFLUX-ARTIFACT-01: abaixo deste limiar de fracao de gelo,
+    ! abaixo deste limiar de fracao de gelo,
     ! Si_t_sis2 e' o FALLBACK de export_si_tskin (ponto de congelamento),
     ! nao uma temperatura real. Usa-lo como se fosse T_gelo real produz
     ! um deltaT fabricado (ex.: ar polar genuino sobre agua aberta SEM
     ! gelo, deltaT de 40-50K fictício) — foi a causa da maior parte das
-    ! saturacoes em FIX-DIAG-ICESTAB-01 (tice=271.4 identico em centenas
+    ! saturacoes em (tice=271.4 identico em centenas
     ! de celulas). Abaixo do limiar, copia o Foxx_* (agua aberta, SST
     ! real) ja calculado acima em vez de inventar um gradiente de gelo.
     real(ESMF_KIND_R8), parameter :: IFRAC_MIN_FIOI = 1.0e-3_ESMF_KIND_R8
@@ -681,11 +681,11 @@ contains
             stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
           end if
           raw_sen = rho_air * Cp_air * Ch_neut * stab_fac * wspd * (tas(i,j) - tice_eff)
-          ! FIX-DIAG-ICESTAB-01: rastreia saturacao no teto de seguranca
+          ! rastreia saturacao no teto de seguranca
           ! ANTES do clamp, para distinguir evento fisico real (vento e/ou
           ! delta-T genuinamente extremos) de artefato numerico. Com os
           ! dois ramos de Louis (1979) + a guarda de ifrac (fix
-          ! B-ICEFLUX-ARTIFACT-01), espera-se n_sat ~ 0 na maioria dos
+          ! ), espera-se n_sat ~ 0 na maioria dos
           ! passos — se persistir, e' sinal de vento/deltaT realmente
           ! extremos (ver rib_sat/stab_sat no log para confirmar; note
           ! que stab_sat pode agora ser > 1 no ramo instavel, reforco
@@ -770,7 +770,7 @@ contains
       call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
         'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
 
-      ! FIX-DIAG-ICEFLUX-01: validacao. Compara T_gelo vs SST e
+      ! validacao. Compara T_gelo vs SST e
       ! Fioi_sen vs Foxx_sen (calculado com SST, secao acima) nas MESMAS
       ! celulas. Ja validado em producao (Set/2026).
       if (cfg_write_fixdiag) then
@@ -833,7 +833,7 @@ contains
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
 
-      ! Fase 4 (B-ICE-SWNET-01, Set/2026): ANTES desta correcao, Foxx_swnet_*
+      ! (, Set/2026): ANTES desta correcao, Foxx_swnet_*
       ! era calculado com alb_eff (media ponderada por Si_ifrac entre
       ! albedo de agua aberta e albedo do gelo) e esse MESMO valor era
       ! enviado tanto ao MOM6 (Foxx_swnet_*) quanto ao SIS2 (que importava
@@ -860,7 +860,7 @@ contains
         call ESMF_FieldGet(is%f_swvdr_ice,  farrayPtr=fptr_ice2, rc=rc)
         do j=j1,j2; do i=i1,i2
           fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          ! Fase 2.5: lat/lon analiticos da grade ATM 360x180 (mesma formula
+          ! lat/lon analiticos da grade ATM 360x180 (mesma formula
           ! usada na criacao da grade em MED_cap.F90::InitializeRealize).
           lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
                    + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
@@ -942,7 +942,7 @@ contains
           if (associated(fptr_ice2)) &
             fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_idf(i,j)) * f_nir_dif
           alb_eff = (1.0_ESMF_KIND_R8 - fi) * albedo_ocn + fi * alb_idf(i,j)
-          ! Fase 2.6: ultima banda — fptr_alb(i,j) agora contem o albedo de
+          ! ultima banda — fptr_alb(i,j) agora contem o albedo de
           ! banda larga efetivo completo (soma das 4 contribuicoes ponderadas).
           if (associated(fptr_alb)) fptr_alb(i,j) = fptr_alb(i,j) + f_nir_dif * alb_eff
         end do; end do
@@ -989,7 +989,7 @@ contains
         call ESMF_FieldGet(is%f_swidf_ice, farrayPtr=fptr_ice2, rc=rc)
         if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
 
-      ! Fase 2.6: sem dado de gelo/zenite -- exporta a constante antiga
+      ! sem dado de gelo/zenite -- exporta a constante antiga
       ! como albedo de banda larga tambem (degrada de forma consistente).
       nullify(fptr_alb)
         call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)

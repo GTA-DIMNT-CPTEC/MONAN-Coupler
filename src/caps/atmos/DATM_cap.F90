@@ -535,7 +535,7 @@ contains
     nj = size(array, 2)
     allocate(buf_global(NX*NY))
     ! (f0/f1 removidos - veja declaracoes)
-    ! FIX-DEADLOCK (modo concurrent, v13.1): VM do componente, não a global —
+    ! (modo concurrent, v13.1): VM do componente, não a global —
     ! ver docn_cap_netcdf.F90. Evita broadcast coletivo sobre 8 PETs quando o
     ! DATM roda só no subconjunto da atmosfera (teste DATM concorrente).
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)

@@ -36,11 +36,11 @@ module MED_cap_MONAN_mod
                                   cfg_docn_dt_data,                 &
                                   cfg_docn_epoch_year,              &
                                   cfg_docn_epoch_month,             &
-                                  cfg_docn_epoch_day,               & ! Alternativa 1 + Sprint B.1.1
+                                  cfg_docn_epoch_day,               &  ! Alternativa 1 +.1.1
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  &
                                   cfg_use_datm, cfg_use_med_to_mpas, &
                                   cfg_use_sis2_dynamic,             & ! FIX SIS2-ATIVACAO
-                                  cfg_coupling_mode,                & ! BUG-SEQ-STAMP-01
+                                  cfg_coupling_mode,                &
                                   cfg_seq_repro                       ! seq_repro (reprodutibilidade)
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -76,7 +76,7 @@ module MED_cap_MONAN_mod
   private
   public :: SetServices
 
-  ! ── Variáveis de estado de módulo — Sprint B.1.1 ───────────────────────────
+  ! ── Variáveis de estado de módulo —.1.1 ───────────────────────────
   !
   ! med_ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado na
   !   primeira MediatorAdvance.  Com save, retém o valor entre chamadas.
@@ -215,7 +215,7 @@ contains
       SharePolicyField="share", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! BUG-CALC-DUU (fix v13.0): anuncia So_u e So_v no importState do MED.
+    ! v13.0): anuncia So_u e So_v no importState do MED.
     ! O NUOPC só conecta campos mutuamente anunciados: o OCN exporta So_u/So_v
     ! mas o MED não os anunciava → o NUOPC descartava esses campos e o
     ! ESMF_StateGet subsequente gerava "ERROR: Not found" no log a cada passo.
@@ -231,7 +231,7 @@ contains
       SharePolicyField="share", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! FIX B-COASTMASK-02 (Ago 2026): anuncia So_omask no importState do MED.
+    ! anuncia So_omask no importState do MED.
     ! O OCN (mom_cap_methods.F90::mom_export) ja exporta 'So_omask' = nint(mask2dT)
     ! (1=oceano, 0=terra), mas o MED nunca anunciava esse campo -> o NUOPC
     ! descartava o conector e o MED era forcado a "adivinhar" a mascara terra/
@@ -265,7 +265,7 @@ contains
         SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      ! Fase 2 (B-ICE-ALBEDO-01): albedo do gelo por banda. Mesmo padrão
+      ! albedo do gelo por banda. Mesmo padrão
       ! de Si_ifrac_sis2 acima (nome próprio para não colidir com um
       ! eventual conector automático; mesma política de share).
       call NUOPC_Advertise(importState, StandardName="Si_avsdr_sis2", &
@@ -284,7 +284,7 @@ contains
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
-      ! Fase 3 (B-ICE-FLUX-DIFF-01): temperatura de pele real do gelo.
+      ! temperatura de pele real do gelo.
       call NUOPC_Advertise(importState, StandardName="Si_t_sis2", &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
@@ -320,7 +320,7 @@ contains
     type(MED_InternalState), pointer :: is
     integer :: nx_atm, ny_atm, nx_ocn, ny_ocn
     integer :: petCount
-    character(len=256)  :: msg_tmp  ! FIX B-OCNGRID-01
+    character(len=256)  :: msg_tmp
       type(ESMF_VM) :: med_vm
 
     rc = ESMF_SUCCESS
@@ -331,7 +331,7 @@ contains
     is => iswrap%wrap
 
 
-    ! B-44/B-45/B-46: obter petCount para calcular regDecomp de ambas as grades.
+    ! obter petCount para calcular regDecomp de ambas as grades.
     ! Sem regDecomp explícito, com N>ny PETs o ESMF gera DEs vazias (localDeCount=0)
     ! ou DEs de 1 linha, ambas incompatíveis com o conector bilinear NUOPC automático.
     ! regDecomp(2) = min(petCount, ny/2) garante ≥2 linhas/DE para qualquer N.
@@ -350,7 +350,7 @@ contains
     !        Alinhada com DOCN_cap (OISST) — redistribuição zero-copy.
     nx_atm = ATM_NX
     ny_atm = ATM_NY
-    ! FIX B-OCNGRID-01 (Ago 2026): cfg_docn_nx/ny (1440x720) sao a grade do
+    ! cfg_docn_nx/ny (1440x720) sao a grade do
     ! DOCN/OISST (0.25 grau, regular). Quando o OCN real e' o MOM6+SIS2
     ! dinamico (cfg_use_docn=.false., modo de producao), a grade T real do
     ! MOM6 e' definida por NIGLOBAL/NJGLOBAL no MOM_input e normalmente NAO
@@ -381,13 +381,13 @@ contains
     !--------------------------------------------------------------------------
     ! Criar grade ATM regular 640x320
     !--------------------------------------------------------------------------
-    ! B-52 (fix B-50): regDecomp 2D universal — sem DE de largura 1 e sem PETs vazios.
+    ! ): regDecomp 2D universal — sem DE de largura 1 e sem PETs vazios.
     ! ATM 640x320: nx_max=320, ny=ceil(N/320)
     !   N=128: ny=1 → regDecomp=(/128,1/) → 640/128=5 col ✓
     !   N=512: ny=2 → regDecomp=(/320,2/) → 640 DEs>512, 640/320=2 col, 320/2=160 lin ✓
     !
     ! -------------------------------------------------------------------------
-    ! BUG-CALC-08-COV (fix B-58): a fórmula B-52 gera totalDEs = nx_max*ny_tiles
+    ! ): a fórmula gera totalDEs = nx_max*ny_tiles
     ! que só coincide com petCount quando sqrt(petCount) é inteiro. Quando
     ! totalDEs > petCount, alguns PETs recebem localDeCount=2. O gather de
     ! med_write_import_fields (uas_g etc., ~L1017) usa lbound/ubound(uas), que
@@ -408,12 +408,12 @@ contains
     !--------------------------------------------------------------------------
     !--- Criar grade OCN com dimensões de nuopc.input (cfg_docn_nx x cfg_docn_ny) ---
     !--------------------------------------------------------------------------
-    ! B-52 (fix B-51+B-50): regDecomp 2D universal para grade OCN.
+    ! ): regDecomp 2D universal para grade OCN.
     ! largura 1 para qualquer petCount. Grade alinhada com DOCN_cap (OISST 0.25°)
     ! → conector DOCN→MED usa redistribuição (zero-copy) em vez de bilinear.
     !   N=512: ny=4 → regDecomp=(/128,4/) → 512 DEs=512 PETs, 2 col, 39 lin ✓
     !
-    ! BUG-CALC-08-COV (fix B-58): mesma fatoração exata da grade ATM. Garante
+    ! ): mesma fatoração exata da grade ATM. Garante
     ! totalDEs = petCount (1 DE por PET), evitando DEs órfãos. Respeita
     ! ncol<=nx_ocn/2 e nrow<=ny_ocn.
     call create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
@@ -442,12 +442,12 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! BUG-OUT-01 fix v4: ler config de diagnóstico de importação
+    ! v4: ler config de diagnóstico de importação
     call med_read_import_config()
 
-    ! FIX-IMP-01: salvar informação MPI do mediador para uso em med_write_import_fields
+    ! salvar informação MPI do mediador para uso em med_write_import_fields
     !
-    ! FIX-DEADLOCK (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
+    ! (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
     ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
     ! med_write_import_fields. No modo concurrent o MED tem seu próprio
     ! comunicador de componente; substituí-lo silenciosamente por
@@ -505,7 +505,7 @@ contains
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
     ! Loops bulk usam lbound/ubound - agnósticos ao indexflag do MPAS.
-    ! REVERT B-OCNGRID-05 (Ago 2026): a tentativa de fixar polekindflag=MONOPOLE
+    ! REVERT a tentativa de fixar polekindflag=MONOPOLE
     ! explicitamente foi REVERTIDA. Motivo: o usuario confirmou que a versao
     ! ANTERIOR a qualquer mudanca de grade nesta sessao rodava sem SIGSEGV,
     ! apesar do artefato de costa. atm_grid ja' usava ESMF_GridCreate1PeriDim
@@ -526,12 +526,12 @@ contains
     call ESMF_GridAddCoord(atm_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! B-45: verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
+    ! verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
     call ESMF_GridGet(atm_grid, localDeCount=localDeCount_atm, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha GridGet localDeCount ATM', &
       line=__LINE__, file=__FILE__)) return
 
-    ! B-53 (fix B-52): loop sobre DEs locais — com regDecomp 2D alguns PETs têm
+    ! ): loop sobre DEs locais — com regDecomp 2D alguns PETs têm
     ! localDeCount=2; ESMF_GridGetCoord exige localDE= quando localDeCount > 1.
     do lde = 0, localDeCount_atm - 1
       call ESMF_GridGetCoord(atm_grid, coordDim=1, localDE=lde, &
@@ -552,7 +552,7 @@ contains
       end do
     end do  ! lde ATM
 
-    ! FIX B-CONSERVE-01 (Set/2026): stagger CORNER na grade ATM, necessario
+    ! stagger CORNER na grade ATM, necessario
     ! para ESMF_REGRIDMETHOD_CONSERVE em conjunto com o CORNER do ocn_grid
     ! acima. Grade ATM e' regular lat-lon -> canto sai de conta direta
     ! (borda da celula, meia-celula ANTES do centro), sem ler arquivo.
@@ -602,7 +602,7 @@ contains
     regDecomp = grid_regdecomp(petCount, nx_ocn, ny_ocn)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
-    ! FIX B-OCNGRID-03 (Ago 2026): a grade OCN era criada SEM dimensao
+    ! a grade OCN era criada SEM dimensao
     ! periodica (ESMF_GridCreateNoPeriDim). Isso significa que o ESMF nao
     ! sabe que a coluna i=nx_ocn (longitude ~360) e a coluna i=1 (longitude
     ! ~0) sao fisicamente vizinhas - o regrid bilinear trata a borda leste/
@@ -641,7 +641,7 @@ contains
     call ESMF_GridAddCoord(ocn_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! B-45: verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
+    ! verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
     call ESMF_GridGet(ocn_grid, localDeCount=localDeCount_ocn, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha GridGet localDeCount OCN', &
       line=__LINE__, file=__FILE__)) return
@@ -665,7 +665,7 @@ contains
           end do
         end do
       else
-        ! FIX B-OCNGRID-01: MOM6 tripolar real - le as coordenadas T verdadeiras
+        ! MOM6 tripolar real - le as coordenadas T verdadeiras
         ! do supergrid ocean_hgrid.nc (NAO uniformes; convergem no polo Norte).
         ! Sem isso, o conector NUOPC OCN->MED interpola usando posicoes erradas
         ! e a costa fica sistematicamente deslocada em todo o dominio.
@@ -677,7 +677,7 @@ contains
       end if
     end do  ! lde OCN
 
-    ! FIX B-CONSERVE-01 (Set/2026): stagger CORNER, necessario para
+    ! stagger CORNER, necessario para
     ! ESMF_REGRIDMETHOD_CONSERVE (calcula peso por sobreposicao de area,
     ! exige os 4 cantos de cada celula). Aditivo ao CENTER ja existente —
     ! nao afeta nenhum RouteHandle ja criado com staggerloc=CENTER (Cd_neut,
@@ -716,7 +716,7 @@ contains
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade OCN ' // &
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
 
-    ! FIX-DIAG-CONSERVE01-01: sanidade dos cantos lidos — confirma que os
+    ! sanidade dos cantos lidos — confirma que os
     ! valores estao numa faixa fisica plausivel (lon em [0,360), lat em
     ! [-90,90]) e nao sao um bloco de zeros/garbage por leitura silenciosa
     ! mal-sucedida. Compara tambem com o CENTRO da mesma celula (i1,j1
@@ -782,7 +782,7 @@ contains
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! BUG-CALC-DUU (fix v13.0): realizar So_u e So_v na grade OCN.
+    ! v13.0): realizar So_u e So_v na grade OCN.
     ! Simétrico ao tratamento de So_t: correntes vêm do OCN, portanto
     ! devem ser realizadas em ocn_grid para que o rh_ocn2atm funcione.
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
@@ -797,7 +797,7 @@ contains
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! FIX B-COASTMASK-02: realizar So_omask (mascara real mask2dT do MOM6)
+    ! realizar So_omask (mascara real mask2dT do MOM6)
     ! na grade OCN, simetrico a So_t/So_u/So_v.
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_omask", rc=rc)
@@ -817,7 +817,7 @@ contains
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      ! Fase 2 (B-ICE-ALBEDO-01): mesma ocn_grid, mesmo raciocinio.
+      ! mesma ocn_grid, mesmo raciocinio.
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_avsdr_sis2", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -842,7 +842,7 @@ contains
       call NUOPC_Realize(importState, field=tmp_field, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      ! Fase 3 (B-ICE-FLUX-DIFF-01): mesma ocn_grid.
+      ! mesma ocn_grid.
       tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
         staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_t_sis2", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -883,7 +883,7 @@ contains
     call CreateInternalField(is%f_snow_atm,   atm_grid, "med_snow",   rc)
     call CreateInternalField(is%f_pslv_atm,   atm_grid, "med_pslv",   rc)
     call CreateInternalField(is%f_ifrac_atm,  atm_grid, "med_ifrac",  rc)
-    ! FIX B-LANDMASK-01: mascara terra/oceano real na grade ATM (1=oceano,
+    ! mascara terra/oceano real na grade ATM (1=oceano,
     ! 0=terra). Default 1.0 (oceano) ate' o primeiro regrid de So_omask —
     ! seguro porque so' e' USADA para EXCLUIR terra, nao para validar
     ! oceano; ficar em "tudo oceano" ate' o regrid real e' menos arriscado
@@ -893,29 +893,29 @@ contains
     call CreateInternalField(is%f_duu10n_atm, atm_grid, "med_duu10n", rc)
     ! f_sst_atm: campo de SST interpolado para a grade ATM (destino do OCN->ATM)
     call CreateInternalField(is%f_sst_atm,    atm_grid, "med_sst",    rc)
-    ! BUG-CALC-DUU (fix v13.0): correntes oceânicas interpoladas OCN → ATM.
+    ! v13.0): correntes oceânicas interpoladas OCN → ATM.
     ! Usadas no cálculo de So_duu10n = |(V_atm − V_ocn)|² (protocolo CMEPS).
     call CreateInternalField(is%f_uocn_atm,   atm_grid, "med_uocn",   rc)
     call CreateInternalField(is%f_vocn_atm,   atm_grid, "med_vocn",   rc)
-    ! Sprint C: rugosidade Charnock + Smith — calculada no MED e enviada ao MPAS.
+    ! rugosidade Charnock + Smith — calculada no MED e enviada ao MPAS.
     call CreateInternalField(is%f_zorl_atm,   atm_grid, "med_zorl",   rc)
-    ! Fase 2 (B-ICE-ALBEDO-01): albedo do gelo por banda, regridado do SIS2.
+    ! albedo do gelo por banda, regridado do SIS2.
     call CreateInternalField(is%f_alb_vdr_ice, atm_grid, "med_albvdr_ice", rc)
     call CreateInternalField(is%f_alb_vdf_ice, atm_grid, "med_albvdf_ice", rc)
     call CreateInternalField(is%f_alb_idr_ice, atm_grid, "med_albidr_ice", rc)
     call CreateInternalField(is%f_alb_idf_ice, atm_grid, "med_albidf_ice", rc)
     call CreateInternalField(is%f_coszen_atm,  atm_grid, "med_coszen",     rc)
     call CreateInternalField(is%f_albedo_atm,  atm_grid, "med_albedo",     rc)
-    ! Fase 3 (B-ICE-FLUX-DIFF-01)
+    ! Fase 3
     call CreateInternalField(is%f_tice_atm,    atm_grid, "med_tice",       rc)
-    ! Fase 4b (B-TSFC-DUALEXPORT-01)
+    ! Fase 4b
     call CreateInternalField(is%f_tsfc_atm,    atm_grid, "med_tsfc_comp",  rc)
     call CreateInternalField(is%f_taux_ice,    atm_grid, "med_taux_ice",   rc)
     call CreateInternalField(is%f_tauy_ice,    atm_grid, "med_tauy_ice",   rc)
     call CreateInternalField(is%f_sen_ice,     atm_grid, "med_sen_ice",    rc)
     call CreateInternalField(is%f_evap_ice,    atm_grid, "med_evap_ice",   rc)
     call CreateInternalField(is%f_lwnet_ice,   atm_grid, "med_lwnet_ice",  rc)
-    ! Fase 4 (B-ICE-SWNET-01)
+    ! Fase 4
     call CreateInternalField(is%f_swvdr_ice,   atm_grid, "med_swvdr_ice",  rc)
     call CreateInternalField(is%f_swvdf_ice,   atm_grid, "med_swvdf_ice",  rc)
     call CreateInternalField(is%f_swidr_ice,   atm_grid, "med_swidr_ice",  rc)
@@ -936,7 +936,7 @@ contains
     call ZeroInternalField(is%f_pslv_atm,   rc)
     call ZeroInternalField(is%f_ifrac_atm,  rc)
     call ZeroInternalField(is%f_duu10n_atm, rc)
-    ! Fase 2: fallback nao-zero (mesmo valor de ALBEDO_ICE_FALLBACK em
+    ! fallback nao-zero (mesmo valor de ALBEDO_ICE_FALLBACK em
     ! sis_cap_MONAN.F90) ate o primeiro regrid real via rh_ice2atm — evita
     ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
     ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
@@ -946,7 +946,7 @@ contains
     call FillInternalField(is%f_alb_idf_ice, 0.65_ESMF_KIND_R8, rc)
     call ZeroInternalField(is%f_coszen_atm, rc)
     call FillInternalField(is%f_albedo_atm, 0.08_ESMF_KIND_R8, rc)
-    ! Fase 3: T_gelo default = ponto de congelamento da agua do mar; fluxos
+    ! T_gelo default = ponto de congelamento da agua do mar; fluxos
     ! turbulentos do gelo comecam zerados ate o 1o calc_bulk_ncar real.
     call FillInternalField(is%f_tice_atm,   271.35_ESMF_KIND_R8, rc)
     call FillInternalField(is%f_tsfc_atm,   271.35_ESMF_KIND_R8, rc)
@@ -955,7 +955,7 @@ contains
     call ZeroInternalField(is%f_sen_ice,   rc)
     call ZeroInternalField(is%f_evap_ice,  rc)
     call ZeroInternalField(is%f_lwnet_ice, rc)
-    ! Fase 4 (B-ICE-SWNET-01): comeca zerado ate o 1o calc_bulk_ncar real,
+    ! comeca zerado ate o 1o calc_bulk_ncar real,
     ! mesma logica de f_sen_ice/f_lwnet_ice acima.
     call ZeroInternalField(is%f_swvdr_ice, rc)
     call ZeroInternalField(is%f_swvdf_ice, rc)
@@ -964,11 +964,11 @@ contains
     ! Inicializa SST com valor padrao (nao zero, para evitar bulk erratico no t=0)
     call FillInternalField(is%f_sst_atm, SST_BULK_FALLBACK, rc)
     ! Valor de bootstrap: será substituído no primeiro passo pelo So_t do DOCN/MOM6.
-    ! BUG-CALC-DUU: correntes oceânicas inicializadas a zero (oceano em repouso).
+    ! correntes oceânicas inicializadas a zero (oceano em repouso).
     ! Serão regridadas de So_u/So_v a partir do primeiro passo de acoplamento.
     call ZeroInternalField(is%f_uocn_atm, rc)
     call ZeroInternalField(is%f_vocn_atm, rc)
-    ! Sprint C: rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
+    ! rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
     ! Substituida no primeiro passo pela parametrizacao Charnock no bulk NCAR.
     call FillInternalField(is%f_zorl_atm, 0.01_ESMF_KIND_R8, rc)
   end subroutine create_internal_fields
@@ -1010,7 +1010,7 @@ contains
       ' | canto-centro (amostra) dlon=', dlon_sample, ' dlat=', dlat_sample
     call ESMF_LogWrite(trim(diag_msg_corner), ESMF_LOGMSG_INFO)
 
-    ! FIX-DIAG-CONSERVE02-01 (Set/2026): checagem especifica da(s)
+    ! checagem especifica da(s)
     ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
     ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
     ! > 80) -- a maioria dos PETs nao chega la' e nao tem o que checar.
@@ -1133,7 +1133,7 @@ contains
   !==========================================================================
   ! FASE A — GEOMETRIA (uma unica vez, na primeira iteracao)
   !
-  ! FIX B-SEQINIT-01 (v14.21): esta rotina foi dividida em duas fases porque
+  ! (v14.21): esta rotina foi dividida em duas fases porque
   ! ela pode ser chamada MAIS DE UMA VEZ. O laco de resolucao de dependencia
   ! de dados do driver NUOPC percorre a RunSequence repetidamente, executando
   ! o Run dos conectores e o label_DataInitialize dos componentes, ate que
@@ -1168,7 +1168,7 @@ contains
       call regrid_ocean_currents(is, importState, zero_on_error=.true.)
 
       ! Inicializar exportState com valores fisicamente razoaveis
-      ! B-45: ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
+      ! ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
       ! Verificar localDeCount antes de acessar dados do campo.
       call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
       if (fieldCount > 0) then
@@ -1190,7 +1190,7 @@ contains
         deallocate(fieldNameList)
       end if
 
-      ! ── Sprint B.2 (Set/2026): Si_ifrac_sis2 reutiliza rh_ocn2atm ──────────
+      ! ──.2 (Set/2026): Si_ifrac_sis2 reutiliza rh_ocn2atm ──────────
       ! Correcao de curso: Si_ifrac_sis2 (e os 4 campos de albedo do gelo,
       ! Fase 2, mais abaixo) sao realizados pelo MED em ocn_grid — a MESMA
       ! grade de So_t (ver InitializeRealize) — logo NAO precisam de um
@@ -1228,7 +1228,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
   !--------------------------------------------------------------------------
-  ! FIX B-SEQINIT-02 (v14.21): CARIMBO NAO E' DADO.
+  ! (v14.21): CARIMBO NAO E' DADO.
   !
   ! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
   ! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
@@ -1236,7 +1236,7 @@ contains
   ! identicamente nulo passa no NUOPC_IsAtTime — foi o que aconteceu enquanto
   ! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
   ! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
-  ! o que por sua vez fazia a mascara Sprint A.5.1 classificar o planeta
+  ! o que por sua vez fazia a mascara.5.1 classificar o planeta
   ! inteiro como terra e zerar os 11 campos de fluxo.
   !
   ! Exigir tambem VALOR fisicamente plausivel em alguma celula, contado
@@ -1311,7 +1311,7 @@ contains
   !==========================================================================
   ! FASE B — DADOS (So_t valido em maos)
   !
-  ! BUG-CALC-DUU (fix v13.0): primeiro regrid de So_u e So_v para
+  ! v13.0): primeiro regrid de So_u e So_v para
   ! f_uocn_atm/f_vocn_atm. So_u e So_v sao anunciados e realizados no
   ! importState do MED (ocn_grid), portanto ESMF_StateGet e' seguro. O
   ! routehandle rh_ocn2atm (bilinear, ja' criado na fase A) e' reutilizado:
@@ -1368,7 +1368,7 @@ contains
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
     type(ESMF_Time)          :: currTime, nextTime
-    ! BUG-SEQ-STAMP-01 (Set/2026): instante que representa o CONTEUDO desta
+    ! instante que representa o CONTEUDO desta
     ! execucao do mediador. Ver a justificativa completa junto da atribuicao,
     ! logo apos o calculo de nextTime.
     type(ESMF_Time)          :: stampTime
@@ -1377,7 +1377,7 @@ contains
     type(ESMF_Field)         :: field
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
-    integer :: localDeCount_med   ! B-45: guard para PETs sem DE local
+    integer :: localDeCount_med  ! guard para PETs sem DE local
 
     ! Campos do MPAS (primario)
     real(ESMF_KIND_R8), pointer :: uas_mpas(:,:)  => null()
@@ -1389,7 +1389,7 @@ contains
     real(ESMF_KIND_R8), pointer :: lwdn_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: rain_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: snow_mpas(:,:) => null()
-    ! Fase 3: fluxos nativos do PBL do MONAN-A (opcionais — ausencia mantem
+    ! fluxos nativos do PBL do MONAN-A (opcionais — ausencia mantem
     ! o fallback bulk NCAR via calc_bulk_ncar, ex. modo DATM)
     real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)  => null()
@@ -1412,7 +1412,7 @@ contains
     real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
     real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    ! BUG-CALC-DUU (fix v13.0): ponteiros para correntes oceânicas na grade ATM
+    ! v13.0): ponteiros para correntes oceânicas na grade ATM
     real(ESMF_KIND_R8), pointer :: uocn(:,:), vocn(:,:)
 
     real(ESMF_KIND_R8), pointer     :: shum_local(:,:) => null()
@@ -1438,7 +1438,7 @@ contains
         type(ESMF_Field) :: f_bs
         integer :: rc_bs_2
 
-    ! BUG-CALC-DUU: nullify após todas as declarações (instrução executável
+    ! nullify após todas as declarações (instrução executável
     ! não pode preceder declarações — Fortran 2003 §12.4).
     nullify(uocn, vocn)
 
@@ -1448,7 +1448,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-    ! BUG-NC-02 fix (GT Acoplamento MONAN/INPE — Maio 2026):
+    ! (GT Acoplamento MONAN/INPE — Maio 2026):
     ! NUOPC_MediatorGet e ESMF_ClockGet devem ser chamados ANTES da guarda
     ! localDeCount==0. A subrotina med_write_import_fields contém MPI_Allreduce
     ! e MPI_Reduce — operações MPI coletivas que exigem participação de TODOS os
@@ -1465,7 +1465,7 @@ contains
     nextTime = currTime + dt
 
     !--------------------------------------------------------------------------
-    ! BUG-SEQ-STAMP-01 (Set/2026): o instante que rotula o resultado do
+    ! o instante que rotula o resultado do
     ! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
     !
     ! O relogio do mediador marca currTime = t durante toda a execucao do passo,
@@ -1515,14 +1515,14 @@ contains
       stampTime = nextTime
     end if
 
-    ! B-45: com regDecomp(2)=min(petCount,ny_atm/2), PETs acima de ny_atm/2
+    ! com regDecomp(2)=min(petCount,ny_atm/2), PETs acima de ny_atm/2
     ! têm localDeCount=0 para o atm_grid interno do MED. Esses PETs não têm
     ! dados locais — nenhum campo interno pode ser acessado via farrayPtr.
     call ESMF_FieldGet(is%f_taux_atm, localDeCount=localDeCount_med, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     if (localDeCount_med == 0) then  ! (*) — ponto de retorno corrigido
       ! PET sem DE local: participar nas operações MPI coletivas dentro de
-      ! med_write_import_fields antes de retornar (evita deadlock BUG-NC-02).
+      ! med_write_import_fields antes de retornar (evita deadlock).
       ! Contribuição local = FILL_IMP (neutro no MPI_Reduce MAX).
       call med_write_import_fields(exportState, stampTime, is, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
@@ -1530,7 +1530,7 @@ contains
     end if
 
     !==========================================================================
-    ! BUG-CALC-01: zerar f_*_atm antes do bulk para evitar persistência de
+    ! zerar f_*_atm antes do bulk para evitar persistência de
     ! valores não inicializados em células fora do alcance de uas/vas
     ! (grade MPAS Voronoi parcialmente sobreposta à grade MED regular).
     ! O loop bulk só preenche (i1:i2, j1:j2) = lbound:ubound(uas); sem
@@ -1606,7 +1606,7 @@ contains
     !==========================================================================
     if (.not. mpas_available) then
       if (is%use_mpas_atm) then
-        ! B-45: com regDecomp(2)=min(petCount,NLAT/2), PETs acima de NLAT/2
+        ! com regDecomp(2)=min(petCount,NLAT/2), PETs acima de NLAT/2
         ! (ex: PETs 90-159 com 512 PETs e NLAT=180) têm localDeCount=0 na
         ! grade MPAS (360×180) mas localDeCount>0 na grade MED (640×320).
         ! GetFieldPtrOptional retorna mpas_available=false para esses PETs
@@ -1669,7 +1669,7 @@ contains
     j1 = lbound(uas,2); j2 = ubound(uas,2)
 
     !==========================================================================
-    ! BUG-CALC-08 (CRÍTICO): SPREAD MPAS-A → todos PETs do mediador.
+    ! (CRÍTICO): SPREAD MPAS-A → todos PETs do mediador.
     !
     ! Causa raiz definitiva (confirmada pela análise de 8 rodadas):
     !   O MPAS-A roda apenas num subconjunto dos PETs do MED. Em PETs onde
@@ -1776,13 +1776,13 @@ contains
       call MPI_Allreduce(tmp_local, snow_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
         MPI_SUM, med_mpi_comm, mpi_ierr_g)
 
-      ! DIAGNÓSTICO BUG-CALC-08 + BUG-MPAS-01: vai para stdout (= esmApp_run.log).
-      ! Espera-se que após BUG-MPAS-01, n_nz_uas > 30000/64800 (cobertura global).
+      ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
+      ! Espera-se que após, n_nz_uas > 30000/64800 (cobertura global).
       call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
 
       deallocate(tmp_local)
 
-      ! BUG-CALC-08 fix-2: arrays globais (uas_g..snow_g) cobrem 1..NX_G,1..NY_G
+      ! 2: arrays globais (uas_g..snow_g) cobrem 1..NX_G,1..NY_G
       ! Mas fptr (de is%f_*_atm) tem bounds LOCAIS à DE do PET → loop deve usar
       ! os bounds locais (i1_loc..i2_loc da DE). Como uas_g é global, acessá-lo
       ! com índices (i,j) locais à DE acessa as mesmas coordenadas geográficas
@@ -1825,7 +1825,7 @@ contains
     !==========================================================================
     ! 3. SST: regrid OCN -> ATM (So_t esta agora na grade OCN)
     !
-    ! Sprint A.5 (Maio 2026): aplica mascara terra/oceano apos o regrid.
+    ! 5 (Maio 2026): aplica mascara terra/oceano apos o regrid.
     !
     ! CAUSA-RAIZ DETECTADA NO POSTPROC:
     ! O mom_cap_methods::state_setexport multiplica SST por ocean_grid%mask2dT
@@ -1835,7 +1835,7 @@ contains
     ! caindo abaixo de 270 K. Resultado: ~37% das celulas oceanicas mascaradas
     ! como "fill" pelo postproc (limiar fill_min_threshold=270 K).
     !
-    ! FIX B-COASTMASK-02 (Ago 2026): a mascara terra/oceano usada no regrid
+    ! a mascara terra/oceano usada no regrid
     ! bilinear OCN->ATM NAO deve ser adivinhada a partir do proprio campo de
     ! SST (limiar T<270K). Isso e' fragil e inconsistente com a mascara real
     ! do modelo oceanico: a mascara agora vem diretamente de So_omask =
@@ -1848,17 +1848,17 @@ contains
     call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
 
     !==========================================================================
-    ! 3b. Si_ifrac — Sprint B.1.1: fill_ifrac_from_oisst apenas no 1º passo
+    ! 3b. Si_ifrac —.1.1: fill_ifrac_from_oisst apenas no 1º passo
     !
     ! Modos (nuopc.input &nuopc_mode):
     !   use_docn_ice=T  init_only=F  → Alternativa 1 original:
     !     fill_ifrac_from_oisst a cada passo (campo congelado em OISST).
-    !   use_docn_ice=T  init_only=T  → Sprint B.1.1:
+    ! use_docn_ice=T init_only=T →.1.1:
     !     fill_ifrac_from_oisst apenas na 1ª MediatorAdvance (flag
     !     med_ifrac_init_done). is%f_ifrac_atm fica congelado no valor
     !     OISST de t=0 nas demais chamadas.
     !     NÃO tentar rh_ocn2atm para Si_ifrac: zera is%f_ifrac_atm antes
-    !     de falhar (rh é específico para So_t). Sprint B.2 criará rh dedicado.
+    ! de falhar (rh é específico para So_t)..2 criará rh dedicado.
     !   use_docn_ice=F              → regrid OCN sigmoid via importState.
     !==========================================================================
     ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
@@ -1894,7 +1894,7 @@ contains
     !  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
     !  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
     !  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
-    !  FIX B-ICEFLUX-SIGN-01 em sis_cap_MONAN.F90 para o sinal desses.
+    ! em sis_cap_MONAN.F90 para o sinal desses.
     !  1) Sinal de hfx/lh: POSITIVO PARA CIMA (convencao
     !     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
     !     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
@@ -1925,29 +1925,29 @@ contains
     !   OCN do exportState via ESMF_FieldSMM (ou copia simples). Isso evita
     !   que os campos exportados permane�am zerados silenciosamente.
     !
-    ! Sprint A.5.1 (Maio 2026): aplicacao de mascara terra/oceano nos fluxos
+    ! 5.1 (Maio 2026): aplicacao de mascara terra/oceano nos fluxos
     ! antes do export, eliminando valores absurdos sobre continentes.
     !
     ! CONTEXTO:
     ! O bulk NCAR roda em TODAS as celulas da grade ATM (oceano + terra).
-    ! Apos o Sprint A.5, celulas terra recebem sst = 271.35 K (marcador).
+    ! Apos o.5, celulas terra recebem sst = 271.35 K (marcador).
     ! Combinado com T_2m, U_10m, P_slv reais (continentais), o bulk produz
     ! fluxos enormes sobre terra (Foxx_sen saturando em +-500 W/m^2;
     ! Foxx_lwnet em -300 W/m^2 sobre o Saara).
     !
     ! O MOM6 ja descarta essas celulas em state_setexport (mask2dT), mas o
     ! diagnostico NetCDF do MED captura ANTES dessa mascara, registrando
-    ! os valores absurdos. Sprint A.5.1 zera os fluxos sobre terra no
+    ! os valores absurdos..5.1 zera os fluxos sobre terra no
     ! proprio MED, antes da escrita do NetCDF e antes do envio ao MOM6.
     !
     ! HEURISTICA: celulas terra tem sst exatamente = 271.35 K (marcador
-    ! cravado pelo where do Sprint A.5). Celulas marinhas polares reais
+    ! cravado pelo where do.5). Celulas marinhas polares reais
     ! tem sst variavel em torno de 270-272 K (raramente exato em 271.35).
     !==========================================================================
-    ! FIX B-LANDMASK-01 (Set/2026): cria/regrida is%f_omask_atm uma unica
+    ! cria/regrida is%f_omask_atm uma unica
     ! vez (So_omask, ocn_grid -> atm_grid, NEAREST_STOD -- so' precisa
     ! discriminar terra/oceano, nao precisao subcelular). Usado abaixo no
-    ! Sprint A.5.1 no lugar da heuristica SST~=271,35K, que colidia com
+    ! 5.1 no lugar da heuristica SST~=271,35K, que colidia com
     ! agua aberta genuina no ponto de congelamento (borda do gelo).
     call export_to_components(is, importState, exportState, rc)
     if (allocated(uas_g)) deallocate(uas_g)
@@ -1966,13 +1966,13 @@ contains
 
     call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
 
-    ! ── BUG-OUT-01 fix v4: diagnóstico de importação inline ──────────────────
+    ! ── v4: diagnóstico de importação inline ──────────────────
     ! Implementação direta em MED_cap_MONAN.F90 — sem dependência de
     ! MOM_cap_methods (lib pré-compilada) nem de coupler_config_mod.
     ! Lê mom6_output.nml com namelist local de 2 variáveis (sem ios/=0).
     ! Usa netcdf (já importado neste módulo) para escrever os campos.
     ! ─────────────────────────────────────────────────────────────────────────
-    ! ── Fase 2: RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
+    ! ── RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
     ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
     ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
     ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
@@ -1986,7 +1986,7 @@ contains
       end if
     end if
 
-    ! FIX-DIAG-BITSUM-01 (etapa 4 de 4): Si_ifrac como sai do mediador,
+    ! (etapa 4 de 4): Si_ifrac como sai do mediador,
     ! no exportState, depois do RouteOcnToAtm. E' o que o conector entrega
     ! ao MPAS e o que aparece no monan2_import_*.nc.
     if (cfg_write_fixdiag) then
@@ -2001,7 +2001,7 @@ contains
 
     call med_write_import_fields(exportState, stampTime, is, rc)
     if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
-    ! Liberar arrays temporarios de defaults Fase 2 (se alocados)
+    ! Liberar arrays temporarios de defaults (se alocados)
     if (associated(shum_local)) then
       deallocate(shum_local); nullify(shum_local)
     end if
@@ -2024,7 +2024,7 @@ contains
     do k = 1, fieldCount
       call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
         field=field, rc=rc)
-      call NUOPC_SetTimestamp(field, stampTime, rc=rc)   ! BUG-SEQ-STAMP-01
+      call NUOPC_SetTimestamp(field, stampTime, rc=rc)
     end do
     deallocate(fieldNameList)
   end subroutine stamp_export_fields
@@ -2057,8 +2057,8 @@ contains
     call RegridOrCopy(is%f_rain_atm,   exportState, "Faxa_rain",      is, rc)
     call RegridOrCopy(is%f_snow_atm,   exportState, "Faxa_snow",      is, rc)
     call RegridOrCopy(is%f_pslv_atm,   exportState, "Sa_pslv",        is, rc)
-    ! FIX B-ICEREGRID-04 (Set/2026): Si_ifrac exportado SEM o RegridOrCopy
-    ! generico. O B-ICEREGRID-01/02 corrigiu so' a perna OCN(SIS2)->ATM
+    ! Si_ifrac exportado SEM o RegridOrCopy
+    ! generico. O /02 corrigiu so' a perna OCN(SIS2)->ATM
     ! (populando is%f_ifrac_atm corretamente). Mas o RegridOrCopy generico
     ! faz uma SEGUNDA perna, ATM->OCN (via rh_atm2ocn, NEAREST_STOD,
     ! zeroregion=TOTAL, sem mascara, sem extrapolacao), para preencher o
@@ -2070,9 +2070,9 @@ contains
     ! continua, mesmo com is%f_ifrac_atm ja correto na entrada.
     call export_ice_fraction(is, exportState, rc)
     call RegridOrCopy(is%f_duu10n_atm, exportState, "So_duu10n",      is, rc)
-    ! FIX B-DIAGMASK-01 (Set/2026): mascara terra/oceano REAL do MOM6 no
+    ! mascara terra/oceano REAL do MOM6 no
     ! exportState. is%f_omask_atm ja' esta' pronta neste ponto (regridada
-    ! uma unica vez logo acima, B-LANDMASK-01). Aqui ela segue para o
+    ! uma unica vez logo acima,). Aqui ela segue para o
     ! conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
     ! mom6_import_*.nc NAO passa por este caminho — le is%f_omask_atm
     ! diretamente na grade ATM (med_cap_netcdf.F90), evitando o ida-e-volta
@@ -2081,20 +2081,20 @@ contains
     call RegridOrCopy(is%f_omask_atm,  exportState, "Sx_omask",       is, rc)
     call RegridOrCopy(is%f_coszen_atm, exportState, "Faxa_coszen",    is, rc)  ! Fase 2.5
     call RegridOrCopy(is%f_albedo_atm, exportState, "Sf_albedo",      is, rc)  ! Fase 2.6
-    ! Fase 3 (B-ICE-FLUX-DIFF-01)
+    ! Fase 3
     call RegridOrCopy(is%f_taux_ice,   exportState, "Fioi_taux",      is, rc)
     call RegridOrCopy(is%f_tauy_ice,   exportState, "Fioi_tauy",      is, rc)
     call RegridOrCopy(is%f_sen_ice,    exportState, "Fioi_sen",       is, rc)
     call RegridOrCopy(is%f_evap_ice,   exportState, "Fioi_evap",      is, rc)
     call RegridOrCopy(is%f_lwnet_ice,  exportState, "Fioi_lwnet",     is, rc)
-    ! Fase 4 (B-ICE-SWNET-01)
+    ! Fase 4
     call RegridOrCopy(is%f_swvdr_ice,  exportState, "Fioi_swnet_vdr", is, rc)
     call RegridOrCopy(is%f_swvdf_ice,  exportState, "Fioi_swnet_vdf", is, rc)
     call RegridOrCopy(is%f_swidr_ice,  exportState, "Fioi_swnet_idr", is, rc)
     call RegridOrCopy(is%f_swidf_ice,  exportState, "Fioi_swnet_idf", is, rc)
 
-    ! Fase 4b (B-TSFC-DUALEXPORT-01, Set/2026): CORRECAO da Fase 4
-    ! (B-TSFC-COMPOSITE-01) anterior. Aquela versao sobrescrevia
+    ! Fase 4b (, Set/2026): CORRECAO da Fase 4
+    ! anterior. Aquela versao sobrescrevia
     ! is%f_sst_atm IN-PLACE com a mistura (1-ifrac)*SST + ifrac*Si_t_sis2,
     ! reaproveitando o export "So_t" ja existente. Problema descoberto em
     ! producao: sis_cap_MONAN.F90 TAMBEM importa "So_t" (linha ~914) para
@@ -2138,7 +2138,7 @@ contains
       flush(6)
     end if
 
-    ! Fase 4b (B-TSFC-DUALEXPORT-01): Sx_tsfc — composto (SST+Si_t_sis2 por
+    ! Fase 4b: Sx_tsfc — composto (SST+Si_t_sis2 por
     ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst via IMP_NAMES em
     ! mpas_cap_MONAN.F90). So_t acima permanece SST pura para o SIS2.
     call RegridOrCopy(is%f_tsfc_atm,   exportState, "Sx_tsfc",        is, rc)
@@ -2148,10 +2148,10 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ── Sprint B Fase 2 (Maio 2026) ────────────────────────────────────────
+    ! ── ────────────────────────────────────────
     ! So_u, So_v: correntes superficiais MOM6 -> exportState para conector
     ! MED -> MPAS. Os campos f_uocn_atm/f_vocn_atm já contêm os valores
-    ! regridados OCN -> ATM (preenchidos no bloco BUG-CALC-DUU acima a partir
+    ! regridados OCN -> ATM (preenchidos no bloco acima a partir
     ! do importState.So_u/So_v). RegridOrCopy faz ATM -> OCN para o exportState;
     ! depois o conector MED -> MPAS fará OCN -> ATM. Mesmo round-trip que So_t —
     ! mantém consistência arquitetural até a refatoração para grade unificada.
@@ -2173,12 +2173,12 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ── Sprint C (Maio 2026) ───────────────────────────────────────────────
+    ! ── ───────────────────────────────────────────────
     ! Sf_zorl: rugosidade superficial Charnock+Smith calculada no bulk NCAR
     ! a partir de Foxx_taux/tauy. Mesmo padrão arquitetural de So_t/So_u/So_v:
     ! f_zorl_atm (grade ATM interna) -> RegridOrCopy -> exportState.Sf_zorl
     ! (grade OCN) -> conector MED -> MPAS faz o regrid final para Voronoi.
-    ! O cap MPAS (Sprint C) atualiza atm_bnd%zorl com este valor a cada passo
+    ! O cap MPAS atualiza atm_bnd%zorl com este valor a cada passo
     ! em vez de manter o default fixo de 0.01 m.
     call RegridOrCopy(is%f_zorl_atm, exportState, "Sf_zorl", is, rc)
     if (rc /= ESMF_SUCCESS) then
@@ -2203,8 +2203,8 @@ contains
 
     else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
              med_ifrac_init_done) then
-      ! Sprint B.1.1: decaimento exponencial do campo OISST retido em
-      ! is%f_ifrac_atm.  O campo NÃO foi zerado (fix BUG-MED-ZERO acima).
+      ! 1.1: decaimento exponencial do campo OISST retido em
+      ! is%f_ifrac_atm. O campo NÃO foi zerado (fix acima).
       ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
       ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
       ! de desaparecer instantaneamente no passo seguinte ao t=0.
@@ -2244,7 +2244,7 @@ contains
     if (is%regrid%has('ocn2atm')) then
       call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
 
-      ! DIAGNOSTICO TEMPORARIO B-OCNGRID-02: valores BRUTOS de So_t (antes de
+      ! DIAGNOSTICO TEMPORARIO valores BRUTOS de So_t (antes de
       ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
       ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
         if (.not. raw_sst_diag_done) then
@@ -2284,13 +2284,13 @@ contains
         call fill_sst_gaps(sst)
       end if
 
-      ! BUG-CALC-DUU (fix v13.0): regrid de correntes oceânicas OCN → ATM.
+      ! v13.0): regrid de correntes oceânicas OCN → ATM.
       ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid).
       ! ESMF_StateGet é seguro — sem risco de "Not found" no log.
       ! Fallback seguro: se regrid falhar, mantém zeros em f_uocn_atm/f_vocn_atm.
       call regrid_ocean_currents(is, importState, zero_on_error=.false.)
 
-      ! ── Sprint B.2 (Set/2026) + FIX B-ICEREGRID-01: Si_ifrac_sis2 real +
+      ! ──.2 (Set/2026) + Si_ifrac_sis2 real +
       !    albedo + T_gelo, regridados via RouteHandle MASCARADO dedicado
       !    (rh_ocn2atm_ice), com extrapolacao por vizinhanca pos-regrid —
       !    mesmo tratamento ja validado para So_t (rh_ocn2atm_sst), agora
@@ -2302,8 +2302,8 @@ contains
       if (cfg_use_sis2_dynamic) then
         call update_ice_fields_on_atm_grid(is, importState)
 
-        ! FIX-DIAG-SPRINTB2-01: validacao. is%f_ifrac_atm deve agora
-        ! refletir o Ice%part_size real (ver FIX-DIAG-FASTSYNC-01 no cap do
+        ! validacao. is%f_ifrac_atm deve agora
+        ! refletir o Ice%part_size real (ver no cap do
         ! gelo) regridado para a grade ATM — nao mais zero nem OISST
         ! sintetico. Os 4 bandos de albedo devem estar entre o fallback
         ! (0,65) e valores de neve fria (~0,85-0,9) onde ha gelo espesso.
@@ -2343,18 +2343,18 @@ contains
     call ZeroInternalField(is%f_rain_atm,   rc)
     call ZeroInternalField(is%f_snow_atm,   rc)
     call ZeroInternalField(is%f_pslv_atm,   rc)
-    ! BUG-MED-ZERO (v2.5): NÃO zerar is%f_ifrac_atm incondicionalmente.
-    ! Em Sprint B.1.1 (use_docn_ice=T, init_only=T, med_ifrac_init_done=T),
+    ! (v2.5): NÃO zerar is%f_ifrac_atm incondicionalmente.
+    ! Em.1.1 (use_docn_ice=T, init_only=T, med_ifrac_init_done=T),
     ! fill_ifrac_from_oisst é pulado após o primeiro passo, então zerando aqui
     ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
     ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
-    ! No Sprint B.1.1, o decaimento é aplicado no bloco 3b abaixo.
+    ! No.1.1, o decaimento é aplicado no bloco 3b abaixo.
     if (.not. (cfg_use_docn_ice .and. &
                cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
       call ZeroInternalField(is%f_ifrac_atm, rc)
     end if
     call ZeroInternalField(is%f_duu10n_atm, rc)
-    ! BUG-CALC-DUU (fix v13.0): zerar correntes para evitar persistência
+    ! v13.0): zerar correntes para evitar persistência
     call ZeroInternalField(is%f_uocn_atm,   rc)
     call ZeroInternalField(is%f_vocn_atm,   rc)
     rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
@@ -2429,10 +2429,10 @@ contains
     if (rc_ifrac2 == ESMF_SUCCESS) then
       call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
 
-      ! FIX B-CONSERVE-05 (Set/2026): CONSERVE reativado aqui tambem —
-      ! ver comentario completo em B-ICEREGRID-01 (bloco rh_ocn2atm_ice)
-      ! sobre por que a reversao anterior (B-CONSERVE-04) tinha
-      ! diagnostico errado (causa real era B-NEIGHBORFILL-02, nao o
+      ! CONSERVE reativado aqui tambem —
+      ! ver comentario completo em (bloco rh_ocn2atm_ice)
+      ! sobre por que a reversao anterior tinha
+      ! diagnostico errado (causa real era, nao o
       ! metodo de regrid).
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
         call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
@@ -2480,7 +2480,7 @@ contains
 
     call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask, rc=rc)
     if (associated(p_omask)) then
-      ! FIX B-LANDMASK-01: mascara REAL (So_omask regridada), nao mais
+      ! mascara REAL (So_omask regridada), nao mais
       ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
       ! 0=terra e 1=oceano; robusto a pequena mistura de borda do
       ! regrid NEAREST_STOD, que deveria ser quase sempre exatamente
@@ -2581,7 +2581,7 @@ contains
     allocate(sen_g2(ATM_NX,ATM_NY), lat_g2(ATM_NX,ATM_NY))
     allocate(taux_g2(ATM_NX,ATM_NY), tauy_g2(ATM_NX,ATM_NY), tmp2(ATM_NX,ATM_NY))
 
-    ! Gather global (mesmo padrao BUG-CALC-08: SUM com tiles disjuntos)
+    ! Gather global (mesmo padrao SUM com tiles disjuntos)
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
       do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
@@ -2634,7 +2634,7 @@ contains
         do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
           if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
             ! so sobrescreve onde ha dado nativo real (fora do fill=0
-            ! dos PETs sem tile MONAN-A local — mesmo criterio BUG-CALC-08)
+            ! dos PETs sem tile MONAN-A local — mesmo criterio)
             if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
               fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
               fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s
@@ -2695,7 +2695,7 @@ contains
     call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
       field=f_ifrac_src, rc=rc_ice)
 
-    ! ── FIX B-ICEREGRID-01: criar rh_ocn2atm_ice uma unica vez ────────
+    ! ── criar rh_ocn2atm_ice uma unica vez ────────
     ! Reusa a mascara de is%ocn_grid (So_omask, 1=oceano/0=terra) ja
     ! populada pelo bloco de So_t acima (rh_ocn2atm_sst) — idempotente
     ! se chamado de novo aqui, garantindo independencia de ordem.
@@ -2715,7 +2715,7 @@ contains
                 farrayPtr=maskptr, rc=rc_store)
               if (rc_store == ESMF_SUCCESS .and. associated(maskptr)) then
                 maskptr = nint(omask_src)
-                ! FIX-DIAG-ICEMASK-01: conta terra/oceano vistos por
+                ! conta terra/oceano vistos por
                 ! ESTE PET, para confirmar que So_omask foi de fato
                 ! encontrada e tem uma mistura sensata dos dois
                 ! valores (nao tudo-terra nem tudo-oceano por engano).
@@ -2732,14 +2732,14 @@ contains
               ' n_sea=', n_sea_ice
             call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
         end if
-        ! FIX B-CONSERVE-05 (Set/2026): CONSERVE REATIVADO. O
-        ! B-CONSERVE-04 revertera para BILINEAR suspeitando de
+        ! CONSERVE REATIVADO. O
+        ! revertera para BILINEAR suspeitando de
         ! desalinhamento de indice canto<->centro por DE, mas ficou
         ! confirmado depois (usuario relatou e checamos) que a mesma
         ! mancha geografica implausivel JA' EXISTIA antes do CONSERVE
         ! entrar em cena -- ou seja, a causa nao era o metodo de
         ! regrid. A causa real era o alcance sem limite de
-        ! NeighborFillExtrapolate (corrigido em B-NEIGHBORFILL-02),
+        ! NeighborFillExtrapolate (corrigido em),
         ! que "vazava" valor real de gelo por dezenas de graus de
         ! distancia atraves de qualquer regiao invalida grande —
         ! acontecia igual com BILINEAR ou CONSERVE por baixo, porque
@@ -2751,15 +2751,15 @@ contains
           f_ifrac_src, is%f_ifrac_atm, rc_store, fallback='ocn2atm')
     end if
 
-    ! ── FIX B-ICEREGRID-02: sentinela fora da faixa valida + ─────────
+    ! ── sentinela fora da faixa valida + ─────────
     ! zeroregion=ESMF_REGION_SELECT em vez de ESMF_REGION_TOTAL.
-    ! Causa raiz confirmada por FIX-DIAG-ICEMASK-02: com REGION_TOTAL,
+    ! Causa raiz confirmada por com REGION_TOTAL,
     ! TODA celula nao-mapeada pelo regrid mascarado (bilinear perto do
     ! fold tripolar, onde o stencil de 4 vizinhos frequentemente nao
     ! fecha) virava 0,0 — um valor DENTRO da faixa valida [0,1], que a
     ! NeighborFillExtrapolate nunca detectava como invalido (~42-52%
     ! do dominio nos PETs polares, contra uma fisica real de SIS2
-    ! saudavel confirmada por FIX-DIAG-FASTSYNC-01). REGION_SELECT so'
+    ! saudavel confirmada por). REGION_SELECT so'
     ! escreve onde o regrid de fato mapeou algo, deixando o sentinela
     ! (fora de [0,1]) nas demais — agora sim detectavel e corrigivel
     ! pela extrapolacao de vizinhanca que ja existia.
@@ -2771,17 +2771,17 @@ contains
     call FillInternalField(is%f_tice_atm,     -999.0_ESMF_KIND_R8, rc_ice)
 
     !--------------------------------------------------------------------
-    ! FIX-DIAG-ICESRC-01 (Set/2026): o campo de ORIGEM, antes do regrid.
+    ! o campo de ORIGEM, antes do regrid.
     !
     ! PARA QUE SERVE. A bateria de 18/09/2026 localizou a divergencia
     ! entre duas etapas: a mascara do regrid do gelo e' IDENTICA nas
     ! quatro execucoes (n_land=45 n_sea=355), e o ifrac de DESTINO, medido
-    ! pelo FIX-DIAG-ICEMASK-02 logo apos o regrid e antes da
+    ! pelo logo apos o regrid e antes da
     ! extrapolacao, JA' diverge. Faltava saber de que lado da seta esta' a
     ! origem: se o Si_ifrac_sis2 que o SIS2 entrega ja' difere, o regrid
     ! e' mensageiro e o alvo e' o gelo; se ele e' identico e o destino
     ! difere, o alvo e' o regrid CONSERVE mascarado. Nao havia nenhum
-    ! diagnostico do lado da origem: o FIX-DIAG-SPRINTB2-01, apesar do
+    ! diagnostico do lado da origem: o, apesar do
     ! nome sugestivo, imprime f_ifrac_atm, que e' o DESTINO.
     !
     ! FORMATO. Quinze digitos significativos, e nao os quatro do
@@ -2817,7 +2817,7 @@ contains
         end if
     end if
 
-    ! FIX-DIAG-BITSUM-01 (etapa 1 de 4): checksum exato, por PET, da
+    ! (etapa 1 de 4): checksum exato, por PET, da
     ! ORIGEM (Si_ifrac_sis2 na grade do oceano), antes do regrid.
     if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
         call diag_bitsum_log('etapa1 Si_ifrac_sis2 ORIGEM pre-regrid', &
@@ -2829,11 +2829,11 @@ contains
         zero_total=.false.)
 
     !--------------------------------------------------------------------
-    ! FIX-DIAG-ICESRC-02: o campo de DESTINO com quinze digitos.
+    ! o campo de DESTINO com quinze digitos.
     !
     ! Par do ICESRC-01, medido no mesmo instante e no mesmo PET, logo
     ! apos o regrid e antes da extrapolacao. Existe porque o
-    ! FIX-DIAG-ICEMASK-02, que mede o mesmo ponto, imprime quatro
+    ! que mede o mesmo ponto, imprime quatro
     ! digitos e por isso nao permite comparar origem e destino na mesma
     ! precisao. Mantido separado do ICEMASK-02 para nao alterar o formato
     ! de um diagnostico que ja' tem historico de leitura.
@@ -2856,20 +2856,20 @@ contains
         end if
     end if
 
-    ! FIX-DIAG-BITSUM-01 (etapa 2 de 4): f_ifrac_atm logo apos o regrid,
+    ! (etapa 2 de 4): f_ifrac_atm logo apos o regrid,
     ! antes da extrapolacao (celulas nao mapeadas ainda com -999).
     if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) then
         call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
                              is%f_ifrac_atm, rc_bs)
     end if
 
-    ! FIX-DIAG-ICEMASK-02: ifrac LOGO APOS o regrid bruto, ANTES da
+    ! ifrac LOGO APOS o regrid bruto, ANTES da
     ! extrapolacao — conta celulas exatamente = 0.0 (candidato a
     ! "nao mapeado, zerado pelo zeroregion=TOTAL") separado de
     ! celulas com ifrac realmente pequeno mas nao-zero. Se
     ! n_exact_zero for uma fracao grande do total aqui, o problema
     ! esta' no regrid/mascara, nao na fisica do SIS2 (que ja' foi
-    ! confirmada saudavel via FIX-DIAG-FASTSYNC-01).
+    ! confirmada saudavel via).
     if (cfg_write_fixdiag) then
         call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_raw, rc=rc_ice)
         if (associated(p_ifrac_raw)) then
@@ -2908,14 +2908,14 @@ contains
       call is%regrid%apply('ocn2atm_ice', f_anidf_src, is%f_alb_idf_ice, rc_ice, &
         zero_total=.false.)
 
-    ! Fase 3 (B-ICE-FLUX-DIFF-01)
+    ! Fase 3
     call ESMF_StateGet(importState, itemName="Si_t_sis2", &
       field=f_tice_src, rc=rc_ice)
     if (rc_ice == ESMF_SUCCESS) &
       call is%regrid%apply('ocn2atm_ice', f_tice_src, is%f_tice_atm, rc_ice, &
         zero_total=.false.)
 
-    ! ── FIX B-ICEREGRID-01: extrapolacao por vizinhanca pos-regrid ────
+    ! ── extrapolacao por vizinhanca pos-regrid ────
     ! Fecha buracos/costura na regiao de deformacao tripolar, mesmo
     ! algoritmo validado para So_t (NeighborFillExtrapolate), com
     ! faixa fisica valida e fallback proprios de cada campo.
@@ -2924,14 +2924,14 @@ contains
       call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
 
-    ! FIX-DIAG-BITSUM-01 (etapa 3 de 4): f_ifrac_atm depois da
+    ! (etapa 3 de 4): f_ifrac_atm depois da
     ! extrapolacao por vizinhanca.
     if (cfg_write_fixdiag) then
         call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
                              is%f_ifrac_atm, rc_bs)
     end if
 
-    ! FIX-DIAG-ICEGEO-01 (Set/2026): checagem de plausibilidade fisica
+    ! checagem de plausibilidade fisica
     ! independente de qual PET/componente e' dono de qual pedaco do
     ! dominio (a correspondencia PET<->geografia entre ICE/MED sob
     ! coupling_mode=concurrent + pet_layout=split se mostrou nao-trivial
@@ -3263,7 +3263,7 @@ contains
 
     ! PET0 lê o arquivo; todos os outros PETs aguardam o broadcast.
     !
-    ! FIX-DEADLOCK (v14.20): usar a VM do COMPONENTE, não a global — mesmo
+    ! (v14.20): usar a VM do COMPONENTE, não a global — mesmo
     ! motivo já aplicado em DATM_cap.F90, DOCN_cap.F90 e docn_cap_netcdf.F90
     ! na v13.1. Este era o último ESMF_VMGetGlobal dentro de uma rotina de
     ! componente. Hoje o MED roda em todos os PETs nos dois layouts, então

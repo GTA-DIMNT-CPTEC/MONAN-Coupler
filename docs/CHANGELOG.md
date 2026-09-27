@@ -9,6 +9,9 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Comentários sem marcas de histórico (R-FASE3-03).** Retiradas de 482 linhas de comentário, em 17 arquivos, as marcas de correção e de etapa (`FIX B-OCNGRID-01`, `BUG-NC-03`, `B-45`, `Sprint A (Maio 2026)` e semelhantes), que já estão neste CHANGELOG e no histórico do git. O texto explicativo foi mantido; linhas que só continham a marca foram removidas. Conferido arquivo a arquivo que as instruções de código, descontados espaços e comentários, são as mesmas de antes; mensagens de log não foram alteradas.
+  - `valida_rodada.bash compara`: mostra sempre a linha de contagem e o veredito PASS/FAIL, com um resumo, por prefixo de arquivo, dos arquivos que diferem só nos metadados.
+
 - **Módulo comum dos gravadores NetCDF (R-FASE3-02).** Novo `src/shared/nc_writer.F90` com `nc_create`, `nc_global_header`, `nc_def_latlon`, `nc_def_field2d` e `nc_ok` (falha do NetCDF registrada no log com a mensagem de `nf90_strerror`). Os quatro gravadores de diagnóstico passam a usá-lo para criar o arquivo, gravar o cabeçalho CF, definir os eixos e definir os campos: exportação da atmosfera e diagnóstico de importação da atmosfera (`mpas_cap_netcdf.F90`), importação do oceano no mediador (`med_cap_netcdf.F90`) e oceano de dados (`docn_cap_netcdf.F90`). Os dados gravados não mudam. Nos metadados:
   - diagnóstico de importação da atmosfera e oceano de dados: `lat` e `lon` ganham `long_name`, `standard_name` e `axis`, como já tinham os outros dois gravadores;
   - oceano de dados: ganha o atributo global `source`, e a dimensão `lat` passa a ser definida antes de `lon`;

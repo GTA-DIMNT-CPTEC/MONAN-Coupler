@@ -203,7 +203,7 @@ contains
   !
   ! Todos os N_IMP campos importados (fluxos do mediador MED→OCN) são anunciados.
   ! O conector NUOPC MED→OCN cria RouteHandles bilineares na grade OISST nativa
-  ! (1440×720 com decomposição 2D via B-57: sqrt(petCount) tiles por dimensão,
+  ! (1440×720 com decomposição 2D via sqrt(petCount) tiles por dimensão,
   ! garantindo colunas ≥2 e evitando o erro "DE width 1" em qualquer petCount).
   !
   ! Campos exportados (N_EXP = 6): So_t, Si_ifrac, Sf_zorl, So_s, So_u, So_v.
@@ -275,7 +275,7 @@ contains
     dx = 360.0_ESMF_KIND_R8 / real(nx, ESMF_KIND_R8)
     dy = 180.0_ESMF_KIND_R8 / real(ny, ESMF_KIND_R8)
 
-    ! B-38 (fix): obter petCount para definir decomposicao explicitamente.
+    ! obter petCount para definir decomposicao explicitamente.
     ! ESMF_GridCreate1PeriDim sem regDecomp usa decomposicao default que,
     ! em ESMF 8.9.1, pode gerar DEs de largura 1 na dimensao latitudinal
     ! quando petCount > ny/2. Isso causa falha no regridding bilinear
@@ -290,15 +290,15 @@ contains
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! B-57 (fix B-46/B-52): regDecomp 2D com tiles quadradas — evita strips extremos.
+    ! ): regDecomp 2D com tiles quadradas — evita strips extremos.
     !
-    ! PROBLEMA com B-46 (regDecomp=(/1, min(petCount,ny/2)/)):
+    ! PROBLEMA com (regDecomp=(/1, min(petCount,ny/2)/)):
     !   Decompõe em latitude → PETs vazios com petCount>ny/2.
-    ! PROBLEMA com B-52 (nx_max=nx/2):
+    ! PROBLEMA com (nx_max=nx/2):
     !   netcdf 1440×720 a 512 PETs → regDecomp=(/512,1/) → 2-3 cols×720 rows
     !   → aspecto 256:1 → MOAB trava em ESMF_FieldBundleRegridStore.
     !
-    ! SOLUCAO B-57: sqrt(petCount) tiles por dimensão.
+    ! SOLUCAO sqrt(petCount) tiles por dimensão.
     !   nx_tiles_target = nint(sqrt(N)) → aspecto ≈ 1.
     !   nx_max = min(target, nx/2) → garante col ≥ 2.
     !
@@ -325,7 +325,7 @@ contains
       call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      ! B-53: loop sobre DEs locais — com regDecomp 2D e DEs>petCount,
+      ! loop sobre DEs locais — com regDecomp 2D e DEs>petCount,
       ! 17 PETs a 512 PETs têm localDeCount=2; GridGetCoord exige localDE=.
       call ESMF_GridGet(grid, localDeCount=localDeCount_docn, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -532,7 +532,7 @@ contains
     end if
 
     ! ── Leitura dos campos oceânicos com interpolação temporal ────────────────
-    ! B-56: nomes de variável configuráveis via nuopc.input (docn_*_varname).
+    ! nomes de variável configuráveis via nuopc.input (docn_*_varname).
     ! OISST v2.1: sst_varname='sst'  ice_varname='icec'
     call ReadOcnFieldInterp(gcomp, trim(cfg_docn_sst_file), &
       trim(cfg_docn_sst_varname), &

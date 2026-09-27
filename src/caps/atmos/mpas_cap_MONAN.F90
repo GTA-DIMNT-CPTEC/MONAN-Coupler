@@ -5,13 +5,13 @@
 !!   set_mpas_diag_clock movido de mpas_cap_methods_mod para mpas_cap_netcdf_mod
 !!   (reorganizacao de responsabilidades — Passo 6).
 !!
-!! Versao 9.0 -- Sprint C Fase 2 (Maio 2026):
+!! Versao 9.0 --
 !!   N_IMP estendido de 4 -> 5: agora importa Sf_zorl (rugosidade Charnock)
 !!   do mediador. Substitui o default fixo cfg_zorl_default = 0.01 m
 !!   por valor dinamico calculado no MED via Charnock + Smith (1988):
 !!     z0 = 0.018 * u*^2 / g + 0.11 * nu / u*
 !!
-!! Versao 8.0 -- Sprint A Fase 2 (Maio 2026):
+!! Versao 8.0 --
 !!   N_IMP estendido de 1 -> 4: agora importa So_t, Si_ifrac, So_u, So_v
 !!   do mediador (antes apenas So_t; Si_ifrac/correntes usavam defaults
 !!   fixos = 0, ignorando MOM6+SIS2 dinamico). Habilita gelo marinho,
@@ -20,7 +20,7 @@
 !! Versao 7.0 -- Protocolo NUOPC completo via NUOPC_CompDerive.
 !!
 !! Patches aplicados:
-!!   v8.0: Sprint A — IMP_NAMES estendido com Si_ifrac/So_u/So_v
+!! v8.0: IMP_NAMES estendido com Si_ifrac/So_u/So_v
 !!   v7.0: NUOPC_CompDerive + InitializeAdvertise + InitializeDataComplete
 !!   v7.1: mpas_atm_resize eliminado (ESMF e MPAS usam decomposicoes distintas)
 !!   v7.2: coordenadas para NetCDF via lonCell(1:n_local) com
@@ -35,7 +35,7 @@ module mpas_cap_MONAN_mod
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
                            NUOPC_CompAttributeGet,  NUOPC_CompAttributeSet,  &
-                           NUOPC_IsConnected   ! B-IMPORT-DESCONECTADO-01
+                           NUOPC_IsConnected
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
                            model_label_CheckImport    => label_CheckImport,  &
                            model_label_DataInitialize => label_DataInitialize, &
@@ -88,9 +88,9 @@ module mpas_cap_MONAN_mod
   !   v9 (Fase 1, DOCN OISST): N_IMP=1 — apenas So_t. Si_ifrac/Sf_zorl/uocn/vocn
   !     usavam defaults fixos via cfg_*_default (gelo=0, zorl=0.01 m, correntes=0).
   !
-  !   Sprint A Fase 2 (Maio 2026): N_IMP=4 — So_t, Si_ifrac, So_u, So_v.
+  ! N_IMP=4 — So_t, Si_ifrac, So_u, So_v.
   !
-  !   Sprint C Fase 2 (Maio 2026): N_IMP=5 — adiciona Sf_zorl (rugosidade).
+  ! N_IMP=5 — adiciona Sf_zorl (rugosidade).
   !     Calculada via Charnock + Smith no MED a partir de Foxx_taux/tauy.
   !     Substitui o default fixo cfg_zorl_default = 0.01 m, habilitando
   !     feedback dinamico vento <-> rugosidade essencial em tempestades.
@@ -98,14 +98,14 @@ module mpas_cap_MONAN_mod
   ! O NUOPC só cria RouteHandle para campos MUTUAMENTE anunciados: o MED
   ! anuncia So_t, Si_ifrac, So_u, So_v, Sf_zorl no exportState; o MPAS precisa
   ! anunciá-los espelhadamente no importState (este array).
-  ! Fase 4b (B-TSFC-DUALEXPORT-01, Set/2026): trocado de 'So_t' para
+  ! Fase 4b (, Set/2026): trocado de 'So_t' para
   ! 'Sx_tsfc'. So_t e' SST pura do MOM6 — o SIS2 tambem a importa e precisa
   ! dela pura para o fluxo de calor basal do gelo (ICE_KMELT). Sx_tsfc e' o
   ! composto (1-Si_ifrac)*So_t + Si_ifrac*Si_t_sis2, calculado no MED
   ! (MED_cap.F90) especificamente para a atmosfera, que enxerga uma unica
   ! celula mista agua+gelo — index 1 continua alimentando atm_bnd%sst.
   !
-  ! FIX B-DIAGMASK-01 (Set/2026): N_IMP=7 — adiciona Sx_omask, a mascara
+  ! N_IMP=7 — adiciona Sx_omask, a mascara
   ! terra/oceano REAL do MOM6 (ocean_grid%mask2dT). Nao alimenta a fisica do
   ! MONAN-A, que tem a propria landmask; serve para mascarar continentes no
   ! diagnostico monan2_import_*.nc, que ate' aqui so' contava com o filtro
@@ -118,9 +118,9 @@ module mpas_cap_MONAN_mod
     'Si_ifrac',          &  ! Fração de gelo [0-1]       → atm_bnd%ice_fraction
     'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
     'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
-    'Sf_zorl ',          &  ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
+    'Sf_zorl ',          &  ! Rugosidade Charnock [m] → atm_bnd%zorl
     'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
-    'Sx_omask' ]            ! Máscara 1=oceano/0=terra   → atm_bnd%omask (B-DIAGMASK-01)
+    'Sx_omask' ]  ! Máscara 1=oceano/0=terra → atm_bnd%omask
 
   integer, parameter :: N_EXP = 13
   character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
@@ -134,10 +134,10 @@ module mpas_cap_MONAN_mod
     'Faxa_rain_mpas',               &
     'Sa_shum_mpas  ',               &  ! B-Fase2-01: q2 [kg/kg] — hum. espec. 2m
     'Faxa_snow_mpas',               &  ! B-Fase2-02: Δsnownc/dt [kg/m²/s] — neve
-    'Faxa_sen_mpas ',               &  ! Fase 3: calor sensivel nativo do PBL (hfx)
-    'Faxa_lat_mpas ',               &  ! Fase 3: calor latente nativo do PBL (lh)
-    'Faxa_taux_mpas',               &  ! Fase 3: tensao zonal nativa (de ust)
-    'Faxa_tauy_mpas' ]                 ! Fase 3: tensao meridional nativa (de ust)
+    'Faxa_sen_mpas ',               &  ! calor sensivel nativo do PBL (hfx)
+    'Faxa_lat_mpas ',               &  ! calor latente nativo do PBL (lh)
+    'Faxa_taux_mpas',               &  ! tensao zonal nativa (de ust)
+    'Faxa_tauy_mpas' ]  ! tensao meridional nativa (de ust)
 
   integer, save      :: step_count    = 0
 
@@ -285,7 +285,7 @@ contains
     end if
 
     ! ── 4. Coordenadas NetCDF (MPI_Allgather apos SMIOL — seguro) ────────
-      ! B-32: usar nCellsSolve (células próprias sem halos) para que a soma
+      ! usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
       n_local = g_atm_public%nCellsSolve
       if (n_local == 0) n_local = g_atm_public%nCells   ! fallback se não disponível
@@ -316,7 +316,7 @@ contains
          modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! B-IMPORT-DESCONECTADO-01: barreira antes de qualquer leitura do
+    ! barreira antes de qualquer leitura do
     ! importState. Ver o cabecalho de verify_import_connected para o motivo.
     call verify_import_connected(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -369,7 +369,7 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call set_mpas_diag_clock(yr, mo, dy, hr, mn, sc)
 
-    ! BUG-FIX-01: usar nCellsSolve (células próprias sem halos) em vez de nCells.
+    ! usar nCellsSolve (células próprias sem halos) em vez de nCells.
     ! nCells inclui células halo de PETs vizinhos, que podem conter valores não
     ! inicializados ou de outra região geográfica, corrompendo os campos importados.
     call mpas_import(importState, g_atm_bnd, &
@@ -436,7 +436,6 @@ contains
   !! (ESMF_Grid 360x180), evitando erro ESMF_LocalArrayGetData rank mismatch.
   !> @brief Aborta se algum campo de IMP_NAMES nao estiver conectado.
   !!
-  !! FIX B-IMPORT-DESCONECTADO-01 (Set/2026).
   !!
   !! O PROBLEMA. Quando o componente OCN nao oferece todos os campos que este
   !! cap anuncia, o NUOPC registra no log de PET
@@ -448,7 +447,7 @@ contains
   !! N_IMP campos assim mesmo, inclusive os que nunca foram realizados, e o
   !! ponteiro do farrayPtr de um campo nao conectado leva a SIGSEGV dentro do
   !! libesmf.so, com backtrace irresoluvel. Foi o que aconteceu no perfil
-  !! MPAS+DOCN (B-DOCN-FASE1-CAMPOS-01): tres campos faltando, morte sete
+  !! MPAS+DOCN: tres campos faltando, morte sete
   !! segundos depois, sem nenhuma pista no esmApp_run.log.
   !!
   !! O CONSERTO. Verificar explicitamente, antes de tocar no importState, e
@@ -552,9 +551,9 @@ contains
   !! do MED ter executado. Sem isso, o importState chega ao mpas_import com
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
   !!
-  !! Sprint A Fase 2: defaults estendidos para 4 campos (era 1).
+  !! defaults estendidos para 4 campos (era 1).
   !!   1: Sx_tsfc  → temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
-  !!                 (Fase 4b, B-TSFC-DUALEXPORT-01 — era So_t; ver IMP_NAMES)
+  !! (Fase 4b, era So_t; ver IMP_NAMES)
   !!   2: Si_ifrac → fração de gelo (cfg_ice_fraction_default = 0.0)
   !!   3: So_u     → corrente zonal (0.0 m/s — oceano em repouso)
   !!   4: So_v     → corrente meridional (0.0 m/s — oceano em repouso)
@@ -571,13 +570,13 @@ contains
     integer :: i, fld_rank, localDeCount_imp
     rc = ESMF_SUCCESS
 
-    ! Sprint A: defaults alinhados com IMP_NAMES (5 elementos):
+    ! defaults alinhados com IMP_NAMES (5 elementos):
     defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! Sx_tsfc   [K]
     defaults(2) = real(cfg_ice_fraction_default, ESMF_KIND_R8)  ! Si_ifrac  [0-1]
     defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
     defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
-    defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl   [m]  (Sprint C)
-    ! FIX B-DIAGMASK-01: defaults(6) estava faltando desde a Fase 2.6 —
+    defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl [m]
+    ! defaults(6) estava faltando desde a Fase 2.6 —
     ! o array e' dimensionado por N_IMP e o laco abaixo percorre 1..N_IMP,
     ! entao Sf_albedo era inicializado com o que houvesse na pilha. Corrigido
     ! junto com a entrada nova, para o mesmo valor de agua aberta usado em
@@ -590,7 +589,7 @@ contains
       call ESMF_StateGet(importState, itemName=trim(IMP_NAMES(i)), &
                          field=field, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! B-45: PETs sem DE local na grade MPAS (360×180, regDecomp(2)=90) têm
+      ! PETs sem DE local na grade MPAS (360×180, regDecomp(2)=90) têm
       ! localDeCount=0 com 512 PETs (PETs 90-511). ESMF_FieldGet(farrayPtr)
       ! nestes PETs gera "localDe is out of range". Verificar antes de acessar.
       call ESMF_FieldGet(field, localDeCount=localDeCount_imp, rc=rc)

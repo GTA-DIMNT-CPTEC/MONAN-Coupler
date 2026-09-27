@@ -22,7 +22,6 @@ contains
 
 
   !============================================================================
-  ! FIX B-OCNGRID-01 (Ago 2026)
   !
   ! CAUSA-RAIZ: a grade "ocn_grid" que o MEDIADOR usa internamente para o
   ! regrid OCN<->ATM era construida com as dimensoes do DOCN/OISST
@@ -180,7 +179,7 @@ contains
       rc = ESMF_FAILURE
     end if
 
-    ! FIX B-OCNGRID-03: normaliza longitude bruta do supergrid (ex.: -300..60,
+    ! normaliza longitude bruta do supergrid (ex.: -300..60,
     ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
     ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
     ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
@@ -201,7 +200,7 @@ contains
 
     ncstat = nf90_close(ncid)
 
-    ! DIAGNOSTICO TEMPORARIO B-OCNGRID-01b: comprova o que foi lido de fato.
+    ! DIAGNOSTICO TEMPORARIO comprova o que foi lido de fato.
     ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
     ! (exceto perto do fold tripolar); coordY o oposto. Se coordX nao variar
     ! com i, a longitude "colapsou" e o regrid produz bandas puramente
@@ -228,7 +227,7 @@ contains
   end subroutine mom6_supergrid_tcoords
 
   !----------------------------------------------------------------------------
-  ! FIX B-CONSERVE-01 (Set/2026): mom6_supergrid_corners — le os
+  ! mom6_supergrid_corners — le os
   ! VERTICES (cantos) das celulas T do MOM6, necessarios para regrid
   ! conservativo (ESMF_REGRIDMETHOD_CONSERVE), que calcula peso por
   ! sobreposicao de AREA entre celulas fonte e destino — exige os 4 cantos
@@ -297,7 +296,7 @@ contains
       rc = ESMF_FAILURE
     end if
 
-    ! Mesma normalizacao de longitude 0..360 usada para o centro (B-OCNGRID-03).
+    ! Mesma normalizacao de longitude 0..360 usada para o centro.
     where (coordX < 0.0_ESMF_KIND_R8)
       coordX = coordX + 360.0_ESMF_KIND_R8
     end where

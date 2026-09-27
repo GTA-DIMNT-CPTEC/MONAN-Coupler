@@ -71,8 +71,8 @@ module sis_cap_MONAN_mod
                              share_ice_domains, ice_model_restart,          &
                              update_ice_slow_thermo, update_ice_dynamics_trans, &
                              unpack_ocean_ice_boundary, update_ice_model_fast, &
-                             exchange_slow_to_fast_ice, &  ! FIX B-ICE-FASTSYNC-01
-                             set_ice_surface_fields,    &  ! FIX B-ICE-FASTSYNC-02
+                             exchange_slow_to_fast_ice, &
+                             set_ice_surface_fields,    &
                              ocean_ice_boundary_type, atmos_ice_boundary_type
 
   use MOM_time_manager, only : time_type, set_date, set_calendar_type, GREGORIAN
@@ -120,14 +120,14 @@ module sis_cap_MONAN_mod
   integer, parameter :: n_import_ocn = 3   ! So_t, So_u, So_v (ver OIB)
   character(len=32), dimension(n_import_atm) :: import_names_atm = (/ &
     "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! Fase 3
-    "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! Fase 4 (B-ICE-SWNET-01)
+    "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! Fase 4
     "Fioi_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
-    "Faxa_coszen   " /)  ! Fase 2.5 (B-ZENITH-01)
-  ! Fase 3 (B-ICE-FLUX-DIFF-01): taux/tauy/sen/evap/lwnet trocados de
+    "Faxa_coszen   " /)  ! Fase 2.5
+  ! taux/tauy/sen/evap/lwnet trocados de
   ! Foxx_* (calculados com SST, apropriados para o MOM6) para Fioi_*
   ! (calculados com a temperatura de pele real do gelo, Si_t_sis2 — ver
   ! export_si_tskin e med_bulk_ncar.F90).
-  ! Fase 4 (B-ICE-SWNET-01, Set/2026): SW (swnet_v*/idr/idf) tambem
+  ! (, Set/2026): SW (swnet_v*/idr/idf) tambem
   ! separado — antes usava Foxx_swnet_* (albedo MISTURADO por Si_ifrac,
   ! o mesmo valor enviado ao MOM6), o que fazia o gelo absorver SW
   ! calculada com um albedo mais baixo que o seu proprio. Agora usa
@@ -140,11 +140,11 @@ module sis_cap_MONAN_mod
   character(len=32), dimension(n_export) :: export_names = (/ &
     character(len=32) ::                &
     "Si_ifrac_sis2", &
-    "Si_avsdr_sis2", &  ! Fase 2: albedo visivel direto (Ice%albedo_vis_dir)
-    "Si_avsdf_sis2", &  ! Fase 2: albedo visivel difuso (Ice%albedo_vis_dif)
-    "Si_anidr_sis2", &  ! Fase 2: albedo infravermelho prox. direto (Ice%albedo_nir_dir)
-    "Si_anidf_sis2", &  ! Fase 2: albedo infravermelho prox. difuso (Ice%albedo_nir_dif)
-    "Si_t_sis2"    /)   ! Fase 3: temperatura de pele do gelo (Ice%t_surf)
+    "Si_avsdr_sis2", &  ! albedo visivel direto (Ice%albedo_vis_dir)
+    "Si_avsdf_sis2", &  ! albedo visivel difuso (Ice%albedo_vis_dif)
+    "Si_anidr_sis2", &  ! albedo infravermelho prox. direto (Ice%albedo_nir_dir)
+    "Si_anidf_sis2", &  ! albedo infravermelho prox. difuso (Ice%albedo_nir_dif)
+    "Si_t_sis2"    /)  ! temperatura de pele do gelo (Ice%t_surf)
 
 contains
 
@@ -277,7 +277,7 @@ contains
   !!
   !! TODO-VERIFICAR (risco alto): esta rotina assume que dá pra reaproveitar
   !! o MESMO padrão de leitura de ocean_hgrid.nc já usado em MED_cap.F90
-  !! (FIX B-OCNGRID-01/03) para construir a grade ESMF deste componente.
+  !! (/03) para construir a grade ESMF deste componente.
   !! Isso NÃO foi testado — precisa confirmar que a decomposição de PETs do
   !! componente ICE (independente da do OCN agora, dado Concurrent_ice=
   !! .false.) é compatível com como ice_model_init monta Ice%slow_domain
@@ -339,7 +339,7 @@ contains
     ! set_date -> time_manager_init -> fms_init -> mpp_init -> abort).
     ! Movendo MOM_infra_init pra cá (primeiro), antes de qualquer set_date.
     !
-    ! FIX-PELIST-ICE: mom_cap_MONAN.F90 chama MOM_infra_init(mpi_comm_mom)
+    ! mom_cap_MONAN.F90 chama MOM_infra_init(mpi_comm_mom)
     ! com o comunicador MPI PRÓPRIO daquele componente (nao o comunicador
     ! global) — depois disso, mpp_pe()/mpp_npes() do FMS ficam numerados
     ! localmente (0..petCount-1) DENTRO daquele comunicador. Fazendo o mesmo
@@ -434,7 +434,7 @@ contains
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
         'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
-      ! B-ICE-DECOMP-01 (23/09/2026): a grade ESMF segue a decomposicao que o
+      ! (23/09/2026): a grade ESMF segue a decomposicao que o
       ! PROPRIO SIS2 escolheu em ice_model_init, bloco por bloco.
       !
       ! Antes, a grade era criada com uma regra propria (regDecomp a partir
@@ -443,7 +443,7 @@ contains
       ! escondido; com 8 PETs o SIS2 escolheu 2 x 4 (blocos 90 x 39) e o cap
       ! 4 x 2 (blocos 45 x 78), e export_si_ifrac saiu do array do SIS2
       ! ("Index '48' of dimension 2 ... outside of expected range (1:47)").
-      ! Mesmo principio do FIX-GRID-v5 do cap do oceano (deBlockList a partir
+      ! Mesmo principio do v5 do cap do oceano (deBlockList a partir
       ! da decomposicao do MOM6).
       !
       ! Cada PET pega os limites GLOBAIS do seu bloco no dominio do SIS2, os
@@ -501,7 +501,7 @@ contains
       is%isc = lbound(coordX,1); is%iec = ubound(coordX,1)
       is%jsc = lbound(coordX,2); is%jec = ubound(coordX,2)
 
-      ! B-ICE-DECOMP-01: conferencia final, em cada PET, de que o bloco ESMF e'
+      ! conferencia final, em cada PET, de que o bloco ESMF e'
       ! exatamente o bloco do SIS2. Protege contra um petMap trocado.
       if (is%isc /= gis .or. is%iec /= gie .or. is%jsc /= gjs .or. is%jec /= gje) then
         write(msg_decomp,'(a,8(i0,a))') 'ICE(SIS2): B-ICE-DECOMP-01 bloco ESMF i ', &
@@ -634,7 +634,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
-    ! FIX B-ICE-FASTSYNC-01: sincroniza fCS%IST <- sCS%IST logo apos
+    ! sincroniza fCS%IST <- sCS%IST logo apos
     ! ice_model_init, para que o primeiro update_ice_model_fast (inicio do
     ! primeiro ModelAdvance) ja opere sobre a condicao inicial real do gelo
     ! (restart ou default de ice_model_init em sCS%IST), em vez do estado
@@ -717,7 +717,7 @@ contains
 
     ! ── Passo 2: avançar o SIS2 ───────────────────────────────────────────
     !
-    ! FIX-DIAG-SLOWSPLIT-01 (Set/2026): separa as duas sub-rotinas do passo
+    ! separa as duas sub-rotinas do passo
     ! lento, que e' onde a nao reprodutibilidade nasce.
     !
     ! O QUE JA SE SABE. Bateria de 18/09/2026, quatro execucoes, seis pares.
@@ -738,12 +738,12 @@ contains
     ! update_ice_slow_thermo, o alvo e' slow_thermodynamics. Se so divergir
     ! depois de update_ice_dynamics_trans, o alvo e' SIS_transport, que e'
     ! justamente a rotina que abortou com GLOBAL_INDEXING=True reclamando de
-    ! "non-zero snow mass rests atop no ice" (B-SIS2-SNOW-NOICE-01). Os dois
+    ! "non-zero snow mass rests atop no ice". Os dois
     ! indicios apontando para o mesmo lugar seria forte.
     !
     ! LIMITE DO INSTRUMENTO, E COMO ELE SE DENUNCIA. Aqui so' ha acesso a
     ! FACHADA is%ice%part_size, nao ao sCS%IST%part_size que o SIS2 usa por
-    ! dentro. O B-ICE-TSKIN-SRC-01 ja mostrou que essa fachada pode ficar
+    ! dentro. O ja mostrou que essa fachada pode ficar
     ! DEFASADA em relacao ao estado interno. Por isso o diagnostico mede TRES
     ! pontos, inclusive ANTES da primeira chamada: se os tres saírem iguais,
     ! a fachada nao esta sendo atualizada por estas rotinas e o instrumento e'
@@ -758,7 +758,7 @@ contains
     call ESMF_LogWrite('ICE(SIS2): update_ice_slow_thermo + ' // &
       'update_ice_dynamics_trans concluido', ESMF_LOGMSG_INFO)
 
-    ! ── Passo 2b (FIX B-ICE-FASTSYNC-01): sincronizar fCS%IST <- sCS%IST ──
+    ! ── Passo 2b: sincronizar fCS%IST <- sCS%IST ──
     ! Sem esta chamada, Ice%fCS%IST (a copia "rapida" do estado do gelo,
     ! usada por update_ice_model_fast para popular os campos publicos de
     ! fachada Ice%part_size/Ice%albedo*) fica congelada no estado inicial
@@ -779,7 +779,7 @@ contains
     call ESMF_LogWrite('ICE(SIS2): exchange_slow_to_fast_ice concluido ' // &
       '(fCS%IST sincronizado com sCS%IST)', ESMF_LOGMSG_INFO)
 
-    ! ── Passo 2c (FIX B-ICE-FASTSYNC-02): popular Ice%part_size/Ice%albedo* ──
+    ! ── Passo 2c: popular Ice%part_size/Ice%albedo* ──
     ! exchange_slow_to_fast_ice (acima) so ATUALIZA fCS%IST; quem de fato
     ! PREENCHE os campos publicos de fachada (Ice%part_size, Ice%albedo_*)
     ! a partir de fCS%IST e set_ice_surface_fields (-> set_ice_surface_state
@@ -787,7 +787,7 @@ contains
     ! chamada e feita pelo driver externo, nunca pelo proprio SIS2 -- por
     ! isso esta ausencia nao aparece como erro de compilacao nem de link,
     ! so como campo permanentemente zerado. Sem esta chamada, o FIX
-    ! B-ICE-FASTSYNC-01 sincroniza o estado mas ninguem o "publica".
+    ! sincroniza o estado mas ninguem o "publica".
     call set_ice_surface_fields(is%ice)
     call ESMF_LogWrite('ICE(SIS2): set_ice_surface_fields concluido ' // &
       '(Ice%part_size/albedo* publicados a partir de fCS%IST)', &
@@ -874,14 +874,14 @@ contains
   !! "NUOPC INCOMPATIBILITY: Import Fields not all connected" com os nomes
   !! antigos inventados). Mapeamento atual:
   !! - Fioi_taux/tauy → u_flux/v_flux; Fioi_sen → t_flux (SINAL INVERTIDO,
-  !!   ver FIX B-ICEFLUX-SIGN-01 / broadcast_to_cat_neg); Fioi_evap → q_flux;
+  !! ver / broadcast_to_cat_neg); Fioi_evap → q_flux;
   !!   Fioi_lwnet → lw_flux; Fioi_swnet_vdr/vdf/idr/idf → sw_flux_*
-  !!   (Fase 4, B-ICE-SWNET-01 — albedo do gelo puro, sem blend);
+  !! (Fase 4, albedo do gelo puro, sem blend);
   !!   Faxa_rain/snow → lprec/fprec; Sa_pslv → p. Os campos 2D do mediador
   !!   sao REPLICADOS (broadcast) para todas as categorias de espessura de
   !!   gelo na 3a dimensao de is%aib — o mediador nao distingue por categoria.
   !!
-  !! FIX B-ICEFLUX-SIGN-01 (Set/2026): t_flux e' o UNICO campo desta lista
+  !! t_flux e' o UNICO campo desta lista
   !! que precisa de inversao de sinal. Fioi_sen chega na convencao CMEPS
   !! (positivo = aquece a superficie), mas o SIS2 (ice_boundary_types.F90)
   !! define t_flux como positivo = sai da superficie (convencao legada FMS).
@@ -908,13 +908,13 @@ contains
     !    categorias de espessura de gelo em is%aib. Nomes confirmados em
     !    med_cap_types.F90::export_names (FIX — nomes anteriores estavam
     !    inventados e causavam NUOPC INCOMPATIBILITY em teste real).
-    !    Fase 3 (B-ICE-FLUX-DIFF-01): taux/tauy/sen/evap/lwnet agora vem de
+    ! taux/tauy/sen/evap/lwnet agora vem de
     !    Fioi_* (temperatura de pele do gelo), nao mais Foxx_* (SST). --
     call get_field_2d(importState, "Fioi_taux",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%u_flux)
     call get_field_2d(importState, "Fioi_tauy",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%v_flux)
-    ! FIX B-ICEFLUX-SIGN-01 (Set/2026): Fioi_sen (convencao CMEPS, positivo =
+    ! Fioi_sen (convencao CMEPS, positivo =
     ! aquece a superficie) precisa ser INVERTIDO ao entrar em t_flux (SIS2
     ! espera positivo = sai da superficie, convencao legada FMS). Ver
     ! docstring de broadcast_to_cat_neg abaixo para o raciocinio completo.
@@ -924,7 +924,7 @@ contains
     call broadcast_to_cat(ptr2d, is%aib%q_flux)
     call get_field_2d(importState, "Fioi_lwnet",     ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%lw_flux)
-    ! Fase 4 (B-ICE-SWNET-01, Set/2026): Fioi_swnet_* (albedo do gelo por
+    ! (, Set/2026): Fioi_swnet_* (albedo do gelo por
     ! banda, PURO — sem blend com agua aberta) substitui Foxx_swnet_* (que
     ! usava o albedo MEDIO da celula, o mesmo enviado ao MOM6). Ver
     ! comentario no cabecalho de import_names_atm acima para o raciocinio
@@ -945,7 +945,7 @@ contains
     call get_field_2d(importState, "Sa_pslv",        ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%p)
 
-    ! Fase 2.5 (B-ZENITH-01): angulo zenital solar real, antes zerado (ver
+    ! angulo zenital solar real, antes zerado (ver
     ! comentario historico logo acima desta rotina). Campo NOVO — se o
     ! mediador em uso ainda nao exportar Faxa_coszen (versao antiga),
     ! degrada de forma segura para coszen=0 (comportamento anterior) em vez
@@ -1001,7 +1001,7 @@ contains
     end do
   end subroutine broadcast_to_cat
 
-  !> FIX B-ICEFLUX-SIGN-01 (Set/2026): variante de broadcast_to_cat que
+  ! > variante de broadcast_to_cat que
   !! inverte o sinal antes de replicar. Uso exclusivo para Fioi_sen -> t_flux.
   !!
   !! Fioi_sen chega do MED_cap (med_bulk_ncar.F90) na convencao CMEPS
@@ -1067,10 +1067,10 @@ contains
     !      como agua aberta — errado (indice 1 e categoria de gelo);
     !   2) tentativa de corrigir com lbound falhou: part_size e POINTER e a
     !      associacao nao preserva os limites 0:CatIce (lbound deu 1);
-    !   3) causa raiz final: a FONTE estava errada — ver FIX-3 abaixo.
+    ! 3) causa raiz final: a FONTE estava errada — ver abaixo.
     ! ------------------------------------------------------------------
-    ! FIX-3 (Ago 2026) — FONTE DO CAMPO estava errada.
-    ! O diagnostico FIX-DIAG-TEMP5 mostrou part_size dim1[1:90] dim2[1:155]
+    ! FONTE DO CAMPO estava errada.
+    ! O diagnostico mostrou part_size dim1[1:90] dim2[1:155]
     ! dim3[1:6], i_off=0, j_off=0 e TODAS as fatias zeradas, apesar do SIS2
     ! ter gelo real (SIS Date: Area 1.277E+13 no passo 0). Ou seja: nao era
     ! problema de indice nem de halo (nao ha halo em Ice%part_size, e a
@@ -1128,7 +1128,7 @@ contains
       end do
     end do
 
-    ! FIX-DIAG-FASTSYNC-01: valida a correcao B-ICE-FASTSYNC-01 comparando
+    ! valida a correcao comparando
     ! o campo publico de fachada Ice%part_size (que ate a correcao ficava
     ! sempre zerado, ver historico acima) contra o valor de sCS%IST%part_size
     ! ja usado como fonte real acima. Ja validado em producao (Set/2026);
@@ -1148,16 +1148,16 @@ contains
 
   end subroutine export_si_ifrac
 
-  !! Fase 2 (B-ICE-ALBEDO-01): exporta o albedo real do gelo, por banda,
+  !! exporta o albedo real do gelo, por banda,
   !! calculado pela fisica do proprio SIS2 (esquema optico em
   !! SIS_optics.F90/fast_radiation_diagnostics), agora acessivel porque
   !! Ice%albedo_vis_dir/vis_dif/nir_dir/nir_dif (fachada publica) passaram
-  !! a ser preenchidos pelas correcoes B-ICE-FASTSYNC-01/02 acima.
+  !! a ser preenchidos pelas correcoes /02 acima.
   !!
   !! Diferente de Si_ifrac_sis2 (que le sCS%IST%part_size com deslocamento
   !! i_off/j_off), aqui usamos Ice%part_size e Ice%albedo_* diretamente —
   !! ambos sao campos da MESMA fachada publica, com a MESMA indexacao local
-  !! (sem halo, sem offset), confirmados no diagnostico FIX-DIAG-FASTSYNC-01
+  !! (sem halo, sem offset), confirmados no diagnostico
   !! (que ja le is%ice%part_size(:,:,1) sem nenhum deslocamento).
   !!
   !! *** VERIFICAR ***: os comentarios de ice_type.F90 (fonte NOAA-GFDL/SIS2)
@@ -1252,8 +1252,8 @@ contains
       end do
     end do
 
-    ! FIX-DIAG-ALBEDO-01: diagnostico de validacao, mesmo espirito do
-    ! FIX-DIAG-FASTSYNC-01. Espera-se min proximo do fallback/agua (baixo)
+    ! diagnostico de validacao, mesmo espirito do
+    ! Espera-se min proximo do fallback/agua (baixo)
     ! e max na faixa de neve fria (~0,8-0,9) em regioes com gelo espesso.
     if (cfg_write_fixdiag) then
         write(diag_msg7,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
@@ -1265,7 +1265,7 @@ contains
 
   end subroutine export_si_albedo
 
-  !! Fase 3 (B-ICE-FLUX-DIFF-01): exporta a temperatura de pele real do
+  !! exporta a temperatura de pele real do
   !! gelo, media ponderada por area de categoria (mesmo padrao de
   !! export_si_albedo). Usada pelo mediador para calcular um segundo
   !! conjunto de fluxos turbulentos (Fioi_*) especifico para a fracao de
@@ -1275,7 +1275,7 @@ contains
   !!
   !! Ice%t_surf e' preenchido pela MESMA rotina (set_ice_surface_state) que
   !! Ice%part_size/Ice%albedo_* — ja' confirmada funcionando pelas
-  !! correcoes B-ICE-FASTSYNC-01/02.
+  !! correcoes /02.
   subroutine export_si_tskin(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp)                                :: gcomp
@@ -1355,7 +1355,7 @@ contains
 
   end subroutine ModelFinalize
 
-  !> B-ICE-DECOMP-01: a partir dos blocos de todos os PETs (inicio e fim
+  ! > a partir dos blocos de todos os PETs (inicio e fim
   !! globais em i e em j, na ordem dos PETs), monta a decomposicao retangular
   !! que o ESMF precisa: tamanho de cada coluna (cntx), de cada linha (cnty) e
   !! o PET dono de cada bloco (pmap). Valida que os blocos formam uma
@@ -1460,7 +1460,7 @@ contains
 
   !> @brief Checksum inteiro de part_size, no mesmo espirito do chksum do SIS2.
   !!
-  !! FIX-DIAG-SLOWSPLIT-01. Inteiro, e nao mean/min/max, porque valor de ponto
+  !! Inteiro, e nao mean/min/max, porque valor de ponto
   !! flutuante impresso com poucos digitos ja escondeu divergencia duas vezes
   !! nesta investigacao: com quatro digitos ela aparecia na 12a troca, com
   !! quinze, na 3a. Um checksum inteiro nao tem esse problema.

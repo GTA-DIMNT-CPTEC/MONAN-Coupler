@@ -81,8 +81,20 @@ compara)
            bash ${COUPLER_ROOT}/tools/dev/compara-linha-base.bash -l ${BASE} -o ${REF}/baseline -e" \
     > compara.txt 2>&1
   grep -E 'Entradas|entradas diferentes' compara.txt
-  tail -4 compara.txt
-  grep -q 'PASS' compara.txt || { echo; echo "Primeiras diferenças:"; sed -n '/Integridade/,$p' compara.txt | head -30; }
+  grep -E '^ *iguais:' compara.txt
+  n_meta=$(grep -c 'difere so nos METADADOS' compara.txt)
+  if [[ ${n_meta} -gt 0 ]]; then
+    echo " Arquivos só com metadados diferentes (dados iguais): ${n_meta}; por prefixo:"
+    grep 'difere so nos METADADOS' compara.txt | awk '{print $1}' | sed -E 's/_[0-9]{8}_[0-9]{6}\.nc$//' \
+      | sort | uniq -c | sed 's/^/   /'
+  fi
+  if grep -q ' PASS ' compara.txt; then
+    grep ' PASS ' compara.txt
+  else
+    grep -E ' FAIL' compara.txt
+    echo; echo "Primeiras diferenças:"; sed -n '/Integridade/,$p' compara.txt | head -30
+  fi
+  echo " Relatório completo: ${DIR}/compara.txt"
   ;;
 *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
