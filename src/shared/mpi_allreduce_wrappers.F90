@@ -1,7 +1,7 @@
 !> @file mpi_allreduce_wrappers.F90
 !! @brief Wrappers fortemente tipadas para MPI_Allreduce (MPI_SUM).
 !!
-!! Motivação (W1-FIX v12.0):
+!! Motivação:
 !!   MPI_Allreduce tem interface implícita via 'use mpi' (declarações
 !!   EXTERNAL do padrão MPI-2). O backend gfortran do Cray ftn compara
 !!   os tipos de sendbuf/recvbuf entre TODAS as chamadas ao mesmo símbolo
@@ -13,7 +13,7 @@
 !!   -Wno-argument-mismatch não suprime esse aviso: ele é gerado pela
 !!   análise de consistência de interface, não pela verificação de argumentos.
 !!
-!!   Solução (v12.0): separar as duas subrotinas em MÓDULOS DISTINTOS,
+!!   Solução: separar as duas subrotinas em MÓDULOS DISTINTOS,
 !!   cada um em seu próprio arquivo de compilação (.F90). O compilador
 !!   analisa cada arquivo em escopo fechado, sem visibilidade cruzada.
 !!   A semântica MPI é idêntica à chamada direta original.
@@ -31,7 +31,7 @@
 !!   mpi_allreduce_r8_mod  →  mpi_allreduce_r8.F90
 !!   mpi_allreduce_i4_mod  →  mpi_allreduce_i4.F90
 !!
-!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v12.0 (Maio 2026)
+!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 
 module mpi_allreduce_wrappers_mod
 

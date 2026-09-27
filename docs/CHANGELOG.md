@@ -9,12 +9,20 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Comentários do cap atmosférico e de `src/shared` sem marcas de histórico (R-FASE5-04).** Quarta etapa da fase 5. Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código.
+  - Arquivos: `mpas_cap_MONAN.F90`, `mpas_cap_methods.F90`, `mpas_cap_netcdf.F90`, `mpas_atm_model.F90`, `mpas_atm_types.F90`, `DATM_cap.F90`, `diag_bitsum.F90`, `mom6_supergrid.F90` e os três arquivos `mpi_allreduce_*.F90`.
+  - Os históricos de versão dos cabeçalhos de `mpas_cap_MONAN` (7.0 a 9.2) e `mpas_cap_netcdf` (2.5 a 3.0) foram resumidos neste CHANGELOG; no lugar, cada cabeçalho descreve o que o arquivo faz. Saíram "Fase 2/2.6/4b", "FIX v5.2", "BUG FIX v2.8", "W1/W2/W3-FIX", "CORRECAO N", "(modo concurrent, v13.x)", "v7.6)", "correção Maio 2026" e as datas de medições.
+  - Documentação desatualizada corrigida: `mpas_create_grid` citava a grade 640x320 do mediador e a fórmula antiga de decomposição; `state_get_field_1d` e `state_set_field_1d` tinham blocos `@brief` duplicados e uma nota de "trabalho futuro" já feita (o campo é reunido no PET 0 e difundido); o fluxo MPI de `mpas_cap_netcdf` citava `voronoi_to_latlon`, que não existe mais; `voronoi_accum_local` e `netcdf_push_raw_field` tinham a documentação de outras rotinas; o cabeçalho de `mpas_cap_MONAN` dava o nome `mpas_cap.F90`. Texto com codificação corrompida em `mpas_cap_methods` foi corrigido.
+  - `DATM_cap.F90`: os comentários diziam que a época do JRA55 fora corrigida para 00:00, mas o código usa 01:30; os comentários agora descrevem o que o código faz (ver a pendência no estado do projeto). O DATM não entra na configuração de validação.
+  - Conferências locais: `confere-instrucoes.py` sem diferenças nos onze arquivos; `confere-literais.py` com as constantes de texto iguais; compilação local sem avisos novos.
+
 - **Comentários dos caps do oceano e do gelo sem marcas de histórico (R-FASE5-03).** Terceira etapa da fase 5. Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código.
   - Arquivos: `mom_cap_MONAN.F90`, `sis_cap_MONAN.F90`, `DOCN_cap.F90` e `docn_cap_netcdf.F90`.
   - `mom_cap_MONAN.F90`: o histórico das versões 2.0 a 2.6 saiu do cabeçalho e foi resumido neste CHANGELOG (seção "Histórico do cap do oceano"); no lugar, o cabeçalho descreve os três modos da fração de gelo exportada e a persistência. Saíram as marcas `[C1]` a `[C13]`, `[v14.4]`, "(v2.6)", "(v14.21)", "Alternativa 1" e ".5.1". A documentação da sigmoide descrevia `DT_TRANS` = 0,5 K e frazil binário e estava antes da rotina errada; foi reescrita com os valores atuais (2,0 K, frazil contínuo, persistência) e posta antes de `compute_si_ifrac_proxy`. Saíram três blocos de documentação de rotinas que não existem mais (malha ESMF e grade lat-lon regular do oceano).
   - `sis_cap_MONAN.F90`: saíram "FIX", "TODO-VERIFICAR", "Fase 2/3/4" (trocados pelo nome do grupo de campos), "(Ago 2026)", "(, Set/2026)" e a data da bateria de diagnóstico; o bloco "Historico de correcoes" de `export_si_ifrac`, que repetia o bloco seguinte, saiu. A documentação de `import_forcing` dizia que `coszen` não tinha fonte no mediador; hoje vem de `Faxa_coszen`. O comentário de `u_star` aponta a decisão em aberto registrada em `docs/estado-do-projeto.md`.
   - `DOCN_cap.F90` e `docn_cap_netcdf.F90`: linha de versão do cabeçalho e marca "(modo concurrent, v13.1)".
   - Conferências locais: `confere-instrucoes.py` sem diferenças nos quatro arquivos; `confere-literais.py` com as constantes de texto iguais; compilação local sem avisos novos.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02.
 
 - **Comentários do mediador sem marcas de histórico (R-FASE5-02).** Segunda etapa da fase 5 (limpeza). Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código.
   - Arquivos: `MED_cap.F90`, `med_cap_types.F90`, `med_bulk_ncar.F90`, `med_cap_methods.F90` e `med_cap_netcdf.F90` (juntos, de 5598 para 5439 linhas).
@@ -773,6 +781,14 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 - Passos renomeados (nomes mais curtos, sem "install" redundante):
   `1-install-monan.bash`→`1-monan.bash`, `2-install-mom.bash`→`2-mom.bash`,
   `3-install-coupler.bash`→`3-coupler.bash`.
+
+## Histórico do cap atmosférico (`mpas_cap_MONAN.F90`, versões 7.0 a 9.2, e `mpas_cap_netcdf.F90`, versões 2.5 a 3.0, Maio 2026)
+
+Resumo do histórico que ficava nos cabeçalhos dos arquivos, retirado na R-FASE5-04.
+
+- **`mpas_cap_MONAN` 7.0**: protocolo NUOPC completo via `NUOPC_CompDerive` (InitializeAdvertise, InitializeDataComplete). **7.1**: `mpas_atm_resize` eliminado (ESMF e MPAS usam decomposições distintas). **7.2**: coordenadas do NetCDF por `lonCell(1:n_local)`, sem `ownedElemCoords` (double-free no ESMF 8.9.1 em Cray/gfortran).
+- **`mpas_cap_MONAN` 8.0**: importação estendida de So_t para So_t, Si_ifrac, So_u e So_v (antes gelo e correntes usavam valores fixos). **9.0**: importação de Sf_zorl (Charnock + Smith no mediador), no lugar de `cfg_zorl_default` = 0,01 m. **9.2**: `set_mpas_diag_clock` passou para `mpas_cap_netcdf`. Depois vieram Sf_albedo, Sx_omask e a troca de So_t por Sx_tsfc.
+- **`mpas_cap_netcdf` 2.5**: conversão dos campos acumulados movida para `mpas_atm_model.F90` (a divisão pelo tempo total desde t=0 dava a média errada depois do primeiro passo) e limiar de outlier de Faxa_taux/tauy de 1e4 para 10 N/m². **2.6**: timestamp duplo em `export_write_netcdf` corrigido (usa o currTime de ModelRun). **2.8**: decomposição MPI salva em `netcdf_init_coords` e reutilizada na escrita. **3.0**: `write_mpas_import_diag`, `set_mpas_diag_clock` e `voronoi_to_grid` vieram de `mpas_cap_methods.F90`.
 
 ## Histórico do cap do oceano (`mom_cap_MONAN.F90`, versões 2.0 a 2.6, Maio 2026)
 

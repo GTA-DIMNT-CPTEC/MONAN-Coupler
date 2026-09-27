@@ -1,31 +1,17 @@
-!> @file mpas_cap.F90
+!> @file mpas_cap_MONAN.F90
 !! @brief Cap NUOPC/ESMF para o modelo atmosferico MPAS-A 8.3 / MONAN-A 2.0.
 !!
-!! Versao 9.2 -- Reorganizacao (Mai/2026):
-!!   set_mpas_diag_clock movido de mpas_cap_methods_mod para mpas_cap_netcdf_mod
-!!   (reorganizacao de responsabilidades — Passo 6).
+!! Protocolo NUOPC completo via NUOPC_CompDerive (InitializeAdvertise,
+!! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
+!! cap exporta a forcante atmosferica do MONAN-A ao mediador e importa dele
+!! a superficie do oceano e do gelo (IMP_NAMES, abaixo). A troca com o
+!! MPAS-A fica em mpas_cap_methods.F90, e o diagnostico NetCDF em
+!! mpas_cap_netcdf.F90.
 !!
-!! Versao 9.0 --
-!!   N_IMP estendido de 4 -> 5: agora importa Sf_zorl (rugosidade Charnock)
-!!   do mediador. Substitui o default fixo cfg_zorl_default = 0.01 m
-!!   por valor dinamico calculado no MED via Charnock + Smith (1988):
-!!     z0 = 0.018 * u*^2 / g + 0.11 * nu / u*
-!!
-!! Versao 8.0 --
-!!   N_IMP estendido de 1 -> 4: agora importa So_t, Si_ifrac, So_u, So_v
-!!   do mediador (antes apenas So_t; Si_ifrac/correntes usavam defaults
-!!   fixos = 0, ignorando MOM6+SIS2 dinamico). Habilita gelo marinho,
-!!   vento relativo ao oceano e fluxos de momento corretos em alta lat.
-!!
-!! Versao 7.0 -- Protocolo NUOPC completo via NUOPC_CompDerive.
-!!
-!! Patches aplicados:
-!! v8.0: IMP_NAMES estendido com Si_ifrac/So_u/So_v
-!!   v7.0: NUOPC_CompDerive + InitializeAdvertise + InitializeDataComplete
-!!   v7.1: mpas_atm_resize eliminado (ESMF e MPAS usam decomposicoes distintas)
-!!   v7.2: coordenadas para NetCDF via lonCell(1:n_local) com
-!!          n_local = min(localCells_ESMF, nCells_MPAS) -- sem ownedElemCoords
-!!          que causa double-free no ESMF 8.9.1 em Cray/gfortran.
+!! As coordenadas para o NetCDF vem de lonCell(1:n_local), com
+!! n_local = min(localCells_ESMF, nCells_MPAS), e nao de ownedElemCoords,
+!! que causa double-free no ESMF 8.9.1 em Cray/gfortran. O historico das
+!! versoes 7.0 a 9.2 deste cap esta em docs/CHANGELOG.md.
 
 module mpas_cap_MONAN_mod
 
@@ -82,35 +68,27 @@ module mpas_cap_MONAN_mod
   type(atm_ocean_boundary_type), pointer, save :: g_atm_bnd    => null()
   type(ESMF_Grid),                        save :: g_grid
 
-  ! ── Campos importados do mediador (Fase 2 MED→MPAS) ─────────────────────────
-  !
-  ! Histórico:
-  !   v9 (Fase 1, DOCN OISST): N_IMP=1 — apenas So_t. Si_ifrac/Sf_zorl/uocn/vocn
-  !     usavam defaults fixos via cfg_*_default (gelo=0, zorl=0.01 m, correntes=0).
-  !
-  ! N_IMP=4 — So_t, Si_ifrac, So_u, So_v.
-  !
-  ! N_IMP=5 — adiciona Sf_zorl (rugosidade).
-  !     Calculada via Charnock + Smith no MED a partir de Foxx_taux/tauy.
-  !     Substitui o default fixo cfg_zorl_default = 0.01 m, habilitando
-  !     feedback dinamico vento <-> rugosidade essencial em tempestades.
+  ! ── Campos importados do mediador (MED→MPAS) ───────────────────────────────
   !
   ! O NUOPC só cria RouteHandle para campos MUTUAMENTE anunciados: o MED
-  ! anuncia So_t, Si_ifrac, So_u, So_v, Sf_zorl no exportState; o MPAS precisa
-  ! anunciá-los espelhadamente no importState (este array).
-  ! Fase 4b (, Set/2026): trocado de 'So_t' para
-  ! 'Sx_tsfc'. So_t e' SST pura do MOM6 — o SIS2 tambem a importa e precisa
-  ! dela pura para o fluxo de calor basal do gelo (ICE_KMELT). Sx_tsfc e' o
-  ! composto (1-Si_ifrac)*So_t + Si_ifrac*Si_t_sis2, calculado no MED
-  ! (MED_cap.F90) especificamente para a atmosfera, que enxerga uma unica
-  ! celula mista agua+gelo — index 1 continua alimentando atm_bnd%sst.
+  ! anuncia estes campos no exportState, e o MPAS os anuncia espelhadamente
+  ! no importState (este array).
   !
-  ! N_IMP=7 — adiciona Sx_omask, a mascara
-  ! terra/oceano REAL do MOM6 (ocean_grid%mask2dT). Nao alimenta a fisica do
-  ! MONAN-A, que tem a propria landmask; serve para mascarar continentes no
-  ! diagnostico monan2_import_*.nc, que ate' aqui so' contava com o filtro
-  ! ocean_frac_min do binning Voronoi — um criterio de COBERTURA de celula
-  ! Voronoi por bin, sem nenhuma relacao com terra/oceano.
+  ! Sx_tsfc (e nao So_t) alimenta atm_bnd%sst: So_t e' a SST pura do MOM6,
+  ! que o SIS2 tambem importa e precisa pura para o fluxo de calor basal do
+  ! gelo (ICE_KMELT); Sx_tsfc e' o composto (1-Si_ifrac)*So_t +
+  ! Si_ifrac*Si_t_sis2, calculado no MED (MED_cap.F90) para a atmosfera, que
+  ! enxerga uma unica celula mista agua+gelo.
+  !
+  ! Sf_zorl e' a rugosidade calculada no MED por Charnock + Smith a partir de
+  ! Foxx_taux/tauy, no lugar do valor fixo cfg_zorl_default = 0.01 m
+  ! (realimentacao vento <-> rugosidade, importante em tempestades).
+  !
+  ! Sx_omask e' a mascara terra/oceano REAL do MOM6 (ocean_grid%mask2dT).
+  ! Nao alimenta a fisica do MONAN-A, que tem a propria landmask; serve para
+  ! mascarar continentes no diagnostico monan2_import_*.nc, em vez de contar
+  ! so' com o filtro ocean_frac_min do binning Voronoi, um criterio de
+  ! COBERTURA de celula Voronoi por bin, sem relacao com terra/oceano.
   integer, parameter :: N_IMP = 7
   character(len=20), parameter :: IMP_NAMES(N_IMP) = [ &
     character(len=20) ::  &
@@ -119,7 +97,7 @@ module mpas_cap_MONAN_mod
     'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
     'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
     'Sf_zorl ',          &  ! Rugosidade Charnock [m] → atm_bnd%zorl
-    'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
+    'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb
     'Sx_omask' ]  ! Máscara 1=oceano/0=terra → atm_bnd%omask
 
   integer, parameter :: N_EXP = 13
@@ -430,10 +408,6 @@ contains
     call ESMF_LogWrite(subname//': ModelFinalize concluido', ESMF_LOGMSG_INFO)
   end subroutine ModelFinalize
 
-  !> @brief Preenche campos de importacao com valores padrao (t=0).
-  !!
-  !! FIX v5.2: usa ESMF_FieldGet(dimCount=) antes de farrayPtr para campos rank-2
-  !! (ESMF_Grid 360x180), evitando erro ESMF_LocalArrayGetData rank mismatch.
   !> @brief Aborta se algum campo de IMP_NAMES nao estiver conectado.
   !!
   !!
@@ -551,9 +525,8 @@ contains
   !! do MED ter executado. Sem isso, o importState chega ao mpas_import com
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
   !!
-  !! defaults estendidos para 4 campos (era 1).
+  !! Valores padrao, na ordem de IMP_NAMES:
   !!   1: Sx_tsfc  → temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
-  !! (Fase 4b, era So_t; ver IMP_NAMES)
   !!   2: Si_ifrac → fração de gelo (cfg_ice_fraction_default = 0.0)
   !!   3: So_u     → corrente zonal (0.0 m/s — oceano em repouso)
   !!   4: So_v     → corrente meridional (0.0 m/s — oceano em repouso)
@@ -570,18 +543,16 @@ contains
     integer :: i, fld_rank, localDeCount_imp
     rc = ESMF_SUCCESS
 
-    ! defaults alinhados com IMP_NAMES (5 elementos):
+    ! defaults alinhados com IMP_NAMES (N_IMP elementos):
     defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! Sx_tsfc   [K]
     defaults(2) = real(cfg_ice_fraction_default, ESMF_KIND_R8)  ! Si_ifrac  [0-1]
     defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
     defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
     defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl [m]
-    ! defaults(6) estava faltando desde a Fase 2.6 —
-    ! o array e' dimensionado por N_IMP e o laco abaixo percorre 1..N_IMP,
-    ! entao Sf_albedo era inicializado com o que houvesse na pilha. Corrigido
-    ! junto com a entrada nova, para o mesmo valor de agua aberta usado em
-    ! mpas_cap_methods.F90 e mpas_atm_model.F90.
-    defaults(6) = 0.08_ESMF_KIND_R8                             ! Sf_albedo [0-1] (Fase 2.6)
+    ! Sf_albedo: o mesmo valor de agua aberta usado em mpas_cap_methods.F90 e
+    ! mpas_atm_model.F90. O laco abaixo percorre 1..N_IMP, entao todo campo de
+    ! IMP_NAMES precisa de valor aqui.
+    defaults(6) = 0.08_ESMF_KIND_R8                             ! Sf_albedo [0-1]
     defaults(7) = 1.0_ESMF_KIND_R8                              ! Sx_omask  [0-1] — tudo oceano
 
     do i = 1, N_IMP

@@ -92,7 +92,7 @@ module mpas_atm_types_mod
 
   ! ── Condições de contorno vindas do oceano (via mediador) ─────────────────
   !
-  ! Mapeamento mediador → campo do cap (conector MED→MPAS, Fase 2):
+  ! Mapeamento mediador → campo do cap (conector MED→MPAS):
   !   So_t      → sst           SST [K]
   !   Si_ifrac  → ice_fraction  fração de gelo [0–1]
   !   So_u      → uocn          corrente zonal      a 0 m [m/s]
@@ -109,7 +109,7 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), allocatable :: uocn(:)         !< corrente zonal      0 m  [m/s]
     real(MPAS_RKIND), allocatable :: vocn(:)         !< corrente meridional 0 m  [m/s]
     real(MPAS_RKIND), allocatable :: zorl(:)         !< rugosidade               [m]
-    real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície (Fase 2.6) [0–1]
+    real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície [0–1]
     ! > máscara terra/oceano REAL do MOM6
     !! (ocean_grid%mask2dT), recebida do mediador como Sx_omask. Chega
     !! fracionária, porque atravessou dois regrids (OCN→ATM no MED e

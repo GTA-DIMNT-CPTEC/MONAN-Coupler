@@ -37,7 +37,7 @@ contains
   ! deslocamento geografico sistematico, mais visivel exatamente na costa
   ! (onde pequenos erros de posicao cruzam a fronteira terra/mar).
   !
-  ! FIX: quando cfg_use_docn=.false. (MOM6 ativo), a grade T real e' lida
+  ! Por isso, quando cfg_use_docn=.false. (MOM6 ativo), a grade T real e' lida
   ! diretamente do supergrid FRE-NCtools (ocean_hgrid.nc, mesmo arquivo
   ! apontado por mesh_ocn em nuopc.input): dimensoes = nx/ny do arquivo / 2;
   ! coordenadas T = pontos pares do supergrid (indice 2*i, 2*j). Ambas as
@@ -47,7 +47,7 @@ contains
   !============================================================================
 
   !----------------------------------------------------------------------------
-  ! mom6_supergrid_dims ? le as dimensoes do supergrid (variaveis 'nx'/'ny'
+  ! mom6_supergrid_dims: le as dimensoes do supergrid (variaveis 'nx'/'ny'
   ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
   ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
   ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).

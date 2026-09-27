@@ -5,8 +5,8 @@
 ! Checksum EXATO de campos reais, POR PET, para diagnostico de
 ! reprodutibilidade bit a bit.
 !
-! POR QUE. Os diagnosticos /-02 imprimem 17 algarismos,
-! precisao suficiente, mas so' o PET 0 e' recolhido. A bateria de 22/09/2026
+! POR QUE. Os diagnosticos FIX-DIAG-ICESRC-01/-02 imprimem 17 algarismos,
+! precisao suficiente, mas so' o PET 0 e' recolhido. Uma bateria de testes
 ! achou diferencas de exatamente 1 ulp no Si_ifrac recebido pelo MPAS
 ! (1573 pontos, r1 x r4, 01h) fora da fatia do PET 0.
 !

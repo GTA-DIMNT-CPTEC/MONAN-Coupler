@@ -50,8 +50,8 @@ module DATM_cap_mod
     model_label_DataInitialize => label_DataInitialize, &
     model_label_Advance        => label_Advance
   use NUOPC_Model, only: NUOPC_ModelGet
-  ! CORRECAO 2: removida dependencia de MOM_io (stdout, io_infra_end nao
-  !   eram utilizados e acoplavam o DATM desnecessariamente ao MOM6).
+  ! Sem dependencia de MOM_io: o DATM nao usa stdout nem io_infra_end e nao
+  ! precisa ser acoplado ao MOM6.
   use coupler_utils_mod, only : ChkErr
 
   implicit none
@@ -179,8 +179,8 @@ contains
   !============================================================================
   ! InitializeRealize - grade 640x320 (JRA55)
   !
-  ! CORRECAO 1: coordX usa (i-1)*dx + dx/2  (i eh indice global com INDEX_GLOBAL)
-  ! CORRECAO 2: coordY usa (j-1)*dy + dy/2  (idem)
+  ! Centros das celulas: coordX = (i-1)*dx + dx/2 e coordY = (j-1)*dy + dy/2,
+  ! com i e j indices globais (INDEX_GLOBAL).
   !============================================================================
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -485,18 +485,11 @@ contains
   ! Estrategia paralela: PET0 le campo global inteiro do NetCDF e faz
   ! broadcast via ESMF_VMBroadcast. Cada PET copia apenas o seu subdominio.
   !
-  ! CORRECAO 1: epochTime corrigido para 2016-01-01 00:00:00.
-  !   O valor anterior (01:30:00) causava tidx0 negativo para t=0 do
-  !   experimento (2016-01-01 00:00:00), pois sec_since_epoch ficava < 0.
-  !   O JRA55 com passo 3h tem snapshots em 00:00, 03:00, 06:00, ..., portanto
-  !   a epoca correta e o inicio do dado, nao o centro do primeiro intervalo.
-  !   Se o seu arquivo JRA55 comecar em 01:30 (centro do 1o intervalo), ajuste
-  !   aqui e documente o offset na cabecalho do arquivo.
-  !
-  ! CORRECAO 3: leitura paralela correta.
-  !   Estrategia: PET0 le o campo global inteiro do NetCDF e faz broadcast
-  !   para todos os PETs via ESMF_VMBroadcast. Cada PET entao copia apenas
-  !   o seu subdominio local (i1:i2, j1:j2) do array global.
+  ! Epoca do arquivo: epochTime (em ReadJRAFieldInterp) marca o primeiro
+  !   snapshot do JRA55, de passo 3 h. O codigo usa 2016-01-01 01:30:00, o
+  !   centro do primeiro intervalo; se o arquivo comecar em 00:00, a epoca
+  !   deve ser 00:00, senao sec_since_epoch fica < 0 para t=0 do experimento
+  !   (2016-01-01 00:00:00). Documente o offset no cabecalho do arquivo.
   !
   !   Isso e correto porque os arquivos JRA55 nao sao particionados; a
   !   leitura paralela real exigiria PIO ou NetCDF-4 paralelo, o que
@@ -535,9 +528,9 @@ contains
     nj = size(array, 2)
     allocate(buf_global(NX*NY))
     ! (f0/f1 removidos - veja declaracoes)
-    ! (modo concurrent, v13.1): VM do componente, não a global —
-    ! ver docn_cap_netcdf.F90. Evita broadcast coletivo sobre 8 PETs quando o
-    ! DATM roda só no subconjunto da atmosfera (teste DATM concorrente).
+    ! VM do componente, não a global (ver docn_cap_netcdf.F90): evita
+    ! broadcast coletivo sobre todos os PETs quando o DATM roda só no
+    ! subconjunto da atmosfera (teste DATM concorrente).
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -548,10 +541,9 @@ contains
     f1_global = 0.0_ESMF_KIND_R8
     ! Calcula indices de interpolacao temporal
     !--------------------------------------------------------------------------
-    ! CORRECAO 1: epochTime = 2016-01-01 00:00:00
-    ! O valor anterior (h=1, m=30) era o centro do primeiro intervalo JRA55,
-    ! o que causava sec_since_epoch < 0 para currTime = 2016-01-01 00:00:00
-    ! e portanto tidx0 = 0, causando leitura com indice invalido (base 1).
+    ! epochTime = 2016-01-01 01:30:00 (centro do primeiro intervalo JRA55).
+    ! Para currTime anterior a epoca, sec_since_epoch < 0 (ver o aviso abaixo);
+    ! com arquivo iniciado em 00:00, a epoca correta e' 00:00.
     !--------------------------------------------------------------------------
     call ESMF_TimeSet(epochTime, yy=2016, mm=1, dd=1, h=1, m=30, s=0, &
       calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
@@ -659,10 +651,5 @@ contains
     nc_rc = nf90_close(ncid)
 
   end subroutine ReadGlobalField
-
-  ! W3-FIX (v11.0): subroutine ReadJRAFieldByIndex removida — dead code.
-  ! Era usada em protótipo anterior de leitura por índice de tempo explícito.
-  ! A leitura atual é feita integralmente por ReadGlobalField com controle de
-  ! step interno, tornando esta rotina obsoleta.
 
 end module DATM_cap_mod

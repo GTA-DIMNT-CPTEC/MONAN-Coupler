@@ -5,7 +5,7 @@
 !! de sendbuf/recvbuf com a variante REAL(8) (mpi_allreduce_r8.F90).
 !! Ver mpi_allreduce_wrappers.F90 para a motivação completa.
 !!
-!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v12.0 (Maio 2026)
+!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 
 module mpi_allreduce_i4_mod
 

@@ -1,44 +1,12 @@
 !> @file mpas_cap_netcdf.F90
 !! @brief Diagnóstico NetCDF do cap MPAS-A: exportação e importação MED→MPAS.
 !!
-!! Versão 3.0 (Mai/2026) — GT Acoplamento de Modelos / INPE/CGCT/DIMNT
-!!
-!! MUDANÇAS EM RELAÇÃO À v2.9:
-!!   Migração de mpas_cap_methods.F90 (reorganização de responsabilidades):
-!!     write_mpas_import_diag  — escrita diagnóstica dos campos importados do MED
-!!     set_mpas_diag_clock     — injeta timestamp de simulação no diagnóstico
-!!     voronoi_to_grid         — binning Voronoi → grade lat/lon (helper privado)
-!!   Variáveis de estado do diagnóstico de importação (g_diag_*) movidas junto.
-!!   mpas_cap_methods.F90 passa a chamar write_mpas_import_diag via use deste módulo.
-!!
-!! MUDANÇAS EM RELAÇÃO À v2.5:
-!!
-!!   Bug corrigido: timestamp duplo em export_write_netcdf (v2.6).
-!!   Os parâmetros step e dt_s foram removidos da assinatura.
-!!   O currTime passado por ModelRun (yr,mo,dy,hr,mn,sc via ESMF_ClockGet)
-!!   é usado diretamente como timestamp do arquivo NetCDF.
-!!   Resultado: arquivo monan_export_YYYYMMDD_HHMMSS.nc agora recebe o
-!!   timestamp correto em vez de startTime + 2×step×dt_coupling.
-!!
-!! MUDANÇAS EM RELAÇÃO À v2.4:
-!!
-!!   Removida a lógica de conversão de campos acumulados (field_is_accumulated,
-!!   acum_factor, ÷elapsed_s). Esta conversão foi movida para mpas_atm_model.F90
-!!   (mpas_atm_run), que agora fornece campos já em unidades instantâneas:
-!!
-!!     Faxa_swdn = (acswdnb_N − acswdnb_{N−1}) / dt_coupling  [W/m²]
-!!     Faxa_lwdn = (aclwdnb_N − aclwdnb_{N−1}) / dt_coupling  [W/m²]
-!!     Faxa_prec = (rainnc_N + rainc_N − prev_N) / dt / 1000  [kg/m²/s]
-!!     Faxa_taux = ρ_a · ust² · u10 / |V10|                   [N/m²]
-!!     Faxa_tauy = ρ_a · ust² · v10 / |V10|                   [N/m²]
-!!
-!!   A divisão por elapsed_s (tempo total desde t=0) era incorreta para passos
-!!   posteriores ao primeiro: produzia a média from t=0 em vez da média do
-!!   intervalo de acoplamento corrente.
-!!
-!!   O limiar de outlier Faxa_taux/tauy foi reduzido de 1e4 para 10 N/m²
-!!   (valor físico máximo realista de stress superficial). Com o cálculo
-!!   correto via ust, não há mais lixo de memória nestes campos.
+!! Grava a forçante exportada pelo MONAN-A (monan_export_*.nc) e o
+!! diagnóstico dos campos importados do mediador (monan2_import_*.nc) numa
+!! grade regular lat/lon. Os campos já chegam de mpas_atm_model.F90 em
+!! unidades instantâneas (médias do intervalo de acoplamento para os
+!! acumulados). O histórico das versões 2.5 a 3.0 deste módulo está em
+!! docs/CHANGELOG.md.
 !!
 !! ESTRUTURA DO ARQUIVO NetCDF GERADO (grade regular 1°×1°):
 !!   dimensions  : lat(181), lon(360)
@@ -63,17 +31,17 @@
 !!   Python:  nc.variables['Sa_tbot'][:] → shape (181, 360) = (nlat, nlon) ✓
 !!
 !! FLUXO MPI:
-!!   Todos os PETs → MPI_Allgather (tamanhos locais)
-!!               → MPI_Gatherv    (dados de campo → PET0)
-!!   PET0        → voronoi_to_latlon (binning + conversão)
-!!               → nf90_create / nf90_put_var / nf90_close
+!!   Coordenadas: MPI_Allgather + MPI_Gatherv, uma vez (netcdf_init_coords).
+!!   Campos: cada PET acumula suas células Voronoi na grade lat/lon
+!!           (voronoi_accum_local) → MPI_Allreduce(SUM) de somas e contagens
+!!   PET0  → média por ponto e nf90_put_var.
 
 module mpas_cap_netcdf_mod
 
   use ESMF
   use coupler_constants_mod, only : FILL_VALUE_R8
   use mpi
-  ! W1-FIX (v12.0): wrappers tipadas em módulo separado — mpi_allreduce_wrappers.F90.
+  ! Wrappers tipadas em módulo separado (mpi_allreduce_wrappers.F90):
   ! O ftn/gfortran cruza tipos de MPI_Allreduce entre chamadas no mesmo módulo
   ! (análise de fluxo sobre interface implícita 'use mpi'). Isolar em módulo
   ! próprio elimina o cruzamento de escopo sem alterar a semântica MPI.
@@ -113,7 +81,7 @@ module mpas_cap_netcdf_mod
   real(ESMF_KIND_R8), allocatable, save :: g_lat_global(:)  ! (nGlobal) graus
   logical,                          save :: g_coords_ready = .false.
 
-  ! ── Decomposição MPI salva (BUG FIX v2.8 — Bug 3) ───────────────────────
+  ! ── Decomposição MPI salva ─────────────────────────────────────────────────
   ! Garante que allCounts/displs em export_write_netcdf sejam idênticos
   ! aos usados em netcdf_init_coords, evitando mapeamento geográfico errado.
   integer,                          save :: g_nLocal_saved  = 0
@@ -191,7 +159,7 @@ contains
   !!
   !! Chamada idempotente (retorna imediatamente se já executada).
   !!
-  !! Uso em mpas_cap.F90 (InitializeRealize), após ESMF_MeshGet:
+  !! Uso em mpas_cap_MONAN.F90 (InitializeRealize):
   !!   call netcdf_init_coords(lon_local, lat_local, nLocalElem, vm, rc)
   subroutine netcdf_init_coords(lon_local, lat_local, nLocal, vm, rc)
     real(ESMF_KIND_R8), intent(in)    :: lon_local(:)   ! longitudes do PET (graus)
@@ -250,7 +218,7 @@ contains
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
       write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lat_local falhou'
 
-    ! BUG FIX v2.8: salvar decomposicao MPI para reuso em export_write_netcdf.
+    ! Salvar a decomposicao MPI para reuso em export_write_netcdf.
     ! Garante que recvBuf(i) corresponde a g_lon/lat_global(i) — sem desfase.
     g_nLocal_saved  = nLocal
     g_nGlobal_saved = nGlobal
@@ -285,16 +253,7 @@ contains
   end subroutine netcdf_init_coords
 
   ! ============================================================================
-  !> Reúne campos do exportState, interpola para grade lat/lon e escreve NetCDF.
-  !!
-  !! Fluxo por campo (todos os PETs participam nas chamadas MPI coletivas):
-  !!   1. MPI_Gatherv → recvBuf(nGlobal) no PET0
-  !!   2. voronoi_to_latlon (PET0): nearest-neighbor binning + filtro de outliers
-  !!   3. nf90_put_var: escreve grid(NLON,NLAT) → Python lê como (nlat,nlon)
-  !!
-  !! Todos os campos chegam já em unidades instantâneas de mpas_atm_model.F90
-  !! (sem conversão de acumulados aqui).
-  ! > v2: salva dado MPAS LOCAL deste PET — sem MPI aqui.
+  !> Guarda o dado MPAS LOCAL deste PET, sem MPI.
   !! Todos os PETs têm g_raw_local(nLocal, MAX_RAW) com seus próprios dados.
   subroutine netcdf_push_raw_field(fname, data1d, nLocal, vm, rc)
     character(len=*),   intent(in)    :: fname
@@ -323,6 +282,10 @@ contains
     end if
   end subroutine netcdf_push_raw_field
 
+  !> Escreve no NetCDF os campos do exportState na grade lat/lon.
+  !!
+  !! Todos os PETs participam das chamadas MPI coletivas; os campos chegam
+  !! em unidades instantâneas de mpas_atm_model.F90 (sem conversão aqui).
   subroutine export_write_netcdf(exportState,               &
                                   elapsed_s,                &
                                   s_yr, s_mo, s_dy,         &
@@ -387,12 +350,12 @@ contains
     call ESMF_StateGet(exportState, itemNameList=fldnames, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 2-3. Decomposição MPI reutilizada de netcdf_init_coords (BUG FIX v2.8)
-    ! Antes: nLocal = size(fptr) [localCells_ESMF] podia diferir do nLocal
-    ! usado em netcdf_init_coords [min(localCells_ESMF, nCells_MPAS)],
-    ! gerando allCounts distintos e mapeamento geográfico errado no NetCDF.
-    ! Agora: reutilizar exatamente os mesmos allCounts/displs do init_coords
-    ! garante que recvBuf(i) corresponde a g_lon/lat_global(i).
+    ! ── 2-3. Decomposição MPI reutilizada de netcdf_init_coords
+    ! nLocal = size(fptr) [localCells_ESMF] pode diferir do nLocal usado em
+    ! netcdf_init_coords [min(localCells_ESMF, nCells_MPAS)]; com allCounts
+    ! distintos, o mapeamento geográfico no NetCDF sairia errado. Reutilizar
+    ! os mesmos allCounts/displs do init_coords garante que recvBuf(i)
+    ! corresponde a g_lon/lat_global(i).
     nLocal  = g_nLocal_saved
     nGlobal = g_nGlobal_saved
     allocate(allCounts(petCount), displs(petCount))
@@ -502,7 +465,7 @@ contains
 
     end if   ! localPet == 0
 
-    ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce (v2) ──────
+    ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce ───────────
     call write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
         grid_2d, ncstat, ncid, varid, rc)
 
@@ -594,7 +557,7 @@ contains
             g_lat_local_saved(1:nLocal), nLocal, acc_local, cnt_local, othr)
       end if
 
-      ! W1-FIX (v12.0): wrappers isoladas em módulo separado (mpi_allreduce_wrappers_mod).
+      ! Wrappers isoladas em módulo separado (mpi_allreduce_wrappers_mod).
       call allreduce_r8(acc_local, acc_global, NLON*NLAT, mpiComm, mpi_ierr)
       call allreduce_i4(cnt_local, cnt_global, NLON*NLAT, mpiComm, mpi_ierr)
 
@@ -613,23 +576,14 @@ contains
   end subroutine write_export_fields
 
   ! ============================================================================
-  !> Nearest-neighbor binning: mapeia células Voronoi para grade regular NLON×NLAT.
+  !> Acumulação per-PET, por vizinho mais próximo, das células Voronoi na
+  !! grade regular NLON×NLAT. Não normaliza: usar com MPI_Allreduce(SUM) e
+  !! dividir a soma pela contagem.
   !!
-  !! Para cada célula k:
-  !!   1. Descartar se |data_in(k)| > outlier_thr (fill value ou lixo de memória)
-  !!   2. Normalizar longitude para [-180, 180)
-  !!   3. Calcular índice Fortran (ilon, ilat) do ponto de grade mais próximo:
-  !!        ilon = nint((lon + 180) / DLON) + 1   [1..NLON]
-  !!        ilat = nint((lat +  90) / DLAT) + 1   [1..NLAT]
-  !!   4. Acumular soma e contagem
-  !!
-  !! Após o loop:
-  !!   grid_out(ilon,ilat) = soma / contagem   onde cnt > 0
-  !!   grid_out(ilon,ilat) = FILL_VALUE        onde cnt = 0
-  !!
-  !! Spray adaptativo em longitude (ver detalhes nos comentários inline).
-  !! Todos os campos chegam já em unidades corretas — sem conversão aqui.
-  !> Acumulação per-PET — não normaliza. Usar com MPI_Allreduce(SUM).
+  !! Para cada célula k: descarta |data_in(k)| > outlier_thr (fill value ou
+  !! lixo de memória), normaliza a longitude para [-180, 180), acha o ponto
+  !! de grade mais próximo e acumula soma e contagem, com espalhamento
+  !! adaptativo em longitude (ver comentários no código).
   subroutine voronoi_accum_local(data_in, lon_v, lat_v, n, acc, cnt, outlier_thr)
     real(ESMF_KIND_R8), intent(in)    :: data_in(n), lon_v(n), lat_v(n)
     integer,            intent(in)    :: n
@@ -664,11 +618,6 @@ contains
       end do
     end do
   end subroutine voronoi_accum_local
-
-  ! W2-FIX (v12.0): subroutine voronoi_to_latlon removida — dead code.
-  ! Supersedida pela arquitetura distribuída voronoi_accum_local + MPI_Allreduce
-  ! introduzida na versão v2. A lógica de spray por célula Voronoi foi
-  ! preservada e incorporada em voronoi_accum_local (operação per-PET local).
 
   ! ============================================================================
   ! Funções auxiliares de metadados de campo
@@ -857,7 +806,7 @@ contains
   end function datetime_to_cf_base
 
   ! ============================================================================
-  ! Diagnóstico de importação MED→MPAS (migrado de mpas_cap_methods.F90 v3.0)
+  ! Diagnóstico de importação MED→MPAS
   ! ============================================================================
 
   !> @brief Configura o timestamp do diagnóstico de importação MPAS.

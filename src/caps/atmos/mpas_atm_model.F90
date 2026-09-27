@@ -1,18 +1,15 @@
 !> @file mpas_atm_model.F90
 !! @brief Interface com o modelo atmosférico MPAS-A 8.3 / MONAN-A 2.0.
 !!
-!! Versão 5.2 — Interface MONAN-A 2.0: init/run/final/resize + buffers de acoplamento.
+!! Interface MONAN-A 2.0: init/run/final + buffers de acoplamento.
 !!
-!! MUDANÇAS EM RELAÇÃO À v5.1:
-!!   Corrigida a ausência do registro de atributos globais nas saídas do
-!!   modelo. A sequência de inicialização reproduzida deste módulo omitia
-!!   a chamada add_stream_attributes de mpas_subdriver.F (linha 364), de
-!!   modo que os arquivos diag, history e restart eram gravados apenas com
-!!   o atributo file_id. Acrescentada a rotina atm_add_stream_attributes,
-!!   cópia fiel do upstream, e sua chamada no passo 11a de mpas_atm_init.
-!!   Com -DMPAS_EXTERNAL_ESMF_LIB, mpas_timekeeping.F usa 'use ESMF' (externo).
-!!   mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (g_domain%%clock),
-!!   independente do relógio ESMF do driver. Ambos são necessários.
+!! A sequência de inicialização reproduz a de mpas_subdriver.F, inclusive
+!! add_stream_attributes (rotina atm_add_stream_attributes, cópia fiel do
+!! upstream, chamada no passo 11a de mpas_atm_init): sem ela, os arquivos
+!! diag, history e restart saem só com o atributo file_id.
+!! Com -DMPAS_EXTERNAL_ESMF_LIB, mpas_timekeeping.F usa 'use ESMF' (externo).
+!! mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (g_domain%%clock),
+!! independente do relógio ESMF do driver. Ambos são necessários.
 !!
 !! Sequência de inicialização do MONAN-A (confirmada via probe no Jaci):
 !!   phase1(external_comm) → atm_setup_core → atm_setup_domain → setup_log →
@@ -1092,7 +1089,7 @@ contains
             ! ocorre, porque sst e xice chegam pelo stream manager, que faz a
             ! troca de halo; a injecao do acoplador contornava esse caminho.
             !
-            ! A EVIDENCIA. Medicao de 17/09/2026 com dt_coupling=43200, ou
+            ! A EVIDENCIA. Numa medicao com dt_coupling=43200, ou
             ! seja, duas janelas de acoplamento, das quais apenas a segunda
             ! injeta (a primeira e' pulada pela guarda):
             ! quatro execucoes identicas, seis pares comparados, SEIS
@@ -1162,10 +1159,9 @@ contains
 
     call mpas_log_write('mpas_atm_run: core_run concluido')
 
-    ! reabre sfc_albedo (diag_physics) DEPOIS de
-    ! core_run e compara com o valor injetado ANTES (diag_alb_before), na
-    ! mesma celula de oceano (diag_alb_cell). Ja validado em producao
-    ! (Set/2026, preservado=T) — gated por cfg_write_fixdiag.
+    ! Diagnostico: reabre sfc_albedo (diag_physics) DEPOIS de core_run e
+    ! compara com o valor injetado ANTES (diag_alb_before), na mesma celula
+    ! de oceano (diag_alb_cell). Condicionado a cfg_write_fixdiag.
     if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
         call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', &
           diag_physicsPool_after)
@@ -1480,7 +1476,7 @@ contains
     if (allocated(atm_bnd%uocn))          deallocate(atm_bnd%uocn)
     if (allocated(atm_bnd%vocn))          deallocate(atm_bnd%vocn)
     if (allocated(atm_bnd%zorl))          deallocate(atm_bnd%zorl)
-    if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)     ! Fase 2.6
+    if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)
     if (allocated(atm_bnd%omask))         deallocate(atm_bnd%omask)
     ! Buffers de saída computados (propriedade deste módulo)
     if (allocated(g_prev_acswdnb)) deallocate(g_prev_acswdnb)
