@@ -11,14 +11,14 @@
 #   REF      pasta com baseline/, exp/ e o experimento modelo
 #            (a pasta que contém Coupler-Install/)
 #   MODELO   experimento com as entradas ($REF/exp_monan2xmom6)
-#   BASE     linha de base de referência (R-NOFMA-01)
+#   BASE     linha de base de referência (R-NOFMA-02)
 #   NPES     número de processos (152)
 # Os diretórios de rodada ficam em $REF/exp/NOME.
 set -u
 COUPLER_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 REF=${REF:-$(cd "${COUPLER_ROOT}/../.." && pwd)}
 MODELO=${MODELO:-${REF}/exp_monan2xmom6}
-BASE=${BASE:-R-NOFMA-01}
+BASE=${BASE:-R-NOFMA-02}
 BASEL=${REF}/baseline/${BASE}
 NPES=${NPES:-152}
 export COUPLER_ROOT

@@ -6,6 +6,9 @@ INPE / CGCT / DIMNT, Grupo de Trabalho para Acoplamento de Modelos. Máquina de 
 
 Componentes: MPAS-A 8.3.1 · MOM6 + SIS2 · ESMF/NUOPC 8.9.1. Branch de desenvolvimento: `develop`.
 
+
+Para o estado atual da refatoração, as linhas de base e como validar uma alteração, veja [`docs/estado-do-projeto.md`](docs/estado-do-projeto.md).
+
 ## Arquitetura
 
 Quatro componentes NUOPC orquestrados por um driver único sob um relógio ESMF global. O componente de gelo (ICE, cap do SIS2) é opcional e só é criado com `use_sis2_dynamic = .true.`.

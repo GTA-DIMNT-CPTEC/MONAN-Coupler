@@ -1,15 +1,16 @@
 # Validação de alterações de código na Jaci
 
-Roteiro para confirmar que uma alteração de código (refatoração, reorganização, correção que não deve mexer em cálculos) reproduz bit a bit uma linha de base. Foi o procedimento usado nas etapas R-FASE1-01 e R-FASE2A-01, em setembro de 2026.
+Roteiro para confirmar que uma alteração de código (refatoração, reorganização, correção que não deve mexer em cálculos) reproduz bit a bit uma linha de base. Foi o procedimento usado em todas as etapas da refatoração, de R-FASE1-01 a R-FASE3-03, em setembro de 2026.
 
 ## Linhas de base existentes
 
 | Rótulo | Código | Compilação | Uso |
 | --- | --- | --- | --- |
 | R-REF-00 | `ea10fb6` (develop) | com FMA (compilação anterior ao Makefile 16.1) | registro histórico |
-| **R-NOFMA-01** | `ea10fb6` (develop) | `-ffp-contract=off` | **referência atual** |
+| R-NOFMA-01 | `ea10fb6` (develop) | `-ffp-contract=off` | referência das fases 2A a 3 |
+| **R-NOFMA-02** | tag `fase3-03-validada` | `-ffp-contract=off` | **referência atual**: dados idênticos aos da R-NOFMA-01; os 24 `monan2_import_*` têm os atributos CF novos nos eixos |
 
-As duas usam a mesma configuração: `pet_layout = split`, 128 + 20 + 4 PETs (152), modo concorrente com SIS2 dinâmico, rodada de 1 dia (24 passos de 3600 s).
+Todas usam a mesma configuração: `pet_layout = split`, 128 + 20 + 4 PETs (152), modo concorrente com SIS2 dinâmico, rodada de 1 dia (24 passos de 3600 s).
 
 ## 1. Compilar
 
@@ -40,7 +41,7 @@ bash $COUPLER_ROOT/tools/dev/valida_rodada.bash compara teste_01
 | `submete NOME` | roda o `--check` e submete com 152 PETs; espera o job terminar |
 | `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados e compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças |
 
-Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-01`) e `NPES` (padrão: 152). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
+Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`) e `NPES` (padrão: 152). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
 
 Não altere o repositório (`git switch`, `git am`, `make`) enquanto o job estiver na fila ou rodando.
 

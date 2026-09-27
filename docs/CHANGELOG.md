@@ -9,6 +9,8 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Documentação de passagem (R-FASE3-04).** Novo `docs/estado-do-projeto.md`, com o ambiente, as etapas validadas, as linhas de base, o roteiro de validação, as armadilhas encontradas e as pendências. O `valida_rodada.bash` e o roteiro de validação passam a usar a linha de base R-NOFMA-02 como padrão.
+
 - **Comentários sem marcas de histórico (R-FASE3-03).** Retiradas de 482 linhas de comentário, em 17 arquivos, as marcas de correção e de etapa (`FIX B-OCNGRID-01`, `BUG-NC-03`, `B-45`, `Sprint A (Maio 2026)` e semelhantes), que já estão neste CHANGELOG e no histórico do git. O texto explicativo foi mantido; linhas que só continham a marca foram removidas. Conferido arquivo a arquivo que as instruções de código, descontados espaços e comentários, são as mesmas de antes; mensagens de log não foram alteradas.
   - `valida_rodada.bash compara`: mostra sempre a linha de contagem e o veredito PASS/FAIL, com um resumo, por prefixo de arquivo, dos arquivos que diferem só nos metadados.
 
