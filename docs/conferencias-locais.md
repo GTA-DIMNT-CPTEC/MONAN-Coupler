@@ -58,7 +58,7 @@ Junta as linhas de continuação, retira comentários, espaços e diferença de 
 tests/writers/compara-gravadores.bash HEAD
 ```
 
-Compila a versão do commit e a da árvore de trabalho, liga a cada uma o programa `tests/writers/test_writers.F90` e o executa com 4 processos MPI e dados sintéticos. O programa chama `med_write_import_fields` (mediador) e `write_mpas_import_diag` (cap atmosférico) duas vezes cada, com valores inválidos, máscara de terra e, na segunda chamada, membros de `atm_bnd` ausentes. O script compara byte a byte os arquivos NetCDF gravados e compara as mensagens dos gravadores no log do ESMF. Sai com código 0 se tudo for idêntico. Com a mudança ainda não gravada, compare com `HEAD`; depois do commit, com `HEAD~1`.
+Compila a versão do commit e a da árvore de trabalho, liga a cada uma o programa `tests/writers/test_writers.F90` e o executa com 4 processos MPI e dados sintéticos. O programa chama `med_write_import_fields` (mediador) e `write_mpas_import_diag` (cap atmosférico) duas vezes cada, com valores inválidos, máscara de terra e, na segunda chamada, membros de `atm_bnd` ausentes. Chama também `WriteDOCNDiag` (oceano de dados) três vezes, cada uma com um arquivo `&nuopc_docn` lido por `config_read` e com arquivos NetCDF de SST, gelo e correntes que o próprio programa grava numa grade 36 x 18: sem correntes e com o gelo em fração; com correntes, gelo em porcentagem e nomes diferentes para a dimensão de tempo; e com o arquivo de SST ausente, que só gera um aviso no log. Esse teste é a única verificação do `WriteDOCNDiag`, porque a rodada da linha de base não usa o DOCN. O script compara byte a byte os arquivos NetCDF gravados e compara as mensagens dos gravadores no log do ESMF. Sai com código 0 se tudo for idêntico. Com a mudança ainda não gravada, compare com `HEAD`; depois do commit, com `HEAD~1`.
 
 O lançador do MPI pode ser trocado pela variável `MPIRUN` (padrão: `mpiexec`). O número de processos (`NP`, padrão 4) tem de ser par, porque a grade do teste é dividida em 2 x NP/2 blocos.
 
@@ -85,6 +85,6 @@ Uma interface mínima pode estar errada; por isso, antes de confiar nela para um
 1. `tools/dev/compila-local.bash`: nenhum fonte com falha e nenhum aviso novo.
 2. `tools/dev/confere-literais.py HEAD`: nenhuma diferença, ou só as anunciadas.
 3. Em etapas que só movem código: `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado.
-4. Se a etapa mexe em `med_cap_netcdf.F90` ou `mpas_cap_netcdf.F90`: `tests/writers/compara-gravadores.bash HEAD`.
+4. Se a etapa mexe em `med_cap_netcdf.F90`, `mpas_cap_netcdf.F90` ou `docn_cap_netcdf.F90`: `tests/writers/compara-gravadores.bash HEAD`.
 5. Se a etapa mexe em `med_bulk_ncar.F90`: `tests/bulk/compara-bulk.bash HEAD`.
 6. Rodada na Jaci com `tools/dev/valida_rodada.bash`.

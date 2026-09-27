@@ -275,6 +275,12 @@ contains
   !! na grade nativa do DOCN (sem reprojeção). Somente PET0 escreve; demais
   !! executam MPI_Barrier e retornam. Validação de SST/gelo vs fonte de dados.
   !!
+  !! Etapas: posição no tempo dos dados (docn_epoch_seconds), SST
+  !! (interp_docn_sst), fração de gelo (interp_docn_ice), correntes
+  !! (interp_docn_currents) e gravação do arquivo (write_docn_diag_file).
+  !! Os instantes vizinhos e o peso da interpolação seguem o mesmo algoritmo
+  !! de ReadOcnFieldInterp.
+  !!
   !! Ativada por write_import_diag=.true. em &nuopc_docn do nuopc.input.
   !! Lida por: postproc_mom6_import.py
   !!
@@ -290,24 +296,12 @@ contains
     integer,              intent(out) :: rc
 
     type(ESMF_VM)  :: vm
-    type(ESMF_Time):: epochTime
-    type(ESMF_TimeInterval) :: dt_since_epoch
     integer(ESMF_KIND_I8)   :: sec_since_epoch, dt_data_i8
     integer :: localPet, mpiComm, mpiErr
     integer :: yy, mm, dd, hh, mn, ss
-    character(len=256) :: fname, dname
-    character(len=19)  :: tstamp
-    integer :: ncid_r, ncid_w
-    integer :: varid_src, ncstat
-    logical :: ok
-    integer :: varid_sst, varid_ice, varid_u, varid_v
-    integer :: varid_lat, varid_lon, dimid_lon, dimid_lat
-    integer :: ntime, dimid_nt, tidx0, tidx1
-    integer :: ntime_i, dimid_nt_i, tidx0_i, tidx1_i
-    integer :: ntime_cur, dimid_nt_cur, tidx0_cur, tidx1_cur
-    real(ESMF_KIND_R8) :: alpha, alpha_i, fill_val
-    integer :: nlon_diag, nlat_diag, i, j
-    real(ESMF_KIND_R8), allocatable :: lon_ax(:), lat_ax(:)
+    integer :: ntime, tidx0, tidx1
+    logical :: opened
+    real(ESMF_KIND_R8) :: alpha, fill_val
     real(ESMF_KIND_R8), allocatable :: f0(:,:), f1(:,:), fout(:,:)
     real(ESMF_KIND_R8), allocatable :: ice0(:,:), ice1(:,:), iceout(:,:)
     real(ESMF_KIND_R8), allocatable :: uout(:,:), vout(:,:)
@@ -325,9 +319,40 @@ contains
 
     call ESMF_TimeGet(currTime, yy=yy, mm=mm, dd=dd, h=hh, m=mn, s=ss, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    write(tstamp,'(I4.4,I2.2,I2.2,A,I2.2,I2.2,I2.2)') yy,mm,dd,'_',hh,mn,ss
 
-    ! ── Calcular tidx0, tidx1, alpha (mesmo algoritmo de ReadOcnFieldInterp) ──
+    call docn_epoch_seconds(currTime, sec_since_epoch, dt_data_i8, rc)
+    if (rc /= ESMF_SUCCESS) return
+    alpha = real(mod(sec_since_epoch, dt_data_i8), ESMF_KIND_R8) / real(dt_data_i8, ESMF_KIND_R8)
+    alpha = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, alpha))
+
+    allocate(f0(nx,ny), f1(nx,ny), fout(nx,ny))
+    allocate(uout(nx,ny), vout(nx,ny))
+    uout = 0.0_ESMF_KIND_R8; vout = 0.0_ESMF_KIND_R8
+    call interp_docn_sst(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
+                         f0, f1, fout, ntime, tidx0, tidx1, opened)
+    if (.not. opened) return
+
+    allocate(ice0(nx,ny), ice1(nx,ny), iceout(nx,ny))
+    call interp_docn_ice(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, ntime, &
+                         ice0, ice1, iceout)
+
+    call interp_docn_currents(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
+                              f0, f1, uout, vout)
+
+    call write_docn_diag_file(nx, ny, yy, mm, dd, hh, mn, ss, tidx0, tidx1, alpha, &
+                              fill_val, fout, iceout, uout, vout)
+  end subroutine WriteDOCNDiag
+
+  !=============================================================================
+  !> @brief Segundos desde a época dos dados e intervalo entre instantes (s).
+  !=============================================================================
+  subroutine docn_epoch_seconds(currTime, sec_since_epoch, dt_data_i8, rc)
+    type(ESMF_Time),       intent(in)  :: currTime
+    integer(ESMF_KIND_I8), intent(out) :: sec_since_epoch, dt_data_i8
+    integer,               intent(out) :: rc
+    type(ESMF_Time) :: epochTime
+    type(ESMF_TimeInterval) :: dt_since_epoch
+
     call ESMF_TimeSet(epochTime, yy=cfg_docn_epoch_year, &
       mm=cfg_docn_epoch_month, dd=cfg_docn_epoch_day, rc=rc)
     if (rc /= ESMF_SUCCESS) return
@@ -335,8 +360,64 @@ contains
     call ESMF_TimeIntervalGet(dt_since_epoch, s_i8=sec_since_epoch, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     dt_data_i8 = int(cfg_docn_dt_data, ESMF_KIND_I8)
+  end subroutine docn_epoch_seconds
 
-    ! ntime da SST
+  !=============================================================================
+  !> @brief Tamanho da dimensão de tempo de um arquivo aberto.
+  !!
+  !! Procura a dimensão pelos nomes 'time' e 'Time' e, se all_caps, também
+  !! 'TIME'. Sem a dimensão, devolve n_default.
+  !=============================================================================
+  integer function docn_time_len(ncid_r, n_default, all_caps) result(ntime)
+    integer, intent(in) :: ncid_r, n_default
+    logical, intent(in) :: all_caps
+    integer :: dimid_nt, ncstat
+
+    ncstat = nf90_inq_dimid(ncid_r, 'time', dimid_nt)
+    if (ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'Time', dimid_nt)
+    if (all_caps .and. ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'TIME', dimid_nt)
+    if (ncstat == NF90_NOERR) then
+      ncstat = nf90_inquire_dimension(ncid_r, dimid_nt, len=ntime)
+    else
+      ntime = n_default
+    end if
+  end function docn_time_len
+
+  !=============================================================================
+  !> @brief Instantes dos dados antes (tidx0) e depois (tidx1) do tempo atual.
+  !!
+  !! Os dados se repetem em ciclo de ntime instantes: depois do último vem o
+  !! primeiro.
+  !=============================================================================
+  pure subroutine docn_time_indices(sec_since_epoch, dt_data_i8, ntime, tidx0, tidx1)
+    integer(ESMF_KIND_I8), intent(in)  :: sec_since_epoch, dt_data_i8
+    integer,               intent(in)  :: ntime
+    integer,               intent(out) :: tidx0, tidx1
+
+    tidx0 = mod(int(sec_since_epoch / real(dt_data_i8, ESMF_KIND_R8)), ntime) + 1
+    tidx1 = mod(tidx0, ntime) + 1
+  end subroutine docn_time_indices
+
+  !=============================================================================
+  !> @brief SST interpolada no tempo, em K, do arquivo cfg_docn_sst_file.
+  !!
+  !! Pontos com valor ausente (|valor| > 1e10) em algum dos dois instantes
+  !! recebem fill_val; sem a variável, o campo inteiro recebe fill_val. Se o
+  !! arquivo não abre, registra um aviso e devolve opened = .false.
+  !! ntime (número de instantes do arquivo) serve de padrão para o gelo.
+  !=============================================================================
+  subroutine interp_docn_sst(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
+                             f0, f1, fout, ntime, tidx0, tidx1, opened)
+    integer,               intent(in)    :: nx, ny
+    integer(ESMF_KIND_I8), intent(in)    :: sec_since_epoch, dt_data_i8
+    real(ESMF_KIND_R8),    intent(in)    :: alpha, fill_val
+    real(ESMF_KIND_R8),    intent(inout) :: f0(:,:), f1(:,:)
+    real(ESMF_KIND_R8),    intent(out)   :: fout(:,:)
+    integer,               intent(out)   :: ntime, tidx0, tidx1
+    logical,               intent(out)   :: opened
+    integer :: ncid_r, varid_src, ncstat
+
+    opened = .false.
     ncstat = nf90_open(trim(cfg_docn_sst_file), NF90_NOWRITE, ncid_r)
     if (ncstat /= NF90_NOERR) then
       call ESMF_LogWrite('WriteDOCNDiag: falha ao abrir '// &
@@ -344,23 +425,10 @@ contains
         ESMF_LOGMSG_WARNING)
       return
     end if
-    ncstat = nf90_inq_dimid(ncid_r, 'time', dimid_nt)
-    if (ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'Time', dimid_nt)
-    if (ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'TIME', dimid_nt)
-    if (ncstat == NF90_NOERR) then
-      ncstat = nf90_inquire_dimension(ncid_r, dimid_nt, len=ntime)
-    else
-      ntime = huge(ntime)
-    end if
-    tidx0 = mod(int(sec_since_epoch / real(dt_data_i8, ESMF_KIND_R8)), ntime) + 1
-    tidx1 = mod(tidx0, ntime) + 1
-    alpha = real(mod(sec_since_epoch, dt_data_i8), ESMF_KIND_R8) / real(dt_data_i8, ESMF_KIND_R8)
-    alpha = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, alpha))
+    opened = .true.
+    ntime = docn_time_len(ncid_r, huge(ntime), .true.)
+    call docn_time_indices(sec_since_epoch, dt_data_i8, ntime, tidx0, tidx1)
 
-    ! Ler dois snapshots SST e interpolar
-    allocate(f0(nx,ny), f1(nx,ny), fout(nx,ny))
-    allocate(uout(nx,ny), vout(nx,ny))
-    uout = 0.0_ESMF_KIND_R8; vout = 0.0_ESMF_KIND_R8
     ncstat = nf90_inq_varid(ncid_r, trim(cfg_docn_sst_varname), varid_src)
     if (ncstat == NF90_NOERR) then
       ncstat = nf90_get_var(ncid_r, varid_src, f0, start=[1,1,tidx0], count=[nx,ny,1])
@@ -373,21 +441,33 @@ contains
       fout = fill_val
     end if
     ncstat = nf90_close(ncid_r)
+  end subroutine interp_docn_sst
 
-    ! ntime do gelo
+  !=============================================================================
+  !> @brief Fração de gelo interpolada no tempo, do arquivo cfg_docn_ice_file.
+  !!
+  !! Com cfg_docn_ice_pct, os dados estão em % e são divididos por 100. O
+  !! resultado é limitado a [0,1]; valores ausentes recebem fill_val. Sem o
+  !! arquivo ou sem a variável, o campo inteiro recebe fill_val. Sem a
+  !! dimensão de tempo, usa o número de instantes da SST (ntime_sst).
+  !=============================================================================
+  subroutine interp_docn_ice(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
+                             ntime_sst, ice0, ice1, iceout)
+    integer,               intent(in)    :: nx, ny
+    integer(ESMF_KIND_I8), intent(in)    :: sec_since_epoch, dt_data_i8
+    real(ESMF_KIND_R8),    intent(in)    :: alpha, fill_val
+    integer,               intent(in)    :: ntime_sst
+    real(ESMF_KIND_R8),    intent(inout) :: ice0(:,:), ice1(:,:)
+    real(ESMF_KIND_R8),    intent(out)   :: iceout(:,:)
+    integer :: ncid_r, varid_src, ncstat
+    integer :: ntime_i, tidx0_i, tidx1_i
+    real(ESMF_KIND_R8) :: alpha_i
+
     ncstat = nf90_open(trim(cfg_docn_ice_file), NF90_NOWRITE, ncid_r)
-    allocate(ice0(nx,ny), ice1(nx,ny), iceout(nx,ny))
     iceout = fill_val
     if (ncstat == NF90_NOERR) then
-      ncstat = nf90_inq_dimid(ncid_r, 'time', dimid_nt_i)
-      if (ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'Time', dimid_nt_i)
-      if (ncstat == NF90_NOERR) then
-        ncstat = nf90_inquire_dimension(ncid_r, dimid_nt_i, len=ntime_i)
-      else
-        ntime_i = ntime
-      end if
-      tidx0_i = mod(int(sec_since_epoch / real(dt_data_i8, ESMF_KIND_R8)), ntime_i) + 1
-      tidx1_i = mod(tidx0_i, ntime_i) + 1
+      ntime_i = docn_time_len(ncid_r, ntime_sst, .false.)
+      call docn_time_indices(sec_since_epoch, dt_data_i8, ntime_i, tidx0_i, tidx1_i)
       alpha_i  = alpha
       ncstat = nf90_inq_varid(ncid_r, trim(cfg_docn_ice_varname), varid_src)
       if (ncstat == NF90_NOERR) then
@@ -401,21 +481,32 @@ contains
       end if
       ncstat = nf90_close(ncid_r)
     end if
+  end subroutine interp_docn_ice
 
-    ! ── Correntes superficiais (opcional) ─────────────────────────────────────
-    ! usar tidx calculado para o cur_file (ntime independente do SST)
+  !=============================================================================
+  !> @brief Correntes superficiais interpoladas no tempo (opcional).
+  !!
+  !! Lidas de cfg_docn_cur_file, com os mesmos pesos da SST e com os
+  !! instantes calculados pelo número de instantes do próprio arquivo (1 se
+  !! não houver dimensão de tempo). Valores com módulo >= 10 m/s, no
+  !! resultado ou em algum dos instantes, recebem fill_val. Sem o arquivo
+  !! ou sem a variável, a componente é zero. f0 e f1 são áreas de trabalho.
+  !=============================================================================
+  subroutine interp_docn_currents(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
+                                  f0, f1, uout, vout)
+    integer,               intent(in)    :: nx, ny
+    integer(ESMF_KIND_I8), intent(in)    :: sec_since_epoch, dt_data_i8
+    real(ESMF_KIND_R8),    intent(in)    :: alpha, fill_val
+    real(ESMF_KIND_R8),    intent(inout) :: f0(:,:), f1(:,:)
+    real(ESMF_KIND_R8),    intent(inout) :: uout(:,:), vout(:,:)
+    integer :: ncid_r, varid_src, ncstat
+    integer :: ntime_cur, tidx0_cur, tidx1_cur
+
     if (len_trim(cfg_docn_cur_file) > 0) then
       ncstat = nf90_open(trim(cfg_docn_cur_file), NF90_NOWRITE, ncid_r)
       if (ncstat == NF90_NOERR) then
-        ncstat = nf90_inq_dimid(ncid_r, 'time', dimid_nt_cur)
-        if (ncstat /= NF90_NOERR) ncstat = nf90_inq_dimid(ncid_r, 'Time', dimid_nt_cur)
-        if (ncstat == NF90_NOERR) then
-          ncstat = nf90_inquire_dimension(ncid_r, dimid_nt_cur, len=ntime_cur)
-        else
-          ntime_cur = 1
-        end if
-        tidx0_cur = mod(int(sec_since_epoch / real(dt_data_i8, ESMF_KIND_R8)), ntime_cur) + 1
-        tidx1_cur = mod(tidx0_cur, ntime_cur) + 1
+        ntime_cur = docn_time_len(ncid_r, 1, .false.)
+        call docn_time_indices(sec_since_epoch, dt_data_i8, ntime_cur, tidx0_cur, tidx1_cur)
 
         ncstat = nf90_inq_varid(ncid_r, trim(cfg_docn_cur_u_varname), varid_src)
         if (ncstat == NF90_NOERR) then
@@ -447,24 +538,41 @@ contains
     else
       uout = 0.0_ESMF_KIND_R8; vout = 0.0_ESMF_KIND_R8
     end if
+  end subroutine interp_docn_currents
 
-    ! ── Escrever NetCDF de diagnóstico (grade nativa DOCN) ────────────────────
-    nlon_diag = nx
-    nlat_diag = ny
+  !=============================================================================
+  !> @brief Grava o arquivo docn_import_AAAAMMDD_HHMMSS.nc em cfg_import_diag_dir.
+  !!
+  !! Eixos na grade nativa do DOCN: longitude de 0 a 360 - 360/nx graus
+  !! (o postproc_mom6_import.py faz o deslocamento) e latitude de -90 a 90.
+  !=============================================================================
+  subroutine write_docn_diag_file(nx, ny, yy, mm, dd, hh, mn, ss, tidx0, tidx1, alpha, &
+                                  fill_val, fout, iceout, uout, vout)
+    integer,            intent(in) :: nx, ny, yy, mm, dd, hh, mn, ss, tidx0, tidx1
+    real(ESMF_KIND_R8), intent(in) :: alpha, fill_val
+    real(ESMF_KIND_R8), intent(in) :: fout(:,:), iceout(:,:), uout(:,:), vout(:,:)
+    character(len=256) :: fname, dname
+    character(len=19)  :: tstamp
+    integer :: ncid_w, ncstat, i, j
+    integer :: varid_sst, varid_ice, varid_u, varid_v
+    integer :: varid_lat, varid_lon, dimid_lon, dimid_lat
+    logical :: ok
+    real(ESMF_KIND_R8), allocatable :: lon_ax(:), lat_ax(:)
+
+    write(tstamp,'(I4.4,I2.2,I2.2,A,I2.2,I2.2,I2.2)') yy,mm,dd,'_',hh,mn,ss
     dname = trim(cfg_import_diag_dir)
     call execute_command_line('mkdir -p '//trim(dname), wait=.true.)
     fname = trim(dname)//'/docn_import_'//trim(tstamp)//'.nc'
 
-    allocate(lon_ax(nlon_diag), lat_ax(nlat_diag))
-    ! Eixo lon nativo OISST: 0° → 359.75°. O postproc_mom6_import.py aplica roll.
-    do i = 1, nlon_diag
-      lon_ax(i) = real(i-1, ESMF_KIND_R8) * (360.0_ESMF_KIND_R8 / nlon_diag)
+    allocate(lon_ax(nx), lat_ax(ny))
+    do i = 1, nx
+      lon_ax(i) = real(i-1, ESMF_KIND_R8) * (360.0_ESMF_KIND_R8 / nx)
     end do
-    do j = 1, nlat_diag
-      lat_ax(j) = -90.0_ESMF_KIND_R8 + real(j-1, ESMF_KIND_R8) * (180.0_ESMF_KIND_R8 / (nlat_diag-1))
+    do j = 1, ny
+      lat_ax(j) = -90.0_ESMF_KIND_R8 + real(j-1, ESMF_KIND_R8) * (180.0_ESMF_KIND_R8 / (ny-1))
     end do
 
-    if (.not. nc_create(fname, ncid_w, 'WriteDOCNDiag')) goto 99
+    if (.not. nc_create(fname, ncid_w, 'WriteDOCNDiag')) return
 
     call nc_global_header(ncid_w, &
       title='DOCN importState — SST/gelo interpolados por passo (campo global)', &
@@ -486,9 +594,9 @@ contains
       'PET0 direct re-read (B-58v2) — grid='//trim(merge('1440x720','360x180 ', &
        trim(cfg_docn_mode)=='netcdf')))
 
-    if (.not. nc_def_latlon(ncid_w, nlon_diag, nlat_diag, dimid_lon, dimid_lat, &
+    if (.not. nc_def_latlon(ncid_w, nx, ny, dimid_lon, dimid_lat, &
                             varid_lon, varid_lat, 'WriteDOCNDiag')) then
-      ncstat = nf90_close(ncid_w); goto 99
+      ncstat = nf90_close(ncid_w); return
     end if
 
     ok = nc_def_field2d(ncid_w, 'So_t', dimid_lon, dimid_lat, varid_sst, 'WriteDOCNDiag', &
@@ -518,14 +626,6 @@ contains
     call ESMF_LogWrite('WriteDOCNDiag: '//trim(fname)//' (tidx0='// &
       int_to_str(tidx0)//' alpha='// &
       real_to_str(alpha)//') [B-58v2]', ESMF_LOGMSG_INFO)
-
-    99 continue
-    if (allocated(f0))    deallocate(f0, f1, fout)
-    if (allocated(ice0))  deallocate(ice0, ice1, iceout)
-    if (allocated(uout))  deallocate(uout, vout)
-    if (allocated(lon_ax)) deallocate(lon_ax, lat_ax)
-
-
-  end subroutine WriteDOCNDiag
+  end subroutine write_docn_diag_file
 
 end module docn_cap_netcdf_mod

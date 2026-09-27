@@ -1,5 +1,6 @@
-! Teste de regressão dos gravadores de diagnóstico: med_write_import_fields
-! e write_mpas_import_diag, com dados sintéticos e vários PETs. Ligado uma
+! Teste de regressão dos gravadores de diagnóstico: med_write_import_fields,
+! write_mpas_import_diag e WriteDOCNDiag, com dados sintéticos e vários
+! PETs. Ligado uma
 ! vez com os objetos antigos e uma vez com os novos; os arquivos gravados
 ! têm de ser idênticos. Executado por tests/writers/compara-gravadores.bash,
 ! com um número par de processos (a grade é dividida em 2 x NP/2).
@@ -10,6 +11,9 @@ program test_writers
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
   use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock
+  use docn_cap_netcdf_mod, only : WriteDOCNDiag
+  use coupler_config_mod, only : config_read
+  use netcdf
   implicit none
 
   type(ESMF_VM) :: vm
@@ -93,6 +97,9 @@ program test_writers
   call set_mpas_diag_clock(2026, 3, 29, 2, 0, 0)
   call write_mpas_import_diag(bnd, nloc, lonc, latc, rc)
 
+  ! ── oceano de dados (DOCN) ───────────────────────────────────────────
+  call docn_cases()
+
   call ESMF_Finalize(rc=rc)
 
 contains
@@ -124,6 +131,98 @@ contains
       end do
     end do
   end subroutine mkmask
+
+  !> Casos do WriteDOCNDiag. A configuração vem de arquivos &nuopc_docn
+  !! gravados aqui e lidos por config_read; os dados, de arquivos NetCDF
+  !! sintéticos na grade 36 x 18. Casos: (1) sem correntes, gelo em fração,
+  !! dimensão de tempo 'time' no gelo; (2) com correntes (valores >= 10
+  !! descartados), gelo em porcentagem, dimensão 'Time' no gelo e 'TIME'
+  !! na SST, outro dt_data; (3) arquivo de SST ausente (só o aviso no log).
+  subroutine docn_cases()
+    integer, parameter :: NXD = 36, NYD = 18
+    type(ESMF_GridComp) :: gc
+    type(ESMF_Time) :: td
+    integer :: ierr
+
+    gc = ESMF_GridCompCreate(name='docn_teste', rc=rc)
+    if (localPet == 0) then
+      call cria_nc('in_sst_1.nc', 'time', ['sst '], 4, 1)
+      call cria_nc('in_ice_1.nc', 'time', ['icec'], 4, 2)
+      call cria_nc('in_sst_2.nc', 'TIME', ['sst '], 5, 1)
+      call cria_nc('in_ice_2.nc', 'Time', ['icec'], 3, 3)
+      call cria_nc('in_cur_2.nc', 'time', ['uo  ', 'vo  '], 2, 4)
+      call nml('docn_1.nml', 'in_sst_1.nc', 'in_ice_1.nc', '', 86400, '.false.')
+      call nml('docn_2.nml', 'in_sst_2.nc', 'in_ice_2.nc', 'in_cur_2.nc', 43200, '.true.')
+      call nml('docn_3.nml', 'nao_existe.nc', 'in_ice_1.nc', '', 86400, '.false.')
+    end if
+    call MPI_Barrier(comm, ierr)
+
+    call config_read(rc, 'docn_1.nml')
+    call ESMF_TimeSet(td, yy=2026, mm=3, dd=29, h=6, m=0, s=0, rc=rc)
+    call WriteDOCNDiag(gc, td, NXD, NYD, rc)
+    call config_read(rc, 'docn_2.nml')
+    call ESMF_TimeSet(td, yy=2026, mm=3, dd=29, h=10, m=30, s=0, rc=rc)
+    call WriteDOCNDiag(gc, td, NXD, NYD, rc)
+    call config_read(rc, 'docn_3.nml')
+    call ESMF_TimeSet(td, yy=2026, mm=3, dd=29, h=12, m=0, s=0, rc=rc)
+    call WriteDOCNDiag(gc, td, NXD, NYD, rc)
+  end subroutine docn_cases
+
+  !> Grava um arquivo &nuopc_docn para config_read.
+  subroutine nml(fname, sst, ice, cur, dt_data, ice_pct)
+    character(len=*), intent(in) :: fname, sst, ice, cur, ice_pct
+    integer,          intent(in) :: dt_data
+    integer :: u
+    open(newunit=u, file=fname, status='replace', action='write')
+    write(u,'(A)') '&nuopc_docn'
+    write(u,'(3A)') "  docn_sst_file = '", sst, "'"
+    write(u,'(3A)') "  docn_ice_file = '", ice, "'"
+    write(u,'(3A)') "  docn_cur_file = '", cur, "'"
+    write(u,'(A,I0)') '  docn_dt_data = ', dt_data
+    write(u,'(A)') '  docn_epoch_year = 2026, docn_epoch_month = 3, docn_epoch_day = 27'
+    write(u,'(2A)') '  docn_ice_pct = ', ice_pct
+    write(u,'(A)') "  import_diag_dir = 'out_docn'"
+    write(u,'(A)') '/'
+    close(u)
+  end subroutine nml
+
+  !> Grava um arquivo NetCDF (lon, lat, tempo) com as variáveis pedidas.
+  !! tipo 1: SST em graus Celsius; 2: fração de gelo; 3: gelo em %;
+  !! 4: correntes. Todos com alguns pontos de valor ausente (1e20).
+  subroutine cria_nc(fname, tdim, vars, nt, tipo)
+    character(len=*), intent(in) :: fname, tdim
+    character(len=*), intent(in) :: vars(:)
+    integer,          intent(in) :: nt, tipo
+    integer, parameter :: NXD = 36, NYD = 18
+    integer :: ncid, dx, dy, dt, v, vid, i, j, t, st
+    real(ESMF_KIND_R8) :: a(NXD, NYD, nt)
+    st = nf90_create(fname, NF90_CLOBBER, ncid)
+    st = nf90_def_dim(ncid, 'lon', NXD, dx)
+    st = nf90_def_dim(ncid, 'lat', NYD, dy)
+    st = nf90_def_dim(ncid, tdim, nt, dt)
+    do v = 1, size(vars)
+      st = nf90_def_var(ncid, trim(vars(v)), NF90_DOUBLE, [dx, dy, dt], vid)
+    end do
+    st = nf90_enddef(ncid)
+    do v = 1, size(vars)
+      do t = 1, nt
+        do j = 1, NYD
+          do i = 1, NXD
+            select case (tipo)
+            case (1); a(i,j,t) = 28.0d0*cos(0.17d0*(j-9.5d0)) - 1.8d0 + 0.3d0*t + 0.01d0*i
+            case (2); a(i,j,t) = max(0.0d0, min(1.0d0, (abs(j-9.5d0) - 6.0d0)/3.0d0 + 0.05d0*t))
+            case (3); a(i,j,t) = max(0.0d0, min(100.0d0, (abs(j-9.5d0) - 6.0d0)*35.0d0 + t + 0.5d0*i))
+            case default; a(i,j,t) = (3.0d0*v + t)*sin(0.3d0*i)*cos(0.2d0*j) + 0.1d0*v
+            end select
+            if (mod(i*7 + j*3 + t + v, 29) == 0) a(i,j,t) = 1.0d20
+          end do
+        end do
+      end do
+      st = nf90_inq_varid(ncid, trim(vars(v)), vid)
+      st = nf90_put_var(ncid, vid, a)
+    end do
+    st = nf90_close(ncid)
+  end subroutine cria_nc
 
   real(ESMF_KIND_R8) function ieee_nan()
     use, intrinsic :: ieee_arithmetic
