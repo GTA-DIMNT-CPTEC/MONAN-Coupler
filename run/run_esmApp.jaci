@@ -946,7 +946,6 @@ if [[ "${PET_LAYOUT}" == "split" ]]; then
       "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
     printf "  %-8s: componente ICE (SIS2) ATIVO — ice_pet_count = %s (0 = auto)\n" \
       "INFO" "${ICE_PET}"
-    printf "  %-8s: ATENÇÃO — o caminho Si_ifrac ICE→MPAS ainda não foi validado.\n" "AVISO"
   else
     printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN em %s PET(s)\n" \
       "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"

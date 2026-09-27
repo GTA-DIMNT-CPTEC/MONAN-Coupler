@@ -9,8 +9,15 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **`nuopc.input` sem histórico nos comentários (R-FASE5-01).** Primeira etapa da fase 5 (limpeza). Nenhum valor do `nuopc.input` muda e nenhum fonte Fortran muda.
+  - `nuopc.input`: o cabeçalho com o histórico de versões (v10.0 a v12.0) e as marcas `[N1]` a `[N8]`, `[N-B1]` e `Sprint` saíram dos comentários (o histórico fica neste CHANGELOG); os comentários passam a citar o módulo que lê o arquivo (`coupler_config_mod`, no lugar de `mpas_cap_config_mod`), o driver `esm.F90` (no lugar de `esm_MONAN.F90`) e o módulo do cap atmosférico (`mpas_cap_MONAN_mod`); as referências a versões antigas (v14.19, v14.20) e aos nomes "Fase 1" e "Fase 2" do acoplamento saíram; os grupos passam a ser numerados de 1 a 9, sem o "1b".
+  - A nota "ESTADO" do grupo `&nuopc_petlayout`, que dava o caminho do `Si_ifrac` do SIS2 até o MPAS como não validado e dizia que o mediador copiava o campo ponto a ponto, foi substituída pela descrição atual: o mediador interpola `Si_ifrac_sis2` pela rota `ocn2atm_ice` (conservativa, com máscara de terra e extrapolação por vizinhança), e o caminho está validado. Resolve a pendência registrada na entrada do componente de gelo.
+  - `run/run_esmApp.jaci`: saiu o aviso "o caminho Si_ifrac ICE→MPAS ainda não foi validado", impresso na verificação antes de cada submissão.
+  - Documentação: `docs/estado-do-projeto.md`, com o levantamento e a sequência da fase 5.
+
 - **`nuopc.input` com a configuração de validação (R-FASE4-08).** O `nuopc.input` do repositório passa a ter as contagens de PETs usadas nos experimentos de reprodutibilidade e na linha de base de validação: `atm_pet_count = 128` e `ocn_pet_count = 20` (antes 32 e 4), com `ice_pet_count = 4`, num total de 152 PETs. Os demais valores já eram iguais aos desses experimentos. Os comentários do repositório, mais novos que os da cópia usada nos experimentos (grupo `&nuopc_regrid`, descrição correta de `mesh_ocn`, chaves obsoletas retiradas), foram mantidos. Nenhum fonte Fortran muda; a validação usa a cópia do `nuopc.input` guardada na linha de base, que não é afetada.
   - Documentação: `docs/estado-do-projeto.md` (R-FASE4-07 validada; a troca pelo `mpi_f08` passa a opcional, sem número de etapa) e a versão 4 do relatório técnico (RPQ).
+  - Validação: sem os comentários, o arquivo tem os mesmos valores da cópia guardada na linha de base R-NOFMA-02 (a única diferença é o grupo `&nuopc_regrid` vazio, sem efeito).
 
 - **Cap do gelo: `InitializeRealize` em etapas e `intent` refinados (R-FASE4-07).** Nenhum cálculo muda.
   - `InitializeRealize` (`sis_cap_MONAN`) passou de 338 linhas (202 de código) para 36 (26 de código). Etapas novas, procedimentos de módulo com `intent`: `init_sis2` (FMS, calendário, listas de PETs, tempos, `ice_model_init`, `diag_manager_set_time_end_infra` e `share_ice_domains`, na mesma ordem), `create_ice_grid` (grade ESMF com a decomposição do SIS2 e coordenadas do `ocean_hgrid.nc`), `ice_category_count`, `realize_ice_fields` e `alloc_ice_boundaries`. A liberação explícita dos arrays locais da decomposição saiu (eles são liberados na saída da rotina).
