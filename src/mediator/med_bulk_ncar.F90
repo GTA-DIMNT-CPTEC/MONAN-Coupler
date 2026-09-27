@@ -46,6 +46,17 @@ module med_bulk_ncar_mod
 
   public :: calc_bulk_ncar
 
+  ! Parâmetros dos fluxos sobre o gelo (compute_ice_fluxes).
+  real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referencia [m]
+  real(ESMF_KIND_R8), parameter :: LOUIS_B = 5.0_ESMF_KIND_R8     ! Louis (1979), caso estavel
+  real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instavel
+  real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ nao zerar o fluxo
+  real(ESMF_KIND_R8), parameter :: STAB_FAC_MAX = 3.0_ESMF_KIND_R8   ! teto de seguranca (nao e' do Louis original)
+  ! Abaixo desta fração de gelo, Si_t_sis2 é o valor padrão do cap do gelo
+  ! (ponto de congelamento), e não uma temperatura real: os Fioi_* recebem
+  ! os fluxos da água aberta (Foxx_*).
+  real(ESMF_KIND_R8), parameter :: IFRAC_MIN_FIOI = 1.0e-3_ESMF_KIND_R8
+
 contains
 
   !============================================================================
@@ -296,7 +307,7 @@ contains
     ! Emissividade do gelo/neve (0,99) e' ligeiramente maior que a de agua
     ! aberta (0,97) usada acima — valor padrao bem estabelecido na
     ! literatura, nao e' erro de digitacao.
-    call compute_ice_fluxes(is, j1, j2, i1, i2, wspd, uas, vas, tas, psl, shum, lwdn, rc)
+    call compute_ice_fluxes(is, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
 
     !==========================================================================
     ! Rain, snow, pslv — cópia direta (pass-through para o OCN)
@@ -524,13 +535,27 @@ contains
     end if
   end subroutine compute_roughness_length
 
-  subroutine compute_ice_fluxes(is, j1, j2, i1, i2, wspd, uas, vas, tas, psl, shum, lwdn, rc)
+  !============================================================================
+  !> @brief Fluxos entre o gelo e a atmosfera (Fioi_*) com a temperatura real do gelo.
+  !!
+  !! Calcula, nesta ordem, taux, tauy, calor sensível, evaporação e balanço
+  !! de onda longa sobre o gelo, na grade ATM. As fórmulas bulk são as da
+  !! água aberta, com a temperatura do gelo no lugar da SST e o fator de
+  !! estabilidade de Louis (1979) (ver louis_stability).
+  !!
+  !! Onde a fração de gelo é menor que IFRAC_MIN_FIOI, Si_t_sis2 é só o
+  !! valor padrão do cap do gelo (ponto de congelamento) e não uma
+  !! temperatura real; ali cada fluxo recebe o valor já calculado para a
+  !! água aberta (Foxx_*), em vez de um gradiente de temperatura fictício.
+  !!
+  !! Sem f_tice_atm associado, os Fioi_* ficam com o valor inicial.
+  !============================================================================
+  subroutine compute_ice_fluxes(is, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
     type(MED_InternalState), intent(inout) :: is
     integer, intent(in) :: j1
     integer, intent(in) :: j2
     integer, intent(in) :: i1
     integer, intent(in) :: i2
-    real(ESMF_KIND_R8), intent(inout) :: wspd
     integer, intent(inout) :: rc
     real(ESMF_KIND_R8), intent(in) :: uas(:,:)
     real(ESMF_KIND_R8), intent(in) :: vas(:,:)
@@ -538,30 +563,142 @@ contains
     real(ESMF_KIND_R8), intent(in) :: psl(:,:)
     real(ESMF_KIND_R8), intent(in) :: shum(:,:)
     real(ESMF_KIND_R8), intent(in) :: lwdn(:,:)
-    integer :: i
-    integer :: j
     real(ESMF_KIND_R8), pointer :: tice(:,:) => null()
     real(ESMF_KIND_R8), pointer :: fptr_ice(:,:) => null()
     real(ESMF_KIND_R8), pointer :: ifr_g(:,:) => null()
     real(ESMF_KIND_R8), pointer :: f_taux_ocn(:,:), f_tauy_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: f_sen_ocn(:,:), f_evap_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: f_lwnet_ocn(:,:)
-    real(ESMF_KIND_R8) :: tice_eff, qsat_ice, rib, stab_fac
     integer :: rc_ice2
-    real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referencia [m]
-    real(ESMF_KIND_R8), parameter :: LOUIS_B = 5.0_ESMF_KIND_R8     ! Louis (1979), caso estavel
-    real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instavel
-    real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ nao zerar o fluxo
-    real(ESMF_KIND_R8), parameter :: STAB_FAC_MAX = 3.0_ESMF_KIND_R8   ! teto de seguranca (nao e' do Louis original)
-    ! abaixo deste limiar de fracao de gelo,
-    ! Si_t_sis2 e' o FALLBACK de export_si_tskin (ponto de congelamento),
-    ! nao uma temperatura real. Usa-lo como se fosse T_gelo real produz
-    ! um deltaT fabricado (ex.: ar polar genuino sobre agua aberta SEM
-    ! gelo, deltaT de 40-50K fictício) — foi a causa da maior parte das
-    ! saturacoes em (tice=271.4 identico em centenas
-    ! de celulas). Abaixo do limiar, copia o Foxx_* (agua aberta, SST
-    ! real) ja calculado acima em vez de inventar um gradiente de gelo.
-    real(ESMF_KIND_R8), parameter :: IFRAC_MIN_FIOI = 1.0e-3_ESMF_KIND_R8
+
+    call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=tice,       rc=rc_ice2)
+    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifr_g,      rc=rc_ice2)
+    call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=f_taux_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=f_tauy_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=f_sen_ocn,  rc=rc_ice2)
+    call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=f_evap_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=f_lwnet_ocn, rc=rc_ice2)
+
+    if (associated(tice)) then
+
+      call ESMF_FieldGet(is%f_taux_ice, farrayPtr=fptr_ice, rc=rc)
+      call ice_wind_stress(fptr_ice, f_taux_ocn, ifr_g, tice, uas, vas, tas, uas, &
+                           i1, i2, j1, j2)
+
+      call ESMF_FieldGet(is%f_tauy_ice, farrayPtr=fptr_ice, rc=rc)
+      call ice_wind_stress(fptr_ice, f_tauy_ocn, ifr_g, tice, uas, vas, tas, vas, &
+                           i1, i2, j1, j2)
+
+      call ESMF_FieldGet(is%f_sen_ice, farrayPtr=fptr_ice, rc=rc)
+      call ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
+                             i1, i2, j1, j2)
+
+      call ESMF_FieldGet(is%f_evap_ice, farrayPtr=fptr_ice, rc=rc)
+      call ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
+                           i1, i2, j1, j2)
+
+      call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=fptr_ice, rc=rc)
+      call ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
+
+      call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
+        'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
+
+      if (cfg_write_fixdiag) call log_ice_flux_check(is, tice)
+    else
+      call ESMF_LogWrite('MED(Fase3-ICE): f_tice_atm nao associado — ' // &
+        'Fioi_* permanecem no fallback inicial', ESMF_LOGMSG_WARNING)
+    end if
+    rc = ESMF_SUCCESS
+  end subroutine compute_ice_fluxes
+
+  !============================================================================
+  !> @brief Temperatura efetiva do gelo.
+  !!
+  !! Si_t_sis2 quando está na faixa física (180 K; 273,16 K], a mesma
+  !! validada em export_si_tskin; fora dela, o ponto de congelamento.
+  !============================================================================
+  pure function ice_temp_eff(tice) result(tice_eff)
+    real(ESMF_KIND_R8), intent(in) :: tice
+    real(ESMF_KIND_R8) :: tice_eff
+
+    tice_eff = merge(tice, 271.35_ESMF_KIND_R8, &
+      tice > 180.0_ESMF_KIND_R8 .and. tice <= 273.16_ESMF_KIND_R8)
+  end function ice_temp_eff
+
+  !============================================================================
+  !> @brief Número de Richardson bulk e fator de estabilidade de Louis (1979).
+  !!
+  !! rib > 0 indica estratificação estável (ar mais quente que a superfície,
+  !! o caso típico sobre o gelo): a troca turbulenta é amortecida, com fator
+  !! entre STAB_FAC_MIN e 1. rib <= 0 indica estratificação instável: a
+  !! convecção reforça a troca, com fator entre 1 e STAB_FAC_MAX. O mesmo
+  !! fator vale para o momento, o calor e a umidade.
+  !============================================================================
+  pure subroutine louis_stability(tas, tice_eff, wspd, rib, stab_fac)
+    real(ESMF_KIND_R8), intent(in)  :: tas, tice_eff, wspd
+    real(ESMF_KIND_R8), intent(out) :: rib, stab_fac
+
+    rib = GRAV * Z_REF * (tas - tice_eff) / &
+          (max(tas, 100.0_ESMF_KIND_R8) * wspd**2)
+    if (rib > 0.0_ESMF_KIND_R8) then
+      stab_fac = 1.0_ESMF_KIND_R8 / &
+        (1.0_ESMF_KIND_R8 + 2.0_ESMF_KIND_R8*LOUIS_B*rib/sqrt(1.0_ESMF_KIND_R8+LOUIS_B*rib))
+      stab_fac = max(STAB_FAC_MIN, min(1.0_ESMF_KIND_R8, stab_fac))
+    else
+      stab_fac = 1.0_ESMF_KIND_R8 - &
+        (2.0_ESMF_KIND_R8*LOUIS_B*rib) / &
+        (1.0_ESMF_KIND_R8 + 3.0_ESMF_KIND_R8*LOUIS_B*LOUIS_C*sqrt(-rib))
+      stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
+    end if
+  end subroutine louis_stability
+
+  !============================================================================
+  !> @brief Tensão do vento sobre o gelo, numa componente (Fioi_taux ou Fioi_tauy).
+  !!
+  !! wind é a componente do vento na direção da tensão (uas para taux, vas
+  !! para tauy); f_ocn é o fluxo da água aberta na mesma direção.
+  !============================================================================
+  subroutine ice_wind_stress(fptr_ice, f_ocn, ifr_g, tice, uas, vas, tas, wind, &
+                             i1, i2, j1, j2)
+    real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: f_ocn(:,:), ifr_g(:,:), tice(:,:)
+    real(ESMF_KIND_R8), intent(in) :: uas(:,:), vas(:,:), tas(:,:), wind(:,:)
+    integer,            intent(in) :: i1, i2, j1, j2
+    integer :: i, j
+    real(ESMF_KIND_R8) :: wspd, tice_eff, rib, stab_fac
+
+    do j=j1,j2; do i=i1,i2
+      if (associated(ifr_g) .and. associated(f_ocn)) then
+        if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
+          fptr_ice(i,j) = f_ocn(i,j)
+          cycle
+        end if
+      end if
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      tice_eff = ice_temp_eff(tice(i,j))
+      call louis_stability(tas(i,j), tice_eff, wspd, rib, stab_fac)
+      fptr_ice(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
+        rho_air * Cd_neut * stab_fac * wspd * wind(i,j)))
+    end do; end do
+  end subroutine ice_wind_stress
+
+  !============================================================================
+  !> @brief Calor sensível sobre o gelo (Fioi_sen), limitado a +-500 W/m2.
+  !!
+  !! Células com tas < 100 K (sem dado da atmosfera) ficam como estão.
+  !! Conta, antes do limite, as células com |fluxo| > 490 W/m2 e, com
+  !! cfg_write_fixdiag, registra a primeira delas (FIX-DIAG-ICESTAB-01):
+  !! saturação frequente indica vento ou diferença de temperatura extremos.
+  !! No ramo instável, stab_fac pode passar de 1 (reforço da troca).
+  !============================================================================
+  subroutine ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
+                               i1, i2, j1, j2)
+    real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: f_sen_ocn(:,:), ifr_g(:,:), tice(:,:)
+    real(ESMF_KIND_R8), intent(in) :: uas(:,:), vas(:,:), tas(:,:)
+    integer,            intent(in) :: i1, i2, j1, j2
+    integer :: i, j
+    real(ESMF_KIND_R8) :: wspd, tice_eff, rib, stab_fac
     real(ESMF_KIND_R8) :: raw_sen
     integer :: n_sat
     integer :: i_sat
@@ -574,225 +711,141 @@ contains
     real(ESMF_KIND_R8) :: rib_sat
     real(ESMF_KIND_R8) :: stab_sat
     character(len=320) :: diag_msg10
+
+    n_sat = 0; i_sat = -1; j_sat = -1
+    wspd_sat = 0.0_ESMF_KIND_R8; dt_sat = 0.0_ESMF_KIND_R8
+    raw_sat = 0.0_ESMF_KIND_R8; tas_sat = 0.0_ESMF_KIND_R8; tice_sat = 0.0_ESMF_KIND_R8
+    rib_sat = 0.0_ESMF_KIND_R8; stab_sat = 1.0_ESMF_KIND_R8
+    do j=j1,j2; do i=i1,i2
+      if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
+      if (associated(ifr_g) .and. associated(f_sen_ocn)) then
+        if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
+          fptr_ice(i,j) = f_sen_ocn(i,j)
+          cycle
+        end if
+      end if
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      tice_eff = ice_temp_eff(tice(i,j))
+      call louis_stability(tas(i,j), tice_eff, wspd, rib, stab_fac)
+      raw_sen = rho_air * Cp_air * Ch_neut * stab_fac * wspd * (tas(i,j) - tice_eff)
+      if (abs(raw_sen) > 490.0_ESMF_KIND_R8) then
+        n_sat = n_sat + 1
+        if (i_sat < 0) then
+          i_sat = i; j_sat = j
+          wspd_sat = wspd; dt_sat = tas(i,j) - tice_eff
+          raw_sat = raw_sen; tas_sat = tas(i,j); tice_sat = tice_eff
+          rib_sat = rib; stab_sat = stab_fac
+        end if
+      end if
+      fptr_ice(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, raw_sen))
+    end do; end do
+
+    if (cfg_write_fixdiag .and. n_sat > 0) then
+        write(diag_msg10,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3, &
+          &A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
+          'FIX-DIAG-ICESTAB-01: n_saturado=', n_sat, &
+          ' primeira_celula(i,j)=(', i_sat, ',', j_sat, &
+          ') wspd=', wspd_sat, ' tas=', tas_sat, ' tice=', tice_sat, &
+          ' deltaT=', dt_sat, ' Rib=', rib_sat, ' stab_fac=', stab_sat, &
+          ' valor_bruto=', raw_sat
+        call ESMF_LogWrite(trim(diag_msg10), ESMF_LOGMSG_WARNING)
+    end if
+  end subroutine ice_sensible_heat
+
+  !============================================================================
+  !> @brief Evaporação sobre o gelo (Fioi_evap), limitada a +-1e-4 kg/m2/s.
+  !!
+  !! Células com psl < 5e4 Pa (sem dado da atmosfera) ficam como estão. A
+  !! umidade de saturação sobre o gelo usa a mesma fórmula de
+  !! Clausius-Clapeyron da água aberta; a fórmula exata sobre o gelo tem
+  !! constantes um pouco diferentes, e a aproximação basta aqui.
+  !============================================================================
+  subroutine ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
+                             i1, i2, j1, j2)
+    real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: f_evap_ocn(:,:), ifr_g(:,:), tice(:,:)
+    real(ESMF_KIND_R8), intent(in) :: uas(:,:), vas(:,:), tas(:,:), psl(:,:), shum(:,:)
+    integer,            intent(in) :: i1, i2, j1, j2
+    integer :: i, j
+    real(ESMF_KIND_R8) :: wspd, tice_eff, rib, stab_fac, qsat_ice
+
+    do j=j1,j2; do i=i1,i2
+      if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
+      if (associated(ifr_g) .and. associated(f_evap_ocn)) then
+        if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
+          fptr_ice(i,j) = f_evap_ocn(i,j)
+          cycle
+        end if
+      end if
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      tice_eff = ice_temp_eff(tice(i,j))
+      call louis_stability(tas(i,j), tice_eff, wspd, rib, stab_fac)
+      qsat_ice = eps_q * es_coef_a * &
+        exp(es_coef_b*(tice_eff-T_freeze)/(tice_eff-T_freeze+es_coef_c)) / &
+        max(psl(i,j), 1.0_ESMF_KIND_R8)
+      fptr_ice(i,j) = max(-1.0e-4_ESMF_KIND_R8, min(1.0e-4_ESMF_KIND_R8, &
+        rho_air * Ce_neut * stab_fac * wspd * (qsat_ice - shum(i,j))))
+    end do; end do
+  end subroutine ice_evaporation
+
+  !============================================================================
+  !> @brief Balanço de onda longa sobre o gelo (Fioi_lwnet), limitado a -300 W/m2.
+  !!
+  !! Células com lwdn < 1 W/m2 (sem dado da atmosfera) ficam como estão. A
+  !! emissividade do gelo e da neve (0,99) é um pouco maior que a da água
+  !! aberta (0,97).
+  !============================================================================
+  subroutine ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
+    real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: f_lwnet_ocn(:,:), ifr_g(:,:), tice(:,:)
+    real(ESMF_KIND_R8), intent(in) :: lwdn(:,:)
+    integer,            intent(in) :: i1, i2, j1, j2
+    integer :: i, j
+    real(ESMF_KIND_R8) :: tice_eff
+
+    do j=j1,j2; do i=i1,i2
+      if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
+      if (associated(ifr_g) .and. associated(f_lwnet_ocn)) then
+        if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
+          fptr_ice(i,j) = f_lwnet_ocn(i,j)
+          cycle
+        end if
+      end if
+      tice_eff = ice_temp_eff(tice(i,j))
+      fptr_ice(i,j) = max( &
+        max(lwdn(i,j), 0.0_ESMF_KIND_R8) - 0.99_ESMF_KIND_R8 * sigma_sb * tice_eff**4, &
+        -300.0_ESMF_KIND_R8)
+    end do; end do
+  end subroutine ice_longwave
+
+  !============================================================================
+  !> @brief Diagnóstico FIX-DIAG-ICEFLUX-01: T_gelo, Fioi_sen e Foxx_sen.
+  !!
+  !! Compara, no DE local, a temperatura do gelo e o calor sensível sobre o
+  !! gelo com o calor sensível da água aberta, calculado com a SST.
+  !============================================================================
+  subroutine log_ice_flux_check(is, tice)
+    type(MED_InternalState), intent(in) :: is
+    real(ESMF_KIND_R8), pointer, intent(in) :: tice(:,:)
     real(ESMF_KIND_R8), pointer :: p_sen_ice(:,:)
     real(ESMF_KIND_R8), pointer :: p_sen_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: p_lwnet_ice(:,:)
     character(len=250) :: diag_msg9
+    integer :: rc
 
-    call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=tice,       rc=rc_ice2)
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifr_g,      rc=rc_ice2)
-    call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=f_taux_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=f_tauy_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=f_sen_ocn,  rc=rc_ice2)
-    call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=f_evap_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=f_lwnet_ocn, rc=rc_ice2)
-    rc_ice2 = ESMF_SUCCESS
-
-    if (associated(tice)) then
-
-      call ESMF_FieldGet(is%f_taux_ice, farrayPtr=fptr_ice, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        if (associated(ifr_g) .and. associated(f_taux_ocn)) then
-          if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
-            fptr_ice(i,j) = f_taux_ocn(i,j)
-            cycle
-          end if
-        end if
-        wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-        tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
-          tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-        ! Numero de Richardson bulk; positivo = estratificacao estavel
-        ! (ar mais quente que a superficie — caso tipico sobre gelo).
-        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
-              (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
-        if (rib > 0.0_ESMF_KIND_R8) then
-          stab_fac = 1.0_ESMF_KIND_R8 / &
-            (1.0_ESMF_KIND_R8 + 2.0_ESMF_KIND_R8*LOUIS_B*rib/sqrt(1.0_ESMF_KIND_R8+LOUIS_B*rib))
-          stab_fac = max(STAB_FAC_MIN, min(1.0_ESMF_KIND_R8, stab_fac))
-        else
-          ! Louis (1979), caso instavel: turbulencia REFORCADA (nao
-          ! amortecida) em relacao ao neutro — superficie mais quente
-          ! que o ar gera conveccao que intensifica a troca turbulenta.
-          stab_fac = 1.0_ESMF_KIND_R8 - &
-            (2.0_ESMF_KIND_R8*LOUIS_B*rib) / &
-            (1.0_ESMF_KIND_R8 + 3.0_ESMF_KIND_R8*LOUIS_B*LOUIS_C*sqrt(-rib))
-          stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
-        end if
-        fptr_ice(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
-          rho_air * Cd_neut * stab_fac * wspd * uas(i,j)))
-      end do; end do
-
-      call ESMF_FieldGet(is%f_tauy_ice, farrayPtr=fptr_ice, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        if (associated(ifr_g) .and. associated(f_tauy_ocn)) then
-          if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
-            fptr_ice(i,j) = f_tauy_ocn(i,j)
-            cycle
-          end if
-        end if
-        wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-        tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
-          tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
-              (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
-        if (rib > 0.0_ESMF_KIND_R8) then
-          stab_fac = 1.0_ESMF_KIND_R8 / &
-            (1.0_ESMF_KIND_R8 + 2.0_ESMF_KIND_R8*LOUIS_B*rib/sqrt(1.0_ESMF_KIND_R8+LOUIS_B*rib))
-          stab_fac = max(STAB_FAC_MIN, min(1.0_ESMF_KIND_R8, stab_fac))
-        else
-          stab_fac = 1.0_ESMF_KIND_R8 - &
-            (2.0_ESMF_KIND_R8*LOUIS_B*rib) / &
-            (1.0_ESMF_KIND_R8 + 3.0_ESMF_KIND_R8*LOUIS_B*LOUIS_C*sqrt(-rib))
-          stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
-        end if
-        fptr_ice(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
-          rho_air * Cd_neut * stab_fac * wspd * vas(i,j)))
-      end do; end do
-
-        call ESMF_FieldGet(is%f_sen_ice, farrayPtr=fptr_ice, rc=rc)
-        n_sat = 0; i_sat = -1; j_sat = -1
-        wspd_sat = 0.0_ESMF_KIND_R8; dt_sat = 0.0_ESMF_KIND_R8
-        raw_sat = 0.0_ESMF_KIND_R8; tas_sat = 0.0_ESMF_KIND_R8; tice_sat = 0.0_ESMF_KIND_R8
-        rib_sat = 0.0_ESMF_KIND_R8; stab_sat = 1.0_ESMF_KIND_R8
-        do j=j1,j2; do i=i1,i2
-          if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-          if (associated(ifr_g) .and. associated(f_sen_ocn)) then
-            if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
-              fptr_ice(i,j) = f_sen_ocn(i,j)
-              cycle
-            end if
-          end if
-          wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-          ! blindagem fisica: T_gelo em [180,273.15] K (mesma faixa validada
-          ! em export_si_tskin); fora disso, cai para o ponto de
-          ! congelamento (mesmo fallback usado la).
-          tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
-            tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-          rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
-                (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
-          if (rib > 0.0_ESMF_KIND_R8) then
-            stab_fac = 1.0_ESMF_KIND_R8 / &
-              (1.0_ESMF_KIND_R8 + 2.0_ESMF_KIND_R8*LOUIS_B*rib/sqrt(1.0_ESMF_KIND_R8+LOUIS_B*rib))
-            stab_fac = max(STAB_FAC_MIN, min(1.0_ESMF_KIND_R8, stab_fac))
-          else
-            stab_fac = 1.0_ESMF_KIND_R8 - &
-              (2.0_ESMF_KIND_R8*LOUIS_B*rib) / &
-              (1.0_ESMF_KIND_R8 + 3.0_ESMF_KIND_R8*LOUIS_B*LOUIS_C*sqrt(-rib))
-            stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
-          end if
-          raw_sen = rho_air * Cp_air * Ch_neut * stab_fac * wspd * (tas(i,j) - tice_eff)
-          ! rastreia saturacao no teto de seguranca
-          ! ANTES do clamp, para distinguir evento fisico real (vento e/ou
-          ! delta-T genuinamente extremos) de artefato numerico. Com os
-          ! dois ramos de Louis (1979) + a guarda de ifrac (fix
-          ! ), espera-se n_sat ~ 0 na maioria dos
-          ! passos — se persistir, e' sinal de vento/deltaT realmente
-          ! extremos (ver rib_sat/stab_sat no log para confirmar; note
-          ! que stab_sat pode agora ser > 1 no ramo instavel, reforco
-          ! de transporte turbulento, nao amortecimento).
-          if (abs(raw_sen) > 490.0_ESMF_KIND_R8) then
-            n_sat = n_sat + 1
-            if (i_sat < 0) then
-              i_sat = i; j_sat = j
-              wspd_sat = wspd; dt_sat = tas(i,j) - tice_eff
-              raw_sat = raw_sen; tas_sat = tas(i,j); tice_sat = tice_eff
-              rib_sat = rib; stab_sat = stab_fac
-            end if
-          end if
-          fptr_ice(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, raw_sen))
-        end do; end do
-
-        if (cfg_write_fixdiag .and. n_sat > 0) then
-            write(diag_msg10,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3, &
-              &A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-              'FIX-DIAG-ICESTAB-01: n_saturado=', n_sat, &
-              ' primeira_celula(i,j)=(', i_sat, ',', j_sat, &
-              ') wspd=', wspd_sat, ' tas=', tas_sat, ' tice=', tice_sat, &
-              ' deltaT=', dt_sat, ' Rib=', rib_sat, ' stab_fac=', stab_sat, &
-              ' valor_bruto=', raw_sat
-            call ESMF_LogWrite(trim(diag_msg10), ESMF_LOGMSG_WARNING)
-        end if
-
-      call ESMF_FieldGet(is%f_evap_ice, farrayPtr=fptr_ice, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
-        if (associated(ifr_g) .and. associated(f_evap_ocn)) then
-          if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
-            fptr_ice(i,j) = f_evap_ocn(i,j)
-            cycle
-          end if
-        end if
-        wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-        tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
-          tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-        ! Mesmo Rib/fator de estabilidade do calor sensivel acima —
-        ! teoria de similaridade usa a MESMA funcao de estabilidade para
-        ! calor e umidade (ambos escalares passivos).
-        rib = GRAV * Z_REF * (tas(i,j) - tice_eff) / &
-              (max(tas(i,j), 100.0_ESMF_KIND_R8) * wspd**2)
-        if (rib > 0.0_ESMF_KIND_R8) then
-          stab_fac = 1.0_ESMF_KIND_R8 / &
-            (1.0_ESMF_KIND_R8 + 2.0_ESMF_KIND_R8*LOUIS_B*rib/sqrt(1.0_ESMF_KIND_R8+LOUIS_B*rib))
-          stab_fac = max(STAB_FAC_MIN, min(1.0_ESMF_KIND_R8, stab_fac))
-        else
-          stab_fac = 1.0_ESMF_KIND_R8 - &
-            (2.0_ESMF_KIND_R8*LOUIS_B*rib) / &
-            (1.0_ESMF_KIND_R8 + 3.0_ESMF_KIND_R8*LOUIS_B*LOUIS_C*sqrt(-rib))
-          stab_fac = max(1.0_ESMF_KIND_R8, min(STAB_FAC_MAX, stab_fac))
-        end if
-        ! qsat sobre GELO usa a mesma formula de Clausius-Clapeyron do
-        ! bulk de agua aberta acima — aproximacao (formula exata sobre
-        ! gelo usa constantes ligeiramente diferentes); adequado para
-        ! a precisao pretendida aqui.
-        qsat_ice = eps_q * es_coef_a * &
-          exp(es_coef_b*(tice_eff-T_freeze)/(tice_eff-T_freeze+es_coef_c)) / &
-          max(psl(i,j), 1.0_ESMF_KIND_R8)
-        fptr_ice(i,j) = max(-1.0e-4_ESMF_KIND_R8, min(1.0e-4_ESMF_KIND_R8, &
-          rho_air * Ce_neut * stab_fac * wspd * (qsat_ice - shum(i,j))))
-      end do; end do
-
-      call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=fptr_ice, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
-        if (associated(ifr_g) .and. associated(f_lwnet_ocn)) then
-          if (ifr_g(i,j) < IFRAC_MIN_FIOI) then
-            fptr_ice(i,j) = f_lwnet_ocn(i,j)
-            cycle
-          end if
-        end if
-        tice_eff = merge(tice(i,j), 271.35_ESMF_KIND_R8, &
-          tice(i,j) > 180.0_ESMF_KIND_R8 .and. tice(i,j) <= 273.16_ESMF_KIND_R8)
-        fptr_ice(i,j) = max( &
-          max(lwdn(i,j), 0.0_ESMF_KIND_R8) - 0.99_ESMF_KIND_R8 * sigma_sb * tice_eff**4, &
-          -300.0_ESMF_KIND_R8)
-      end do; end do
-
-      call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
-        'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
-
-      ! validacao. Compara T_gelo vs SST e
-      ! Fioi_sen vs Foxx_sen (calculado com SST, secao acima) nas MESMAS
-      ! celulas. Ja validado em producao (Set/2026).
-      if (cfg_write_fixdiag) then
-          call ESMF_FieldGet(is%f_sen_ice,   farrayPtr=p_sen_ice,   rc=rc)
-          call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen_ocn,   rc=rc)
-          call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=p_lwnet_ice, rc=rc)
-          rc = ESMF_SUCCESS
-          if (associated(p_sen_ice) .and. associated(p_sen_ocn) .and. &
-              associated(p_lwnet_ice)) then
-            write(diag_msg9,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-              'FIX-DIAG-ICEFLUX-01: T_gelo min=', minval(tice), ' max=', maxval(tice), &
-              ' | Fioi_sen min=', minval(p_sen_ice), ' max=', maxval(p_sen_ice), &
-              ' | Foxx_sen(SST) min=', minval(p_sen_ocn), ' max=', maxval(p_sen_ocn)
-            call ESMF_LogWrite(trim(diag_msg9), ESMF_LOGMSG_INFO)
-          end if
-      end if
-    else
-      call ESMF_LogWrite('MED(Fase3-ICE): f_tice_atm nao associado — ' // &
-        'Fioi_* permanecem no fallback inicial', ESMF_LOGMSG_WARNING)
-    end if
+    call ESMF_FieldGet(is%f_sen_ice,   farrayPtr=p_sen_ice,   rc=rc)
+    call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen_ocn,   rc=rc)
+    call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=p_lwnet_ice, rc=rc)
     rc = ESMF_SUCCESS
-  end subroutine compute_ice_fluxes
+    if (associated(p_sen_ice) .and. associated(p_sen_ocn) .and. &
+        associated(p_lwnet_ice)) then
+      write(diag_msg9,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
+        'FIX-DIAG-ICEFLUX-01: T_gelo min=', minval(tice), ' max=', maxval(tice), &
+        ' | Fioi_sen min=', minval(p_sen_ice), ' max=', maxval(p_sen_ice), &
+        ' | Foxx_sen(SST) min=', minval(p_sen_ocn), ' max=', maxval(p_sen_ocn)
+      call ESMF_LogWrite(trim(diag_msg9), ESMF_LOGMSG_INFO)
+    end if
+  end subroutine log_ice_flux_check
 
   subroutine blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
     real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8

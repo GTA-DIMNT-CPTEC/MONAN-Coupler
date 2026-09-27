@@ -21,6 +21,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tools/dev/confere-literais.py REV` | alguma mensagem de log, nome de campo, atributo ou formato mudou desde o commit `REV`? |
 | `tools/dev/confere-instrucoes.py REV arquivo` | numa etapa que só move código, alguma instrução foi alterada? |
 | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
+| `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
 
 ### 2.1 Compilação
 
@@ -61,6 +62,18 @@ Compila a versão do commit e a da árvore de trabalho, liga a cada uma o progra
 
 O lançador do MPI pode ser trocado pela variável `MPIRUN` (padrão: `mpiexec`). O número de processos (`NP`, padrão 4) tem de ser par, porque a grade do teste é dividida em 2 x NP/2 blocos.
 
+### 2.5 Teste da física bulk do mediador
+
+```bash
+tests/bulk/compara-bulk.bash HEAD
+```
+
+Funciona como o teste dos gravadores. O programa `tests/bulk/test_bulk_ncar.F90` cria, na grade ATM 360 x 180, todos os campos do estado interno do mediador que `calc_bulk_ncar` lê ou escreve, preenche as entradas com dados sintéticos e chama `calc_bulk_ncar` três vezes, em instantes diferentes. Depois de cada chamada, grava todos esses campos. O script compara os arquivos das duas versões byte a byte e compara as mensagens da física bulk no log do ESMF.
+
+Os dados cobrem os casos que mudam o caminho do cálculo: vento nulo, ar mais quente e mais frio que a superfície (os dois ramos do fator de estabilidade), temperatura do gelo fora da faixa física, fração de gelo abaixo do limiar dos fluxos sobre o gelo, máscara de terra e forçantes ausentes. Como compara bit a bit, o teste confirma que mudar código de lugar, por exemplo para uma função, não alterou nenhuma operação de ponto flutuante. O teste foi conferido ao contrário também: alterar um parâmetro do fator de estabilidade faz o resultado diferir.
+
+Ficam de fora o caminho do DOCN e o caminho com `cfg_use_sis2_dynamic = .true.`, porque o teste usa os valores padrão da configuração. Com o padrão, `calc_bulk_ncar` também calcula a fração de gelo pelo limiar de SST (`legacy_ice_fraction`), que fica coberta.
+
 ## 3. Interfaces mínimas
 
 Os arquivos `tests/interfaces/mpas_stubs.F90` e `tests/interfaces/mom_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6 e do FMS que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90` e `mom_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
@@ -73,4 +86,5 @@ Uma interface mínima pode estar errada; por isso, antes de confiar nela para um
 2. `tools/dev/confere-literais.py HEAD`: nenhuma diferença, ou só as anunciadas.
 3. Em etapas que só movem código: `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado.
 4. Se a etapa mexe em `med_cap_netcdf.F90` ou `mpas_cap_netcdf.F90`: `tests/writers/compara-gravadores.bash HEAD`.
-5. Rodada na Jaci com `tools/dev/valida_rodada.bash`.
+5. Se a etapa mexe em `med_bulk_ncar.F90`: `tests/bulk/compara-bulk.bash HEAD`.
+6. Rodada na Jaci com `tools/dev/valida_rodada.bash`.

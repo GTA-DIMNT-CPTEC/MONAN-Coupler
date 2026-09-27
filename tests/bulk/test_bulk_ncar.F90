@@ -1,0 +1,165 @@
+!> @file test_bulk_ncar.F90
+!! @brief Teste de regressão da física bulk do mediador (calc_bulk_ncar).
+!!
+!! Cria, na grade ATM 360x180 dividida em 2 x NP/2 blocos, todos os campos
+!! do estado interno do mediador que calc_bulk_ncar lê ou escreve, preenche
+!! as entradas com dados sintéticos e chama calc_bulk_ncar três vezes, em
+!! três instantes diferentes. Depois de cada chamada, grava em
+!! saida_<PET>.bin o código de retorno e todos os campos, na ordem da lista
+!! abaixo. O script compara-bulk.bash compara esses arquivos entre duas
+!! versões do código.
+!!
+!! Os dados cobrem os casos que mudam o caminho do cálculo: vento nulo,
+!! ar mais quente e mais frio que a superfície, temperatura do gelo fora
+!! da faixa física, fração de gelo abaixo do limiar dos fluxos sobre o
+!! gelo, máscara de terra e forçantes ausentes (tas < 100 K, psl < 5e4 Pa,
+!! lwdn < 1 W/m2). O gerador aleatório tem semente fixa e é chamado na
+!! mesma sequência em todos os PETs, que assim veem a mesma grade global.
+program test_bulk_ncar
+  use ESMF
+  use med_cap_types_mod, only: MED_InternalState
+  use med_bulk_ncar_mod, only: calc_bulk_ncar
+  implicit none
+
+  integer, parameter :: NX = 360, NY = 180, NCHAMADAS = 3
+  type(MED_InternalState) :: is
+  type(ESMF_Grid)  :: grid
+  type(ESMF_VM)    :: vm
+  type(ESMF_State) :: importState
+  type(ESMF_Clock) :: clock
+  type(ESMF_Time)  :: t0, t1
+  type(ESMF_TimeInterval) :: dt
+  type(ESMF_Field), allocatable :: todos(:)
+  real(ESMF_KIND_R8), allocatable :: uas(:,:), vas(:,:), tas(:,:), psl(:,:), swdn(:,:)
+  real(ESMF_KIND_R8), allocatable :: lwdn(:,:), rain(:,:), shum(:,:), snow(:,:)
+  real(ESMF_KIND_R8), pointer :: p(:,:)
+  integer, allocatable :: semente(:)
+  integer :: rc, pet, npet, ns, k, n, u, i1, i2, j1, j2
+  character(len=64) :: nome
+
+  call ESMF_Initialize(defaultLogFileName='teste_bulk', logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
+  if (rc /= ESMF_SUCCESS) stop 2
+  call ESMF_VMGetGlobal(vm, rc=rc)
+  call ESMF_VMGet(vm, localPet=pet, petCount=npet, rc=rc)
+  if (mod(npet, 2) /= 0) then
+    call ESMF_LogWrite('test_bulk_ncar: o numero de PETs tem de ser par', ESMF_LOGMSG_ERROR)
+    call ESMF_Finalize(endflag=ESMF_END_ABORT)
+  end if
+  grid = ESMF_GridCreateNoPeriDim(minIndex=(/1,1/), maxIndex=(/NX,NY/), &
+    regDecomp=(/2, npet/2/), coordSys=ESMF_COORDSYS_SPH_DEG, &
+    indexflag=ESMF_INDEX_GLOBAL, rc=rc)
+
+  ! Todos os campos que calc_bulk_ncar usa, entradas e saídas
+  call cria(is%f_taux_atm);   call cria(is%f_tauy_atm);   call cria(is%f_sen_atm)
+  call cria(is%f_evap_atm);   call cria(is%f_lwnet_atm);  call cria(is%f_swvdr_atm)
+  call cria(is%f_swvdf_atm);  call cria(is%f_swidr_atm);  call cria(is%f_swidf_atm)
+  call cria(is%f_rain_atm);   call cria(is%f_snow_atm);   call cria(is%f_pslv_atm)
+  call cria(is%f_ifrac_atm);  call cria(is%f_duu10n_atm); call cria(is%f_sst_atm)
+  call cria(is%f_uocn_atm);   call cria(is%f_vocn_atm);   call cria(is%f_zorl_atm)
+  call cria(is%f_coszen_atm); call cria(is%f_albedo_atm); call cria(is%f_tice_atm)
+  call cria(is%f_taux_ice);   call cria(is%f_tauy_ice);   call cria(is%f_sen_ice)
+  call cria(is%f_evap_ice);   call cria(is%f_lwnet_ice);  call cria(is%f_swvdr_ice)
+  call cria(is%f_swvdf_ice);  call cria(is%f_swidr_ice);  call cria(is%f_swidf_ice)
+  call cria(is%f_omask_atm);  call cria(is%f_alb_vdr_ice); call cria(is%f_alb_vdf_ice)
+  call cria(is%f_alb_idr_ice); call cria(is%f_alb_idf_ice)
+  todos = [is%f_taux_atm, is%f_tauy_atm, is%f_sen_atm, is%f_evap_atm, is%f_lwnet_atm, &
+           is%f_swvdr_atm, is%f_swvdf_atm, is%f_swidr_atm, is%f_swidf_atm,           &
+           is%f_rain_atm, is%f_snow_atm, is%f_pslv_atm, is%f_ifrac_atm,              &
+           is%f_duu10n_atm, is%f_sst_atm, is%f_uocn_atm, is%f_vocn_atm,              &
+           is%f_zorl_atm, is%f_coszen_atm, is%f_albedo_atm, is%f_tice_atm,           &
+           is%f_taux_ice, is%f_tauy_ice, is%f_sen_ice, is%f_evap_ice,                &
+           is%f_lwnet_ice, is%f_swvdr_ice, is%f_swvdf_ice, is%f_swidr_ice,           &
+           is%f_swidf_ice, is%f_omask_atm, is%f_alb_vdr_ice, is%f_alb_vdf_ice,       &
+           is%f_alb_idr_ice, is%f_alb_idf_ice]
+
+  importState = ESMF_StateCreate(name='import vazio', rc=rc)
+  call ESMF_TimeSet(t0, yy=2026, mm=3, dd=29, h=6, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+  call ESMF_TimeSet(t1, yy=2026, mm=4, dd=29, h=0, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+  call ESMF_TimeIntervalSet(dt, h=7, rc=rc)
+  clock = ESMF_ClockCreate(dt, t0, stopTime=t1, rc=rc)
+
+  allocate(uas(NX,NY), vas(NX,NY), tas(NX,NY), psl(NX,NY), swdn(NX,NY), &
+           lwdn(NX,NY), rain(NX,NY), shum(NX,NY), snow(NX,NY))
+  call random_seed(size=ns)
+  allocate(semente(ns)); semente = 20260927
+  call random_seed(put=semente)
+
+  write(nome,'(A,I0,A)') 'saida_', pet, '.bin'
+  open(newunit=u, file=nome, access='stream', form='unformatted', status='replace')
+  do k = 1, NCHAMADAS
+    ! Forçantes atmosféricos, na grade global
+    call sorteia(uas, -30.0d0, 30.0d0);   call sorteia(vas, -30.0d0, 30.0d0)
+    uas(1:20,1:5) = 0.0d0;                vas(1:20,1:5) = 0.0d0
+    call sorteia(tas, 50.0d0, 320.0d0);   call sorteia(psl, 4.0d4, 1.05d5)
+    call sorteia(swdn, -10.0d0, 1100.0d0); call sorteia(lwdn, -5.0d0, 450.0d0)
+    call sorteia(rain, -1.0d-4, 1.0d-3);  call sorteia(shum, 0.0d0, 2.0d-2)
+    call sorteia(snow, -1.0d-4, 1.0d-3)
+
+    ! Campos do estado interno: primeiro valores quaisquer em todos...
+    do n = 1, size(todos)
+      call preenche(todos(n), -1.0d3, 1.0d3)
+    end do
+    ! ...depois as entradas, em faixas plausíveis
+    call preenche(is%f_sst_atm, 260.0d0, 310.0d0)
+    call preenche(is%f_uocn_atm, -1.0d0, 1.0d0)
+    call preenche(is%f_vocn_atm, -1.0d0, 1.0d0)
+    call preenche(is%f_tice_atm, 150.0d0, 290.0d0)
+    call preenche(is%f_ifrac_atm, -0.5d0, 1.0d0)
+    call preenche(is%f_omask_atm, -0.5d0, 1.0d0)
+    call preenche(is%f_taux_atm, -1.0d0, 1.0d0)
+    call preenche(is%f_tauy_atm, -1.0d0, 1.0d0)
+    call preenche(is%f_alb_vdr_ice, 0.0d0, 1.0d0)
+    call preenche(is%f_alb_vdf_ice, 0.0d0, 1.0d0)
+    call preenche(is%f_alb_idr_ice, 0.0d0, 1.0d0)
+    call preenche(is%f_alb_idf_ice, 0.0d0, 1.0d0)
+    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p, rc=rc)
+    where (p < 0.0d0) p = 0.0d0                      ! um terço sem gelo
+    p(lbound(p,1):lbound(p,1)+3, :) = 5.0d-4         ! abaixo do limiar dos Fioi_*
+    call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p, rc=rc)
+    p = merge(1.0d0, 0.0d0, p > 0.0d0)               ! terra onde era negativo
+    call ESMF_FieldGet(is%f_tice_atm, farrayPtr=p, rc=rc)
+    p(:, lbound(p,2)) = 271.35d0                     ! valor padrão do cap do gelo
+
+    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=p, rc=rc)
+    i1 = lbound(p,1); i2 = ubound(p,1); j1 = lbound(p,2); j2 = ubound(p,2)
+    call calc_bulk_ncar(is, importState, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
+                        i1, i2, j1, j2, clock, rc)
+    write(u) rc
+    do n = 1, size(todos)
+      call ESMF_FieldGet(todos(n), farrayPtr=p, rc=rc)
+      write(u) p
+    end do
+    call ESMF_ClockAdvance(clock, rc=rc)
+  end do
+  close(u)
+  call ESMF_Finalize(rc=rc)
+
+contains
+
+  subroutine cria(campo)
+    type(ESMF_Field), intent(out) :: campo
+    campo = ESMF_FieldCreate(grid, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)
+  end subroutine cria
+
+  subroutine sorteia(a, lo, hi)
+    real(ESMF_KIND_R8), intent(out) :: a(:,:)
+    real(ESMF_KIND_R8), intent(in)  :: lo, hi
+    call random_number(a)
+    a = lo + (hi - lo) * a
+  end subroutine sorteia
+
+  !> Sorteia a grade global inteira (mesma sequência em todos os PETs) e
+  !! copia para o campo o bloco local.
+  subroutine preenche(campo, lo, hi)
+    type(ESMF_Field),   intent(in) :: campo
+    real(ESMF_KIND_R8), intent(in) :: lo, hi
+    real(ESMF_KIND_R8), allocatable :: g(:,:)
+    real(ESMF_KIND_R8), pointer :: q(:,:)
+    allocate(g(NX,NY))
+    call sorteia(g, lo, hi)
+    call ESMF_FieldGet(campo, farrayPtr=q, rc=rc)
+    q = g(lbound(q,1):ubound(q,1), lbound(q,2):ubound(q,2))
+  end subroutine preenche
+
+end program test_bulk_ncar

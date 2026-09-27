@@ -43,7 +43,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE4-01 | `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano divididos em etapas |
 | R-FASE4-02 | `anota-linha-base.bash`; `valida_rodada compara` distingue "comparação não feita" de FAIL e devolve o código da comparação |
 | R-FASE4-03 | `MediatorAdvance` dividida em etapas |
-| R-FASE4-04 | ferramentas de conferência local no repositório; documentação (validação na Jaci pendente) |
+| R-FASE4-04 | ferramentas de conferência local no repositório; documentação (sem mudança em `src/`: validada pela compilação na Jaci, tag `fase4-04-validada`) |
+| R-FASE4-05 | `update_ice_fields_on_atm_grid` e `compute_ice_fluxes` divididas em etapas; teste da física bulk (`tests/bulk`) (validação na Jaci pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 3, que cobre todas as etapas até a R-FASE4-03).
 
@@ -98,6 +99,7 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | `tools/dev/confere-literais.py` | compara as constantes de texto com as de um commit |
 | `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit |
 | `tests/writers/compara-gravadores.bash` | compara byte a byte os arquivos dos gravadores de diagnóstico de duas versões |
+| `tests/bulk/compara-bulk.bash` | compara bit a bit os campos calculados por `calc_bulk_ncar` em duas versões |
 
 O uso das quatro últimas, antes de levar uma mudança à Jaci, está em `docs/conferencias-locais.md`.
 
@@ -107,22 +109,26 @@ Sequência combinada em 27/09/2026. Cada item de código é um patch validado na
 
 | Ordem | Etapa | Conteúdo | Situação |
 | --- | --- | --- | --- |
-| 1 | R-FASE4-04 | ferramentas de conferência local no repositório (`compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, interfaces mínimas, teste dos gravadores); documentação pendente | entregue, a validar |
-| 2 | (Daniel) | enviar `refactor/principal` ao GitHub e abrir o pedido de integração para o `develop`, com o RPQ v3 e o CHANGELOG | a fazer |
-| 3 | R-FASE4-05 | verificação automática de compilação a cada envio ao repositório, com as ferramentas da R-FASE4-04; o ESMF 8.9.1 (cerca de 40 min para compilar) precisa ficar em cache | a fazer |
-| 4 | R-FASE4-06 | dividir `update_ice_fields_on_atm_grid` (`MED_cap`, 222 linhas de código) e `compute_ice_fluxes` (`med_bulk_ncar`, 224), numa rodada só; a segunda é cálculo de fluxo, e a ordem das operações tem de ficar intacta | a fazer |
-| 5 | R-FASE4-07 | dividir `WriteDOCNDiag` (`docn_cap_netcdf`, 210); estender o teste dos gravadores a ele, porque a linha de base não roda com DOCN | a fazer |
-| 6 | R-FASE4-08 | cap do gelo: dividir o `InitializeRealize` (202) e refinar os `intent` hoje `intent(inout)` por precaução; antes, escrever interfaces mínimas do SIS2 para compilar `sis_cap_MONAN.F90` fora da Jaci | a fazer |
-| 7 | R-FASE4-09 | trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`; antes, confirmar na Jaci que o `cray-mpich` oferece o módulo `mpi_f08` com o gfortran | a fazer |
+| 1 | R-FASE4-04 | ferramentas de conferência local no repositório (`compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, interfaces mínimas, teste dos gravadores) e documentação | concluída (compilação na Jaci sem erros, tag `fase4-04-validada`) |
+| 2 | (Daniel) | enviar `refactor/principal` ao GitHub (sem pedido de integração por enquanto) e repetir o envio a cada etapa validada | feito em 27/09/2026 (`9ef3183`, tags `fase4-01-validada` a `fase4-04-validada`) |
+| 3 | R-FASE4-05 | dividir `update_ice_fields_on_atm_grid` (`MED_cap`, 222 linhas de código) e `compute_ice_fluxes` (`med_bulk_ncar`, 224), numa rodada só; a segunda é cálculo de fluxo, e a ordem das operações tem de ficar intacta | entregue, a validar |
+| 4 | R-FASE4-06 | dividir `WriteDOCNDiag` (`docn_cap_netcdf`, 210); estender o teste dos gravadores a ele, porque a linha de base não roda com DOCN | a fazer |
+| 5 | R-FASE4-07 | cap do gelo: dividir o `InitializeRealize` (202) e refinar os `intent` hoje `intent(inout)` por precaução; antes, escrever interfaces mínimas do SIS2 para compilar `sis_cap_MONAN.F90` fora da Jaci | a fazer |
+| 6 | R-FASE4-08 | trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`; antes, confirmar na Jaci que o `cray-mpich` oferece o módulo `mpi_f08` com o gfortran | a fazer |
 
-Numeração dos patches: provisória a partir da R-FASE4-05, na ordem da tabela.
+Numeração dos patches: provisória a partir da R-FASE4-06, na ordem da tabela.
+
+Decisões de 27/09/2026:
+
+- o pedido de integração para o `develop` fica para depois das próximas etapas de limpeza; até lá, `refactor/principal` é atualizado no GitHub a cada etapa validada, com a tag correspondente;
+- a verificação automática de compilação (antes prevista como R-FASE4-05) saiu da sequência: o repositório não usa GitHub Actions e a equipe ainda não tem experiência com a ferramenta. A conferência antes de cada envio continua manual, com `tools/dev/compila-local.bash` e as demais ferramentas de `docs/conferencias-locais.md`.
 
 Fora da sequência, em paralelo:
 
 - **Decisões do GT (não são refatoração):** se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados e exige nova linha de base); e o destino do DATM, que o driver não registra (o `roda_repro_datm_mom6.sh` depende dele).
 - **Opcional:** `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) já está abaixo do limite. O `config_read` (267) é quase todo declaração de namelist e fica como está.
 
-Já concluído: as rotinas `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano (R-FASE4-01) e `MediatorAdvance` (R-FASE4-03).
+Já concluído: as rotinas `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano (R-FASE4-01) `MediatorAdvance` (R-FASE4-03), `update_ice_fields_on_atm_grid` e `compute_ice_fluxes` (R-FASE4-05, a validar).
 
 ## 9. Convenções
 
