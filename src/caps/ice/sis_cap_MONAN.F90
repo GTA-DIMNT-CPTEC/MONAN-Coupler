@@ -81,35 +81,25 @@ module sis_cap_MONAN_mod
   end type ice_internal_state_wrapper
 
   ! ── Nomes de campo trocados com o mediador ────────────────────────────────
-  ! FIX (corrigido — era TODO-VERIFICAR, confirmado agora): nomes reais
-  ! confirmados em med_cap_types.F90::export_names (18 campos exportados
-  ! pelo MED, hoje só ligados a "MED -> OCN"). O conector "MED -> ICE" (já
-  ! registrado em esm.F90) casa por StandardName, então os MESMOS campos
-  ! que o MED já exporta pro OCN passam a alimentar o ICE tambem — sem
-  ! precisar mudar MED_cap.F90. Nomes ANTERIORES (Faxa_taux, Faxa_sen,
-  ! Faxa_lat, Faxa_lwdn, Faxa_swvdr/swvdf/swndr/swndf) estavam INVENTADOS
-  ! e causaram "NUOPC INCOMPATIBILITY: Import Fields not all connected" em
-  ! teste real — substituídos pelos nomes reais abaixo.
-  ! Bônus: lprec/fprec/p agora têm fonte real (Faxa_rain/Faxa_snow/
-  ! Sa_pslv), que antes ficavam em default (zero/1atm) por falta de nome.
+  ! Os nomes seguem med_cap_types.F90::export_names. O conector "MED -> ICE"
+  ! (registrado em esm.F90) casa por StandardName, então os campos que o MED
+  ! exporta alimentam o ICE sem mudança em MED_cap.F90. Um nome que o MED
+  ! não exporta produz "NUOPC INCOMPATIBILITY: Import Fields not all
+  ! connected". lprec/fprec/p vêm de Faxa_rain/Faxa_snow/Sa_pslv.
   integer, parameter :: n_import_atm = 13  ! forçante atmosférica (ver AIB)
   integer, parameter :: n_import_ocn = 3   ! So_t, So_u, So_v (ver OIB)
   character(len=32), dimension(n_import_atm) :: import_names_atm = (/ &
-    "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! Fase 3
-    "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! Fase 4
+    "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! fluxos turbulentos do gelo
+    "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! onda longa e onda curta do gelo
     "Fioi_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
-    "Faxa_coszen   " /)  ! Fase 2.5
-  ! taux/tauy/sen/evap/lwnet trocados de
-  ! Foxx_* (calculados com SST, apropriados para o MOM6) para Fioi_*
-  ! (calculados com a temperatura de pele real do gelo, Si_t_sis2 — ver
-  ! export_si_tskin e med_bulk_ncar.F90).
-  ! (, Set/2026): SW (swnet_v*/idr/idf) tambem
-  ! separado — antes usava Foxx_swnet_* (albedo MISTURADO por Si_ifrac,
-  ! o mesmo valor enviado ao MOM6), o que fazia o gelo absorver SW
-  ! calculada com um albedo mais baixo que o seu proprio. Agora usa
-  ! Fioi_swnet_*, calculado em med_bulk_ncar.F90 com o albedo do gelo por
-  ! banda PURO (sem blend com agua aberta) — simetrico ao que ja era
-  ! feito para sen/evap/lwnet na Fase 3.
+    "Faxa_coszen   " /)  ! angulo zenital solar
+  ! taux/tauy/sen/evap/lwnet vêm dos Fioi_* (calculados com a temperatura de
+  ! pele real do gelo, Si_t_sis2 — ver export_si_tskin e med_bulk_ncar.F90),
+  ! e não dos Foxx_* (calculados com a SST, apropriados para o MOM6). Da
+  ! mesma forma, a onda curta vem de Fioi_swnet_*, calculada com o albedo do
+  ! gelo por banda PURO; Foxx_swnet_* usa o albedo MISTURADO por Si_ifrac
+  ! (o enviado ao MOM6), e o gelo absorveria SW calculada com um albedo mais
+  ! baixo que o seu proprio.
   character(len=32), dimension(n_import_ocn) :: import_names_ocn = (/ &
     "So_t       ", "So_u       ", "So_v       " /)
   integer, parameter :: n_export = 6
@@ -154,13 +144,11 @@ contains
       specRoutine=ModelAdvance, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! FIX (encontrado via comparação com mom_cap_MONAN.F90 — resolve
-    ! "NUOPC INCOMPATIBILITY: Import Fields not at current time" em teste
-    ! real): CheckImport tolerante, aceita campos com timestamp em
-    ! ±dt_coupling, em vez do padrao estrito do NUOPC_ModelBase (que exige
-    ! igualdade exata — falha porque o SIS2/FMS usa seu proprio
-    ! gerenciador de tempo internamente, divergindo ligeiramente do
-    ! relogio do driver ESMF). Mesma solução já testada em
+    ! CheckImport tolerante: aceita campos com timestamp em ±dt_coupling, em
+    ! vez do padrao estrito do NUOPC_ModelBase, que exige igualdade exata e
+    ! falha ("NUOPC INCOMPATIBILITY: Import Fields not at current time")
+    ! porque o SIS2/FMS usa seu proprio gerenciador de tempo, divergindo
+    ! ligeiramente do relogio do driver ESMF. Mesma solução de
     ! mom_cap_MONAN.F90 para o mesmo problema entre MED e OCN.
     call ESMF_MethodRemove(gcomp, label=model_label_CheckImport, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -182,22 +170,18 @@ contains
     integer, intent(out) :: rc
 
     rc = ESMF_SUCCESS
-    ! FIX (lacuna encontrada, corrigida): faltava esta chamada — presente
-    ! em mom_cap_MONAN.F90, seleciona a versão de fases de inicialização
-    ! (IPDv03) que este componente usa. Sem ela, a negociação de fases com
-    ! o driver pode não corresponder exatamente ao que InitializeAdvertise/
-    ! InitializeRealize abaixo registram (phaseLabelList=IPDv03p1/IPDv03p3).
+    ! Seleciona a versão das fases de inicialização (IPDv03), como em
+    ! mom_cap_MONAN.F90. Sem ela, a negociação de fases com o driver pode não
+    ! corresponder ao que InitializeAdvertise/InitializeRealize abaixo
+    ! registram (phaseLabelList=IPDv03p1/IPDv03p3).
     call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
       acceptStringList=(/"IPDv03p"/), rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    ! A especialização de SetClock foi REMOVIDA. A versão anterior
-    ! especializava com uma implementação
-    ! VAZIA (só retornava ESMF_SUCCESS sem fazer nada) — isso bloqueava o
-    ! comportamento PADRÃO do NUOPC_Model de sincronizar o relógio interno
-    ! deste componente com o relógio do driver, causando "NUOPC
-    ! INCOMPATIBILITY: Import Fields not at current time" em teste real
-    ! (o relógio do ICE nunca ficava alinhado ao esperado). Mesmo padrão
-    ! de mom_cap_MONAN.F90, que também não especializa SetClock.
+    ! SetClock NÃO é especializado. Uma especialização vazia bloquearia o
+    ! comportamento PADRÃO do NUOPC_Model de sincronizar o relógio deste
+    ! componente com o do driver, causando "NUOPC INCOMPATIBILITY: Import
+    ! Fields not at current time" (o relógio do ICE nunca ficaria alinhado).
+    ! Mesmo padrão de mom_cap_MONAN.F90, que também não especializa SetClock.
   end subroutine InitializeP0
 
   ! ============================================================================
@@ -221,22 +205,16 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     do n = 1, n_export
-      ! FIX (achado real via NUOPC_Connector.F90:2408 "Neither side able
-      ! to provide geom object"): o campo de export do ICE é realizado
-      ! numa grade PRÓPRIA (is%ice_grid, criada em InitializeRealize) —
-      ! precisa oferecer essa geometria ao conector como "will provide",
-      ! não "cannot provide" (que eu tinha usado igual aos imports, por
-      ! engano — imports realmente não fornecem geometria própria, mas o
-      ! export sim). Sem isso, NEM o lado ICE nem o lado MED (que também
-      ! usa "cannot provide" no import) ofereciam geometria nenhuma,
-      ! travando o conector logo na inicialização (fase IPDv05p3).
-      ! FIX (Ago 2026): removido SharePolicyField="share" desta EXPORTACAO.
-      ! O cap do ICE era o unico do sistema a usar essa politica num campo de
-      ! exportacao — o cap do OCN (mom_cap_MONAN.F90) usa share apenas nas
-      ! IMPORTACOES e deixa as exportacoes so com TransferOfferGeomObject.
-      ! Diagnostico confirmou o sintoma: Si_ifrac saia correto daqui
-      ! (max=0.997) mas chegava zerado no mediador (min=max=0), indicando que
-      ! o conector nao fazia a transferencia real. Alinhado ao padrao do OCN.
+      ! O campo de export do ICE é realizado numa grade PRÓPRIA (is%ice_grid,
+      ! criada em InitializeRealize) e oferece essa geometria ao conector como
+      ! "will provide". Os imports usam "cannot provide", como o import do MED;
+      ! se o export também usasse, nenhum lado ofereceria geometria e o conector
+      ! travaria na inicialização ("Neither side able to provide geom object",
+      ! fase IPDv05p3).
+      ! Sem SharePolicyField="share" nesta EXPORTACAO, como no cap do OCN
+      ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTACOES. Com share
+      ! aqui, Si_ifrac saia correto (max=0.997) mas chegava zerado no mediador
+      ! (min=max=0): o conector nao fazia a transferencia real.
       call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -567,8 +545,8 @@ contains
     allocate(is%aib%drdt(ni_loc,nj_loc,ncat),  is%aib%coszen(ni_loc,nj_loc,ncat))
     allocate(is%aib%p(ni_loc,nj_loc,ncat))
     is%aib%u_flux = 0.0_ESMF_KIND_R8; is%aib%v_flux = 0.0_ESMF_KIND_R8
-    is%aib%u_star = 0.0_ESMF_KIND_R8   ! TODO-VERIFICAR: nao vem do mediador
-                                        ! hoje (ver ModelAdvance/ATENCAO)
+    is%aib%u_star = 0.0_ESMF_KIND_R8   ! nao vem do mediador (decisao em
+                                        ! aberto, ver docs/estado-do-projeto.md)
     is%aib%t_flux = 0.0_ESMF_KIND_R8; is%aib%q_flux = 0.0_ESMF_KIND_R8
     is%aib%lw_flux = 0.0_ESMF_KIND_R8
     is%aib%sw_flux_vis_dir = 0.0_ESMF_KIND_R8
@@ -652,39 +630,36 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha import_forcing', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 1b (Ago 2026, FIX): desempacotar is%oib (SST/correntes do
-    ! OCN, ja populado acima) para dentro de Ice%sCS%OSS — a estrutura
-    ! interna que a fisica do SIS2 realmente le (ver
-    ! update_ice_slow_thermo -> slow_thermodynamics(..., Ice%sCS%OSS, ...)).
-    ! Sem esta chamada, is%oib ficava desconectado da fisica: as correntes
-    ! oceanicas (e SST/salinidade/frazil/nivel do mar) importadas do
-    ! mediador nunca chegavam ao SIS2, que rodava sobre os defaults de
-    ! Ice%sCS%OSS (inicializados em ice_model_init). unpack_ocean_ice_boundary
-    ! e a rotina nativa do SIS2 para essa conversao (ice_model.F90) — faz
-    ! tambem translate_OSS_to_sOSS internamente, alimentando a
-    ! termodinamica rapida. Requer is%oib%stagger=AGRID (ver InitializeRealize).
+    ! ── Passo 1b: desempacotar is%oib (SST/correntes do OCN, ja populado
+    ! acima) para dentro de Ice%sCS%OSS, a estrutura interna que a fisica do
+    ! SIS2 realmente le (ver update_ice_slow_thermo -> slow_thermodynamics(...,
+    ! Ice%sCS%OSS, ...)). Sem esta chamada, as correntes oceanicas (e
+    ! SST/salinidade/frazil/nivel do mar) importadas do mediador nunca chegariam
+    ! ao SIS2, que rodaria sobre os valores de Ice%sCS%OSS inicializados em
+    ! ice_model_init. unpack_ocean_ice_boundary e' a rotina nativa do SIS2 para
+    ! essa conversao (ice_model.F90) e faz tambem translate_OSS_to_sOSS,
+    ! alimentando a termodinamica rapida. Requer is%oib%stagger=AGRID (ver
+    ! InitializeRealize).
     call unpack_ocean_ice_boundary(is%oib, is%ice)
 
-    ! ── Passo 1c (Ago 2026, FIX): registrar a forcante atmosferica (is%aib,
-    ! ja populada acima) em Ice — grava fluxos e calcula temperatura do
-    ! gelo no passo rapido (ver ice_model.F90::update_ice_model_fast).
-    ! Mesmo problema estrutural do oceano: is%aib ficava desconectado da
-    ! fisica, nunca chegando ao SIS2. Padrao de chamada confirmado no
-    ! driver de referencia coupler_main.F90 — la e gated por
-    ! Ice%fast_ice_pe (que este cap ja forca .true. sempre, ver
-    ! ice_model_init) e chamada uma vez por avanco do acoplamento
-    ! atmosfera-superficie, sem subciclo proprio — mesma granularidade do
-    ! nosso dt_coupling. Chamada ANTES da fisica lenta porque esta
-    ! consome os campos que update_ice_model_fast grava em Ice.
+    ! ── Passo 1c: registrar a forcante atmosferica (is%aib, ja populada
+    ! acima) em Ice: grava fluxos e calcula a temperatura do gelo no passo
+    ! rapido (ver ice_model.F90::update_ice_model_fast). Sem esta chamada,
+    ! is%aib nunca chegaria ao SIS2. Padrao de chamada do driver de referencia
+    ! coupler_main.F90: la e' condicionada a Ice%fast_ice_pe (que este cap
+    ! forca .true., ver ice_model_init) e feita uma vez por avanco do
+    ! acoplamento atmosfera-superficie, sem subciclo proprio, a mesma
+    ! granularidade do nosso dt_coupling. Vem ANTES da fisica lenta porque
+    ! esta consome os campos que update_ice_model_fast grava em Ice.
     call update_ice_model_fast(is%aib, is%ice)
 
     ! ── Passo 2: avançar o SIS2 ───────────────────────────────────────────
     !
-    ! separa as duas sub-rotinas do passo
-    ! lento, que e' onde a nao reprodutibilidade nasce.
+    ! advance_ice_slow separa as duas sub-rotinas do passo lento, que e' onde
+    ! a nao reprodutibilidade nasce.
     !
-    ! O QUE JA SE SABE. Bateria de 18/09/2026, quatro execucoes, seis pares.
-    ! Os checksums de IST%part_size que o proprio SIS2 emite (chaves
+    ! O QUE JA SE SABE. Numa bateria de quatro execucoes (seis pares),
+    ! os checksums de IST%part_size que o proprio SIS2 emite (chaves
     ! DEBUG_CHKSUMS/DEBUG_SLOW_ICE/DEBUG_FAST_ICE) mostram, na PRIMEIRA troca
     ! de acoplamento:
     !   Start set_ice_surface_state      334285  identico
@@ -706,7 +681,7 @@ contains
     !
     ! LIMITE DO INSTRUMENTO, E COMO ELE SE DENUNCIA. Aqui so' ha acesso a
     ! FACHADA is%ice%part_size, nao ao sCS%IST%part_size que o SIS2 usa por
-    ! dentro. O ja mostrou que essa fachada pode ficar
+    ! Ja se viu que essa fachada pode ficar
     ! DEFASADA em relacao ao estado interno. Por isso o diagnostico mede TRES
     ! pontos, inclusive ANTES da primeira chamada: se os tres saírem iguais,
     ! a fachada nao esta sendo atualizada por estas rotinas e o instrumento e'
@@ -749,8 +724,8 @@ contains
     ! internamente). No driver nativo do SIS2 (coupler_main.F90 do FMS) essa
     ! chamada e feita pelo driver externo, nunca pelo proprio SIS2 -- por
     ! isso esta ausencia nao aparece como erro de compilacao nem de link,
-    ! so como campo permanentemente zerado. Sem esta chamada, o FIX
-    ! sincroniza o estado mas ninguem o "publica".
+    ! so como campo permanentemente zerado. Sem esta chamada, o estado fica
+    ! sincronizado mas ninguem o "publica".
     call set_ice_surface_fields(is%ice)
     call ESMF_LogWrite('ICE(SIS2): set_ice_surface_fields concluido ' // &
       '(Ice%part_size/albedo* publicados a partir de fCS%IST)', &
@@ -761,12 +736,12 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_ifrac', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3b (Fase 2): exportar albedo real por banda ─────────────────
+    ! ── Passo 3b: exportar albedo real por banda ──────────────────────────
     call export_si_albedo(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_albedo', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3c (Fase 3): exportar temperatura de pele real do gelo ──────
+    ! ── Passo 3c: exportar temperatura de pele real do gelo ───────────────
     call export_si_tskin(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_tskin', &
       line=__LINE__, file=__FILE__)) return
@@ -832,17 +807,15 @@ contains
   !> @brief Le os campos importados do mediador (forcante ATM + SST/correntes
   !! OCN) e popula is%aib/is%oib.
   !!
-  !! FIX (corrigido, era "ATENCAO nao verificado"): nomes de campo
-  !! confirmados contra med_cap_types.F90::export_names em teste real (erro
-  !! "NUOPC INCOMPATIBILITY: Import Fields not all connected" com os nomes
-  !! antigos inventados). Mapeamento atual:
+  !! Nomes de campo iguais a med_cap_types.F90::export_names. Mapeamento:
   !! - Fioi_taux/tauy → u_flux/v_flux; Fioi_sen → t_flux (SINAL INVERTIDO,
-  !! ver / broadcast_to_cat_neg); Fioi_evap → q_flux;
+  !!   ver broadcast_to_cat_neg); Fioi_evap → q_flux;
   !!   Fioi_lwnet → lw_flux; Fioi_swnet_vdr/vdf/idr/idf → sw_flux_*
-  !! (Fase 4, albedo do gelo puro, sem blend);
-  !!   Faxa_rain/snow → lprec/fprec; Sa_pslv → p. Os campos 2D do mediador
-  !!   sao REPLICADOS (broadcast) para todas as categorias de espessura de
-  !!   gelo na 3a dimensao de is%aib — o mediador nao distingue por categoria.
+  !!   (albedo do gelo puro, sem blend);
+  !!   Faxa_rain/snow → lprec/fprec; Sa_pslv → p; Faxa_coszen → coszen.
+  !!   Os campos 2D do mediador sao REPLICADOS (broadcast) para todas as
+  !!   categorias de espessura de gelo na 3a dimensao de is%aib — o mediador
+  !!   nao distingue por categoria.
   !!
   !! t_flux e' o UNICO campo desta lista
   !! que precisa de inversao de sinal. Fioi_sen chega na convencao CMEPS
@@ -850,10 +823,10 @@ contains
   !! define t_flux como positivo = sai da superficie (convencao legada FMS).
   !! Fioi_evap e Fioi_lwnet ja' chegam na convencao que q_flux/lw_flux
   !! esperam — NAO inverter esses dois.
-  !! - u_star, dhdt/dedt/drdt, coszen AINDA sem fonte no mediador — ficam
-  !!   nos valores default de seguranca definidos em InitializeRealize
-  !!   (zero). Isso e' uma SIMPLIFICACAO: acoplamento explicito, sem os
-  !!   termos de derivada usados para acoplamento implicito.
+  !! - u_star e dhdt/dedt/drdt sem fonte no mediador — ficam nos valores de
+  !!   seguranca definidos em InitializeRealize (zero). Isso e' uma
+  !!   SIMPLIFICACAO: acoplamento explicito, sem os termos de derivada usados
+  !!   para acoplamento implicito.
   subroutine import_forcing(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp
@@ -867,11 +840,8 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! -- Forcante atmosferica: le 2D, replica (broadcast) para as N
-    !    categorias de espessura de gelo em is%aib. Nomes confirmados em
-    !    med_cap_types.F90::export_names (FIX — nomes anteriores estavam
-    !    inventados e causavam NUOPC INCOMPATIBILITY em teste real).
-    ! taux/tauy/sen/evap/lwnet agora vem de
-    !    Fioi_* (temperatura de pele do gelo), nao mais Foxx_* (SST). --
+    !    categorias de espessura de gelo em is%aib. taux/tauy/sen/evap/lwnet
+    !    vem de Fioi_* (temperatura de pele do gelo), nao de Foxx_* (SST). --
     call get_field_2d(importState, "Fioi_taux",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%u_flux)
     call get_field_2d(importState, "Fioi_tauy",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
@@ -886,11 +856,10 @@ contains
     call broadcast_to_cat(ptr2d, is%aib%q_flux)
     call get_field_2d(importState, "Fioi_lwnet",     ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%lw_flux)
-    ! (, Set/2026): Fioi_swnet_* (albedo do gelo por
-    ! banda, PURO — sem blend com agua aberta) substitui Foxx_swnet_* (que
-    ! usava o albedo MEDIO da celula, o mesmo enviado ao MOM6). Ver
-    ! comentario no cabecalho de import_names_atm acima para o raciocinio
-    ! completo e med_bulk_ncar.F90 para o calculo.
+    ! Fioi_swnet_* (albedo do gelo por banda, PURO, sem blend com agua
+    ! aberta), e nao Foxx_swnet_* (albedo MEDIO da celula, o enviado ao
+    ! MOM6). Ver o comentario de import_names_atm acima e med_bulk_ncar.F90
+    ! para o calculo.
     call get_field_2d(importState, "Fioi_swnet_vdr", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_vis_dir)
     call get_field_2d(importState, "Fioi_swnet_vdf", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
@@ -899,7 +868,7 @@ contains
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_nir_dir)
     call get_field_2d(importState, "Fioi_swnet_idf", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_nir_dif)
-    ! FIX: lprec/fprec/p agora tem fonte real (antes ficavam em default).
+    ! lprec/fprec/p: chuva, neve e pressao ao nivel do mar do mediador.
     call get_field_2d(importState, "Faxa_rain",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%lprec)
     call get_field_2d(importState, "Faxa_snow",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
@@ -907,11 +876,9 @@ contains
     call get_field_2d(importState, "Sa_pslv",        ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%p)
 
-    ! angulo zenital solar real, antes zerado (ver
-    ! comentario historico logo acima desta rotina). Campo NOVO — se o
-    ! mediador em uso ainda nao exportar Faxa_coszen (versao antiga),
-    ! degrada de forma segura para coszen=0 (comportamento anterior) em vez
-    ! de abortar toda a forcante.
+    ! Angulo zenital solar real. Se o mediador nao exportar Faxa_coszen,
+    ! degrada de forma segura para coszen=0 em vez de abortar toda a
+    ! forcante.
     call get_field_2d(importState, "Faxa_coszen", ptr2d, rc)
     if (rc == ESMF_SUCCESS) then
       call broadcast_to_cat(ptr2d, is%aib%coszen)
@@ -1024,36 +991,6 @@ contains
     lb1 = lbound(ptr_ifrac,1); ub1 = ubound(ptr_ifrac,1)
     lb2 = lbound(ptr_ifrac,2); ub2 = ubound(ptr_ifrac,2)
     ! ------------------------------------------------------------------
-    ! Historico de correcoes desta rotina (Ago 2026), resumido:
-    !   1) formula original usava 1 - part_size(:,:,1), tratando o indice 1
-    !      como agua aberta — errado (indice 1 e categoria de gelo);
-    !   2) tentativa de corrigir com lbound falhou: part_size e POINTER e a
-    !      associacao nao preserva os limites 0:CatIce (lbound deu 1);
-    ! 3) causa raiz final: a FONTE estava errada — ver abaixo.
-    ! ------------------------------------------------------------------
-    ! FONTE DO CAMPO estava errada.
-    ! O diagnostico mostrou part_size dim1[1:90] dim2[1:155]
-    ! dim3[1:6], i_off=0, j_off=0 e TODAS as fatias zeradas, apesar do SIS2
-    ! ter gelo real (SIS Date: Area 1.277E+13 no passo 0). Ou seja: nao era
-    ! problema de indice nem de halo (nao ha halo em Ice%part_size, e a
-    ! indexacao ja acompanhava a decomposicao MPI corretamente — PET6
-    ! dim1[1:90], PET7 dim1[91:180]).
-    !
-    ! Causa raiz: Ice%part_size (do ice_data_type) e o campo DE FACHADA do
-    ! acoplador, preenchido apenas pelo caminho de acoplamento rapido
-    ! (ver ice_type.F90:191 — only available on fast PEs); nesta
-    ! configuracao ele permanece zerado. O estado REAL do gelo vive em
-    ! Ice%sCS%IST%part_size (ice_state_type), que e o que o proprio SIS2 usa
-    ! para calcular area/massa em ice_stock_pe (ice_type.F90:593-625) — os
-    ! mesmos numeros nao-zero que aparecem no log SIS Date.
-    !
-    ! IMPORTANTE: ao contrario de Ice%part_size, IST%part_size TEM HALOS
-    ! (isd:ied, jsd:jed) e categorias com base 0. Por isso o deslocamento
-    ! agora e derivado da grade do proprio SIS2 (Ice%sCS%G%isc/jsc), que e o
-    ! padrao usado internamente por ice_model.F90 (i_off = LBOUND - sG%isc).
-    ! IST so existe em slow_ice_PE — garantido aqui, pois o cap forca
-    ! fast_ice_pe=.true. e slow_ice_pe=.true. antes de ice_model_init.
-    ! ------------------------------------------------------------------
     ! Fracao de gelo marinho exportada ao mediador (Si_ifrac_sis2).
     !
     ! FONTE DO CAMPO — ponto critico: usa Ice%sCS%IST%part_size (estado
@@ -1090,11 +1027,10 @@ contains
       end do
     end do
 
-    ! valida a correcao comparando
-    ! o campo publico de fachada Ice%part_size (que ate a correcao ficava
-    ! sempre zerado, ver historico acima) contra o valor de sCS%IST%part_size
-    ! ja usado como fonte real acima. Ja validado em producao (Set/2026);
-    ! gated por cfg_write_fixdiag para nao poluir logs de rodadas longas.
+    ! Diagnostico: compara o campo publico de fachada Ice%part_size (zerado
+    ! nesta configuracao, ver acima) com sCS%IST%part_size, a fonte real
+    ! usada acima. Condicionado a cfg_write_fixdiag para nao poluir os logs
+    ! de rodadas longas.
     if (cfg_write_fixdiag) then
       if (associated(is%ice%part_size)) then
           write(diag_msg6,'(A,ES12.4,A,ES12.4)') &

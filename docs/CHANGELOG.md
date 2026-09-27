@@ -9,11 +9,19 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Comentários dos caps do oceano e do gelo sem marcas de histórico (R-FASE5-03).** Terceira etapa da fase 5. Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código.
+  - Arquivos: `mom_cap_MONAN.F90`, `sis_cap_MONAN.F90`, `DOCN_cap.F90` e `docn_cap_netcdf.F90`.
+  - `mom_cap_MONAN.F90`: o histórico das versões 2.0 a 2.6 saiu do cabeçalho e foi resumido neste CHANGELOG (seção "Histórico do cap do oceano"); no lugar, o cabeçalho descreve os três modos da fração de gelo exportada e a persistência. Saíram as marcas `[C1]` a `[C13]`, `[v14.4]`, "(v2.6)", "(v14.21)", "Alternativa 1" e ".5.1". A documentação da sigmoide descrevia `DT_TRANS` = 0,5 K e frazil binário e estava antes da rotina errada; foi reescrita com os valores atuais (2,0 K, frazil contínuo, persistência) e posta antes de `compute_si_ifrac_proxy`. Saíram três blocos de documentação de rotinas que não existem mais (malha ESMF e grade lat-lon regular do oceano).
+  - `sis_cap_MONAN.F90`: saíram "FIX", "TODO-VERIFICAR", "Fase 2/3/4" (trocados pelo nome do grupo de campos), "(Ago 2026)", "(, Set/2026)" e a data da bateria de diagnóstico; o bloco "Historico de correcoes" de `export_si_ifrac`, que repetia o bloco seguinte, saiu. A documentação de `import_forcing` dizia que `coszen` não tinha fonte no mediador; hoje vem de `Faxa_coszen`. O comentário de `u_star` aponta a decisão em aberto registrada em `docs/estado-do-projeto.md`.
+  - `DOCN_cap.F90` e `docn_cap_netcdf.F90`: linha de versão do cabeçalho e marca "(modo concurrent, v13.1)".
+  - Conferências locais: `confere-instrucoes.py` sem diferenças nos quatro arquivos; `confere-literais.py` com as constantes de texto iguais; compilação local sem avisos novos.
+
 - **Comentários do mediador sem marcas de histórico (R-FASE5-02).** Segunda etapa da fase 5 (limpeza). Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código.
   - Arquivos: `MED_cap.F90`, `med_cap_types.F90`, `med_bulk_ncar.F90`, `med_cap_methods.F90` e `med_cap_netcdf.F90` (juntos, de 5598 para 5439 linhas).
   - Saíram dos comentários as marcas de versão (v2.5, v4, v13.0, v14.20, v14.21 e outras), datas (Maio, Ago e Set de 2026), os nomes "Fase 2", "Fase 3", "Fase 4" e "Fase 4b" do acoplamento (trocados pelo nome do que cada grupo de campos é: umidade e neve opcionais, fluxos do gelo, onda curta do gelo, temperatura composta), "Alternativa 1", "Opção 1", "CORRECAO N", "FIX", "REVERT PARCIAL" e as linhas "Versão 1.0" dos cabeçalhos. Os fragmentos que sobraram de limpezas anteriores (como "v13.0): anuncia", "Em.1.1" e "mascara.5.1") viraram frases completas, e dois caracteres corrompidos foram corrigidos.
   - Comentários desatualizados reescritos com o comportamento atual: a decomposição das grades (um DE por PET, por `grid_regdecomp`, no lugar da fórmula antiga com exemplos de 640x320 e 512 PETs), as rotas de interpolação pelo nome (`ocn2atm`, `ocn2atm_ice`, `atm2ocn_ice`, no lugar dos antigos `rh_*`), os modos da fração de gelo do OISST, a máscara de terra por `So_omask` e a temperatura composta `Sx_tsfc`. O aviso para conferir a assinatura de `ESMF_GridCreate1PeriDim` saiu (o código compila e roda com o ESMF 8.9.1), assim como o comentário sobre um `BLOCK` que já não existe.
   - Conferências locais: `confere-instrucoes.py` sem diferenças nos cinco arquivos; `confere-literais.py` com as constantes de texto iguais; compilação local, teste da física bulk e teste dos gravadores idênticos.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02.
 
 - **`nuopc.input` sem histórico nos comentários (R-FASE5-01).** Primeira etapa da fase 5 (limpeza). Nenhum valor do `nuopc.input` muda e nenhum fonte Fortran muda.
   - `nuopc.input`: o cabeçalho com o histórico de versões (v10.0 a v12.0) e as marcas `[N1]` a `[N8]`, `[N-B1]` e `Sprint` saíram dos comentários (o histórico fica neste CHANGELOG); os comentários passam a citar o módulo que lê o arquivo (`coupler_config_mod`, no lugar de `mpas_cap_config_mod`), o driver `esm.F90` (no lugar de `esm_MONAN.F90`) e o módulo do cap atmosférico (`mpas_cap_MONAN_mod`); as referências a versões antigas (v14.19, v14.20) e aos nomes "Fase 1" e "Fase 2" do acoplamento saíram; os grupos passam a ser numerados de 1 a 9, sem o "1b".
@@ -765,6 +773,18 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 - Passos renomeados (nomes mais curtos, sem "install" redundante):
   `1-install-monan.bash`→`1-monan.bash`, `2-install-mom.bash`→`2-mom.bash`,
   `3-install-coupler.bash`→`3-coupler.bash`.
+
+## Histórico do cap do oceano (`mom_cap_MONAN.F90`, versões 2.0 a 2.6, Maio 2026)
+
+Resumo do histórico que ficava no cabeçalho do arquivo, retirado na R-FASE5-03.
+
+- **2.0**: acoplamento real com o MOM6, no lugar do stub sintético (SST constante de 290 K).
+- **2.1**: `Si_ifrac` por uma sigmoide da SST, no lugar do proxy binário (gelo onde frazil > 0 ou SST ≤ T_freeze). **2.1.1**: guarda por `mask2dT` (continentes com `Si_ifrac` = 0).
+- **2.2**: com `use_docn_ice`, `Si_ifrac` lido do arquivo OISST (`set_si_ifrac_from_file`, interpolação temporal por `ReadOcnFieldInterp`); a sigmoide fica como alternativa.
+- **2.3**: `docn_ice_init_only`: OISST só em t=0 e, depois, a sigmoide da SST dinâmica do MOM6.
+- **2.4**: largura da sigmoide `DT_TRANS` de 0,5 K para 2,0 K (com 0,5 K, a SST polar de 278 a 282 K logo após o primeiro passo zerava o proxy) e contribuição do frazil contínua, `min(1, frazil/100 W/m²)`, no lugar da binária.
+- **2.5**: persistência entre passos, `Si_ifrac(t) = max(proxy(t), Si_ifrac(t-1) × SI_IFRAC_DECAY)`; sem ela, o gelo do OISST caía de 7918 para 38 células no primeiro passo.
+- **2.6**: `si_ifrac_mem` salvo depois do preenchimento do campo e fora da guarda de PET, e logs que confirmam se a persistência está ativa.
 
 ## v14.15 — Jun 2026
 

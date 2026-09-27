@@ -176,14 +176,14 @@ contains
 
     allocate(buf_global(nx*ny))
 
-    ! (modo concurrent, v13.1): usar a VM do COMPONENTE, não a
-    ! global. ESMF_VMGetGlobal retorna todos os PETs (8); o ESMF_VMBroadcast
-    ! abaixo é coletivo sobre essa VM com rootPet=0. Em concurrent o OCN roda
-    ! só nos seus PETs (ex.: 4..7): apenas eles chamariam o broadcast enquanto
-    ! os PETs do ATM (incl. o PET0 global, raiz) nunca entram nesta rotina →
-    ! deadlock. ESMF_GridCompGet(gcomp,vm) dá a VM do componente (localPet e
-    ! rootPet=0 passam a ser locais ao componente). Em sequential a VM do
-    ! componente = todos os PETs, então o comportamento é idêntico ao anterior.
+    ! Usa a VM do COMPONENTE, não a global. ESMF_VMGetGlobal retornaria
+    ! todos os PETs, e o ESMF_VMBroadcast abaixo é coletivo sobre a VM com
+    ! rootPet=0. Em concurrent o OCN roda só nos seus PETs: apenas eles
+    ! chamariam o broadcast, enquanto os PETs do ATM (incluindo o PET0
+    ! global, a raiz) nunca entram nesta rotina → deadlock.
+    ! ESMF_GridCompGet(gcomp,vm) dá a VM do componente (localPet e rootPet=0
+    ! locais ao componente). Em sequential a VM do componente tem todos os
+    ! PETs, e o comportamento é o mesmo da VM global.
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)

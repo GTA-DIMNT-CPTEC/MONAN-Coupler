@@ -49,7 +49,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE4-07 | `InitializeRealize` do cap do gelo dividida em etapas; `intent` refinados; interfaces mínimas do SIS2 |
 | R-FASE4-08 | `nuopc.input` do repositório com as contagens de PETs da configuração de validação |
 | R-FASE5-01 | comentários do `nuopc.input` atualizados; aviso antigo do `run_esmApp.jaci` retirado |
-| R-FASE5-02 | comentários do mediador sem marcas de histórico e com o comportamento atual (validação pendente) |
+| R-FASE5-02 | comentários do mediador sem marcas de histórico e com o comportamento atual |
+| R-FASE5-03 | comentários dos caps do oceano e do gelo sem marcas de histórico; histórico do `mom_cap_MONAN` resumido no CHANGELOG (validação pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 4, que cobre todas as etapas até a R-FASE4-07).
 
@@ -143,14 +144,14 @@ Levantamento de 27/09/2026, depois da fase 4. Os números de marcas contam só l
 | Ordem | Etapa | Conteúdo | Situação |
 | --- | --- | --- | --- |
 | 1 | R-FASE5-01 | `nuopc.input`: comentários sem histórico, nomes de módulos e do driver corretos, grupos numerados de 1 a 9, nota da fração de gelo atualizada (caminho do `Si_ifrac` do SIS2 até o MPAS validado); `run_esmApp.jaci` sem o aviso de caminho não validado | concluída (PASS, 73 iguais, tag `fase5-01-validada`) |
-| 2 | R-FASE5-02 | marcas de histórico nos comentários do mediador (`MED_cap` 38, `med_cap_types` 12, `med_bulk_ncar` 6, `med_cap_methods` 3, `med_cap_netcdf` 1); também comentários desatualizados e fragmentos de limpezas anteriores | entregue, a validar |
-| 3 | R-FASE5-03 | idem nos caps do oceano e do gelo (`mom_cap_MONAN` 23, `sis_cap_MONAN` 23, `DOCN_cap` 6, `docn_cap_netcdf` 1) | a fazer |
+| 2 | R-FASE5-02 | marcas de histórico nos comentários do mediador (`MED_cap` 38, `med_cap_types` 12, `med_bulk_ncar` 6, `med_cap_methods` 3, `med_cap_netcdf` 1); também comentários desatualizados e fragmentos de limpezas anteriores | concluída (PASS, 73 iguais, tag `fase5-02-validada`) |
+| 3 | R-FASE5-03 | idem nos caps do oceano e do gelo (`mom_cap_MONAN` 23, `sis_cap_MONAN` 23, `DOCN_cap` 6, `docn_cap_netcdf` 1); também documentação desatualizada da fração de gelo do oceano | entregue, a validar |
 | 4 | R-FASE5-04 | idem no cap atmosférico e em `src/shared` (`mpas_cap_methods` 14, `mpas_cap_MONAN` 13, `mpas_cap_netcdf` 11, `mpas_atm_model` 3, `mpas_atm_types` 2, `DATM_cap` 2, `shared` 6) | a fazer |
 | 5 | R-FASE5-05 | dividir `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) | a fazer |
 | 6 | R-FASE5-06 | dividir `InitializeDataComplete` (`MED_cap`, 160) e `blend_albedo_with_ice` (`med_bulk_ncar`, 153; coberta pelo teste da física bulk) | a fazer |
 | 7 | R-FASE5-07 | scripts de pós-processamento com marcas de histórico nos comentários (`postproc_mom6_import.py` 89, `postproc_monan2_import.py` 63, `mede-taxa-repro.sh` 30 e outros) | a fazer |
 
-Para decidir (questão científica, não de refatoração): no cap do gelo, `is%aib%u_star` (velocidade de fricção sobre o gelo) é sempre zero, porque o mediador não a envia; o código marca isso como a verificar.
+Para decidir (questão científica, não de refatoração): no cap do gelo, `is%aib%u_star` (velocidade de fricção sobre o gelo) é sempre zero, porque o mediador não a envia; o comentário no código aponta para esta nota.
 
 Numeração provisória, na ordem da tabela. As etapas 2 a 4 só mudam comentários: a conferência das instruções tem de mostrar zero diferenças.
 

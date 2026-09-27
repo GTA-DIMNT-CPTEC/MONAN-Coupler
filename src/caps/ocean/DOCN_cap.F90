@@ -35,8 +35,7 @@
 !           Se o arquivo já estiver em K, ajuste SST_CELSIUS_TO_K = 0.0.      !
 !                                                                              !
 ! Referência de design: DATM_cap.F90 (JRA55), AtmOcnMedPetListProto/ESMF.    !
-! Versão 2.0 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026.           !
-!   Remoção do modo 'stub' (dados sintéticos constantes) — produção OISST.   !
+! GT Acoplamento de Modelos / INPE/CGCT/DIMNT.                                 !
 !==============================================================================!
 
 module DOCN_cap_mod
