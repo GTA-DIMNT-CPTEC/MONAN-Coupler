@@ -42,6 +42,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE3-04 | linha de base padrão R-NOFMA-02; este documento |
 | R-FASE4-01 | `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano divididos em etapas |
 | R-FASE4-02 | `anota-linha-base.bash`; `valida_rodada compara` distingue "comparação não feita" de FAIL e devolve o código da comparação |
+| R-FASE4-03 | `MediatorAdvance` dividida em etapas (validação na Jaci pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 2).
 
@@ -53,7 +54,7 @@ O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (R
 | R-NOFMA-01 | `ea10fb6` | desligada | referência das fases 2A a 3 |
 | **R-NOFMA-02** | tag `fase3-03-validada` | desligada | **referência atual** |
 
-A R-NOFMA-02 tem dados idênticos aos da R-NOFMA-01; os 24 arquivos `monan2_import_*` têm atributos CF novos nos eixos. Em 27/09/2026 o MANIFEST dela recebeu uma observação sobre a reescrita do histórico (troca do autor dos commits), e a soma do MANIFEST no SHA256SUMS foi atualizada; o SHA256SUMS anterior está em `~/SHA256SUMS.R-NOFMA-02.antes-manifest`. O MANIFEST também marca "árvore suja" por causa do submódulo `models/atmos/MONAN-Model`, que está num commit diferente do registrado no repositório desde antes da refatoração; o código do acoplador estava limpo.
+A R-NOFMA-02 tem dados idênticos aos da R-NOFMA-01; os 24 arquivos `monan2_import_*` têm atributos CF novos nos eixos. Em 27/09/2026 o MANIFEST dela recebeu uma observação sobre a reescrita do histórico (troca do autor dos commits), e a soma do MANIFEST no SHA256SUMS foi atualizada; o SHA256SUMS anterior está em `~/SHA256SUMS.R-NOFMA-02.antes-manifest`. Na mesma data, o `anota-linha-base.bash` registrou nele que o submódulo MONAN-Model usado é o `01962f0`. O MANIFEST marca "árvore suja" por causa do submódulo `models/atmos/MONAN-Model`, que está num commit diferente do registrado no repositório desde antes da refatoração; o código do acoplador estava limpo.
 
 ## 5. Como validar uma alteração
 
@@ -101,8 +102,7 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 4. Decidir se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados; decisão científica).
 5. Decidir o destino do DATM, que o driver não registra (o script `roda_repro_datm_mom6.sh` depende dele).
 6. Trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`.
-7. Dividir as rotinas que ainda passam de 200 linhas de código (sem comentários): `MediatorAdvance` (308), `compute_ice_fluxes` (224), `update_ice_fields_on_atm_grid` (222), `WriteDOCNDiag` (210) e `InitializeRealize` do cap do gelo (202). O `config_read` (267) é quase todo declaração de namelist e pode ficar como está. As quatro rotinas listadas antes foram divididas na R-FASE4-01.
-8. Registrar no MANIFEST da R-NOFMA-02 que o submódulo MONAN-Model usado é o `01962f0` (a linha `MONAN-Model` já traz o commit; falta a observação que explica a "árvore suja"): `tools/dev/anota-linha-base.bash -o $REF/baseline -l R-NOFMA-02 -m "..."`.
+7. Dividir as rotinas que ainda passam de 200 linhas de código (sem comentários): `compute_ice_fluxes` (224), `update_ice_fields_on_atm_grid` (222), `WriteDOCNDiag` (210) e `InitializeRealize` do cap do gelo (202). O `config_read` (267) é quase todo declaração de namelist e pode ficar como está. As quatro rotinas listadas antes foram divididas na R-FASE4-01, e a `MediatorAdvance` (308) na R-FASE4-03.
 
 ## 9. Convenções
 

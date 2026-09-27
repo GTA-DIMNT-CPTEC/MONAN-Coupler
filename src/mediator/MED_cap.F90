@@ -1360,6 +1360,12 @@ contains
 
   !============================================================================
   ! MediatorAdvance - com fallback MPAS -> DATM
+  !
+  ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
+  ! gather_atm_forcing, local_atm_bounds, update_ocean_fields_on_atm_grid,
+  ! update_ice_fraction_from_docn, calc_bulk_ncar, apply_native_fluxes,
+  ! export_to_components, stamp_export_fields, RouteOcnToAtm,
+  ! log_ifrac_export_bitsum e med_write_import_fields.
   !============================================================================
   subroutine MediatorAdvance(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -1368,79 +1374,36 @@ contains
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
     type(ESMF_Time)          :: currTime, nextTime
-    ! instante que representa o CONTEUDO desta
-    ! execucao do mediador. Ver a justificativa completa junto da atribuicao,
-    ! logo apos o calculo de nextTime.
+    ! instante que representa o CONTEUDO desta execucao do mediador (ver
+    ! med_stamp_time).
     type(ESMF_Time)          :: stampTime
-    logical                  :: med_runs_before_advance
     type(ESMF_TimeInterval)  :: dt
     type(ESMF_Field)         :: field
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
     integer :: localDeCount_med  ! guard para PETs sem DE local
+    logical :: proceed
 
-    ! Campos do MPAS (primario)
-    real(ESMF_KIND_R8), pointer :: uas_mpas(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: vas_mpas(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: tas_mpas(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: shum_mpas(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: psl_mpas(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: swdn_mpas(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: lwdn_mpas(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: rain_mpas(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: snow_mpas(:,:) => null()
+    ! Forcantes atmosfericos na grade ATM local (MPAS ou DATM)
+    real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
+    real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
+    real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
     ! fluxos nativos do PBL do MONAN-A (opcionais — ausencia mantem
     ! o fallback bulk NCAR via calc_bulk_ncar, ex. modo DATM)
     real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: taux_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: tauy_mpas(:,:) => null()
-    logical :: mpas_available
-
-    ! Campos do DATM (fallback)
-    real(ESMF_KIND_R8), pointer :: uas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: vas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: tas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: shum_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: psl_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: swdn_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: lwdn_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: rain_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: snow_datm(:,:) => null()
-
-    ! Campos finais (alias para MPAS ou DATM)
-    real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
-    real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
-    real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    ! v13.0): ponteiros para correntes oceânicas na grade ATM
-    real(ESMF_KIND_R8), pointer :: uocn(:,:), vocn(:,:)
-
+    ! valores padrao quando Sa_shum_mpas / Faxa_snow_mpas estao ausentes
     real(ESMF_KIND_R8), pointer     :: shum_local(:,:) => null()
     real(ESMF_KIND_R8), pointer     :: snow_local(:,:) => null()
-    integer :: i1_glob, i2_glob, j1_glob, j2_glob
     integer :: i1, i2, j1, j2
-      real(ESMF_KIND_R8), allocatable, target :: uas_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: vas_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: tas_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: psl_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: swdn_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: lwdn_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: rain_g(:,:)
-      real(ESMF_KIND_R8), allocatable, target :: shum_g(:,:)
-      real(ESMF_KIND_R8), allocatable :: snow_g(:,:)
-      real(ESMF_KIND_R8), allocatable :: tmp_local(:,:)
-      integer :: gi
-      integer :: gj
-      integer :: mpi_ierr_g
-        real(ESMF_KIND_R8), pointer :: fpt_probe(:,:)
-        logical, save :: raw_sst_diag_done = .false.
-        real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
-        type(ESMF_Field) :: f_bs
-        integer :: rc_bs_2
-
-    ! nullify após todas as declarações (instrução executável
-    ! não pode preceder declarações — Fortran 2003 §12.4).
-    nullify(uocn, vocn)
+    ! Forcantes reunidos na grade ATM global (1:ATM_NX, 1:ATM_NY)
+    real(ESMF_KIND_R8), allocatable :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
+    real(ESMF_KIND_R8), allocatable :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
+    real(ESMF_KIND_R8), allocatable :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
+    logical, save :: raw_sst_diag_done = .false.
+    real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
 
     rc = ESMF_SUCCESS
 
@@ -1464,56 +1427,7 @@ contains
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
     nextTime = currTime + dt
 
-    !--------------------------------------------------------------------------
-    ! o instante que rotula o resultado do
-    ! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
-    !
-    ! O relogio do mediador marca currTime = t durante toda a execucao do passo,
-    ! nos dois modos: o NUOPC so' avanca o relogio depois que o Advance retorna.
-    ! O que muda e' o conteudo que chega ao importState:
-    !
-    !   concurrent : 'MED' e' o ULTIMO elemento do passo. Os conectores
-    !                'MPAS -> MED', 'OCN -> MED' e 'ICE -> MED' ja' rodaram
-    !                DEPOIS dos avancos, entao os campos importados descrevem o
-    !                estado em t+dt. O rotulo correto e' nextTime.
-    !
-    !   sequential : 'MED' e' o QUARTO elemento, ANTES de 'MPAS', 'OCN' e 'ICE'.
-    !                Os conectores que o alimentam rodaram no inicio do passo, e
-    !                os campos importados descrevem o estado em t (o que cada
-    !                componente escreveu no fim do passo anterior). O rotulo
-    !                correto e' currTime.
-    !
-    ! Ate' esta correcao nextTime era usado nos dois modos. Consequencias no
-    ! modo sequencial:
-    !
-    !   (a) Todo arquivo de diagnostico mom6_import_YYYYMMDD_HHMMSS.nc e
-    !       monan2_import_YYYYMMDD_HHMMSS.nc saia com o nome e a variavel de
-    !       tempo adiantados em um dt_coupling em relacao ao dado que continha.
-    !       Comparar uma rodada sequential com uma concurrent mostrava as duas
-    !       deslocadas de um passo, e as animacoes ficavam fora de fase.
-    !   (b) O exportState era carimbado com t+dt e entregue a componentes cujo
-    !       relogio marcava t. Os tres caps usam CheckImport tolerante (janela
-    !       de +/- dt_coupling) ou no-op, entao isso nao abortava a execucao;
-    !       passava sem sinal nenhum. Com currTime o carimbo passa a coincidir
-    !       exatamente com o relogio do consumidor.
-    !
-    ! O modo concorrente nao muda: stampTime = nextTime, byte a byte como antes.
-    !--------------------------------------------------------------------------
-    ! seq_repro: na variante REPRODUTIVEL do sequential+split+SIS2 o elemento
-    ! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
-    ! campos importados descrevem o estado em t+dt e o rotulo correto e'
-    ! nextTime — nao currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
-    ! sairia adiantado de um dt e quebraria a comparacao bit-a-bit contra o
-    ! concurrent. O sequential classico (cfg_seq_repro=.false.) continua com
-    ! 'MED' cedo -> currTime; o concurrent continua nextTime. Nenhum dos dois
-    ! muda de comportamento.
-    med_runs_before_advance = (trim(cfg_coupling_mode) == 'sequential' &
-                               .and. .not. cfg_seq_repro)
-    if (med_runs_before_advance) then
-      stampTime = currTime
-    else
-      stampTime = nextTime
-    end if
+    stampTime = med_stamp_time(currTime, nextTime)
 
     ! com regDecomp(2)=min(petCount,ny_atm/2), PETs acima de ny_atm/2
     ! têm localDeCount=0 para o atm_grid interno do MED. Esses PETs não têm
@@ -1537,6 +1451,280 @@ contains
     ! zerar antes, regiões sem dados MPAS aparecem como lixo nos plots.
     !==========================================================================
     call zero_med_fluxes(is, rc)
+
+    !==========================================================================
+    ! 1 e 2. FORCANTES ATMOSFERICOS: MPAS (primario) ou DATM (fallback)
+    !==========================================================================
+    call get_atm_forcing(is, importState, uas, vas, tas, shum, psl, swdn, lwdn, &
+                         rain, snow, shum_local, snow_local,                     &
+                         sen_mpas, lat_mpas, taux_mpas, tauy_mpas, proceed, rc)
+    if (.not. proceed) return
+
+    i1 = lbound(uas,1); i2 = ubound(uas,1)
+    j1 = lbound(uas,2); j2 = ubound(uas,2)
+
+    ! Forcantes reunidos na grade ATM global em todos os PETs do mediador
+    call gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
+                            i1, i2, j1, j2,                                    &
+                            uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
+                            rain_g, shum_g, snow_g, rc)
+
+    ! Os arrays globais cobrem 1..ATM_NX, 1..ATM_NY; os campos internos
+    ! (is%f_*_atm) tem os limites LOCAIS da DE do PET. O bulk percorre os
+    ! limites locais, acessando os arrays globais nas mesmas coordenadas.
+    call local_atm_bounds(is, i1, i2, j1, j2, rc)
+
+    !==========================================================================
+    ! 3. SST: regrid OCN -> ATM (So_t esta agora na grade OCN)
+    !
+    ! 5 (Maio 2026): aplica mascara terra/oceano apos o regrid.
+    !
+    ! CAUSA-RAIZ DETECTADA NO POSTPROC:
+    ! O mom_cap_methods::state_setexport multiplica SST por ocean_grid%mask2dT
+    ! antes do export (linha 1126 do mom_cap_methods.F90). Sobre terra,
+    ! mask2dT=0 -> SST=0 K na grade OCN. Apos regrid bilinear OCN->ATM, celulas
+    ! oceanicas proximas a costa ficam contaminadas pela mistura com zero,
+    ! caindo abaixo de 270 K. Resultado: ~37% das celulas oceanicas mascaradas
+    ! como "fill" pelo postproc (limiar fill_min_threshold=270 K).
+    !
+    ! a mascara terra/oceano usada no regrid
+    ! bilinear OCN->ATM NAO deve ser adivinhada a partir do proprio campo de
+    ! SST (limiar T<270K). Isso e' fragil e inconsistente com a mascara real
+    ! do modelo oceanico: a mascara agora vem diretamente de So_omask =
+    ! nint(mask2dT), exportada pelo MOM6 (mom_cap_methods.F90::mom_export).
+    ! Assim o bilinear so' usa celulas OCEANICAS VALIDAS como fonte da
+    ! interpolacao, nunca preenchimentos de terra (SST=0K sob mask2dT=0).
+    ! Residual nao mapeado na costa (onde nenhum vizinho valido bilinear
+    ! existe) e' tratado pela extrapolacao por vizinhanca logo abaixo.
+    !==========================================================================
+    call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
+
+    !==========================================================================
+    ! 3b. Si_ifrac —.1.1: fill_ifrac_from_oisst apenas no 1º passo
+    !
+    ! Modos (nuopc.input &nuopc_mode):
+    !   use_docn_ice=T  init_only=F  → Alternativa 1 original:
+    !     fill_ifrac_from_oisst a cada passo (campo congelado em OISST).
+    ! use_docn_ice=T init_only=T →.1.1:
+    !     fill_ifrac_from_oisst apenas na 1ª MediatorAdvance (flag
+    !     med_ifrac_init_done). is%f_ifrac_atm fica congelado no valor
+    !     OISST de t=0 nas demais chamadas.
+    !     NÃO tentar rh_ocn2atm para Si_ifrac: zera is%f_ifrac_atm antes
+    ! de falhar (rh é específico para So_t)..2 criará rh dedicado.
+    !   use_docn_ice=F              → regrid OCN sigmoid via importState.
+    !==========================================================================
+    ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
+    call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
+    ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
+    ! use_docn_ice=F: is%f_ifrac_atm foi zerado acima; permanece zero
+
+    !==========================================================================
+    ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
+    !==========================================================================
+    call calc_bulk_ncar(is, importState, &
+                        uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
+                        i1, i2, j1, j2, clock, rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: calc_bulk_ncar falhou', &
+      line=__LINE__, file=__FILE__)) return
+
+    call apply_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
+
+    !==========================================================================
+    ! 5. REGRID E EXPORTA PARA O OCEANO
+    ! CORRECAO 3: RegridOrCopy agora tem ramo else explicito: se routehandles
+    !   nao estiverem criados, copia direto da grade ATM interna para a grade
+    !   OCN do exportState via ESMF_FieldSMM (ou copia simples). Isso evita
+    !   que os campos exportados permane�am zerados silenciosamente.
+    !
+    ! 5.1 (Maio 2026): aplicacao de mascara terra/oceano nos fluxos
+    ! antes do export, eliminando valores absurdos sobre continentes.
+    !
+    ! CONTEXTO:
+    ! O bulk NCAR roda em TODAS as celulas da grade ATM (oceano + terra).
+    ! Apos o.5, celulas terra recebem sst = 271.35 K (marcador).
+    ! Combinado com T_2m, U_10m, P_slv reais (continentais), o bulk produz
+    ! fluxos enormes sobre terra (Foxx_sen saturando em +-500 W/m^2;
+    ! Foxx_lwnet em -300 W/m^2 sobre o Saara).
+    !
+    ! O MOM6 ja descarta essas celulas em state_setexport (mask2dT), mas o
+    ! diagnostico NetCDF do MED captura ANTES dessa mascara, registrando
+    ! os valores absurdos..5.1 zera os fluxos sobre terra no
+    ! proprio MED, antes da escrita do NetCDF e antes do envio ao MOM6.
+    !
+    ! HEURISTICA: celulas terra tem sst exatamente = 271.35 K (marcador
+    ! cravado pelo where do.5). Celulas marinhas polares reais
+    ! tem sst variavel em torno de 270-272 K (raramente exato em 271.35).
+    !==========================================================================
+    ! cria/regrida is%f_omask_atm uma unica
+    ! vez (So_omask, ocn_grid -> atm_grid, NEAREST_STOD -- so' precisa
+    ! discriminar terra/oceano, nao precisao subcelular). Usado abaixo no
+    ! 5.1 no lugar da heuristica SST~=271,35K, que colidia com
+    ! agua aberta genuina no ponto de congelamento (borda do gelo).
+    call export_to_components(is, importState, exportState, rc)
+    if (allocated(uas_g)) deallocate(uas_g)
+    if (allocated(vas_g)) deallocate(vas_g)
+    if (allocated(tas_g)) deallocate(tas_g)
+    if (allocated(psl_g)) deallocate(psl_g)
+    if (allocated(swdn_g)) deallocate(swdn_g)
+    if (allocated(lwdn_g)) deallocate(lwdn_g)
+    if (allocated(rain_g)) deallocate(rain_g)
+    if (allocated(shum_g)) deallocate(shum_g)
+    if (allocated(snow_g)) deallocate(snow_g)
+
+    ! Atualizar timestamps do exportState
+    call stamp_export_fields(exportState, field, stampTime, rc)
+
+    call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
+
+    ! ── RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
+    ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
+    ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
+    ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
+    ! Sem esta chamada, o MPAS recebe exportState vazio (campos zerados).
+    if (is%use_med_to_mpas) then
+      call RouteOcnToAtm(importState, exportState, clock, is, rc)
+      if (rc /= ESMF_SUCCESS) then
+        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
+          ESMF_LOGMSG_WARNING)
+        rc = ESMF_SUCCESS
+      end if
+    end if
+
+    ! Si_ifrac como sai do mediador (etapa 4 de 4 do FIX-DIAG-BITSUM-01)
+    if (cfg_write_fixdiag) call log_ifrac_export_bitsum(exportState)
+
+    call med_write_import_fields(exportState, stampTime, is, rc)
+    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
+    ! Liberar arrays temporarios de defaults (se alocados)
+    if (associated(shum_local)) then
+      deallocate(shum_local); nullify(shum_local)
+    end if
+    if (associated(snow_local)) then
+      deallocate(snow_local); nullify(snow_local)
+    end if
+  end subroutine MediatorAdvance
+
+  !============================================================================
+  !> @brief Instante que rotula o resultado desta execucao do mediador.
+  !!
+  !! o instante que rotula o resultado do
+  !! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
+  !!
+  !! O relogio do mediador marca currTime = t durante toda a execucao do passo,
+  !! nos dois modos: o NUOPC so' avanca o relogio depois que o Advance retorna.
+  !! O que muda e' o conteudo que chega ao importState:
+  !!
+  !!   concurrent : 'MED' e' o ULTIMO elemento do passo. Os conectores
+  !!                'MPAS -> MED', 'OCN -> MED' e 'ICE -> MED' ja' rodaram
+  !!                DEPOIS dos avancos, entao os campos importados descrevem o
+  !!                estado em t+dt. O rotulo correto e' nextTime.
+  !!
+  !!   sequential : 'MED' e' o QUARTO elemento, ANTES de 'MPAS', 'OCN' e 'ICE'.
+  !!                Os conectores que o alimentam rodaram no inicio do passo, e
+  !!                os campos importados descrevem o estado em t (o que cada
+  !!                componente escreveu no fim do passo anterior). O rotulo
+  !!                correto e' currTime.
+  !!
+  !! Ate' esta correcao nextTime era usado nos dois modos. Consequencias no
+  !! modo sequencial:
+  !!
+  !!   (a) Todo arquivo de diagnostico mom6_import_YYYYMMDD_HHMMSS.nc e
+  !!       monan2_import_YYYYMMDD_HHMMSS.nc saia com o nome e a variavel de
+  !!       tempo adiantados em um dt_coupling em relacao ao dado que continha.
+  !!       Comparar uma rodada sequential com uma concurrent mostrava as duas
+  !!       deslocadas de um passo, e as animacoes ficavam fora de fase.
+  !!   (b) O exportState era carimbado com t+dt e entregue a componentes cujo
+  !!       relogio marcava t. Os tres caps usam CheckImport tolerante (janela
+  !!       de +/- dt_coupling) ou no-op, entao isso nao abortava a execucao;
+  !!       passava sem sinal nenhum. Com currTime o carimbo passa a coincidir
+  !!       exatamente com o relogio do consumidor.
+  !!
+  !! O modo concorrente nao muda: stampTime = nextTime, byte a byte como antes.
+  !!--------------------------------------------------------------------------
+  !! seq_repro: na variante REPRODUTIVEL do sequential+split+SIS2 o elemento
+  !! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
+  !! campos importados descrevem o estado em t+dt e o rotulo correto e'
+  !! nextTime — nao currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
+  !! sairia adiantado de um dt e quebraria a comparacao bit-a-bit contra o
+  !! concurrent. O sequential classico (cfg_seq_repro=.false.) continua com
+  !! 'MED' cedo -> currTime; o concurrent continua nextTime. Nenhum dos dois
+  !! muda de comportamento.
+  !!
+  !! @param[in] currTime  instante corrente do relogio do mediador
+  !! @param[in] nextTime  currTime + dt_coupling
+  !! @return             currTime no sequencial classico, nextTime nos demais
+  !============================================================================
+  function med_stamp_time(currTime, nextTime) result(stampTime)
+    type(ESMF_Time), intent(in) :: currTime, nextTime
+    type(ESMF_Time)             :: stampTime
+
+    logical :: med_runs_before_advance
+
+    med_runs_before_advance = (trim(cfg_coupling_mode) == 'sequential' &
+                               .and. .not. cfg_seq_repro)
+    if (med_runs_before_advance) then
+      stampTime = currTime
+    else
+      stampTime = nextTime
+    end if
+  end function med_stamp_time
+
+  !============================================================================
+  !> @brief Ponteiros dos forcantes atmosfericos: MPAS (primario) ou DATM.
+  !!
+  !! Obtem do importState os campos do MPAS (7 obrigatorios, 2 da Fase 2 e 4
+  !! fluxos nativos opcionais). Sem os obrigatorios, e com use_mpas_atm
+  !! falso, usa os campos do DATM. Os ponteiros de saida apontam para os
+  !! dados do importState ou, para shum e snow ausentes, para shum_local e
+  !! snow_local, alocados aqui com os valores padrao.
+  !!
+  !! @param[in]    is          estado interno (use_mpas_atm)
+  !! @param[in]    importState estado de importacao do mediador
+  !! @param[inout] uas..snow   forcantes na grade ATM local
+  !! @param[inout] shum_local, snow_local  valores padrao, se alocados
+  !! @param[inout] sen_mpas, lat_mpas, taux_mpas, tauy_mpas  fluxos nativos
+  !! @param[out]   proceed     .false. quando MediatorAdvance deve retornar
+  !! @param[inout] rc          codigo de retorno ESMF
+  !============================================================================
+  subroutine get_atm_forcing(is, importState, uas, vas, tas, shum, psl, swdn, lwdn, &
+                             rain, snow, shum_local, snow_local,                     &
+                             sen_mpas, lat_mpas, taux_mpas, tauy_mpas, proceed, rc)
+    type(MED_InternalState),     intent(in)    :: is
+    type(ESMF_State),            intent(in)    :: importState
+    real(ESMF_KIND_R8), pointer, intent(inout) :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: psl(:,:), swdn(:,:), lwdn(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: rain(:,:), snow(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: shum_local(:,:), snow_local(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: sen_mpas(:,:), lat_mpas(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: taux_mpas(:,:), tauy_mpas(:,:)
+    logical,                     intent(out)   :: proceed
+    integer,                     intent(inout) :: rc
+
+    ! Campos do MPAS (primario)
+    real(ESMF_KIND_R8), pointer :: uas_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: vas_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: tas_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: shum_mpas(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: psl_mpas(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: swdn_mpas(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: lwdn_mpas(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: rain_mpas(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: snow_mpas(:,:) => null()
+    logical :: mpas_available
+    integer :: i1_glob, i2_glob, j1_glob, j2_glob   ! limites de Sa_u10m_mpas
+
+    ! Campos do DATM (fallback)
+    real(ESMF_KIND_R8), pointer :: uas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: vas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: tas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: shum_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: psl_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: swdn_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: lwdn_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: rain_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: snow_datm(:,:) => null()
+
+    proceed = .false.
 
     !==========================================================================
     ! 1. TENTAR OBTER CAMPOS DO MPAS (PRIMARIO)
@@ -1664,248 +1852,172 @@ contains
       call ESMF_LogWrite('MED: Usando MPAS como fonte atmosferica primaria', &
         ESMF_LOGMSG_INFO)
     end if
+    proceed = .true.
+  end subroutine get_atm_forcing
 
-    i1 = lbound(uas,1); i2 = ubound(uas,1)
-    j1 = lbound(uas,2); j2 = ubound(uas,2)
+  !============================================================================
+  !> @brief Reune os forcantes atmosfericos na grade ATM global, em todos os PETs.
+  !!
+  !! O MPAS-A roda apenas num subconjunto dos PETs do MED. Em PETs onde
+  !! MPAS não roda, os campos uas, vas, tas, psl, swdn, lwdn, rain, shum,
+  !! snow têm fptr=0.0 (do mpas_cap_methods:state_set_field_1d que zera o
+  !! domínio local antes de preencher apenas células Voronoi locais).
+  !! Logo, do globo (360x180=64800 células), apenas a fração coberta por
+  !! PETs com tile MPAS+MED recebe dado real; o resto fica zero.
+  !!
+  !! Por isso cada campo e montado num array GLOBAL (1:ATM_NX, 1:ATM_NY),
+  !! reunido por MPI_Allreduce(SUM) sobre tiles disjuntos (ver
+  !! allreduce_atm_tile), na ordem uas, vas, tas, psl, swdn, lwdn, rain, shum,
+  !! snow. Onde shum_g ficou sem dado (<= 0), vale SHUM_OCEAN_DEFAULT.
+  !!
+  !! @param[in]  uas..snow        forcantes na grade ATM local
+  !! @param[in]  i1, i2, j1, j2   limites locais dos forcantes
+  !! @param[out] uas_g..snow_g    forcantes na grade ATM global
+  !! @param[inout] rc             codigo de retorno (log_atm_forcing_summary)
+  !============================================================================
+  subroutine gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
+                                i1, i2, j1, j2,                                    &
+                                uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
+                                rain_g, shum_g, snow_g, rc)
+    real(ESMF_KIND_R8), pointer, intent(in) :: uas(:,:), vas(:,:), tas(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: psl(:,:), swdn(:,:), lwdn(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: rain(:,:), shum(:,:), snow(:,:)
+    integer,            intent(in)  :: i1, i2, j1, j2
+    real(ESMF_KIND_R8), allocatable, intent(out) :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
+    real(ESMF_KIND_R8), allocatable, intent(out) :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
+    real(ESMF_KIND_R8), allocatable, intent(out) :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
+    integer,            intent(inout) :: rc
 
-    !==========================================================================
-    ! (CRÍTICO): SPREAD MPAS-A → todos PETs do mediador.
-    !
-    ! Causa raiz definitiva (confirmada pela análise de 8 rodadas):
-    !   O MPAS-A roda apenas num subconjunto dos PETs do MED. Em PETs onde
-    !   MPAS não roda, os campos uas, vas, tas, psl, swdn, lwdn, rain, shum,
-    !   snow têm fptr=0.0 (do mpas_cap_methods:state_set_field_1d que zera o
-    !   domínio local antes de preencher apenas células Voronoi locais).
-    !   Logo, do globo (360x180=64800 células), apenas a fração coberta por
-    !   PETs com tile MPAS+MED recebe dado real; o resto fica zero.
-    !
-    ! Solução: para cada campo MPAS, criar um array GLOBAL (1:nx_atm,1:ny_atm)
-    ! e gather via MPI_Allreduce(MAX) — assumindo fill=0 nas células sem dado,
-    ! o MAX vence sobre zero e retorna o dado real onde quer que esteja.
-    ! Trocar bounds do loop bulk para 1..nx_atm, 1..ny_atm.
-    !==========================================================================
+    real(ESMF_KIND_R8), allocatable :: tmp_local(:,:)
 
-      allocate(uas_g(ATM_NX,ATM_NY),  vas_g(ATM_NX,ATM_NY),  tas_g(ATM_NX,ATM_NY))
-      allocate(psl_g(ATM_NX,ATM_NY),  swdn_g(ATM_NX,ATM_NY), lwdn_g(ATM_NX,ATM_NY))
-      allocate(rain_g(ATM_NX,ATM_NY), shum_g(ATM_NX,ATM_NY), snow_g(ATM_NX,ATM_NY))
-      allocate(tmp_local(ATM_NX,ATM_NY))
+    allocate(uas_g(ATM_NX,ATM_NY),  vas_g(ATM_NX,ATM_NY),  tas_g(ATM_NX,ATM_NY))
+    allocate(psl_g(ATM_NX,ATM_NY),  swdn_g(ATM_NX,ATM_NY), lwdn_g(ATM_NX,ATM_NY))
+    allocate(rain_g(ATM_NX,ATM_NY), shum_g(ATM_NX,ATM_NY), snow_g(ATM_NX,ATM_NY))
+    allocate(tmp_local(ATM_NX,ATM_NY))
 
-      ! Gather global por MPI_Allreduce(MAX) — campos com 'fill=0' fora do tile
-      ! local. MAX combina contribuições de todos os PETs corretamente.
-      !
-      ! uas: campo que pode ser negativo. Para MAX não corromper sinal negativo,
-      ! cada PET escreve seu tile e usa OUTROS valores como -infinito virtual.
-      ! Como mpas_cap zera o domínio local fora das células Voronoi locais,
-      ! usamos um truque: replicar via SUM e cada PET zera fora do seu tile.
-      ! MPI_Allreduce(SUM) com tiles disjuntos == gather global.
+    call allreduce_atm_tile(uas,  i1, i2, j1, j2, tmp_local, uas_g)
+    call allreduce_atm_tile(vas,  i1, i2, j1, j2, tmp_local, vas_g)
+    call allreduce_atm_tile(tas,  i1, i2, j1, j2, tmp_local, tas_g)
+    call allreduce_atm_tile(psl,  i1, i2, j1, j2, tmp_local, psl_g)
+    call allreduce_atm_tile(swdn, i1, i2, j1, j2, tmp_local, swdn_g)
+    call allreduce_atm_tile(lwdn, i1, i2, j1, j2, tmp_local, lwdn_g)
+    call allreduce_atm_tile(rain, i1, i2, j1, j2, tmp_local, rain_g)
+    call allreduce_atm_tile(shum, i1, i2, j1, j2, tmp_local, shum_g)
+    ! Onde shum_g=0 (não preenchido) e shum tem fallback, usar SHUM_OCEAN_DEFAULT
+    where (shum_g <= 0.0_ESMF_KIND_R8) shum_g = SHUM_OCEAN_DEFAULT
+    call allreduce_atm_tile(snow, i1, i2, j1, j2, tmp_local, snow_g)
 
-      ! Helper macro: monta tmp_local com o tile, faz Allreduce(SUM) → array_g
-      ! UAS
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) then
-          tmp_local(gi,gj) = uas(gi,gj)
-        end if
-      end do; end do
-      call MPI_Allreduce(tmp_local, uas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+    ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
+    ! Espera-se que após, n_nz_uas > 30000/64800 (cobertura global).
+    call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
 
-      ! VAS
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = vas(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, vas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+    deallocate(tmp_local)
+  end subroutine gather_atm_forcing
 
-      ! TAS
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = tas(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, tas_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+  !============================================================================
+  !> @brief Reune um campo da grade ATM por MPI_Allreduce(SUM) sobre tiles disjuntos.
+  !!
+  !! uas e outros campos podem ser negativos, entao MAX nao serve. Cada PET
+  !! escreve seu tile num buffer global zerado; com tiles disjuntos, a soma
+  !! entre PETs e o proprio campo global.
+  !!
+  !! @param[in]  src        campo na grade ATM local (limites preservados)
+  !! @param[in]  i1, i2, j1, j2  limites locais do tile
+  !! @param[out] tmp_local  buffer de trabalho (1:ATM_NX, 1:ATM_NY)
+  !! @param[out] dst        campo global (1:ATM_NX, 1:ATM_NY)
+  !============================================================================
+  subroutine allreduce_atm_tile(src, i1, i2, j1, j2, tmp_local, dst)
+    real(ESMF_KIND_R8), pointer, intent(in) :: src(:,:)
+    integer,            intent(in)  :: i1, i2, j1, j2
+    real(ESMF_KIND_R8), intent(out) :: tmp_local(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(out) :: dst(ATM_NX, ATM_NY)
 
-      ! PSL
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = psl(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, psl_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+    integer :: gi, gj, mpi_ierr_g
 
-      ! SWDN
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = swdn(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, swdn_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+    tmp_local = 0.0_ESMF_KIND_R8
+    do gj=j1,j2; do gi=i1,i2
+      if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = src(gi,gj)
+    end do; end do
+    call MPI_Allreduce(tmp_local, dst, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+      MPI_SUM, med_mpi_comm, mpi_ierr_g)
+  end subroutine allreduce_atm_tile
 
-      ! LWDN
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = lwdn(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, lwdn_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+  !============================================================================
+  !> @brief Limites locais da DE dos campos internos, restritos a grade ATM global.
+  !!
+  !! Obtidos de is%f_taux_atm (mesma decomposicao para todos os campos
+  !! internos). Em PET sem DE local, limites vazios: os laces nao executam.
+  !!
+  !! @param[in]    is              estado interno do mediador
+  !! @param[out]   i1, i2, j1, j2  limites locais
+  !! @param[inout] rc              codigo de retorno do ESMF_FieldGet
+  !============================================================================
+  subroutine local_atm_bounds(is, i1, i2, j1, j2, rc)
+    type(MED_InternalState), intent(in)    :: is
+    integer,                 intent(out)   :: i1, i2, j1, j2
+    integer,                 intent(inout) :: rc
 
-      ! RAIN
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = rain(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, rain_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+    real(ESMF_KIND_R8), pointer :: fpt_probe(:,:)
 
-      ! SHUM (com fallback)
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = shum(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, shum_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
-      ! Onde shum_g=0 (não preenchido) e shum tem fallback, usar SHUM_OCEAN_DEFAULT
-      where (shum_g <= 0.0_ESMF_KIND_R8) shum_g = SHUM_OCEAN_DEFAULT
+    nullify(fpt_probe)
+    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fpt_probe, rc=rc)
+    if (rc == ESMF_SUCCESS .and. associated(fpt_probe)) then
+      i1 = lbound(fpt_probe,1); i2 = ubound(fpt_probe,1)
+      j1 = lbound(fpt_probe,2); j2 = ubound(fpt_probe,2)
+      ! Clampar aos limites globais (1..NX_G, 1..NY_G) para evitar acesso
+      ! a uas_g fora dos bounds alocados.
+      i1 = max(1, i1); i2 = min(ATM_NX, i2)
+      j1 = max(1, j1); j2 = min(ATM_NY, j2)
+    else
+      ! PET sem DE local — bounds vazios → loops não executam
+      i1 = 1; i2 = 0
+      j1 = 1; j2 = 0
+    end if
+  end subroutine local_atm_bounds
 
-      ! SNOW (fase 2 opcional — zero default)
-      tmp_local = 0.0_ESMF_KIND_R8
-      do gj=j1,j2; do gi=i1,i2
-        if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = snow(gi,gj)
-      end do; end do
-      call MPI_Allreduce(tmp_local, snow_g, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-        MPI_SUM, med_mpi_comm, mpi_ierr_g)
+  !============================================================================
+  !> @brief Fase 3: fluxos nativos do MONAN-A no lugar dos do bulk NCAR.
+  !!
+  !! 4b. FASE 3 — SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
+  !!     MONAN-A (Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
+  !!     Faxa_tauy_mpas), onde disponiveis. calc_bulk_ncar acima continua
+  !!     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
+  !!
+  !! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
+  !! hfx/lh/ust internos (ver mpas_atm_model.F90/mpas_cap_methods.F90).
+  !! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
+  !! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
+  !! inconsistencia entre o balanco de energia do MONAN-A e o forcante
+  !! entregue ao MOM6/SIS2.
+  !!
+  !! CONFIRMADO (Set/2026): sinal de hfx/lh e' POSITIVO PARA CIMA (convencao
+  !!  usual WRF/MPAS/GFS), verificado com a equipe de fisica do MONAN-A —
+  !!  por isso invertido (-sen_g2, -lat_g2) abaixo, para bater com a
+  !!  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
+  !!  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
+  !!  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
+  !! em sis_cap_MONAN.F90 para o sinal desses.
+  !!  1) Sinal de hfx/lh: POSITIVO PARA CIMA (convencao
+  !!     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
+  !!     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
+  !!     oceano).
+  !!  2) taux_sfc/tauy_sfc (de mpas_atm_model.F90) usam a mesma forma
+  !!     rho*Cd*|V|*V do bulk NCAR — nao invertidos aqui, mas confirme
+  !!     que a rotacao de referencial (Terra vs. grade) ja e tratada
+  !!     antes de exportar (deve ser, pois MPAS ja roda em lat/lon).
+  !!  3) Faxa_lat_mpas vem em W/m^2 (energia); Foxx_evap e fluxo de MASSA
+  !!     (kg/m^2/s) — por isso a divisao por L_evap abaixo.
+  !!
+  !! @param[in]    is          estado interno do mediador
+  !! @param[in]    sen_mpas, lat_mpas, taux_mpas, tauy_mpas  fluxos nativos
+  !! @param[inout] rc          codigo de retorno
+  !============================================================================
+  subroutine apply_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
+    type(MED_InternalState), pointer, intent(in) :: is
+    real(ESMF_KIND_R8), pointer, intent(in) :: sen_mpas(:,:), lat_mpas(:,:)
+    real(ESMF_KIND_R8), pointer, intent(in) :: taux_mpas(:,:), tauy_mpas(:,:)
+    integer,                 intent(inout) :: rc
 
-      ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
-      ! Espera-se que após, n_nz_uas > 30000/64800 (cobertura global).
-      call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
-
-      deallocate(tmp_local)
-
-      ! 2: arrays globais (uas_g..snow_g) cobrem 1..NX_G,1..NY_G
-      ! Mas fptr (de is%f_*_atm) tem bounds LOCAIS à DE do PET → loop deve usar
-      ! os bounds locais (i1_loc..i2_loc da DE). Como uas_g é global, acessá-lo
-      ! com índices (i,j) locais à DE acessa as mesmas coordenadas geográficas
-      ! que fptr(i,j) — preservando o resultado correto sem buffer overrun.
-      uas  => uas_g
-      vas  => vas_g
-      tas  => tas_g
-      psl  => psl_g
-      swdn => swdn_g
-      lwdn => lwdn_g
-      rain => rain_g
-      shum => shum_g
-      ! snow_g sem target — usar snow_g diretamente nos loops bulk
-      ! (snow pointer não pode apontar para allocatable sem target)
-
-      ! Obter bounds locais da DE do f_taux_atm (mesma decomposição p/ todos)
-        nullify(fpt_probe)
-        call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fpt_probe, rc=rc)
-        if (rc == ESMF_SUCCESS .and. associated(fpt_probe)) then
-          i1 = lbound(fpt_probe,1); i2 = ubound(fpt_probe,1)
-          j1 = lbound(fpt_probe,2); j2 = ubound(fpt_probe,2)
-          ! Clampar aos limites globais (1..NX_G, 1..NY_G) para evitar acesso
-          ! a uas_g fora dos bounds alocados.
-          i1 = max(1, i1); i2 = min(ATM_NX, i2)
-          j1 = max(1, j1); j2 = min(ATM_NY, j2)
-        else
-          ! PET sem DE local — bounds vazios → loops não executam
-          i1 = 1; i2 = 0
-          j1 = 1; j2 = 0
-        end if
-
-      ! NOTA: uas_g..snow_g são allocatable LOCAIS dentro deste block.
-      ! Para mantê-los vivos até o fim do MediatorAdvance, usamos pointer
-      ! association: uas => uas_g é seguro porque uas é declarado pointer no
-      ! escopo externo. O `block` precisa permanecer aberto até o fim do bulk.
-      ! ATENÇÃO: este block deve englobar TODA a seção 4 (CALCULAR BULK NCAR)
-      ! e seção 5 (REGRID E EXPORTA). Veja end block ao final.
-
-
-    !==========================================================================
-    ! 3. SST: regrid OCN -> ATM (So_t esta agora na grade OCN)
-    !
-    ! 5 (Maio 2026): aplica mascara terra/oceano apos o regrid.
-    !
-    ! CAUSA-RAIZ DETECTADA NO POSTPROC:
-    ! O mom_cap_methods::state_setexport multiplica SST por ocean_grid%mask2dT
-    ! antes do export (linha 1126 do mom_cap_methods.F90). Sobre terra,
-    ! mask2dT=0 -> SST=0 K na grade OCN. Apos regrid bilinear OCN->ATM, celulas
-    ! oceanicas proximas a costa ficam contaminadas pela mistura com zero,
-    ! caindo abaixo de 270 K. Resultado: ~37% das celulas oceanicas mascaradas
-    ! como "fill" pelo postproc (limiar fill_min_threshold=270 K).
-    !
-    ! a mascara terra/oceano usada no regrid
-    ! bilinear OCN->ATM NAO deve ser adivinhada a partir do proprio campo de
-    ! SST (limiar T<270K). Isso e' fragil e inconsistente com a mascara real
-    ! do modelo oceanico: a mascara agora vem diretamente de So_omask =
-    ! nint(mask2dT), exportada pelo MOM6 (mom_cap_methods.F90::mom_export).
-    ! Assim o bilinear so' usa celulas OCEANICAS VALIDAS como fonte da
-    ! interpolacao, nunca preenchimentos de terra (SST=0K sob mask2dT=0).
-    ! Residual nao mapeado na costa (onde nenhum vizinho valido bilinear
-    ! existe) e' tratado pela extrapolacao por vizinhanca logo abaixo.
-    !==========================================================================
-    call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
-
-    !==========================================================================
-    ! 3b. Si_ifrac —.1.1: fill_ifrac_from_oisst apenas no 1º passo
-    !
-    ! Modos (nuopc.input &nuopc_mode):
-    !   use_docn_ice=T  init_only=F  → Alternativa 1 original:
-    !     fill_ifrac_from_oisst a cada passo (campo congelado em OISST).
-    ! use_docn_ice=T init_only=T →.1.1:
-    !     fill_ifrac_from_oisst apenas na 1ª MediatorAdvance (flag
-    !     med_ifrac_init_done). is%f_ifrac_atm fica congelado no valor
-    !     OISST de t=0 nas demais chamadas.
-    !     NÃO tentar rh_ocn2atm para Si_ifrac: zera is%f_ifrac_atm antes
-    ! de falhar (rh é específico para So_t)..2 criará rh dedicado.
-    !   use_docn_ice=F              → regrid OCN sigmoid via importState.
-    !==========================================================================
-    ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
-    call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
-    ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
-    ! use_docn_ice=F: is%f_ifrac_atm foi zerado acima; permanece zero
-
-    !==========================================================================
-    ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
-    !==========================================================================
-    call calc_bulk_ncar(is, importState, &
-                        uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
-                        i1, i2, j1, j2, clock, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: calc_bulk_ncar falhou', &
-      line=__LINE__, file=__FILE__)) return
-
-    !==========================================================================
-    ! 4b. FASE 3 — SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
-    !     MONAN-A (Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
-    !     Faxa_tauy_mpas), onde disponiveis. calc_bulk_ncar acima continua
-    !     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
-    !
-    ! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
-    ! hfx/lh/ust internos (ver mpas_atm_model.F90/mpas_cap_methods.F90).
-    ! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
-    ! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
-    ! inconsistencia entre o balanco de energia do MONAN-A e o forcante
-    ! entregue ao MOM6/SIS2.
-    !
-    ! CONFIRMADO (Set/2026): sinal de hfx/lh e' POSITIVO PARA CIMA (convencao
-    !  usual WRF/MPAS/GFS), verificado com a equipe de fisica do MONAN-A —
-    !  por isso invertido (-sen_g2, -lat_g2) abaixo, para bater com a
-    !  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
-    !  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
-    !  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
-    ! em sis_cap_MONAN.F90 para o sinal desses.
-    !  1) Sinal de hfx/lh: POSITIVO PARA CIMA (convencao
-    !     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
-    !     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
-    !     oceano).
-    !  2) taux_sfc/tauy_sfc (de mpas_atm_model.F90) usam a mesma forma
-    !     rho*Cd*|V|*V do bulk NCAR — nao invertidos aqui, mas confirme
-    !     que a rotacao de referencial (Terra vs. grade) ja e tratada
-    !     antes de exportar (deve ser, pois MPAS ja roda em lat/lon).
-    !  3) Faxa_lat_mpas vem em W/m^2 (energia); Foxx_evap e fluxo de MASSA
-    !     (kg/m^2/s) — por isso a divisao por L_evap abaixo.
-    !==========================================================================
     if (associated(sen_mpas) .and. associated(lat_mpas) .and. &
         associated(taux_mpas) .and. associated(tauy_mpas)) then
       call substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
@@ -1917,98 +2029,30 @@ contains
         'MED(Fase3): Faxa_sen/lat/taux/tauy_mpas ausentes -- mantendo bulk ' // &
         'NCAR (calc_bulk_ncar) para sen/evap/taux/tauy', ESMF_LOGMSG_INFO)
     end if
+  end subroutine apply_native_fluxes
 
-    !==========================================================================
-    ! 5. REGRID E EXPORTA PARA O OCEANO
-    ! CORRECAO 3: RegridOrCopy agora tem ramo else explicito: se routehandles
-    !   nao estiverem criados, copia direto da grade ATM interna para a grade
-    !   OCN do exportState via ESMF_FieldSMM (ou copia simples). Isso evita
-    !   que os campos exportados permane�am zerados silenciosamente.
-    !
-    ! 5.1 (Maio 2026): aplicacao de mascara terra/oceano nos fluxos
-    ! antes do export, eliminando valores absurdos sobre continentes.
-    !
-    ! CONTEXTO:
-    ! O bulk NCAR roda em TODAS as celulas da grade ATM (oceano + terra).
-    ! Apos o.5, celulas terra recebem sst = 271.35 K (marcador).
-    ! Combinado com T_2m, U_10m, P_slv reais (continentais), o bulk produz
-    ! fluxos enormes sobre terra (Foxx_sen saturando em +-500 W/m^2;
-    ! Foxx_lwnet em -300 W/m^2 sobre o Saara).
-    !
-    ! O MOM6 ja descarta essas celulas em state_setexport (mask2dT), mas o
-    ! diagnostico NetCDF do MED captura ANTES dessa mascara, registrando
-    ! os valores absurdos..5.1 zera os fluxos sobre terra no
-    ! proprio MED, antes da escrita do NetCDF e antes do envio ao MOM6.
-    !
-    ! HEURISTICA: celulas terra tem sst exatamente = 271.35 K (marcador
-    ! cravado pelo where do.5). Celulas marinhas polares reais
-    ! tem sst variavel em torno de 270-272 K (raramente exato em 271.35).
-    !==========================================================================
-    ! cria/regrida is%f_omask_atm uma unica
-    ! vez (So_omask, ocn_grid -> atm_grid, NEAREST_STOD -- so' precisa
-    ! discriminar terra/oceano, nao precisao subcelular). Usado abaixo no
-    ! 5.1 no lugar da heuristica SST~=271,35K, que colidia com
-    ! agua aberta genuina no ponto de congelamento (borda do gelo).
-    call export_to_components(is, importState, exportState, rc)
-    if (allocated(uas_g)) deallocate(uas_g)
-    if (allocated(vas_g)) deallocate(vas_g)
-    if (allocated(tas_g)) deallocate(tas_g)
-    if (allocated(psl_g)) deallocate(psl_g)
-    if (allocated(swdn_g)) deallocate(swdn_g)
-    if (allocated(lwdn_g)) deallocate(lwdn_g)
-    if (allocated(rain_g)) deallocate(rain_g)
-    if (allocated(shum_g)) deallocate(shum_g)
-    if (allocated(snow_g)) deallocate(snow_g)
-    if (allocated(tmp_local)) deallocate(tmp_local)
+  !============================================================================
+  !> @brief Soma de bits de Si_ifrac como sai do mediador (FIX-DIAG-BITSUM-01).
+  !!
+  !! Etapa 4 de 4: Si_ifrac no exportState, depois do RouteOcnToAtm. E o que
+  !! o conector entrega ao MPAS e o que aparece no monan2_import_*.nc.
+  !!
+  !! @param[inout] exportState  estado de exportacao do mediador
+  !============================================================================
+  subroutine log_ifrac_export_bitsum(exportState)
+    type(ESMF_State), intent(inout) :: exportState
 
-    ! Atualizar timestamps do exportState
-    call stamp_export_fields(exportState, field, stampTime, rc)
+    type(ESMF_Field) :: f_bs
+    integer :: rc_bs_2
 
-    call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
-
-    ! ── v4: diagnóstico de importação inline ──────────────────
-    ! Implementação direta em MED_cap_MONAN.F90 — sem dependência de
-    ! MOM_cap_methods (lib pré-compilada) nem de coupler_config_mod.
-    ! Lê mom6_output.nml com namelist local de 2 variáveis (sem ios/=0).
-    ! Usa netcdf (já importado neste módulo) para escrever os campos.
-    ! ─────────────────────────────────────────────────────────────────────────
-    ! ── RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
-    ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
-    ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
-    ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
-    ! Sem esta chamada, o MPAS recebe exportState vazio (campos zerados).
-    if (is%use_med_to_mpas) then
-      call RouteOcnToAtm(importState, exportState, clock, is, rc)
-      if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
-          ESMF_LOGMSG_WARNING)
-        rc = ESMF_SUCCESS
-      end if
+    call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_bs, rc=rc_bs_2)
+    if (rc_bs_2 == ESMF_SUCCESS) then
+      call diag_bitsum_log('etapa4 Si_ifrac exportState para MPAS', f_bs, rc_bs_2)
+    else
+      call ESMF_LogWrite('FIX-DIAG-BITSUM-01: etapa4 Si_ifrac ausente do ' // &
+        'exportState; etapa NAO medida', ESMF_LOGMSG_WARNING)
     end if
-
-    ! (etapa 4 de 4): Si_ifrac como sai do mediador,
-    ! no exportState, depois do RouteOcnToAtm. E' o que o conector entrega
-    ! ao MPAS e o que aparece no monan2_import_*.nc.
-    if (cfg_write_fixdiag) then
-        call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_bs, rc=rc_bs_2)
-        if (rc_bs_2 == ESMF_SUCCESS) then
-          call diag_bitsum_log('etapa4 Si_ifrac exportState para MPAS', f_bs, rc_bs_2)
-        else
-          call ESMF_LogWrite('FIX-DIAG-BITSUM-01: etapa4 Si_ifrac ausente do ' // &
-            'exportState; etapa NAO medida', ESMF_LOGMSG_WARNING)
-        end if
-    end if
-
-    call med_write_import_fields(exportState, stampTime, is, rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
-    ! Liberar arrays temporarios de defaults (se alocados)
-    if (associated(shum_local)) then
-      deallocate(shum_local); nullify(shum_local)
-    end if
-    if (associated(snow_local)) then
-      deallocate(snow_local); nullify(snow_local)
-    end if
-  end subroutine MediatorAdvance
+  end subroutine log_ifrac_export_bitsum
 
   subroutine stamp_export_fields(exportState, field, stampTime, rc)
     type(ESMF_State), intent(inout) :: exportState
