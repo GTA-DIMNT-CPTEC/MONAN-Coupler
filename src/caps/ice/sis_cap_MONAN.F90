@@ -1,36 +1,22 @@
-!! ============================================================================
-!! sis_cap_MONAN.F90 — Cap NUOPC do SIS2 (gelo marinho dinâmico)
-!! ============================================================================
+!> @file sis_cap_MONAN.F90
+!! @brief Cap NUOPC do SIS2 (gelo marinho dinâmico).
 !!
-!! FIX SIS2-ATIVACAO (Ago 2026): componente NUOPC NOVO, separado, para o SIS2.
+!! Componente NUOPC próprio para o SIS2, com PETs separados dos do MOM6. O cap
+!! chama o SIS2 diretamente (ice_model_mod), sem o combined_ice_ocean_driver:
+!! esse driver espera o ocean_state_type do cap FMS do MOM6, um tipo opaco
+!! incompatível com o do cap NUOPC que mom_cap_MONAN.F90 usa. O SIS2 só
+!! precisa das estruturas de troca ocean_ice_boundary_type e
+!! atmos_ice_boundary_type, que são arrays simples. Os dados com o mediador
+!! passam por campos ESMF, como nos caps do oceano e da atmosfera.
 !!
-!! HISTÓRICO: a primeira tentativa (embutir o SIS2 dentro de mom_cap_MONAN.F90
-!! via combined_ice_ocean_driver) foi BLOQUEADA — combined_ice_ocean_driver
-!! espera um ocean_state_type do driver FMS_cap (ocean_model_MOM.F90), que é
-!! um tipo OPACO (private) incompatível com o ocean_state_type do driver
-!! nuopc_cap (MOM_ocean_model_nuopc.F90) que mom_cap_MONAN.F90 já usa. Ver
-!! SIS2_ativacao_plano_integracao.md, seção 8, para o erro de compilação real
-!! e a análise completa.
+!! Por passo de acoplamento (ModelAdvance):
+!!   1. lê os campos importados do mediador (forçantes da atmosfera, SST e
+!!      correntes) para atmos_ice_boundary_type e ocean_ice_boundary_type;
+!!   2. update_ice_model_fast, termodinâmica lenta e dinâmica do gelo;
+!!   3. exporta para o mediador a fração, os albedos e a temperatura de pele
+!!      do gelo.
 !!
-!! Este arquivo evita esse problema chamando o SIS2 DIRETAMENTE (ice_model_mod),
-!! sem passar por combined_ice_ocean_driver — o SIS2 só precisa de
-!! ocean_ice_boundary_type/atmos_ice_boundary_type, que são tipos de dados
-!! "achatados" (arrays simples), não o estado opaco do MOM6. Troca dados com
-!! o mediador via campos ESMF normais, no mesmo padrão de mom_cap_MONAN.F90 e
-!! mpas_cap_MONAN.F90.
-!!
-!! ATENÇÃO GERAL: este arquivo é um RASCUNHO/ESQUELETO, escrito sem acesso a
-!! compilador. Partes com alta confiança (API do SIS2, confirmada lendo a
-!! fonte real) estão implementadas. Partes com risco maior estão marcadas
-!! com "TODO-VERIFICAR" — precisam de confirmação/teste antes de produção.
-!!
-!! Fluxo de execução por passo de acoplamento (ModelAdvance):
-!!   1. Ler campos importados do mediador (forçante ATM + SST/correntes OCN)
-!!      para dentro de atmos_ice_boundary_type / ocean_ice_boundary_type
-!!   2. update_ice_slow_thermo(Ice) — termodinâmica do gelo
-!!   3. update_ice_dynamics_trans(Ice) — dinâmica/transporte do gelo
-!!   4. Exportar Si_ifrac (= 1 - Ice%part_size(:,:,1)) para o mediador
-!! ============================================================================
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module sis_cap_MONAN_mod
 
@@ -40,16 +26,9 @@ module sis_cap_MONAN_mod
                            NUOPC_Advertise,         NUOPC_Realize,          &
                            NUOPC_CompAttributeSet,  NUOPC_IsUpdated,        &
                            NUOPC_CompFilterPhaseMap
-  ! FIX (corrigido, era bug de compilação): os três labels abaixo vêm de
-  ! NUOPC_Model, não de NUOPC — mesmo padrão já usado (corretamente) em
-  ! mom_cap_MONAN.F90.
-  ! FIX (limpeza): model_label_SetClock removido — não é mais usado desde
-  ! que a especialização (vazia, bugada) de SetClock foi removida acima.
-  ! FIX (adicionado): model_label_CheckImport, para o CheckImport tolerante
-  ! (ver CheckImportTolerant abaixo) — mesma solução já usada e testada em
-  ! mom_cap_MONAN.F90 para o mesmo tipo de erro ("Import Fields not at
-  ! current time"), causado pelo SIS2/FMS usar seu proprio gerenciador de
-  ! tempo internamente, divergindo ligeiramente do relogio do driver ESMF.
+  ! model_label_CheckImport: o CheckImport tolerante (CheckImportTolerant)
+  ! aceita campos com carimbo de tempo ligeiramente diferente, porque o
+  ! SIS2/FMS tem seu próprio gerenciador de tempo (como no cap do oceano).
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
                            model_label_DataInitialize => label_DataInitialize, &
                            model_label_Advance        => label_Advance,        &
@@ -63,10 +42,9 @@ module sis_cap_MONAN_mod
   use coupler_constants_mod, only : TICE_FALLBACK => T_FREEZE_SEAWATER
   use coupler_config_mod, only : cfg_mom6_mesh_ocn, cfg_write_fixdiag
 
-  ! FIX SIS2-ATIVACAO: API do SIS2, confirmada lendo a fonte real em
-  ! models/ocean/MOM6-examples/src/SIS2/src/{ice_model,ice_type,
-  ! ice_boundary_types}.F90. NÃO usa combined_ice_ocean_driver (bloqueado —
-  ! ver cabeçalho do arquivo).
+  ! API do SIS2: models/ocean/MOM6-examples/src/SIS2/src/{ice_model,
+  ! ice_type,ice_boundary_types}.F90 (interfaces mínimas para compilar fora
+  ! da Jaci em tests/interfaces/sis_stubs.F90).
   use ice_model_mod, only : ice_data_type, ice_model_init, ice_model_end,   &
                              share_ice_domains, ice_model_restart,          &
                              update_ice_slow_thermo, update_ice_dynamics_trans, &
@@ -78,9 +56,7 @@ module sis_cap_MONAN_mod
   use MOM_time_manager, only : time_type, set_date, set_calendar_type, GREGORIAN
   use MOM_diag_manager_infra, only : diag_manager_set_time_end_infra
 
-  use mpp_domains_mod, only : mpp_get_compute_domain, mpp_get_domain_npes, &
-                               mpp_get_pelist
-  use mpp_mod,         only : mpp_pe
+  use mpp_domains_mod, only : mpp_get_compute_domain
   use MOM_domains,     only : MOM_infra_init, AGRID
 
   use coupler_utils_mod, only : ChkErr
@@ -271,17 +247,13 @@ contains
   end subroutine InitializeAdvertise
 
   ! ============================================================================
-  !> @brief Cria a grade ESMF (mesma grade tripolar do OCN, 180x155,
-  !! ocean_hgrid.nc — o gelo vive fisicamente na mesma grade do MOM6) e
-  !! inicializa o SIS2.
+  !> @brief Inicializa o SIS2, cria a grade ESMF do gelo e realiza os campos.
   !!
-  !! TODO-VERIFICAR (risco alto): esta rotina assume que dá pra reaproveitar
-  !! o MESMO padrão de leitura de ocean_hgrid.nc já usado em MED_cap.F90
-  !! (/03) para construir a grade ESMF deste componente.
-  !! Isso NÃO foi testado — precisa confirmar que a decomposição de PETs do
-  !! componente ICE (independente da do OCN agora, dado Concurrent_ice=
-  !! .false.) é compatível com como ice_model_init monta Ice%slow_domain
-  !! internamente a partir do SIS_input.
+  !! Etapas: init_sis2 (FMS, calendário, tempos e ice_model_init),
+  !! create_ice_grid (grade ESMF com a decomposição do próprio SIS2 e as
+  !! coordenadas T do ocean_hgrid.nc), ice_category_count, realize_ice_fields
+  !! e alloc_ice_boundaries (estruturas de troca com o SIS2). O gelo vive na
+  !! mesma grade tripolar do MOM6.
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -291,34 +263,7 @@ contains
     type(ice_internal_state_wrapper) :: wrap
     type(ice_internal_state_type), pointer :: is
     type(ESMF_VM)        :: vm
-    integer               :: petCount, localPet, mpi_comm_ice, n
-    type(time_type)       :: fms_init, fms_start, fms_stop
-    type(ESMF_TimeInterval) :: timeStep
-    type(time_type)        :: dt_coupling
-    type(ESMF_Time)         :: startTime, stopTime
-    integer :: yr, mo, dy, hr, mn, sc
-    integer :: syy_ice, smm_ice, sdd_ice, shh_ice, smn_ice, sss_ice
-    logical :: concurrent_ice_flag
-      integer :: nx_ice
-      integer :: ny_ice
-      integer :: gis
-      integer :: gie
-      integer :: gjs
-      integer :: gje
-      integer :: loc4(4)
-      integer, allocatable :: all4(:)
-      integer, allocatable :: cntx(:)
-      integer, allocatable :: cnty(:)
-      integer, allocatable :: pmap(:,:,:)
-      character(len=256) :: msg_decomp
-      logical :: ok_decomp
-      real(ESMF_KIND_R8), pointer :: coordX(:,:)
-      real(ESMF_KIND_R8), pointer :: coordY(:,:)
-      integer :: ni_loc
-      integer :: nj_loc
-      integer :: ncat
-      integer :: k
-      type(ESMF_Field) :: fld
+    integer               :: petCount, localPet, ncat
 
     rc = ESMF_SUCCESS
 
@@ -328,34 +273,65 @@ contains
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! ── 1. PE-list deste componente + inicializar FMS (MOM_infra_init) ───────
-    ! FIX (corrigido, era bug de ordem): MOM_infra_init precisa ser a
-    ! PRIMEIRA chamada relacionada a FMS/tempo neste componente — igual ao
-    ! padrão de mom_cap_MONAN.F90. A versão anterior chamava set_date()
-    ! (passo "tempo inicial") ANTES de MOM_infra_init, o que disparava uma
-    ! auto-inicializacao IMPLICITA do FMS dentro de time_manager_init, numa
-    ! operacao coletiva do MPI sem sincronia com os demais PETs — causou
-    ! SIGABRT real em mpp_init (confirmado em teste: crash em
-    ! set_date -> time_manager_init -> fms_init -> mpp_init -> abort).
-    ! Movendo MOM_infra_init pra cá (primeiro), antes de qualquer set_date.
-    !
-    ! mom_cap_MONAN.F90 chama MOM_infra_init(mpi_comm_mom)
-    ! com o comunicador MPI PRÓPRIO daquele componente (nao o comunicador
-    ! global) — depois disso, mpp_pe()/mpp_npes() do FMS ficam numerados
-    ! localmente (0..petCount-1) DENTRO daquele comunicador. Fazendo o mesmo
-    ! aqui (MOM_infra_init com o comunicador proprio do componente ICE),
-    ! mpp_pe() fica auto-consistente com o que ice_model_init/
-    ! share_ice_domains esperam internamente — sem precisar traduzir
-    ! numeracao ESMF-local para numeracao FMS-global.
+    call init_sis2(is, vm, clock, localPet, petCount, rc)
+    if (rc /= ESMF_SUCCESS) return
+
+    call create_ice_grid(is, vm, localPet, petCount, rc)
+    if (rc /= ESMF_SUCCESS) return
+
+    ncat = ice_category_count(is)
+    call realize_ice_fields(is%ice_grid, importState, exportState, rc)
+    if (rc /= ESMF_SUCCESS) return
+    call alloc_ice_boundaries(is, ncat)
+
+    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    call ESMF_LogWrite('ICE(SIS2): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+
+  end subroutine InitializeRealize
+
+  ! ============================================================================
+  !> @brief Inicializa o FMS e o SIS2 neste componente.
+  !!
+  !! A ordem importa:
+  !!   1. MOM_infra_init com o comunicador MPI do próprio componente, antes de
+  !!      qualquer chamada do FMS ligada a tempo. Assim o FMS numera os PETs
+  !!      de 0 a petCount-1 dentro do componente, como ice_model_init e
+  !!      share_ice_domains esperam. Um set_date antes disso inicializaria o
+  !!      FMS implicitamente, numa operação coletiva fora de sincronia
+  !!      (terminava em abort no mpp_init).
+  !!   2. set_calendar_type(GREGORIAN) antes de qualquer set_date; sem
+  !!      calendário, set_date para com erro fatal.
+  !!   3. Listas de PETs e fast_ice_pe = slow_ice_pe = .true.: com
+  !!      Verona_coupler=.false., ice_model_init confia nesses valores para
+  !!      decidir o que cada PET processa; sem eles, Ice%sCS não seria alocado.
+  !!   4. ice_model_init com passos rápido e lento iguais ao de acoplamento e
+  !!      Concurrent_ice=.false. (o componente tem PETs próprios).
+  !!   5. diag_manager_set_time_end_infra depois de ice_model_init, que
+  !!      reinicializa o diag_manager; antes dele, a chamada se perdia e os
+  !!      icebergs do SIS2 paravam com erro fatal ao gravar diagnósticos.
+  !!   6. share_ice_domains.
+  ! ============================================================================
+  subroutine init_sis2(is, vm, clock, localPet, petCount, rc)
+    type(ice_internal_state_type), intent(inout) :: is
+    type(ESMF_VM),                 intent(in)    :: vm
+    type(ESMF_Clock),              intent(in)    :: clock
+    integer,                       intent(out)   :: localPet, petCount, rc
+
+    integer               :: mpi_comm_ice, n
+    type(time_type)       :: fms_init, fms_start, fms_stop
+    type(ESMF_TimeInterval) :: timeStep
+    type(time_type)        :: dt_coupling
+    type(ESMF_Time)         :: startTime, stopTime
+    integer :: yr, mo, dy, hr, mn, sc
+    integer :: syy_ice, smm_ice, sdd_ice, shh_ice, smn_ice, sss_ice
+    logical :: concurrent_ice_flag
+
     call ESMF_VMGet(vm, mpiCommunicator=mpi_comm_ice, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha VMGet ' // &
       'mpiCommunicator', line=__LINE__, file=__FILE__)) return
     call MOM_infra_init(mpi_comm_ice)
-    ! FIX (corrigido, era bug faltante): set_calendar_type precisa ser
-    ! chamado antes de qualquer set_date — sem isso o calendario do FMS
-    ! fica NO_CALENDAR e set_date falha com FATAL "Cannot produce a date
-    ! when calendar type is NO_CALENDAR". Mesmo padrao/valor (GREGORIAN)
-    ! ja usado em mom_cap_MONAN.F90, que eu tinha esquecido de copiar aqui.
     call set_calendar_type(GREGORIAN)
 
     call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
@@ -365,21 +341,9 @@ contains
     allocate(is%ice%slow_pelist(petCount))
     is%ice%fast_pelist(:) = (/ (n, n=0, petCount-1) /)
     is%ice%slow_pelist(:) = is%ice%fast_pelist(:)
-    ! FIX (achado real, via analise de ice_model.F90): Verona_coupler=.false.
-    ! (usado abaixo) faz ice_model_init CONFIAR nos valores JA PRESENTES em
-    ! Ice%fast_ice_pe/Ice%slow_ice_pe para decidir se este PET processa
-    ! fast/slow — NAO deriva isso sozinho a partir de fast_pelist/
-    ! slow_pelist. Sem esta atribuicao explicita, os defaults do tipo
-    ! (.false./.false., ver ice_type.F90) faziam TODO PET nao ser
-    ! considerado nem fast nem slow, e Ice%sCS nunca era alocado (aloca
-    ! apenas "if (slow_ice_PE)") — causava o FATAL "pointer to Ice%sCS
-    ! must be associated" em update_ice_slow_thermo. Todo PET deste
-    ! componente processa fast E slow (mesmo padrao das pelists acima).
     is%ice%fast_ice_pe = .true.
     is%ice%slow_ice_pe = .true.
 
-    ! ── 2. Tempo inicial (mesmo padrão de mom_cap_MONAN.F90) ────────────────
-    ! Agora SEGURO — FMS já foi inicializado explicitamente no passo 1.
     call ESMF_ClockGet(clock, startTime=startTime, timeStep=timeStep, &
       stopTime=stopTime, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -397,229 +361,228 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     fms_stop = set_date(syy_ice, smm_ice, sdd_ice, shh_ice, smn_ice, sss_ice)
 
-    ! ── 3. Inicializar o SIS2 ────────────────────────────────────────────
-    ! Concurrent_ice=.false. (mudou da tentativa anterior): este componente
-    ! tem PETs próprios, não embutidos no ciclo do MOM6. fast=slow=
-    ! dt_coupling ainda vale (ADD_DIURNAL_SW=False no SIS_input do time,
-    ! confirmado — não depende de passo rápido sub-horário).
     concurrent_ice_flag = .false.
     call ice_model_init(is%ice, fms_init, fms_start, &
       Time_step_fast=dt_coupling, Time_step_slow=dt_coupling, &
       Verona_coupler=.false., Concurrent_ice=concurrent_ice_flag)
 
-    !-- FIX (corrigido — era bug de ORDEM, não de chamada faltando): a
-    !   versão anterior chamava diag_manager_set_time_end_infra ANTES de
-    !   ice_model_init, mas ice_model_init reinicializa o diag_manager
-    !   internamente para seus próprios diagnósticos (log confirma:
-    !   "diag_manager_init: diag_manager is using fms2_io" aparece de novo
-    !   na inicialização do modelo de gelo) — isso APAGAVA o efeito da
-    !   chamada anterior. Movendo para AQUI (logo depois de
-    !   ice_model_init), a chamada afeta o estado FRESCO do diag_manager
-    !   que ice_model_init acabou de estabelecer. Sem isso, o submódulo de
-    !   icebergs do SIS2 (SIS_dyn_trans.F90::update_icebergs) crashava com
-    !   FATAL "diag_manager_set_time_end must be called before
-    !   diag_send_complete" assim que tentava escrever um diagnóstico.
     call diag_manager_set_time_end_infra(fms_stop)
 
     call share_ice_domains(is%ice)
     is%ice%pe = is%ice%fast_ice_pe .or. is%ice%slow_ice_pe
 
     call ESMF_LogWrite('ICE(SIS2): ice_model_init concluido', ESMF_LOGMSG_INFO)
+  end subroutine init_sis2
 
-    ! ── 4. Grade ESMF (mesma grade tripolar do OCN, ocean_hgrid.nc) ──────────
-    ! Dimensões e coordenadas T lidas do supergrid do MOM6, pela mesma rotina
-    ! do mediador (src/shared/mom6_supergrid.F90); periodicidade leste-oeste.
+  ! ============================================================================
+  !> @brief Grade ESMF do gelo, com a decomposição escolhida pelo próprio SIS2.
+  !!
+  !! Cada PET pega os limites globais do seu bloco no domínio do SIS2, os PETs
+  !! trocam essa informação e ICE_DecompFromBlocks monta os tamanhos por
+  !! coluna e por linha e o mapa bloco -> PET, conferindo cobertura e
+  !! unicidade. Uma regra própria (por exemplo, a raiz quadrada do número de
+  !! PETs) pode divergir do layout do SIS2 e levar export_si_ifrac a ler fora
+  !! do array. Se a decomposição não for representável (blocos de terra
+  !! eliminados por máscara, por exemplo), o cap para com mensagem clara.
+  !!
+  !! A grade é periódica na direção leste-oeste, sem declarar polo, como a do
+  !! mediador. As coordenadas T vêm do ocean_hgrid.nc (mom6_supergrid_mod). No
+  !! fim, cada PET confere que o seu bloco ESMF é exatamente o bloco do SIS2.
+  ! ============================================================================
+  subroutine create_ice_grid(is, vm, localPet, petCount, rc)
+    type(ice_internal_state_type), intent(inout) :: is
+    type(ESMF_VM),                 intent(in)    :: vm
+    integer,                       intent(in)    :: localPet, petCount
+    integer,                       intent(out)   :: rc
 
-      call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, tag='ICE(SIS2)')
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
-        'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
+    integer :: nx_ice, ny_ice
+    integer :: gis, gie, gjs, gje
+    integer :: loc4(4)
+    integer, allocatable :: all4(:)
+    integer, allocatable :: cntx(:), cnty(:)
+    integer, allocatable :: pmap(:,:,:)
+    character(len=256) :: msg_decomp
+    logical :: ok_decomp
+    real(ESMF_KIND_R8), pointer :: coordX(:,:)
+    real(ESMF_KIND_R8), pointer :: coordY(:,:)
 
-      ! (23/09/2026): a grade ESMF segue a decomposicao que o
-      ! PROPRIO SIS2 escolheu em ice_model_init, bloco por bloco.
-      !
-      ! Antes, a grade era criada com uma regra propria (regDecomp a partir
-      ! da raiz quadrada do numero de PETs), supondo que ela coincidia com o
-      ! LAYOUT do SIS2. Com 4 PETs as duas davam 2 x 2 e o defeito ficava
-      ! escondido; com 8 PETs o SIS2 escolheu 2 x 4 (blocos 90 x 39) e o cap
-      ! 4 x 2 (blocos 45 x 78), e export_si_ifrac saiu do array do SIS2
-      ! ("Index '48' of dimension 2 ... outside of expected range (1:47)").
-      ! Mesmo principio do v5 do cap do oceano (deBlockList a partir
-      ! da decomposicao do MOM6).
-      !
-      ! Cada PET pega os limites GLOBAIS do seu bloco no dominio do SIS2, os
-      ! PETs trocam essa informacao, e ICE_DecompFromBlocks monta os tamanhos
-      ! por coluna e por linha e o mapa bloco -> PET, validando cobertura e
-      ! unicidade. Se a decomposicao nao for representavel (por exemplo,
-      ! blocos de terra eliminados por mascara), o cap para com mensagem
-      ! clara em vez de sair do array.
-      call mpp_get_compute_domain(is%ice%sCS%G%Domain%mpp_domain, gis, gie, gjs, gje)
-      loc4 = (/ gis, gie, gjs, gje /)
-      allocate(all4(4*petCount))
-      call ESMF_VMAllGather(vm, sendData=loc4, recvData=all4, count=4, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
-        'falha ao trocar os blocos do SIS2 entre PETs', line=__LINE__, file=__FILE__)) return
+    call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, tag='ICE(SIS2)')
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
+      'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
-      call ICE_DecompFromBlocks(reshape(all4, (/4, petCount/)), petCount, &
-        nx_ice, ny_ice, cntx, cnty, pmap, msg_decomp, ok_decomp)
-      if (.not. ok_decomp) then
-        call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
-          'decomposicao do SIS2 nao representavel na grade ESMF: ' // &
-          trim(msg_decomp), line=__LINE__, file=__FILE__, rcToReturn=rc)
-        return
-      end if
+    call mpp_get_compute_domain(is%ice%sCS%G%Domain%mpp_domain, gis, gie, gjs, gje)
+    loc4 = (/ gis, gie, gjs, gje /)
+    allocate(all4(4*petCount))
+    call ESMF_VMAllGather(vm, sendData=loc4, recvData=all4, count=4, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
+      'falha ao trocar os blocos do SIS2 entre PETs', line=__LINE__, file=__FILE__)) return
 
-      if (localPet == 0) then
-        write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
-          'segue a decomposicao do SIS2: ', size(cntx), ' x ', size(cnty), ' blocos'
-        call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
-      end if
+    call ICE_DecompFromBlocks(reshape(all4, (/4, petCount/)), petCount, &
+      nx_ice, ny_ice, cntx, cnty, pmap, msg_decomp, ok_decomp)
+    if (.not. ok_decomp) then
+      call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
+        'decomposicao do SIS2 nao representavel na grade ESMF: ' // &
+        trim(msg_decomp), line=__LINE__, file=__FILE__, rcToReturn=rc)
+      return
+    end if
 
-      ! periodicDim=1 (leste-oeste) — mesma correcao ja testada em
-      ! MED_cap.F90; polekindflag deliberadamente OMITIDO (ver nota de
-      ! reversao no MED_cap.F90 sobre SIGSEGV causado por declarar polo
-      ! onde nao existe).
-      is%ice_grid = ESMF_GridCreate1PeriDim(countsPerDEDim1=cntx, &
-        countsPerDEDim2=cnty, periodicDim=1, petMap=pmap, &
-        indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao criar ' // &
-        'grade ESMF periodica', line=__LINE__, file=__FILE__)) return
+    if (localPet == 0) then
+      write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
+        'segue a decomposicao do SIS2: ', size(cntx), ' x ', size(cnty), ' blocos'
+      call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
+    end if
 
-      call ESMF_GridAddCoord(is%ice_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
+    is%ice_grid = ESMF_GridCreate1PeriDim(countsPerDEDim1=cntx, &
+      countsPerDEDim2=cnty, periodicDim=1, petMap=pmap, &
+      indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao criar ' // &
+      'grade ESMF periodica', line=__LINE__, file=__FILE__)) return
 
-      call ESMF_GridGetCoord(is%ice_grid, coordDim=1, localDE=0, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call ESMF_GridGetCoord(is%ice_grid, coordDim=2, localDE=0, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='ICE(SIS2)')
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
-        'coordenadas T reais de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
-
-      is%isc = lbound(coordX,1); is%iec = ubound(coordX,1)
-      is%jsc = lbound(coordX,2); is%jec = ubound(coordX,2)
-
-      ! conferencia final, em cada PET, de que o bloco ESMF e'
-      ! exatamente o bloco do SIS2. Protege contra um petMap trocado.
-      if (is%isc /= gis .or. is%iec /= gie .or. is%jsc /= gjs .or. is%jec /= gje) then
-        write(msg_decomp,'(a,8(i0,a))') 'ICE(SIS2): B-ICE-DECOMP-01 bloco ESMF i ', &
-          is%isc, '..', is%iec, ' j ', is%jsc, '..', is%jec, &
-          ' difere do bloco do SIS2 i ', gis, '..', gie, ' j ', gjs, '..', gje, ''
-        call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg=trim(msg_decomp), &
-          line=__LINE__, file=__FILE__, rcToReturn=rc)
-        return
-      end if
-
-      call ESMF_LogWrite('ICE(SIS2): grade ESMF criada ' // &
-        '(mesma grade tripolar do OCN)', ESMF_LOGMSG_INFO)
-    if (allocated(all4)) deallocate(all4)
-    if (allocated(cntx)) deallocate(cntx)
-    if (allocated(cnty)) deallocate(cnty)
-    if (allocated(pmap)) deallocate(pmap)
-
-    ! ── 5. Realizar campos ESMF sobre is%ice_grid ────────────────────────
-
-      ni_loc = is%iec - is%isc + 1
-      nj_loc = is%jec - is%jsc + 1
-      ! Numero de categorias de espessura de gelo — disponivel apos
-      ! ice_model_init (passo 3 acima), via Ice%part_size ja alocado.
-      if (associated(is%ice%part_size)) then
-        ncat = size(is%ice%part_size, 3)
-      else
-        ncat = 1
-        call ESMF_LogWrite('ICE(SIS2): AVISO — Ice%part_size nao ' // &
-          'associado apos ice_model_init; usando ncat=1 como fallback ' // &
-          '(provavelmente ERRADO, precisa investigar)', ESMF_LOGMSG_WARNING)
-      end if
-
-      ! Campos de importacao (ATM, 2D simples — replicados por categoria
-      ! na hora de popular is%aib em ModelAdvance, nao aqui).
-      do k = 1, n_import_atm
-        fld = ESMF_FieldCreate(is%ice_grid, typekind=ESMF_TYPEKIND_R8, &
-          name=trim(import_names_atm(k)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-          'FieldCreate import ATM ' // trim(import_names_atm(k)), &
-          line=__LINE__, file=__FILE__)) return
-        call NUOPC_Realize(importState, field=fld, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-
-      do k = 1, n_import_ocn
-        fld = ESMF_FieldCreate(is%ice_grid, typekind=ESMF_TYPEKIND_R8, &
-          name=trim(import_names_ocn(k)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-          'FieldCreate import OCN ' // trim(import_names_ocn(k)), &
-          line=__LINE__, file=__FILE__)) return
-        call NUOPC_Realize(importState, field=fld, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-
-      do k = 1, n_export
-        fld = ESMF_FieldCreate(is%ice_grid, typekind=ESMF_TYPEKIND_R8, &
-          name=trim(export_names(k)), rc=rc)
-        if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-          'FieldCreate export ' // trim(export_names(k)), &
-          line=__LINE__, file=__FILE__)) return
-        call NUOPC_Realize(exportState, field=fld, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-
-      ! ── Alocar is%oib (2D) e is%aib (3D, com dimensao de categoria) ─────
-      allocate(is%oib%u(ni_loc,nj_loc),  is%oib%v(ni_loc,nj_loc))
-      allocate(is%oib%t(ni_loc,nj_loc),  is%oib%s(ni_loc,nj_loc))
-      allocate(is%oib%frazil(ni_loc,nj_loc), is%oib%sea_level(ni_loc,nj_loc))
-      is%oib%u = 0.0_ESMF_KIND_R8; is%oib%v = 0.0_ESMF_KIND_R8
-      is%oib%t = 273.15_ESMF_KIND_R8; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
-      is%oib%frazil = 0.0_ESMF_KIND_R8; is%oib%sea_level = 0.0_ESMF_KIND_R8
-      ! FIX (Ago 2026): is%oib%stagger — o default do tipo
-      ! ocean_ice_boundary_type e' BGRID_NE (ver ice_boundary_types.F90).
-      ! Os dados que chegam do mediador (So_t/So_u/So_v) sao valores
-      ! escalares co-localizados numa grade regular lat-lon simples, sem
-      ! staggering — equivalente a AGRID. Sem esta atribuicao explicita,
-      ! unpack_ocn_ice_bdry (chamada via unpack_ocean_ice_boundary em
-      ! ModelAdvance) tomaria o ramo B-grid/C-grid e interpretaria as
-      ! correntes com a geometria errada.
-      is%oib%stagger = AGRID
-      ! calving/calving_hflx (ice shelf) — nao usados neste acoplamento,
-      ! deixados nao-alocados (=> NULL() por padrao no tipo).
-
-      allocate(is%aib%u_flux(ni_loc,nj_loc,ncat), is%aib%v_flux(ni_loc,nj_loc,ncat))
-      allocate(is%aib%u_star(ni_loc,nj_loc,ncat))
-      allocate(is%aib%t_flux(ni_loc,nj_loc,ncat), is%aib%q_flux(ni_loc,nj_loc,ncat))
-      allocate(is%aib%lw_flux(ni_loc,nj_loc,ncat))
-      allocate(is%aib%sw_flux_vis_dir(ni_loc,nj_loc,ncat))
-      allocate(is%aib%sw_flux_vis_dif(ni_loc,nj_loc,ncat))
-      allocate(is%aib%sw_flux_nir_dir(ni_loc,nj_loc,ncat))
-      allocate(is%aib%sw_flux_nir_dif(ni_loc,nj_loc,ncat))
-      allocate(is%aib%lprec(ni_loc,nj_loc,ncat), is%aib%fprec(ni_loc,nj_loc,ncat))
-      allocate(is%aib%dhdt(ni_loc,nj_loc,ncat),  is%aib%dedt(ni_loc,nj_loc,ncat))
-      allocate(is%aib%drdt(ni_loc,nj_loc,ncat),  is%aib%coszen(ni_loc,nj_loc,ncat))
-      allocate(is%aib%p(ni_loc,nj_loc,ncat))
-      is%aib%u_flux = 0.0_ESMF_KIND_R8; is%aib%v_flux = 0.0_ESMF_KIND_R8
-      is%aib%u_star = 0.0_ESMF_KIND_R8   ! TODO-VERIFICAR: nao vem do mediador
-                                          ! hoje (ver ModelAdvance/ATENCAO)
-      is%aib%t_flux = 0.0_ESMF_KIND_R8; is%aib%q_flux = 0.0_ESMF_KIND_R8
-      is%aib%lw_flux = 0.0_ESMF_KIND_R8
-      is%aib%sw_flux_vis_dir = 0.0_ESMF_KIND_R8
-      is%aib%sw_flux_vis_dif = 0.0_ESMF_KIND_R8
-      is%aib%sw_flux_nir_dir = 0.0_ESMF_KIND_R8
-      is%aib%sw_flux_nir_dif = 0.0_ESMF_KIND_R8
-      is%aib%lprec = 0.0_ESMF_KIND_R8; is%aib%fprec = 0.0_ESMF_KIND_R8
-      is%aib%dhdt = 0.0_ESMF_KIND_R8; is%aib%dedt = 0.0_ESMF_KIND_R8
-      is%aib%drdt = 0.0_ESMF_KIND_R8; is%aib%coszen = 0.0_ESMF_KIND_R8
-      is%aib%p = 101325.0_ESMF_KIND_R8  ! 1 atm, default de seguranca
-
-      call ESMF_LogWrite('ICE(SIS2): campos ESMF realizados, ' // &
-        'oib/aib alocados', ESMF_LOGMSG_INFO)
-
-    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
+    call ESMF_GridAddCoord(is%ice_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('ICE(SIS2): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call ESMF_GridGetCoord(is%ice_grid, coordDim=1, localDE=0, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_GridGetCoord(is%ice_grid, coordDim=2, localDE=0, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
-  end subroutine InitializeRealize
+    call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='ICE(SIS2)')
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
+      'coordenadas T reais de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
+
+    is%isc = lbound(coordX,1); is%iec = ubound(coordX,1)
+    is%jsc = lbound(coordX,2); is%jec = ubound(coordX,2)
+
+    if (is%isc /= gis .or. is%iec /= gie .or. is%jsc /= gjs .or. is%jec /= gje) then
+      write(msg_decomp,'(a,8(i0,a))') 'ICE(SIS2): B-ICE-DECOMP-01 bloco ESMF i ', &
+        is%isc, '..', is%iec, ' j ', is%jsc, '..', is%jec, &
+        ' difere do bloco do SIS2 i ', gis, '..', gie, ' j ', gjs, '..', gje, ''
+      call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg=trim(msg_decomp), &
+        line=__LINE__, file=__FILE__, rcToReturn=rc)
+      return
+    end if
+
+    call ESMF_LogWrite('ICE(SIS2): grade ESMF criada ' // &
+      '(mesma grade tripolar do OCN)', ESMF_LOGMSG_INFO)
+  end subroutine create_ice_grid
+
+  ! ============================================================================
+  !> @brief Número de categorias de espessura do gelo (Ice%part_size, depois
+  !! de ice_model_init). Se part_size não estiver associado, avisa no log e
+  !! devolve 1.
+  ! ============================================================================
+  integer function ice_category_count(is) result(ncat)
+    type(ice_internal_state_type), intent(in) :: is
+
+    if (associated(is%ice%part_size)) then
+      ncat = size(is%ice%part_size, 3)
+    else
+      ncat = 1
+      call ESMF_LogWrite('ICE(SIS2): AVISO — Ice%part_size nao ' // &
+        'associado apos ice_model_init; usando ncat=1 como fallback ' // &
+        '(provavelmente ERRADO, precisa investigar)', ESMF_LOGMSG_WARNING)
+    end if
+  end function ice_category_count
+
+  ! ============================================================================
+  !> @brief Cria sobre a grade do gelo e realiza os campos de importação
+  !! (forçantes da atmosfera e do oceano) e de exportação.
+  ! ============================================================================
+  subroutine realize_ice_fields(ice_grid, importState, exportState, rc)
+    type(ESMF_Grid),  intent(in)    :: ice_grid
+    type(ESMF_State), intent(inout) :: importState, exportState
+    integer,          intent(out)   :: rc
+    integer :: k
+    type(ESMF_Field) :: fld
+
+    do k = 1, n_import_atm
+      fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
+        name=trim(import_names_atm(k)), rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
+        'FieldCreate import ATM ' // trim(import_names_atm(k)), &
+        line=__LINE__, file=__FILE__)) return
+      call NUOPC_Realize(importState, field=fld, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+
+    do k = 1, n_import_ocn
+      fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
+        name=trim(import_names_ocn(k)), rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
+        'FieldCreate import OCN ' // trim(import_names_ocn(k)), &
+        line=__LINE__, file=__FILE__)) return
+      call NUOPC_Realize(importState, field=fld, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+
+    do k = 1, n_export
+      fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
+        name=trim(export_names(k)), rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
+        'FieldCreate export ' // trim(export_names(k)), &
+        line=__LINE__, file=__FILE__)) return
+      call NUOPC_Realize(exportState, field=fld, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+  end subroutine realize_ice_fields
+
+  ! ============================================================================
+  !> @brief Aloca e preenche com valores iniciais as estruturas de troca com
+  !! o SIS2: is%oib (oceano -> gelo, 2D) e is%aib (atmosfera -> gelo, 3D, com
+  !! a dimensão de categoria).
+  !!
+  !! is%oib%stagger = AGRID: os campos que chegam do mediador são escalares
+  !! co-localizados, sem defasagem. Com o padrão do tipo (BGRID_NE),
+  !! unpack_ocean_ice_boundary interpretaria as correntes com a geometria
+  !! errada. calving e calving_hflx não são usados e ficam sem alocar.
+  ! ============================================================================
+  subroutine alloc_ice_boundaries(is, ncat)
+    type(ice_internal_state_type), intent(inout) :: is
+    integer,                       intent(in)    :: ncat
+    integer :: ni_loc, nj_loc
+
+    ni_loc = is%iec - is%isc + 1
+    nj_loc = is%jec - is%jsc + 1
+
+    allocate(is%oib%u(ni_loc,nj_loc),  is%oib%v(ni_loc,nj_loc))
+    allocate(is%oib%t(ni_loc,nj_loc),  is%oib%s(ni_loc,nj_loc))
+    allocate(is%oib%frazil(ni_loc,nj_loc), is%oib%sea_level(ni_loc,nj_loc))
+    is%oib%u = 0.0_ESMF_KIND_R8; is%oib%v = 0.0_ESMF_KIND_R8
+    is%oib%t = 273.15_ESMF_KIND_R8; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
+    is%oib%frazil = 0.0_ESMF_KIND_R8; is%oib%sea_level = 0.0_ESMF_KIND_R8
+    is%oib%stagger = AGRID
+
+    allocate(is%aib%u_flux(ni_loc,nj_loc,ncat), is%aib%v_flux(ni_loc,nj_loc,ncat))
+    allocate(is%aib%u_star(ni_loc,nj_loc,ncat))
+    allocate(is%aib%t_flux(ni_loc,nj_loc,ncat), is%aib%q_flux(ni_loc,nj_loc,ncat))
+    allocate(is%aib%lw_flux(ni_loc,nj_loc,ncat))
+    allocate(is%aib%sw_flux_vis_dir(ni_loc,nj_loc,ncat))
+    allocate(is%aib%sw_flux_vis_dif(ni_loc,nj_loc,ncat))
+    allocate(is%aib%sw_flux_nir_dir(ni_loc,nj_loc,ncat))
+    allocate(is%aib%sw_flux_nir_dif(ni_loc,nj_loc,ncat))
+    allocate(is%aib%lprec(ni_loc,nj_loc,ncat), is%aib%fprec(ni_loc,nj_loc,ncat))
+    allocate(is%aib%dhdt(ni_loc,nj_loc,ncat),  is%aib%dedt(ni_loc,nj_loc,ncat))
+    allocate(is%aib%drdt(ni_loc,nj_loc,ncat),  is%aib%coszen(ni_loc,nj_loc,ncat))
+    allocate(is%aib%p(ni_loc,nj_loc,ncat))
+    is%aib%u_flux = 0.0_ESMF_KIND_R8; is%aib%v_flux = 0.0_ESMF_KIND_R8
+    is%aib%u_star = 0.0_ESMF_KIND_R8   ! TODO-VERIFICAR: nao vem do mediador
+                                        ! hoje (ver ModelAdvance/ATENCAO)
+    is%aib%t_flux = 0.0_ESMF_KIND_R8; is%aib%q_flux = 0.0_ESMF_KIND_R8
+    is%aib%lw_flux = 0.0_ESMF_KIND_R8
+    is%aib%sw_flux_vis_dir = 0.0_ESMF_KIND_R8
+    is%aib%sw_flux_vis_dif = 0.0_ESMF_KIND_R8
+    is%aib%sw_flux_nir_dir = 0.0_ESMF_KIND_R8
+    is%aib%sw_flux_nir_dif = 0.0_ESMF_KIND_R8
+    is%aib%lprec = 0.0_ESMF_KIND_R8; is%aib%fprec = 0.0_ESMF_KIND_R8
+    is%aib%dhdt = 0.0_ESMF_KIND_R8; is%aib%dedt = 0.0_ESMF_KIND_R8
+    is%aib%drdt = 0.0_ESMF_KIND_R8; is%aib%coszen = 0.0_ESMF_KIND_R8
+    is%aib%p = 101325.0_ESMF_KIND_R8  ! 1 atm, default de seguranca
+
+    call ESMF_LogWrite('ICE(SIS2): campos ESMF realizados, ' // &
+      'oib/aib alocados', ESMF_LOGMSG_INFO)
+  end subroutine alloc_ice_boundaries
 
   ! ============================================================================
   subroutine InitializeDataComplete(gcomp, rc)
@@ -814,7 +777,7 @@ contains
   !> Termodinâmica lenta e dinâmica do SIS2, com soma de verificação da
   !! fração por categoria antes e depois de cada etapa (diagnóstico).
   subroutine advance_ice_slow(is)
-    type(ice_internal_state_type), pointer :: is
+    type(ice_internal_state_type), pointer, intent(in) :: is
     character(len=200) :: msg_slow
     integer(kind=8)    :: cks_ini, cks_ter, cks_din
     logical            :: tem_ps
@@ -893,11 +856,10 @@ contains
   !!   termos de derivada usados para acoplamento implicito.
   subroutine import_forcing(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
-    type(ESMF_GridComp)                                :: gcomp
+    type(ESMF_GridComp),                   intent(in) :: gcomp
     integer, intent(out)                                :: rc
 
     type(ESMF_State) :: importState
-    type(ESMF_Field) :: fld
     real(ESMF_KIND_R8), pointer :: ptr2d(:,:) => null()
 
     rc = ESMF_SUCCESS
@@ -994,7 +956,7 @@ contains
   !! dimensao) de um campo do atmos_ice_boundary_type.
   subroutine broadcast_to_cat(src2d, dst3d)
     real(ESMF_KIND_R8), pointer, intent(in)    :: src2d(:,:)
-    real(ESMF_KIND_R8),          intent(inout) :: dst3d(:,:,:)
+    real(ESMF_KIND_R8),          intent(out)   :: dst3d(:,:,:)
     integer :: k
     do k = 1, size(dst3d, 3)
       dst3d(:,:,k) = src2d(:,:)
@@ -1022,7 +984,7 @@ contains
   !! com lw_flux ("from the atmosphere into the ice or ocean").
   subroutine broadcast_to_cat_neg(src2d, dst3d)
     real(ESMF_KIND_R8), pointer, intent(in)    :: src2d(:,:)
-    real(ESMF_KIND_R8),          intent(inout) :: dst3d(:,:,:)
+    real(ESMF_KIND_R8),          intent(out)   :: dst3d(:,:,:)
     integer :: k
     do k = 1, size(dst3d, 3)
       dst3d(:,:,k) = -src2d(:,:)
@@ -1033,7 +995,7 @@ contains
   !! Confirmado em ice_type.F90. Ver SIS2_ativacao_plano_integracao.md.
   subroutine export_si_ifrac(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
-    type(ESMF_GridComp)                                :: gcomp
+    type(ESMF_GridComp),                   intent(in) :: gcomp
     integer, intent(out)                                :: rc
 
     type(ESMF_State) :: exportState
@@ -1169,7 +1131,7 @@ contains
   !! contra observacoes.
   subroutine export_si_albedo(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
-    type(ESMF_GridComp)                                :: gcomp
+    type(ESMF_GridComp),                   intent(in) :: gcomp
     integer, intent(out)                                :: rc
 
     type(ESMF_State) :: exportState
@@ -1278,7 +1240,7 @@ contains
   !! correcoes /02.
   subroutine export_si_tskin(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
-    type(ESMF_GridComp)                                :: gcomp
+    type(ESMF_GridComp),                   intent(in) :: gcomp
     integer, intent(out)                                :: rc
 
     type(ESMF_State) :: exportState

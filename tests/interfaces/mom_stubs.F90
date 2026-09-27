@@ -1,5 +1,5 @@
-! Interfaces minimas do MOM6 e do FMS usadas por mom_cap_MONAN.F90 e
-! time_utils.F90. Servem so para conferir a compilacao fora da Jaci (tipos,
+! Interfaces minimas do MOM6 e do FMS usadas por mom_cap_MONAN.F90,
+! time_utils.F90 e (com sis_stubs.F90) sis_cap_MONAN.F90. Servem so para conferir a compilacao fora da Jaci (tipos,
 ! assinaturas e intent); nao executam nada. Usadas por
 ! tools/dev/compila-local.bash. Ao alterar um desses fontes, confira antes que
 ! a versao anterior compila com elas; se nao compilar, ajuste a interface aqui,
@@ -47,6 +47,9 @@ contains
   subroutine mpp_max_i(a)
     integer, intent(inout) :: a
   end subroutine
+  integer function mpp_pe()
+    mpp_pe = 0
+  end function
 end module
 
 module MOM_time_manager
@@ -77,6 +80,7 @@ end module
 module MOM_domains
   use mpp_domains_mod
   implicit none
+  integer, parameter :: AGRID = 0, BGRID_NE = 10, CGRID_NE = 11
   type :: MOM_domain_type
     type(domain2D), pointer :: mpp_domain => null()
   end type

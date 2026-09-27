@@ -30,7 +30,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/compila-local.bash
 ```
 
-Compila os fontes na ordem do Makefile, em `build-local/`, e mostra uma linha por fonte com o resultado e o número de avisos. Ficam de fora o `sis_cap_MONAN.F90` (ainda sem interfaces mínimas do SIS2), o driver e o programa principal. O log de cada fonte fica em `build-local/<fonte>.log`.
+Compila os fontes na ordem do Makefile, em `build-local/`, e mostra uma linha por fonte com o resultado e o número de avisos. Ficam de fora o driver e o programa principal. O log de cada fonte fica em `build-local/<fonte>.log`.
 
 Para saber se uma mudança criou avisos, compile também a versão anterior (extraída com `git archive`, por exemplo) em outro diretório, com `-s` e `-o`, e compare.
 
@@ -76,7 +76,7 @@ Ficam de fora o caminho do DOCN e o caminho com `cfg_use_sis2_dynamic = .true.`,
 
 ## 3. Interfaces mínimas
 
-Os arquivos `tests/interfaces/mpas_stubs.F90` e `tests/interfaces/mom_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6 e do FMS que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90` e `mom_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
+Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
 
 Uma interface mínima pode estar errada; por isso, antes de confiar nela para uma mudança, compile com ela a versão anterior do arquivo. Se a versão anterior não compilar, a interface é que precisa de ajuste, seguindo a assinatura real no código do modelo. Um erro de compilação só é atribuído à mudança se a versão anterior compilar com as mesmas interfaces.
 
