@@ -99,6 +99,7 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | --- | --- | --- |
 | `tools/dev/cria-linha-base.bash` | congela uma execução de referência: saídas, configuração, código e ambiente | `docs/uso-linha-base.md` |
 | `tools/dev/compara-linha-base.bash` | compara a execução atual com uma linha de base, com `nccmp -d` | `docs/uso-linha-base.md` |
+| `tools/dev/anota-linha-base.bash` | acrescenta uma observação ao MANIFEST de uma base congelada e atualiza a soma dele no `SHA256SUMS` | `docs/uso-linha-base.md` |
 
 A linha de base responde se uma alteração de código mudou o resultado; a bateria do `mede-taxa-repro.sh` responde se a configuração é reprodutível. São perguntas diferentes: uma alteração pode ser reprodutível e ainda assim mudar o resultado.
 

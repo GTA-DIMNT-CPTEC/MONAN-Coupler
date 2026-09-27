@@ -39,7 +39,7 @@ bash $COUPLER_ROOT/tools/dev/valida_rodada.bash compara teste_01
 | --- | --- |
 | `prepara NOME` | confere que `bin/esmApp` existe e não contém código de outra instalação; mostra data e revisão; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da linha de base |
 | `submete NOME` | roda o `--check` e submete com 152 PETs; espera o job terminar |
-| `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados e compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças |
+| `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados e compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças; se a comparação nem começou (por exemplo, linha de base que não confere com o seu `SHA256SUMS`), diz isso e sai com código 2; sai com o código do `compara-linha-base.bash` (0 PASS, 1 FAIL, 2 comparação não feita) |
 
 Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`) e `NPES` (padrão: 152). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
 

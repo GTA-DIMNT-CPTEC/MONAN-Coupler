@@ -124,7 +124,7 @@ Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e c
 
 Desde 22/09/2026, o acoplador é reprodutível bit a bit: execuções idênticas, na mesma configuração de PETs, produzem o mesmo resultado nos modos sequencial e concorrente, com o SIS2 dinâmico e com o módulo de icebergs ligado (na configuração atual não há icebergs na simulação, então o código de icebergs em si ainda não foi exercitado). A causa da não reprodutibilidade anterior estava na ordem das somas dos remapeamentos do ESMF, e a correção fixa as duas camadas dessa ordem em todos os remapeamentos e ligações entre componentes (`B-SRCTERM-01`, `B-METHODS-TERMORDER-01`). A regra vale para qualquer remapeamento novo: ver [`docs/ferramentas.md`](docs/ferramentas.md), seção 6. A reprodutibilidade de uma configuração se verifica com o [`mede-taxa-repro.sh`](docs/uso-mede-taxa-repro.md).
 
-Para validar uma alteração de código que não deve mudar resultados, compare uma rodada com a linha de base de referência, hoje a **R-NOFMA-01** (código de `ea10fb6` compilado com `-ffp-contract=off`, 152 PETs, rodada de 1 dia). O roteiro completo está em [`docs/validacao-refatoracao.md`](docs/validacao-refatoracao.md); os cuidados principais são:
+Para validar uma alteração de código que não deve mudar resultados, compare uma rodada com a linha de base de referência, hoje a **R-NOFMA-02** (código da tag `fase3-03-validada` compilado com `-ffp-contract=off`, 152 PETs, rodada de 1 dia). O roteiro completo está em [`docs/validacao-refatoracao.md`](docs/validacao-refatoracao.md); os cuidados principais são:
 
 | Cuidado | Motivo |
 | --- | --- |
@@ -133,6 +133,7 @@ Para validar uma alteração de código que não deve mudar resultados, compare 
 | `-n` igual à soma das contagens de PET, também no `--check` | o `--check` sem `-n` assume 4 processos |
 | Executável alternativo por `ESMAPP_BIN` | o cabeçalho do log registra caminho e data do executável usado |
 | `compara-linha-base.bash -e` | confere também as entradas pela soma registrada na linha de base |
+| Anotações no MANIFEST de uma base congelada só com `anota-linha-base.bash` | editado à mão, o MANIFEST deixa de conferir com o `SHA256SUMS` e a comparação para antes de começar |
 
 ## Documentação
 

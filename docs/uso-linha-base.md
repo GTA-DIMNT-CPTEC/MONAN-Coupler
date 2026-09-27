@@ -92,6 +92,24 @@ ls baseline/L-10/logs/
 
 Confira também que `atm_pet_count`, `ocn_pet_count`, `ice_pet_count`, `coupling_mode`, `pet_layout`, `use_sis2_dynamic` e `use_med_to_mpas` são de fato o cenário que você queria congelar, e que o inventário da saída não está vazio do lado da importação. Se `mom6_import` e `monan2_import` estiverem ambos em zero, o MANIFEST traz um aviso: a causa provável é `write_import_diag` desligado, e a base cobrirá apenas o lado de exportação.
 
+### Anotar uma base já congelada
+
+A base fica sem permissão de escrita, e cada arquivo dela tem a soma registrada no `SHA256SUMS`. O `compara-linha-base.bash` confere essas somas antes de comparar e para, com código 2, se algum arquivo mudou. Por isso uma observação acrescentada à mão no `MANIFEST.txt` trava todas as comparações seguintes, mesmo sem tocar em nenhum dado.
+
+Para anotar, use o `anota-linha-base.bash`. Ele acrescenta a observação, com data e usuário, no fim do `MANIFEST.txt`, atualiza só a soma desse arquivo no `SHA256SUMS` e devolve a proteção contra escrita:
+
+```bash
+tools/dev/anota-linha-base.bash -l L-10 -m "commit do MONAN-Model usado: 01962f0"
+```
+
+Se o `MANIFEST.txt` já foi editado à mão, a opção `-r` registra a soma nova sem acrescentar nada:
+
+```bash
+tools/dev/anota-linha-base.bash -l L-10 -r
+```
+
+O `-r` só é aceito quando o `MANIFEST.txt` é o único arquivo que não confere. Se qualquer outro arquivo mudou (uma saída, a configuração, um log), a base foi alterada de fato, o script recusa e a base precisa ser refeita. Assim como os demais scripts, ele aceita `-o` para a raiz das linhas de base.
+
 ## 6. Comparar contra a linha de base
 
 Depois de alterar o código, recompilar e executar de novo, no mesmo diretório de experimento:

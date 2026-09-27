@@ -9,6 +9,12 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Anotação de linha de base congelada e aviso de comparação não feita (R-FASE4-02).** Só scripts e documentação; nenhum fonte Fortran muda.
+  - Novo `tools/dev/anota-linha-base.bash`: acrescenta uma observação, com data e usuário, ao `MANIFEST.txt` de uma linha de base congelada e atualiza só a soma dele no `SHA256SUMS`, devolvendo a proteção contra escrita. Com `-r`, registra a soma de um `MANIFEST.txt` já editado à mão, desde que ele seja o único arquivo que não confere; se outro arquivo mudou, recusa. Motivo: na validação da R-FASE4-01, uma observação escrita à mão no MANIFEST da R-NOFMA-02 fez o `compara-linha-base.bash` parar antes de comparar, e a saída mostrava só `./MANIFEST.txt: FAILED`.
+  - `valida_rodada.bash compara`: quando o `compara-linha-base.bash` sai com código 2 (comparação não feita), diz isso com clareza, mostra o erro e, se só o `MANIFEST.txt` mudou, sugere o `anota-linha-base.bash -r`. O `compara` passa a sair com o código da comparação (0 PASS, 1 FAIL, 2 comparação não feita); antes saía sempre com 0.
+  - Documentação: `docs/uso-linha-base.md` (anotar uma base congelada), `docs/validacao-refatoracao.md`, `docs/ferramentas.md`, `docs/estado-do-projeto.md` e README. O README passa a citar a R-NOFMA-02 como linha de base de referência (ainda citava a R-NOFMA-01).
+  - Conferido com uma linha de base de teste, como usuário sem privilégios: anotação com `-m`, registro com `-r`, recusa quando uma saída foi alterada, e as três saídas do `compara` (PASS, comparação não feita e FAIL).
+
 - **Rotinas longas divididas em etapas (R-FASE4-01).** As quatro rotinas da pendência 7 do `docs/estado-do-projeto.md` passam a ser uma sequência curta de chamadas a procedimentos de módulo com argumentos explícitos e `intent` declarado. Nenhum cálculo muda: as instruções são as mesmas, só mudaram de procedimento; as mensagens de log e os textos gravados nos arquivos também são os mesmos.
 
   | Rotina | Linhas antes | Linhas depois | Etapas |
@@ -22,6 +28,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `write_mpas_import_diag`: os sete vetores reunidos no PET 0 passam a ser colunas de um único buffer, indexadas pelas constantes `IMP_*`; o limiar `OMASK_MIN` passa a constante do módulo. Sai a variável `ts_str`, que era escrita e nunca lida.
   - `mpas_atm_init` e `InitializeRealize` do oceano, que só compilam na Jaci: os trechos foram movidos sem alteração de instruções, conferido pela comparação das instruções antes e depois (só aparecem as chamadas e declarações novas). Saem sete variáveis sem uso do `InitializeRealize` (`dirs`, `param_file`, `n`, `isd`, `ied`, `jsd`, `jed`) e o comentário que descrevia a construção por `ESMF_Mesh`, abandonada.
   - Conferência local: os fontes que não dependem das bibliotecas dos modelos compilam sem aviso com ESMF 8.9.1; `mpas_atm_model.F90` e `mom_cap_MONAN.F90` foram compilados contra interfaces mínimas do MPAS, MOM6 e FMS, validadas antes com a versão anterior dos arquivos. Um programa de teste com 4 PETs e dados sintéticos chamou os dois gravadores com o código antigo e com o novo: os quatro arquivos NetCDF gravados são idênticos byte a byte, e as mensagens de log também.
+  - Validação na Jaci (rodada R-FASE4-01, 152 PETs, 24 passos): 73 arquivos iguais à linha de base R-NOFMA-02, 0 só com metadados diferentes, PASS.
 
 - **Documentação de passagem (R-FASE3-04).** Novo `docs/estado-do-projeto.md`, com o ambiente, as etapas validadas, as linhas de base, o roteiro de validação, as armadilhas encontradas e as pendências. O `valida_rodada.bash` e o roteiro de validação passam a usar a linha de base R-NOFMA-02 como padrão.
 

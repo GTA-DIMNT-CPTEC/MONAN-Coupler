@@ -80,6 +80,25 @@ compara)
   bash -c "source ${COUPLER_ROOT}/tools/dev/set-nccmp-jaci.bash >/dev/null 2>&1 && \
            bash ${COUPLER_ROOT}/tools/dev/compara-linha-base.bash -l ${BASE} -o ${REF}/baseline -e" \
     > compara.txt 2>&1
+  rc_cmp=$?
+  # Código 2: a comparação nem começou (linha de base que não confere com o
+  # SHA256SUMS, nccmp ausente, base inexistente). Não é FAIL do código.
+  if [[ ${rc_cmp} -eq 2 ]]; then
+    echo
+    echo " COMPARAÇÃO NÃO FEITA: o compara-linha-base.bash parou antes de comparar."
+    echo " O resultado desta rodada ainda não foi avaliado; não é FAIL do código."
+    sed -n '/ERRO/,$p' compara.txt | sed 's/^/ /'
+    if grep -q 'MANIFEST.txt: FAILED' compara.txt \
+       && [[ $(grep -c ': FAILED' compara.txt) -eq 1 ]]; then
+      echo
+      echo " Só o MANIFEST.txt da linha de base mudou. Se foi uma anotação feita à mão,"
+      echo " registre a soma nova e compare de novo:"
+      echo "   bash ${COUPLER_ROOT}/tools/dev/anota-linha-base.bash -o ${REF}/baseline -l ${BASE} -r"
+      echo "   bash ${COUPLER_ROOT}/tools/dev/valida_rodada.bash compara ${nome}"
+    fi
+    echo " Relatório completo: ${DIR}/compara.txt"
+    exit 2
+  fi
   grep -E 'Entradas|entradas diferentes' compara.txt
   grep -E '^ *iguais:' compara.txt
   n_meta=$(grep -c 'difere so nos METADADOS' compara.txt)
@@ -95,6 +114,7 @@ compara)
     echo; echo "Primeiras diferenças:"; sed -n '/Integridade/,$p' compara.txt | head -30
   fi
   echo " Relatório completo: ${DIR}/compara.txt"
+  exit "${rc_cmp}"
   ;;
 *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
