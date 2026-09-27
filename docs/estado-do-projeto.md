@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado ao fim da fase 3 (setembro de 2026).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na fase 4 (setembro de 2026).
 
 ## 1. O que é o projeto
 
@@ -40,6 +40,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE3-02 | módulo comum dos gravadores NetCDF (`nc_writer`) |
 | R-FASE3-03 | comentários sem marcas de histórico; veredito visível no `valida_rodada` |
 | R-FASE3-04 | linha de base padrão R-NOFMA-02; este documento |
+| R-FASE4-01 | `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields` e `InitializeRealize` do oceano divididos em etapas (validação na Jaci pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 2).
 
@@ -97,7 +98,7 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 4. Decidir se o esquema `mpassit` substitui o algoritmo atual do cap atmosférico (muda resultados; decisão científica).
 5. Decidir o destino do DATM, que o driver não registra (o script `roda_repro_datm_mom6.sh` depende dele).
 6. Trocar os três arquivos de `MPI_Allreduce` por uma interface genérica com `mpi_f08`.
-7. Dividir as rotinas que ainda passam de 200 linhas: `mpas_atm_init`, `write_mpas_import_diag`, `med_write_import_fields`, `InitializeRealize` do cap do oceano.
+7. Dividir as rotinas que ainda passam de 200 linhas de código (sem comentários): `MediatorAdvance` (308), `compute_ice_fluxes` (224), `update_ice_fields_on_atm_grid` (222), `WriteDOCNDiag` (210) e `InitializeRealize` do cap do gelo (202). O `config_read` (267) é quase todo declaração de namelist e pode ficar como está. As quatro rotinas listadas antes foram divididas na R-FASE4-01.
 8. Registrar no MANIFEST da R-NOFMA-02 o commit do submódulo MONAN-Model usado.
 
 ## 9. Convenções

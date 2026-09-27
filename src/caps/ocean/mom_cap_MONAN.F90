@@ -337,12 +337,14 @@ contains
   !> @brief Inicializa o MOM6+SIS2 e realiza os campos ESMF na grade tripolar.
   !!
   !! Sequência:
-  !!   1. Lê nuopc.input via get_MOM_input → obtém grade e domínio MOM6
-  !!   2. Chama ocean_model_init → inicializa MOM6 completo (lê restart)
-  !!   3. Aloca estado interno (ocean_public, ocean_state, ice_ocn_bnd)
-  !!   4. Cria ESMF_Mesh ou ESMF_Grid a partir da grade tripolar MOM6
-  !!   5. Cria ESMF_Fields apontando diretamente para memória MOM6
-  !!   6. Salva estado interno no ESMF_GridComp via SetInternalState
+  !!   1. init_fms_time: comunicador MPI do ESMF para o FMS, calendário e
+  !!      instante inicial no tipo de tempo do FMS
+  !!   2. Aloca o estado interno (ocean_public, ocean_state, ice_ocn_bnd)
+  !!   3. ocean_model_init: inicializa o MOM6 completo (lê restart)
+  !!   4. get_ocean_domain e alloc_ice_ocean_boundary
+  !!   5. create_ocean_grid: ESMF_Grid com a decomposição do MOM6
+  !!   6. realize_ocean_fields: cria e realiza os campos ESMF
+  !!   7. Salva o estado interno no ESMF_GridComp via SetInternalState
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -352,42 +354,87 @@ contains
     ! Variáveis locais
     type(ocn_internal_state_wrapper)   :: wrap
     type(ocn_internal_state_type), pointer :: is => null()
+    type(time_type)         :: fms_start, fms_init
+    type(ocean_grid_type), pointer :: ocean_grid => null()
+    type(ESMF_Grid)         :: ocn_grid
+    integer :: isc, iec, jsc, jec, ni, nj
+    character(len=256) :: logmsg
+
+    rc = ESMF_SUCCESS
+
+    ! ── 0 a 2. Comunicador MPI, FMS, calendário e instante inicial ───────
+    call init_fms_time(gcomp, clock, fms_start, fms_init, rc)
+    if (rc /= ESMF_SUCCESS) return
+
+    ! ── 3. Alocar estado interno ──────────────────────────────────────────
+    allocate(wrap%ptr)
+    is => wrap%ptr
+    allocate(is%ocean_public)
+    ! NOTA: is%ocean_state NAO deve ser pre-alocado.
+    ! ocean_model_init verifica: if (associated(OS)) e aborta.
+    ! ocean_model_init faz 'allocate(OS)' internamente.
+    is%ocean_state => null()  ! ponteiro null antes de ocean_model_init
+    allocate(is%ice_ocn_bnd)  ! aloca o tipo; arrays internos alocados abaixo
+
+    ! ── 4. Inicializar MOM6 (lê MOM_input, grid, restart) ────────────────
+    call ocean_model_init(is%ocean_public, is%ocean_state, fms_start, fms_init)
+    call ESMF_LogWrite('OCN(MOM6): ocean_model_init concluido', ESMF_LOGMSG_INFO)
+
+    call get_ocean_domain(is, ocean_grid, isc, iec, jsc, jec, ni, nj)
+
+    ! ── 5b. Alocar arrays internos de ice_ocean_boundary ─────────────────
+    ! Apenas em PETs oceânicos (isc<=iec). PETs land-only não alocam
+    ! porque não têm domínio — mom_import/mom_export não os acessam.
+    if (is%ocean_public%is_ocean_pe) then
+      call alloc_ice_ocean_boundary(is%ice_ocn_bnd, isc, iec, jsc, jec)
+    end if
+
+    write(logmsg,'(A,4I6)') 'OCN(MOM6): domínio local isc,iec,jsc,jec=', &
+      isc, iec, jsc, jec
+    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+
+    ! ── 6–8. Criar ESMF_Grid e realizar campos do OCN ────────────────────
+    ! Grade 2D com deBlockList igual à decomposição do MOM6 (mesma solução
+    ! do ramo GEOMTYPE_GRID do mom_cap.F90 oficial). ESMF_Mesh e DistGrid
+    ! com arbSeqIndexList não servem aqui: o ESMF 8.9.1 exige ids de nó
+    ! >= 1 e globalmente únicos, recusa nodeCount=0 nos PETs sem domínio,
+    ! e ESMF_GridCreate só aceita DistGrid de blocos contíguos.
+    call mom_set_geomtype(ESMF_GEOMTYPE_GRID)
+
+    call create_ocean_grid(is, ocean_grid, isc, iec, jsc, jec, ni, nj, ocn_grid, rc)
+    if (rc /= ESMF_SUCCESS) return
+
+    call realize_ocean_fields(ocn_grid, importState, exportState, rc)
+    if (rc /= ESMF_SUCCESS) return
+
+    ! ── 9. Persistir estado interno no componente ESMF ────────────────────
+    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha SetInternalState', &
+      line=__LINE__, file=__FILE__)) return
+
+    call ESMF_LogWrite('OCN(MOM6): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+
+  end subroutine InitializeRealize
+
+  ! ============================================================================
+  !> @brief Comunicador MPI para o FMS, calendário e instante inicial em FMS.
+  !!
+  !! @param[in]  gcomp      componente oceânico
+  !! @param[in]  clock      relógio do componente
+  !! @param[out] fms_start  instante inicial no tipo de tempo do FMS
+  !! @param[out] fms_init   instante de inicialização (igual ao inicial)
+  !! @param[out] rc         código de retorno ESMF
+  subroutine init_fms_time(gcomp, clock, fms_start, fms_init, rc)
+    type(ESMF_GridComp), intent(in)  :: gcomp
+    type(ESMF_Clock),    intent(in)  :: clock
+    type(time_type),     intent(out) :: fms_start, fms_init
+    integer,             intent(out) :: rc
+
     type(ESMF_VM)           :: vm                ! VM ESMF (para obter MPI comm)
     type(ESMF_Time)         :: startTime
     type(ESMF_TimeInterval) :: timeStep
-    type(time_type)         :: fms_start, fms_init
-    type(param_file_type)   :: param_file
-    type(directories)       :: dirs
-    type(ocean_grid_type), pointer :: ocean_grid => null()
-    type(ESMF_Field)        :: field
-    integer :: n, isc, iec, jsc, jec, ni, nj
-    integer :: isd, ied, jsd, jed
-    integer :: yr, mo, dy, hr, mn, sc            ! [C6] conversao ESMF->FMS
-    integer :: mpi_comm_mom                      ! [C13] comunicador MPI do ESMF
-    character(len=256) :: logmsg
-      type(ESMF_Grid) :: ocn_grid
-      type(ESMF_DistGrid) :: distGrid
-      type(ESMF_DELayout) :: deLayout
-      integer :: npes_ocn
-      integer :: ntiles
-      integer :: n_2
-      integer, allocatable :: xb(:)
-      integer, allocatable :: xe(:)
-      integer, allocatable :: yb(:)
-      integer, allocatable :: ye(:)
-      integer, allocatable :: pe(:)
-      integer, allocatable :: deBlockList(:,:,:)
-      integer, allocatable :: petMap(:)
-      real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
-      real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
-      integer :: i
-      integer :: j
-      integer :: ig
-      integer :: jg
-      integer :: lbnd_i
-      integer :: lbnd_j
-      integer :: i1
-      integer :: j1
+    integer :: yr, mo, dy, hr, mn, sc            ! conversao ESMF->FMS
+    integer :: mpi_comm_mom                      ! comunicador MPI do ESMF
 
     rc = ESMF_SUCCESS
 
@@ -418,20 +465,19 @@ contains
     call ESMF_TimeGet(startTime, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
     fms_start = set_date(yr, mo, dy, hr, mn, sc)
     fms_init  = fms_start   ! init e start coincidem no primeiro passo
+  end subroutine init_fms_time
 
-    ! ── 3. Alocar estado interno ──────────────────────────────────────────
-    allocate(wrap%ptr)
-    is => wrap%ptr
-    allocate(is%ocean_public)
-    ! NOTA: is%ocean_state NAO deve ser pre-alocado.
-    ! ocean_model_init verifica: if (associated(OS)) e aborta.
-    ! ocean_model_init faz 'allocate(OS)' internamente.
-    is%ocean_state => null()  ! ponteiro null antes de ocean_model_init
-    allocate(is%ice_ocn_bnd)  ! aloca o tipo; arrays internos alocados abaixo
-
-    ! ── 4. Inicializar MOM6 (lê MOM_input, grid, restart) ────────────────
-    call ocean_model_init(is%ocean_public, is%ocean_state, fms_start, fms_init)
-    call ESMF_LogWrite('OCN(MOM6): ocean_model_init concluido', ESMF_LOGMSG_INFO)
+  ! ============================================================================
+  !> @brief Grade MOM6 e limites do domínio computacional deste PET.
+  !!
+  !! @param[in]    is          estado interno (ocean_public, ocean_state)
+  !! @param[inout] ocean_grid  grade MOM6; continua nula em PET land-only
+  !! @param[out]   isc, iec, jsc, jec  domínio computacional (vazio em PET land-only)
+  !! @param[out]   ni, nj      dimensões globais, iguais em todos os PETs
+  subroutine get_ocean_domain(is, ocean_grid, isc, iec, jsc, jec, ni, nj)
+    type(ocn_internal_state_type), intent(inout) :: is
+    type(ocean_grid_type), pointer, intent(inout) :: ocean_grid
+    integer, intent(out) :: isc, iec, jsc, jec, ni, nj
 
     ! ── 5. Obter grade MOM6 e limites do domínio computacional ───────────
     ! NÃO retornar prematuramente em PETs land-only.
@@ -457,52 +503,58 @@ contains
     ! mpp_max(scalar) faz MPI_Allreduce MAX sobre o comunicador FMS.
     call mpp_max(ni)
     call mpp_max(nj)
+  end subroutine get_ocean_domain
 
-    ! ── 5b. Alocar arrays internos de ice_ocean_boundary ─────────────────
-    ! Apenas em PETs oceânicos (isc<=iec). PETs land-only não alocam
-    ! porque não têm domínio — mom_import/mom_export não os acessam.
-    if (is%ocean_public%is_ocean_pe) then
-    allocate(is%ice_ocn_bnd%u_flux         (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%v_flux         (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%t_flux         (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%q_flux         (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%salt_flux      (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%lw_flux        (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%sw_flux_vis_dir(isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%sw_flux_vis_dif(isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%sw_flux_nir_dir(isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%sw_flux_nir_dif(isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%lprec          (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%fprec          (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%seaice_melt_heat(isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%seaice_melt    (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%mi             (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%ice_fraction   (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%u10_sqr        (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%p              (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%lrunoff        (isc:iec,jsc:jec))
-    allocate(is%ice_ocn_bnd%frunoff        (isc:iec,jsc:jec))
+  ! ============================================================================
+  !> @brief Aloca e zera os arrays de ice_ocean_boundary no domínio local.
+  !!
+  !! @param[inout] bnd  fronteira gelo-oceano do MOM6
+  !! @param[in]    isc, iec, jsc, jec  domínio computacional deste PET
+  subroutine alloc_ice_ocean_boundary(bnd, isc, iec, jsc, jec)
+    type(ice_ocean_boundary_type), intent(inout) :: bnd
+    integer,                       intent(in)    :: isc, iec, jsc, jec
+
+    allocate(bnd%u_flux         (isc:iec,jsc:jec))
+    allocate(bnd%v_flux         (isc:iec,jsc:jec))
+    allocate(bnd%t_flux         (isc:iec,jsc:jec))
+    allocate(bnd%q_flux         (isc:iec,jsc:jec))
+    allocate(bnd%salt_flux      (isc:iec,jsc:jec))
+    allocate(bnd%lw_flux        (isc:iec,jsc:jec))
+    allocate(bnd%sw_flux_vis_dir(isc:iec,jsc:jec))
+    allocate(bnd%sw_flux_vis_dif(isc:iec,jsc:jec))
+    allocate(bnd%sw_flux_nir_dir(isc:iec,jsc:jec))
+    allocate(bnd%sw_flux_nir_dif(isc:iec,jsc:jec))
+    allocate(bnd%lprec          (isc:iec,jsc:jec))
+    allocate(bnd%fprec          (isc:iec,jsc:jec))
+    allocate(bnd%seaice_melt_heat(isc:iec,jsc:jec))
+    allocate(bnd%seaice_melt    (isc:iec,jsc:jec))
+    allocate(bnd%mi             (isc:iec,jsc:jec))
+    allocate(bnd%ice_fraction   (isc:iec,jsc:jec))
+    allocate(bnd%u10_sqr        (isc:iec,jsc:jec))
+    allocate(bnd%p              (isc:iec,jsc:jec))
+    allocate(bnd%lrunoff        (isc:iec,jsc:jec))
+    allocate(bnd%frunoff        (isc:iec,jsc:jec))
     ! Inicializar a zero — atribuição explícita é tipo-segura (real=real(4))
-    is%ice_ocn_bnd%u_flux          = 0.0
-    is%ice_ocn_bnd%v_flux          = 0.0
-    is%ice_ocn_bnd%t_flux          = 0.0
-    is%ice_ocn_bnd%q_flux          = 0.0
-    is%ice_ocn_bnd%salt_flux       = 0.0
-    is%ice_ocn_bnd%lw_flux         = 0.0
-    is%ice_ocn_bnd%sw_flux_vis_dir = 0.0
-    is%ice_ocn_bnd%sw_flux_vis_dif = 0.0
-    is%ice_ocn_bnd%sw_flux_nir_dir = 0.0
-    is%ice_ocn_bnd%sw_flux_nir_dif = 0.0
-    is%ice_ocn_bnd%lprec           = 0.0
-    is%ice_ocn_bnd%fprec           = 0.0
-    is%ice_ocn_bnd%seaice_melt_heat= 0.0
-    is%ice_ocn_bnd%seaice_melt     = 0.0
-    is%ice_ocn_bnd%mi              = 0.0
-    is%ice_ocn_bnd%ice_fraction    = 0.0
-    is%ice_ocn_bnd%u10_sqr         = 0.0
-    is%ice_ocn_bnd%p               = 0.0
-    is%ice_ocn_bnd%lrunoff         = 0.0
-    is%ice_ocn_bnd%frunoff         = 0.0
+    bnd%u_flux          = 0.0
+    bnd%v_flux          = 0.0
+    bnd%t_flux          = 0.0
+    bnd%q_flux          = 0.0
+    bnd%salt_flux       = 0.0
+    bnd%lw_flux         = 0.0
+    bnd%sw_flux_vis_dir = 0.0
+    bnd%sw_flux_vis_dif = 0.0
+    bnd%sw_flux_nir_dir = 0.0
+    bnd%sw_flux_nir_dif = 0.0
+    bnd%lprec           = 0.0
+    bnd%fprec           = 0.0
+    bnd%seaice_melt_heat= 0.0
+    bnd%seaice_melt     = 0.0
+    bnd%mi              = 0.0
+    bnd%ice_fraction    = 0.0
+    bnd%u10_sqr         = 0.0
+    bnd%p               = 0.0
+    bnd%lrunoff         = 0.0
+    bnd%frunoff         = 0.0
     ! ice_ncat NÃO é inicializado por ocean_model_init neste
     ! acoplamento; sem esta atribuição ele conteria lixo de memória. Se esse
     ! lixo for > 0, a guarda 'if (ice_ncat > 0)' em mom_import (mom_cap_methods
@@ -511,226 +563,200 @@ contains
     ! causando SIGSEGV. O acoplamento MOM6+SIS2 usa campos AGREGADOS (ice_fraction,
     ! t_flux, etc.), não o esquema por categoria do CICE/CESM; logo ice_ncat = 0
     ! é o valor correto e desativa esse ramo de forma determinística.
-    is%ice_ocn_bnd%ice_ncat        = 0
-    end if  ! is_ocean_pe: fim do bloco de alocacao de ice_ocn_bnd
+    bnd%ice_ncat        = 0
+  end subroutine alloc_ice_ocean_boundary
 
-    write(logmsg,'(A,4I6)') 'OCN(MOM6): domínio local isc,iec,jsc,jec=', &
-      isc, iec, jsc, jec
+  ! ============================================================================
+  !> @brief Cria a ESMF_Grid do oceano com a decomposição do MOM6.
+  !!
+  !! Passos:
+  !!   1. mpp_get_compute_domains: coleta xb/xe/yb/ye de todos os PETs via FMS.
+  !!   2. ESMF_DistGridCreate(minIndex, maxIndex, deBlockList): DistGrid 2D
+  !!      regular com blocos contíguos por PET — aceito por ESMF_GridCreate.
+  !!   3. ESMF_GridCreate(distgrid, gridEdgeLWidth, gridEdgeUWidth): Grid 2D
+  !!      sobre esse DistGrid, sem padding de halo.
+  !!   4. ESMF_GridAddCoord: lon/lat nos centróides para regrid.
+  !!   5. Item de máscara na grade (não fatal se falhar).
+  !!
+  !! PETs land-only: mpp_get_compute_domains retorna domínio vazio (lsize=0)
+  !! para esses PETs, mas o deBlockList lida com isso naturalmente pois
+  !! o DistGrid é definido globalmente pelo espaço de índices [1..ni]×[1..nj].
+  !!
+  !! @param[in]  is          estado interno (domínio MOM6)
+  !! @param[in]  ocean_grid  grade MOM6 (coordenadas geoLonT/geoLatT)
+  !! @param[in]  isc, iec, jsc, jec  domínio computacional deste PET
+  !! @param[in]  ni, nj      dimensões globais
+  !! @param[out] ocn_grid    grade ESMF criada
+  !! @param[out] rc          código de retorno ESMF
+  subroutine create_ocean_grid(is, ocean_grid, isc, iec, jsc, jec, ni, nj, ocn_grid, rc)
+    type(ocn_internal_state_type),  intent(inout) :: is
+    type(ocean_grid_type), pointer, intent(in)  :: ocean_grid
+    integer,                        intent(in)  :: isc, iec, jsc, jec, ni, nj
+    type(ESMF_Grid),                intent(out) :: ocn_grid
+    integer,                        intent(out) :: rc
+
+    type(ESMF_DistGrid) :: distGrid
+    type(ESMF_DELayout) :: deLayout
+    integer :: npes_ocn, ntiles, n_2
+    integer, allocatable :: xb(:), xe(:), yb(:), ye(:), pe(:)
+    integer, allocatable :: deBlockList(:,:,:)
+    integer, allocatable :: petMap(:)
+    real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
+    integer :: i, j, ig, jg, lbnd_i, lbnd_j, i1, j1
+    character(len=256) :: logmsg
+
+    rc = ESMF_SUCCESS
+
+    ! ── 1. Verificar que temos exatamente 1 tile por PET ─────────────────
+    ntiles = mpp_get_ntile_count(is%ocean_public%domain)
+    if (ntiles /= 1) then
+      call ESMF_LogWrite( &
+        'OCN: ERRO — ntiles /= 1 não suportado em ESMF_Grid', &
+        ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      return
+    end if
+
+    ! ── 2. Obter limites de domínio de TODOS os PETs oceânicos ───────────
+    ! mpp_get_domain_npes: número de PETs no comunicador MOM6.
+    ! mpp_get_compute_domains (plural): preenche xb/xe/yb/ye para todos.
+    ! mpp_get_pelist: mapeia PETs MOM6 → PETs ESMF.
+    npes_ocn = mpp_get_domain_npes(is%ocean_public%domain)
+    allocate(xb(npes_ocn), xe(npes_ocn), yb(npes_ocn), ye(npes_ocn))
+    allocate(pe(npes_ocn))
+    call mpp_get_compute_domains(is%ocean_public%domain, &
+         xbegin=xb, xend=xe, ybegin=yb, yend=ye)
+    call mpp_get_pelist(is%ocean_public%domain, pe)
+
+    write(logmsg,'(A,I4,A,4I6)') &
+      'OCN(MOM6): npes_ocn=', npes_ocn, '  global ni,nj,isc,jsc=', &
+      ni, nj, isc, jsc
     call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
 
-    ! ── 6–8. Criar ESMF_Mesh e realizar campos do OCN ───────────────────────
-    ! Reescrita completa da construção da Mesh (v10.1).
-    !
-    ! Causa raiz do erro 'node ids must be >= 1' (ESMCI_Mesh_Glue.C:189):
-    !   No ESMF 8.9.x, ESMF_MeshAddNodes exige que os nodeIds sejam
-    !   GLOBALMENTE únicos entre TODOS os PETs participantes, e que cada
-    !   PET passe um array não-vazio quando faz parte da chamada coletiva.
-    !   A versão anterior gerava IDs locais começando em 1 por PET, o que:
-    !     (a) viola unicidade global (vários PETs com mesmo ID),
-    !     (b) cria meshes "desconectadas" (4 nós por célula, sem
-    !         compartilhamento entre células vizinhas — válido mas frágil),
-    !     (c) usa nodeOwners = localPet_m (correto, mas não basta sem (a)).
-    !
-    ! Solução adotada (alinhada com o mom_cap.F90 oficial, linhas 1196-1205):
-    !   • elemIds GLOBAIS:  (jg-1)*ni + ig, onde ig/jg usam idg_offset/
-    !     jdg_offset do ocean_grid → índice único no domínio global MOM6.
-    !   • nodeIds GLOBAIS:  baseados na grade (ni+1)×(nj+1) de cantos —
-    !     cada vértice (ig+di, jg+dj) recebe id = (jg+dj-1)*(ni+1) + (ig+di) + 1.
-    !     Inclui o "+1" para garantir id >= 1 mesmo no canto (1,1).
-    !   • Compartilhamento de nós: células vizinhas compartilham cantos,
-    !     produzindo uma mesh "real" (não desconectada). PETs vizinhos
-    !     referenciam os mesmos nodeIds nos limites — o ESMF resolve via halo.
-    !   • Coordenadas dos cantos: estimadas por offset de ±0.5° em torno
-    !     do centróide (preserva comportamento da versão anterior). Para
-    !     produção em grade tripolar real, usar geoLonBu/geoLatBu do MOM6
-    !     (cantos exatos) — TODO documentado.
-    !   • PETs sem domínio (is_ocean_pe=.false. ou numElems=0): pula a
-    !     chamada a MeshAddNodes/MeshAddElements. O MeshCreate é coletivo
-    !     em todos PETs, satisfazendo o protocolo NUOPC.
-    !
-    ! Por que ESMF_GEOMTYPE_MESH e não ESMF_GEOMTYPE_GRID:
-    !   A escolha foi mantida porque (a) o conector OCN→MED transfere a
-    !   Mesh apenas como topologia (inteiros), evitando bloqueio de
-    !   coordenadas, e (b) ESMF_MESHLOC_ELEMENT produz Fields rank-1 por
-    !   elemento, compatível com State_SetExport/Import (farrayPtr 1D).
-    ! O deadlock anterior foi resolvido pelo (return
-    !   prematuro removido em is_ocean_pe), não pela Mesh.
-    ! ── 6–8. Criar ESMF_Grid (deBlockList MOM6) e realizar campos do OCN ────
-    ! [v5] ESMF_Grid com deBlockList — solução definitiva.
-    !
-    ! Histórico completo das tentativas e diagnósticos:
-    !   v1: ESMF_MeshAddNodes, IDs locais → "node ids must be >= 1" (IDs dup.)
-    !   v2: IDs globais, MeshAdd* condicional → "no elemental distgrid" (MeshAdd*
-    !       não-coletivo deixa mesh incompleta).
-    !   v3: MeshAdd* incondicional, arrays tamanho=0 → "node ids must be >= 1"
-    !       (ESMF 8.9.1 rejeita nodeCount=0 em MeshAddNodes).
-    !   v4: ESMF_Grid + arbSeqIndexList → "distgrid should not contain arbitrary
-    !       sequence indices" (ESMF_Grid exige DistGrid com blocos contíguos,
-    !       não sequências arbitrárias — estas são exclusivas de Mesh/LocStream).
-    !
-    ! Solução (idêntica ao mom_cap.F90 oficial, ramo GEOMTYPE_GRID):
-    !   1. mpp_get_compute_domains: coleta xb/xe/yb/ye de todos os PETs via FMS.
-    !   2. ESMF_DistGridCreate(minIndex, maxIndex, deBlockList): DistGrid 2D
-    !      regular com blocos contíguos por PET — aceito por ESMF_GridCreate.
-    !   3. ESMF_GridCreate(distgrid, gridEdgeLWidth, gridEdgeUWidth): Grid 2D
-    !      sobre esse DistGrid, sem padding de halo.
-    !   4. ESMF_GridAddCoord: lon/lat nos centróides para regrid.
-    !   5. ESMF_FieldCreate(grid, staggerLoc=CENTER): Fields 2D — compatíveis
-    !      com State_GetImport_2d/State_SetExport (ramo GEOMTYPE_GRID).
-    !   6. mom_set_geomtype(ESMF_GEOMTYPE_GRID): informa conectores.
-    !
-    ! PETs land-only: mpp_get_compute_domains retorna domínio vazio (lsize=0)
-    ! para esses PETs, mas o deBlockList lida com isso naturalmente pois
-    ! o DistGrid é definido globalmente pelo espaço de índices [1..ni]×[1..nj].
-    call mom_set_geomtype(ESMF_GEOMTYPE_GRID)
+    ! ── 3. Construir deBlockList e petMap ────────────────────────────────
+    ! deBlockList(dim, start/end, npes): limites de cada bloco por PET.
+    !   dim=1 → índice x (i);  dim=2 → índice y (j)
+    !   start/end=1 → início do bloco;  start/end=2 → fim do bloco
+    ! petMap: para cada DE (bloco), qual PET ESMF é responsável.
+    allocate(deBlockList(2, 2, npes_ocn))
+    allocate(petMap(npes_ocn))
+    do n_2 = 1, npes_ocn
+      deBlockList(1, 1, n_2) = xb(n_2)
+      deBlockList(1, 2, n_2) = xe(n_2)
+      deBlockList(2, 1, n_2) = yb(n_2)
+      deBlockList(2, 2, n_2) = ye(n_2)
+      petMap(n_2) = pe(n_2) - pe(1)    ! PET ESMF (zero-based, relativo ao pe(1))
+    end do
+    deallocate(xb, xe, yb, ye, pe)
 
+    ! ── 4. DELayout e DistGrid 2D ─────────────────────────────────────────
+    ! ESMF_DELayoutCreate com petMap associa cada DE ao PET correto.
+    ! ESMF_DistGridCreate com minIndex/maxIndex/deBlockList cria um DistGrid
+    ! logicamente retangular [1..ni] × [1..nj] com blocos definidos pelo
+    ! deBlockList — aceito por ESMF_GridCreate (sem arbSeqIndexList).
+    deLayout = ESMF_DELayoutCreate(petMap=petMap, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DELayoutCreate', &
+      line=__LINE__, file=__FILE__)) return
+    deallocate(petMap)
 
-      ! ── 1. Verificar que temos exatamente 1 tile por PET ─────────────────
-      ntiles = mpp_get_ntile_count(is%ocean_public%domain)
-      if (ntiles /= 1) then
-        call ESMF_LogWrite( &
-          'OCN: ERRO — ntiles /= 1 não suportado em ESMF_Grid', &
-          ESMF_LOGMSG_ERROR)
-        rc = ESMF_FAILURE
-        return
-      end if
+    distGrid = ESMF_DistGridCreate(minIndex=(/1, 1/), maxIndex=(/ni, nj/), &
+                 deBlockList=deBlockList, delayout=deLayout, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DistGridCreate', &
+      line=__LINE__, file=__FILE__)) return
+    deallocate(deBlockList)
 
-      ! ── 2. Obter limites de domínio de TODOS os PETs oceânicos ───────────
-      ! mpp_get_domain_npes: número de PETs no comunicador MOM6.
-      ! mpp_get_compute_domains (plural): preenche xb/xe/yb/ye para todos.
-      ! mpp_get_pelist: mapeia PETs MOM6 → PETs ESMF.
-      npes_ocn = mpp_get_domain_npes(is%ocean_public%domain)
-      allocate(xb(npes_ocn), xe(npes_ocn), yb(npes_ocn), ye(npes_ocn))
-      allocate(pe(npes_ocn))
-      call mpp_get_compute_domains(is%ocean_public%domain, &
-           xbegin=xb, xend=xe, ybegin=yb, yend=ye)
-      call mpp_get_pelist(is%ocean_public%domain, pe)
-
-      write(logmsg,'(A,I4,A,4I6)') &
-        'OCN(MOM6): npes_ocn=', npes_ocn, '  global ni,nj,isc,jsc=', &
-        ni, nj, isc, jsc
-      call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
-
-      ! ── 3. Construir deBlockList e petMap ────────────────────────────────
-      ! deBlockList(dim, start/end, npes): limites de cada bloco por PET.
-      !   dim=1 → índice x (i);  dim=2 → índice y (j)
-      !   start/end=1 → início do bloco;  start/end=2 → fim do bloco
-      ! petMap: para cada DE (bloco), qual PET ESMF é responsável.
-      allocate(deBlockList(2, 2, npes_ocn))
-      allocate(petMap(npes_ocn))
-      do n_2 = 1, npes_ocn
-        deBlockList(1, 1, n_2) = xb(n_2)
-        deBlockList(1, 2, n_2) = xe(n_2)
-        deBlockList(2, 1, n_2) = yb(n_2)
-        deBlockList(2, 2, n_2) = ye(n_2)
-        petMap(n_2) = pe(n_2) - pe(1)    ! PET ESMF (zero-based, relativo ao pe(1))
-      end do
-      deallocate(xb, xe, yb, ye, pe)
-
-      ! ── 4. DELayout e DistGrid 2D ─────────────────────────────────────────
-      ! ESMF_DELayoutCreate com petMap associa cada DE ao PET correto.
-      ! ESMF_DistGridCreate com minIndex/maxIndex/deBlockList cria um DistGrid
-      ! logicamente retangular [1..ni] × [1..nj] com blocos definidos pelo
-      ! deBlockList — aceito por ESMF_GridCreate (sem arbSeqIndexList).
-      deLayout = ESMF_DELayoutCreate(petMap=petMap, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DELayoutCreate', &
-        line=__LINE__, file=__FILE__)) return
-      deallocate(petMap)
-
-      distGrid = ESMF_DistGridCreate(minIndex=(/1, 1/), maxIndex=(/ni, nj/), &
-                   deBlockList=deBlockList, delayout=deLayout, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DistGridCreate', &
-        line=__LINE__, file=__FILE__)) return
-      deallocate(deBlockList)
-
-      ! ── 5. Grid 2D sobre o DistGrid ──────────────────────────────────────
-      ! gridEdgeLWidth/gridEdgeUWidth=(/0,0/) → sem padding de halo em x ou y.
-      ocn_grid = ESMF_GridCreate(distgrid=distGrid,               &
-                   coordSys=ESMF_COORDSYS_SPH_DEG,                &
-                   gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
-                   rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridCreate', &
-        line=__LINE__, file=__FILE__)) return
-
-      ! ── 6. Coordenadas lon/lat nos centróides ─────────────────────────────
-      call ESMF_GridAddCoord(ocn_grid, &
-           staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridAddCoord', &
-        line=__LINE__, file=__FILE__)) return
-
-      ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
-      ! não necessariamente coincidentes com (isc..iec, jsc..jec).
-      ! Usar lbound() para calcular o offset correto, exatamente como faz
-      ! o mom_cap.F90 oficial (linhas 1500-1531): i1 = i + lbnd1 - isc.
-      call ESMF_GridGetCoord(ocn_grid, coordDim=1, &
-           staggerLoc=ESMF_STAGGERLOC_CENTER, farrayPtr=lon_ptr, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridGetCoord lon', &
-        line=__LINE__, file=__FILE__)) return
-
-      call ESMF_GridGetCoord(ocn_grid, coordDim=2, &
-           staggerLoc=ESMF_STAGGERLOC_CENTER, farrayPtr=lat_ptr, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridGetCoord lat', &
-        line=__LINE__, file=__FILE__)) return
-
-      if (is%ocean_public%is_ocean_pe .and.  &
-          associated(lon_ptr) .and. associated(lat_ptr)) then
-        ! lbnd_i/lbnd_j: índice inicial do farrayPtr retornado pelo ESMF.
-        ! i1 = i + lbnd_i - isc  remapeia i global → índice local do ponteiro.
-          lbnd_i = lbound(lon_ptr, 1)
-          lbnd_j = lbound(lon_ptr, 2)
-          do j = jsc, jec
-            j1 = j + lbnd_j - jsc
-            jg = j + ocean_grid%jsc - jsc
-            do i = isc, iec
-              i1 = i + lbnd_i - isc
-              ig = i + ocean_grid%isc - isc
-              lon_ptr(i1, j1) = ocean_grid%geoLonT(ig, jg)
-              lat_ptr(i1, j1) = ocean_grid%geoLatT(ig, jg)
-            end do
-          end do
-      end if
-      nullify(lon_ptr, lat_ptr)
-
-      ! ── 7. Máscara oceânica ───────────────────────────────────────────────
-      call ESMF_GridAddItem(ocn_grid, itemFlag=ESMF_GRIDITEM_MASK,     &
-           itemTypeKind=ESMF_TYPEKIND_I4,                               &
-           staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
-      if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! não-fatal
-
-      ! ── 8. Realizar campos de importação e exportação ─────────────────────
-      do n_2 = 1, n_import
-        field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-                staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-                name=trim(import_names(n_2)), rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-        call NUOPC_Realize(importState, field=field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-      do n_2 = 1, n_export
-        field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-                staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-                name=trim(export_names(n_2)), rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-        call NUOPC_Realize(exportState, field=field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-      call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
-    if (allocated(xb)) deallocate(xb)
-    if (allocated(xe)) deallocate(xe)
-    if (allocated(yb)) deallocate(yb)
-    if (allocated(ye)) deallocate(ye)
-    if (allocated(pe)) deallocate(pe)
-    if (allocated(deBlockList)) deallocate(deBlockList)
-    if (allocated(petMap)) deallocate(petMap)
-
-    ! ── 9. Persistir estado interno no componente ESMF ────────────────────
-    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha SetInternalState', &
+    ! ── 5. Grid 2D sobre o DistGrid ──────────────────────────────────────
+    ! gridEdgeLWidth/gridEdgeUWidth=(/0,0/) → sem padding de halo em x ou y.
+    ocn_grid = ESMF_GridCreate(distgrid=distGrid,               &
+                 coordSys=ESMF_COORDSYS_SPH_DEG,                &
+                 gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
+                 rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridCreate', &
       line=__LINE__, file=__FILE__)) return
 
-    call ESMF_LogWrite('OCN(MOM6): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    ! ── 6. Coordenadas lon/lat nos centróides ─────────────────────────────
+    call ESMF_GridAddCoord(ocn_grid, &
+         staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridAddCoord', &
+      line=__LINE__, file=__FILE__)) return
 
-  end subroutine InitializeRealize
+    ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
+    ! não necessariamente coincidentes com (isc..iec, jsc..jec).
+    ! Usar lbound() para calcular o offset correto, exatamente como faz
+    ! o mom_cap.F90 oficial (linhas 1500-1531): i1 = i + lbnd1 - isc.
+    call ESMF_GridGetCoord(ocn_grid, coordDim=1, &
+         staggerLoc=ESMF_STAGGERLOC_CENTER, farrayPtr=lon_ptr, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridGetCoord lon', &
+      line=__LINE__, file=__FILE__)) return
+
+    call ESMF_GridGetCoord(ocn_grid, coordDim=2, &
+         staggerLoc=ESMF_STAGGERLOC_CENTER, farrayPtr=lat_ptr, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridGetCoord lat', &
+      line=__LINE__, file=__FILE__)) return
+
+    if (is%ocean_public%is_ocean_pe .and.  &
+        associated(lon_ptr) .and. associated(lat_ptr)) then
+      ! lbnd_i/lbnd_j: índice inicial do farrayPtr retornado pelo ESMF.
+      ! i1 = i + lbnd_i - isc  remapeia i global → índice local do ponteiro.
+        lbnd_i = lbound(lon_ptr, 1)
+        lbnd_j = lbound(lon_ptr, 2)
+        do j = jsc, jec
+          j1 = j + lbnd_j - jsc
+          jg = j + ocean_grid%jsc - jsc
+          do i = isc, iec
+            i1 = i + lbnd_i - isc
+            ig = i + ocean_grid%isc - isc
+            lon_ptr(i1, j1) = ocean_grid%geoLonT(ig, jg)
+            lat_ptr(i1, j1) = ocean_grid%geoLatT(ig, jg)
+          end do
+        end do
+    end if
+    nullify(lon_ptr, lat_ptr)
+
+    ! ── 7. Máscara oceânica ───────────────────────────────────────────────
+    call ESMF_GridAddItem(ocn_grid, itemFlag=ESMF_GRIDITEM_MASK,     &
+         itemTypeKind=ESMF_TYPEKIND_I4,                               &
+         staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! não-fatal
+  end subroutine create_ocean_grid
+
+  ! ============================================================================
+  !> @brief Cria e realiza os campos de importação e exportação na grade do oceano.
+  !!
+  !! @param[in]    ocn_grid     grade ESMF do oceano
+  !! @param[inout] importState  estado de importação do componente
+  !! @param[inout] exportState  estado de exportação do componente
+  !! @param[out]   rc           código de retorno ESMF
+  subroutine realize_ocean_fields(ocn_grid, importState, exportState, rc)
+    type(ESMF_Grid),  intent(in)    :: ocn_grid
+    type(ESMF_State), intent(inout) :: importState, exportState
+    integer,          intent(out)   :: rc
+
+    type(ESMF_Field) :: field
+    integer :: n_2
+
+    rc = ESMF_SUCCESS
+
+    ! ── 8. Realizar campos de importação e exportação ─────────────────────
+    do n_2 = 1, n_import
+      field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
+              staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
+              name=trim(import_names(n_2)), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call NUOPC_Realize(importState, field=field, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+    do n_2 = 1, n_export
+      field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
+              staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
+              name=trim(export_names(n_2)), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call NUOPC_Realize(exportState, field=field, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+    call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
+  end subroutine realize_ocean_fields
 
   ! ============================================================================
   !> @brief Exporta o estado oceânico inicial (t=0) após ocean_model_init.

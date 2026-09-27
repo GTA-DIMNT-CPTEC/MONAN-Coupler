@@ -9,6 +9,20 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Rotinas longas divididas em etapas (R-FASE4-01).** As quatro rotinas da pendência 7 do `docs/estado-do-projeto.md` passam a ser uma sequência curta de chamadas a procedimentos de módulo com argumentos explícitos e `intent` declarado. Nenhum cálculo muda: as instruções são as mesmas, só mudaram de procedimento; as mensagens de log e os textos gravados nos arquivos também são os mesmos.
+
+  | Rotina | Linhas antes | Linhas depois | Etapas |
+  | --- | --- | --- | --- |
+  | `med_write_import_fields` (`med_cap_netcdf.F90`) | 358 | 115 | `local_field_shape`, `define_import_file`, `gather_ocean_mask`, `internal_field_ptr`, `gather_field_global` |
+  | `write_mpas_import_diag` (`mpas_cap_netcdf.F90`) | 383 | 146 | `gather_boundary_member`, `define_import_diag_file`, `write_import_diag_fields`, `bin_masked_field`, `binarize_ocean_mask`, `log_mask_coverage` |
+  | `mpas_atm_init` (`mpas_atm_model.F90`) | 572 | 72 | `setup_mpas_domain`, `setup_mpas_streams`, `bind_mesh_fields`, `bind_diag_fields`, `setup_wind_fallback`, `init_flux_buffers`, `init_boundary_arrays` |
+  | `InitializeRealize` do oceano (`mom_cap_MONAN.F90`) | 388 | 70 | `init_fms_time`, `get_ocean_domain`, `alloc_ice_ocean_boundary`, `create_ocean_grid`, `realize_ocean_fields` |
+
+  - `med_write_import_fields`: sai a leitura das coordenadas da grade (`ESMF_GridGetCoord`), cujo resultado não era usado. Os desvios `goto 999` viram retornos das etapas; o tratamento de erro é o mesmo (fecha o arquivo, registra `ERRO NetCDF` e devolve sucesso).
+  - `write_mpas_import_diag`: os sete vetores reunidos no PET 0 passam a ser colunas de um único buffer, indexadas pelas constantes `IMP_*`; o limiar `OMASK_MIN` passa a constante do módulo. Sai a variável `ts_str`, que era escrita e nunca lida.
+  - `mpas_atm_init` e `InitializeRealize` do oceano, que só compilam na Jaci: os trechos foram movidos sem alteração de instruções, conferido pela comparação das instruções antes e depois (só aparecem as chamadas e declarações novas). Saem sete variáveis sem uso do `InitializeRealize` (`dirs`, `param_file`, `n`, `isd`, `ied`, `jsd`, `jed`) e o comentário que descrevia a construção por `ESMF_Mesh`, abandonada.
+  - Conferência local: os fontes que não dependem das bibliotecas dos modelos compilam sem aviso com ESMF 8.9.1; `mpas_atm_model.F90` e `mom_cap_MONAN.F90` foram compilados contra interfaces mínimas do MPAS, MOM6 e FMS, validadas antes com a versão anterior dos arquivos. Um programa de teste com 4 PETs e dados sintéticos chamou os dois gravadores com o código antigo e com o novo: os quatro arquivos NetCDF gravados são idênticos byte a byte, e as mensagens de log também.
+
 - **Documentação de passagem (R-FASE3-04).** Novo `docs/estado-do-projeto.md`, com o ambiente, as etapas validadas, as linhas de base, o roteiro de validação, as armadilhas encontradas e as pendências. O `valida_rodada.bash` e o roteiro de validação passam a usar a linha de base R-NOFMA-02 como padrão.
 
 - **Comentários sem marcas de histórico (R-FASE3-03).** Retiradas de 482 linhas de comentário, em 17 arquivos, as marcas de correção e de etapa (`FIX B-OCNGRID-01`, `BUG-NC-03`, `B-45`, `Sprint A (Maio 2026)` e semelhantes), que já estão neste CHANGELOG e no histórico do git. O texto explicativo foi mantido; linhas que só continham a marca foram removidas. Conferido arquivo a arquivo que as instruções de código, descontados espaços e comentários, são as mesmas de antes; mensagens de log não foram alteradas.

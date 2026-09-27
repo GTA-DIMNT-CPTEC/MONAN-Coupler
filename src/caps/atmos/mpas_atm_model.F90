@@ -192,6 +192,10 @@ contains
   !!
   !!   7. Liga ponteiros zero-copy via subpools structs%mesh, structs%diag
   !!
+  !! Etapas: setup_mpas_domain (passos 1 a 9), setup_mpas_streams (10 a
+  !! 12), core_init, bind_mesh_fields, bind_diag_fields, setup_wind_fallback,
+  !! init_flux_buffers e init_boundary_arrays.
+  !!
   !! @param mpi_comm  Comunicador MPI inteiro (extraído pelo cap da VM ESMF).
   ! ============================================================================
   subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
@@ -205,13 +209,6 @@ contains
     integer,          intent(in)  :: mpi_comm
     integer,          intent(out) :: rc
 
-    type(mpas_pool_type), pointer :: meshPool     => null()
-    type(mpas_pool_type), pointer :: diagPool     => null()
-    type(mpas_pool_type), pointer :: diagPhysPool => null()
-
-    integer, pointer :: nCells_ptr      => null()
-    integer, pointer :: nCellsSolve_ptr => null()  ! células próprias (sem halos)
-    integer, pointer :: nVertLev_ptr    => null()
     integer          :: n, nSolve, ierr
     ! StrKIND (=512), nao 64.
     !
@@ -230,13 +227,62 @@ contains
     ! Nao ha custo em usar StrKIND: a variavel e' local e usada com trim.
     character(len=StrKIND) :: startTimeStamp
     character(len=256) :: msg
-        type(mpas_pool_type), pointer :: diagPool2 => null()
 
     rc = 0
     g_mpi_comm           = mpi_comm
     atm_state%mpi_comm   = mpi_comm
     atm_state%dt_seconds = dt_seconds
     atm_state%config_dir = trim(config_dir)
+
+    ! Passos 1 a 9: dominio, framework, namelist, pacotes e relogio
+    call setup_mpas_domain(atm_state, rc)
+    if (rc /= 0) return
+
+    ! Passos 10 a 12: malha, stream manager e streams
+    call setup_mpas_streams(rc)
+    if (rc /= 0) return
+
+    ! ------------------------------------------------------------------
+    ! 13. Inicializa o núcleo atmosférico (core_init).
+    ! ------------------------------------------------------------------
+    startTimeStamp = ''
+    ierr = g_domain%core%core_init(g_domain, startTimeStamp)
+    if (ierr /= 0) then
+      write(msg,'(A,I0)') 'ERRO mpas_atm_init: core_init retornou ierr=', ierr
+      call mpas_log_write(trim(msg), messageType=MPAS_LOG_CRIT)
+      rc = ierr; return
+    end if
+    call mpas_log_write('mpas_atm_init: core_init concluido')
+
+    call bind_mesh_fields(atm_public, atm_state, n, nSolve, rc)
+    if (rc /= 0) return
+
+    call bind_diag_fields(atm_public)
+    call setup_wind_fallback(atm_public, n)
+    call init_flux_buffers(atm_public, n)
+    call init_boundary_arrays(atm_bnd, n)
+
+    atm_state%initialized = .true.
+    ! nSolve = células próprias (sem halos); n = nCells total (com halos).
+    ! netcdf_init_coords deve usar nSolve → soma global = 40962.
+    write(msg,'(A,I0,A,I0,A)') &
+      'mpas_atm_init: OK (', nSolve, ' celulas proprias / ', n, ' com halos — SMIOL ativo)'
+    call mpas_log_write(trim(msg))
+
+  end subroutine mpas_atm_init
+
+  !> Passos 1 a 9 de mpas_atm_init: aloca o dominio, inicializa o
+  !! framework (fases 1 e 2) com o comunicador do componente, registra o
+  !! nucleo, le o namelist e configura pacotes, decomposicoes e relogio.
+  !! @param[in]  atm_state  estado do cap (diretorio de configuracao)
+  !! @param[out] rc         0 em caso de sucesso
+  subroutine setup_mpas_domain(atm_state, rc)
+    type(mpas_atm_state_type), intent(in)  :: atm_state
+    integer,                   intent(out) :: rc
+
+    integer :: ierr
+
+    rc = 0
 
     ! ------------------------------------------------------------------
     ! Sequência replicada de mpas_subdriver.F (confirmada pelo probe):
@@ -379,6 +425,19 @@ contains
       rc = ierr; return
     end if
     call mpas_log_write('mpas_atm_init: packages + decomp + clock configurados')
+  end subroutine setup_mpas_domain
+
+  !> Passos 10 a 12 de mpas_atm_init: le a malha (bootstrap fase 1),
+  !! inicializa o stream manager, registra atributos globais e streams, e
+  !! conclui a alocacao de campos e halos (bootstrap fase 2).
+  !! @param[out] rc  0 em caso de sucesso
+  subroutine setup_mpas_streams(rc)
+    integer, intent(out) :: rc
+
+    integer :: ierr
+
+    rc = 0
+
 
     ! ------------------------------------------------------------------
     ! 10. mpas_bootstrap_framework_phase1: lê malha, cria blocos,
@@ -456,18 +515,29 @@ contains
     ! ------------------------------------------------------------------
     call mpas_bootstrap_framework_phase2(g_domain)
     call mpas_log_write('mpas_atm_init: bootstrap_phase2 concluido')
+  end subroutine setup_mpas_streams
 
-    ! ------------------------------------------------------------------
-    ! 13. Inicializa o núcleo atmosférico (core_init).
-    ! ------------------------------------------------------------------
-    startTimeStamp = ''
-    ierr = g_domain%core%core_init(g_domain, startTimeStamp)
-    if (ierr /= 0) then
-      write(msg,'(A,I0)') 'ERRO mpas_atm_init: core_init retornou ierr=', ierr
-      call mpas_log_write(trim(msg), messageType=MPAS_LOG_CRIT)
-      rc = ierr; return
-    end if
-    call mpas_log_write('mpas_atm_init: core_init concluido')
+  !> Le as dimensoes do subpool 'mesh' e liga os ponteiros de geometria.
+  !! @param[inout] atm_public  recebe nCells, nCellsSolve, nVertLevels e
+  !!                           os ponteiros latCell, lonCell e areaCell
+  !! @param[inout] atm_state   recebe nCells e nVertLevels
+  !! @param[out]   n           numero de celulas locais, com halos
+  !! @param[out]   nSolve      numero de celulas proprias, sem halos
+  !! @param[out]   rc          0 em caso de sucesso
+  subroutine bind_mesh_fields(atm_public, atm_state, n, nSolve, rc)
+    type(mpas_atm_public_type), intent(inout) :: atm_public
+    type(mpas_atm_state_type),  intent(inout) :: atm_state
+    integer,                    intent(out)   :: n, nSolve
+    integer,                    intent(out)   :: rc
+
+    type(mpas_pool_type), pointer :: meshPool     => null()
+    integer, pointer :: nCells_ptr      => null()
+    integer, pointer :: nCellsSolve_ptr => null()  ! células próprias (sem halos)
+    integer, pointer :: nVertLev_ptr    => null()
+
+    rc = 0
+    n = 0
+    nSolve = 0
 
     ! ------------------------------------------------------------------
     ! 6. Extrai nCells do subpool 'mesh'
@@ -532,6 +602,16 @@ contains
       write(*,'(A)') 'ERRO mpas_atm_init: latCell nao encontrado no subpool mesh'
       rc = 1; return
     end if
+  end subroutine bind_mesh_fields
+
+  !> Liga os ponteiros dos campos de diagnostico (passo 7b de mpas_atm_init).
+  !! @param[inout] atm_public  recebe os ponteiros pslv, u10, v10, t2m,
+  !!                           lhflx e shflx
+  subroutine bind_diag_fields(atm_public)
+    type(mpas_atm_public_type), intent(inout) :: atm_public
+
+    type(mpas_pool_type), pointer :: diagPool     => null()
+    type(mpas_pool_type), pointer :: diagPhysPool => null()
 
     ! ------------------------------------------------------------------
     ! 7b. Ponteiros zero-copy: diagnósticos
@@ -613,6 +693,17 @@ contains
     call warn_if_null(atm_public%lhflx,    'lh')
     if (.not. associated(g_pool_ust)) &
       write(*,'(A)') 'AVISO mpas_atm_init: ust nulo — taux/tauy serao zero'
+  end subroutine bind_diag_fields
+
+  !> Prepara o calculo de u10/v10 por perfil logaritmico quando os campos
+  !! nao existem no pool.
+  !! @param[inout] atm_public  u10 e v10 passam a apontar para os buffers
+  !! @param[in]    n           numero de celulas locais, com halos
+  subroutine setup_wind_fallback(atm_public, n)
+    type(mpas_atm_public_type), intent(inout) :: atm_public
+    integer,                    intent(in)    :: n
+
+    type(mpas_pool_type), pointer :: diagPool2 => null()
 
     ! ── fallback para u10/v10 quando CLP nao esta ativa ──────
     ! Com config_physics_suite='mesoscale_reference_monan' sem bl_mynn_in ou
@@ -634,13 +725,13 @@ contains
       write(*,'(A)') '  Ativando fallback por perfil logaritmico de uReconstructZonal/Meridional.'
 
       ! Buscar uReconstructZonal e uReconstructMeridional (3D: nVertLevels x nCells)
-        call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag', diagPool2)
-        if (associated(diagPool2)) then
-          call mpas_pool_get_array(diagPool2, 'uReconstructZonal',     g_pool_uZonal)
-          call mpas_pool_get_array(diagPool2, 'uReconstructMeridional', g_pool_vMerid)
-          ! zgrid: altura geopotencial nos centros de camada [m] (3D: nVertLevels x nCells)
-          call mpas_pool_get_array(diagPool2, 'zgrid',                  g_pool_zgrid)
-        end if
+      call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag', diagPool2)
+      if (associated(diagPool2)) then
+        call mpas_pool_get_array(diagPool2, 'uReconstructZonal',     g_pool_uZonal)
+        call mpas_pool_get_array(diagPool2, 'uReconstructMeridional', g_pool_vMerid)
+        ! zgrid: altura geopotencial nos centros de camada [m] (3D: nVertLevels x nCells)
+        call mpas_pool_get_array(diagPool2, 'zgrid',                  g_pool_zgrid)
+      end if
 
       if (associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
         allocate(g_u10_buf(n), g_v10_buf(n))
@@ -656,6 +747,15 @@ contains
         write(*,'(A)') '    config_sf_sfclay_physics = 5'
       end if
     end if
+  end subroutine setup_wind_fallback
+
+  !> Aloca os buffers de fluxos em unidades instantaneas e o estado do passo
+  !! anterior (passo 7c de mpas_atm_init), e aponta atm_public para eles.
+  !! @param[inout] atm_public  recebe os ponteiros dos fluxos
+  !! @param[in]    n           numero de celulas locais, com halos
+  subroutine init_flux_buffers(atm_public, n)
+    type(mpas_atm_public_type), intent(inout) :: atm_public
+    integer,                    intent(in)    :: n
 
     ! ------------------------------------------------------------------
     ! 7c. Alocar buffers de saída em unidades instantâneas e apontar
@@ -728,6 +828,15 @@ contains
     atm_public%q2m        => g_q2m_buf
     atm_public%prec_rain  => g_prec_rain_buf
     atm_public%prec_snow  => g_prec_snow_buf
+  end subroutine init_flux_buffers
+
+  !> Aloca os campos de contorno recebidos do oceano e atribui os valores
+  !! usados ate a primeira troca com o mediador.
+  !! @param[inout] atm_bnd  campos de contorno oceano-atmosfera
+  !! @param[in]    n        numero de celulas locais, com halos
+  subroutine init_boundary_arrays(atm_bnd, n)
+    type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
+    integer,                       intent(in)    :: n
 
     ! ------------------------------------------------------------------
     ! 8. Aloca arrays de propriedade deste módulo
@@ -757,15 +866,7 @@ contains
     ! mascara nao chegar, o diagnostico sai como saia antes (sem mascarar),
     ! em vez de apagar o globo inteiro.
     atm_bnd%omask        = 1.0_MPAS_RKIND
-
-    atm_state%initialized = .true.
-    ! nSolve = células próprias (sem halos); n = nCells total (com halos).
-    ! netcdf_init_coords deve usar nSolve → soma global = 40962.
-    write(msg,'(A,I0,A,I0,A)') &
-      'mpas_atm_init: OK (', nSolve, ' celulas proprias / ', n, ' com halos — SMIOL ativo)'
-    call mpas_log_write(trim(msg))
-
-  end subroutine mpas_atm_init
+  end subroutine init_boundary_arrays
 
   !> Lê streams.atmosphere e registra as streams no stream manager do MPAS,
   !! como faz o mpas_subdriver.F. Sem esta chamada as streams do namelist
