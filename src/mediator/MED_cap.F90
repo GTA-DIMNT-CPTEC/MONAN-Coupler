@@ -36,10 +36,10 @@ module MED_cap_MONAN_mod
                                   cfg_docn_dt_data,                 &
                                   cfg_docn_epoch_year,              &
                                   cfg_docn_epoch_month,             &
-                                  cfg_docn_epoch_day,               &  ! Alternativa 1 +.1.1
+                                  cfg_docn_epoch_day,               &  ! epoca do arquivo OISST
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  &
                                   cfg_use_datm, cfg_use_med_to_mpas, &
-                                  cfg_use_sis2_dynamic,             & ! FIX SIS2-ATIVACAO
+                                  cfg_use_sis2_dynamic,             & ! gelo dinamico do SIS2
                                   cfg_coupling_mode,                &
                                   cfg_seq_repro                       ! seq_repro (reprodutibilidade)
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
@@ -51,7 +51,7 @@ module MED_cap_MONAN_mod
   use NUOPC_Mediator, only: med_label_Advance        => label_Advance
   use NUOPC_Mediator, only: med_label_CheckImport    => label_CheckImport
   use NUOPC_Mediator, only: NUOPC_MediatorGet
-  ! Módulos especializados do mediador (reorganização Mai/2026)
+  ! Módulos especializados do mediador
   use med_cap_types_mod,   only: MED_InternalState,            &
                                   MED_InternalStateWrapper,     &
                                   n_import_mpas, import_mpas_names, &
@@ -76,7 +76,7 @@ module MED_cap_MONAN_mod
   private
   public :: SetServices
 
-  ! ── Variáveis de estado de módulo —.1.1 ───────────────────────────
+  ! ── Variáveis de estado de módulo (Si_ifrac do OISST) ───────────────────
   !
   ! med_ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado na
   !   primeira MediatorAdvance.  Com save, retém o valor entre chamadas.
@@ -215,12 +215,12 @@ contains
       SharePolicyField="share", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! v13.0): anuncia So_u e So_v no importState do MED.
-    ! O NUOPC só conecta campos mutuamente anunciados: o OCN exporta So_u/So_v
-    ! mas o MED não os anunciava → o NUOPC descartava esses campos e o
-    ! ESMF_StateGet subsequente gerava "ERROR: Not found" no log a cada passo.
-    ! Com o anúncio, o conector OCN→MED cria RouteHandle para So_u e So_v,
-    ! que chegam prontos ao MED para o cálculo de duu10n = |(V_atm − V_ocn)|².
+    ! Anuncia So_u e So_v no importState do MED.
+    ! O NUOPC só conecta campos anunciados dos dois lados: sem este anúncio, o
+    ! conector OCN->MED descartaria So_u/So_v exportados pelo OCN, e o
+    ! ESMF_StateGet posterior registraria "ERROR: Not found" a cada passo.
+    ! Com o anúncio, o conector cria a rota para So_u e So_v, que chegam
+    ! prontos ao MED para o cálculo de duu10n = |(V_atm − V_ocn)|².
     call NUOPC_Advertise(importState, StandardName="So_u", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
@@ -231,13 +231,12 @@ contains
       SharePolicyField="share", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! anuncia So_omask no importState do MED.
-    ! O OCN (mom_cap_methods.F90::mom_export) ja exporta 'So_omask' = nint(mask2dT)
-    ! (1=oceano, 0=terra), mas o MED nunca anunciava esse campo -> o NUOPC
-    ! descartava o conector e o MED era forcado a "adivinhar" a mascara terra/
-    ! oceano a partir do proprio valor de SST (limiar SST<270K), o que e
-    ! inconsistente com a mascara real do MOM6 e contamina a interpolacao
-    ! bilinear da costa com valores de celulas de terra fisicamente irreais.
+    ! Anuncia So_omask no importState do MED.
+    ! O OCN (mom_cap_methods.F90::mom_export) exporta 'So_omask' = nint(mask2dT)
+    ! (1=oceano, 0=terra). Com ela o MED usa a mascara real do MOM6, em vez de
+    ! inferir terra e oceano pelo proprio valor da SST (limiar SST<270K), o que
+    ! seria inconsistente com o MOM6 e contaminaria a interpolacao bilinear da
+    ! costa com valores de celulas de terra fisicamente irreais.
     call NUOPC_Advertise(importState, StandardName="So_omask", &
       TransferOfferGeomObject="cannot provide", &
       SharePolicyField="share", rc=rc)
@@ -303,10 +302,10 @@ contains
 
   !============================================================================
   ! InitializeRealize
-  ! CORRECAO 1: So_t (SST) realizado na grade OCN, nao na ATM.
-  !   O campo So_t vem do componente OCN (grade ocn_grid). Realiz�-lo na
-  !   atm_grid fazia com que o routehandle OCN->ATM tivesse src e dst na
-  !   mesma grade, tornando o regrid incorreto.
+  ! Cria as grades internas ATM e OCN e realiza os campos. So_t (SST) e'
+  ! realizado na grade OCN, a grade nativa do campo: na atm_grid, a rota
+  ! OCN->ATM teria origem e destino na mesma grade e o regrid ficaria
+  ! incorreto.
   !============================================================================
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -331,10 +330,9 @@ contains
     is => iswrap%wrap
 
 
-    ! obter petCount para calcular regDecomp de ambas as grades.
-    ! Sem regDecomp explícito, com N>ny PETs o ESMF gera DEs vazias (localDeCount=0)
-    ! ou DEs de 1 linha, ambas incompatíveis com o conector bilinear NUOPC automático.
-    ! regDecomp(2) = min(petCount, ny/2) garante ≥2 linhas/DE para qualquer N.
+    ! petCount define a decomposicao das duas grades (grid_regdecomp): um DE
+    ! por PET, sem DEs vazios nem de largura 1, que o conector bilinear
+    ! automatico do NUOPC nao aceita.
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha VMGetCurrent', &
       line=__LINE__, file=__FILE__)) return
@@ -344,10 +342,9 @@ contains
 
     ! ---------------------------------------------------------------------------
     ! Dimensões das grades internas do mediador:
-    !   ATM: 360x180 (1°) — alinhada com a grade de saída do MPAS cap.
-    !        Garante cobertura global via redistribuição ESMF (zero-copy).
-    !   OCN: cfg_docn_nx x cfg_docn_ny — lidos de nuopc.input &nuopc_docn.
-    !        Alinhada com DOCN_cap (OISST) — redistribuição zero-copy.
+    !   ATM: ATM_NX x ATM_NY (360x180, 1°), a mesma grade de saída do cap MPAS.
+    !   OCN: com DOCN, cfg_docn_nx x cfg_docn_ny de nuopc.input (&nuopc_docn);
+    !        com MOM6, a grade T lida de ocean_hgrid.nc (ver abaixo).
     nx_atm = ATM_NX
     ny_atm = ATM_NY
     ! cfg_docn_nx/ny (1440x720) sao a grade do
@@ -379,43 +376,24 @@ contains
     end if
 
     !--------------------------------------------------------------------------
-    ! Criar grade ATM regular 640x320
+    ! Criar grade ATM regular (ATM_NX x ATM_NY)
     !--------------------------------------------------------------------------
-    ! ): regDecomp 2D universal — sem DE de largura 1 e sem PETs vazios.
-    ! ATM 640x320: nx_max=320, ny=ceil(N/320)
-    !   N=128: ny=1 → regDecomp=(/128,1/) → 640/128=5 col ✓
-    !   N=512: ny=2 → regDecomp=(/320,2/) → 640 DEs>512, 640/320=2 col, 320/2=160 lin ✓
-    !
-    ! -------------------------------------------------------------------------
-    ! ): a fórmula gera totalDEs = nx_max*ny_tiles
-    ! que só coincide com petCount quando sqrt(petCount) é inteiro. Quando
-    ! totalDEs > petCount, alguns PETs recebem localDeCount=2. O gather de
-    ! med_write_import_fields (uas_g etc., ~L1017) usa lbound/ubound(uas), que
-    ! cobrem apenas o PRIMEIRO DE local de cada PET; o segundo DE fica de fora do
-    ! tmp_local e some no Allreduce(SUM) → linhas de latitude inteiras zeradas no
-    ! campo global. O MOM6 recebe forçante com buracos e aborta com "extreme
-    ! surface values".
-    !   N=16: sqrt=4 exato → (4,4)=16 DEs = petCount → 180 linhas OK (funciona)
-    !   N=32: sqrt≈5,66→6  → (6,6)=36 DEs (4 órfãos) → ~20 linhas perdidas ✗
-    ! CORREÇÃO: fatorar petCount EXATAMENTE em (ncol,nrow), ncol*nrow = petCount
-    ! (1 DE por PET), par mais próximo de quadrado, respeitando ncol<=nx_atm/2 e
-    ! nrow<=ny_atm. Idêntico ao fix aplicado em mpas_cap_methods (grade do cap).
+    ! grid_regdecomp fatora petCount EXATAMENTE em colunas x linhas, um DE por
+    ! PET, no par mais proximo de quadrado com colunas <= nx/2 e linhas <= ny.
+    ! Com mais DEs que PETs, alguns PETs ficariam com dois DEs; o gather de
+    ! med_write_import_fields usa lbound/ubound do primeiro DE local e perderia
+    ! o segundo, zerando linhas de latitude inteiras no campo global (o MOM6
+    ! aborta com "extreme surface values"). A grade do cap MPAS
+    ! (mpas_cap_methods) usa a mesma fatoracao.
     !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
-    ! -------------------------------------------------------------------------
     call create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     !--------------------------------------------------------------------------
-    !--- Criar grade OCN com dimensões de nuopc.input (cfg_docn_nx x cfg_docn_ny) ---
+    ! Criar grade OCN (grade do DOCN ou grade T do MOM6)
     !--------------------------------------------------------------------------
-    ! ): regDecomp 2D universal para grade OCN.
-    ! largura 1 para qualquer petCount. Grade alinhada com DOCN_cap (OISST 0.25°)
-    ! → conector DOCN→MED usa redistribuição (zero-copy) em vez de bilinear.
-    !   N=512: ny=4 → regDecomp=(/128,4/) → 512 DEs=512 PETs, 2 col, 39 lin ✓
-    !
-    ! ): mesma fatoração exata da grade ATM. Garante
-    ! totalDEs = petCount (1 DE por PET), evitando DEs órfãos. Respeita
-    ! ncol<=nx_ocn/2 e nrow<=ny_ocn.
+    ! Mesma fatoracao exata da grade ATM: um DE por PET, com colunas <=
+    ! nx_ocn/2 e linhas <= ny_ocn.
     call create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -442,12 +420,12 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! v4: ler config de diagnóstico de importação
+    ! Ler a configuração do diagnóstico de importação
     call med_read_import_config()
 
     ! salvar informação MPI do mediador para uso em med_write_import_fields
     !
-    ! (modo concurrent, v13.0): NÃO cair para MPI_COMM_WORLD em
+    ! Não cair para MPI_COMM_WORLD em
     ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
     ! med_write_import_fields. No modo concurrent o MED tem seu próprio
     ! comunicador de componente; substituí-lo silenciosamente por
@@ -505,17 +483,12 @@ contains
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
     ! Loops bulk usam lbound/ubound - agnósticos ao indexflag do MPAS.
-    ! REVERT a tentativa de fixar polekindflag=MONOPOLE
-    ! explicitamente foi REVERTIDA. Motivo: o usuario confirmou que a versao
-    ! ANTERIOR a qualquer mudanca de grade nesta sessao rodava sem SIGSEGV,
-    ! apesar do artefato de costa. atm_grid ja' usava ESMF_GridCreate1PeriDim
-    ! SEM polekindflag explicito (dependendo do default do ESMF) nessa versao
-    ! que funcionava. Declarar MONOPOLE nas bordas de latitude desta grade
-    ! regular (linhas extremas em ±89.5°, que NAO sao um ponto geometrico
-    ! unico) e' fisicamente incorreto e e' o principal suspeito de ter
-    ! corrompido os pesos de regrid perto dos polos, alimentando valores
-    ! invalidos para a malha Voronoi do MPAS-A e causando o SIGSEGV em
-    ! core_run. Voltando a configuracao original (sem polekindflag).
+    ! polekindflag fica no padrao do ESMF. As linhas extremas desta grade
+    ! regular (±89.5°) NAO sao um ponto geometrico unico, e declara-las
+    ! MONOPOLE e' fisicamente incorreto. Uma tentativa de faze-lo coincidiu
+    ! com SIGSEGV em core_run do MPAS-A, atribuido a pesos de regrid
+    ! corrompidos perto dos polos, que alimentavam valores invalidos na malha
+    ! Voronoi.
     atm_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_atm, ny_atm/), &
       regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &
       coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
@@ -602,33 +575,17 @@ contains
     regDecomp = grid_regdecomp(petCount, nx_ocn, ny_ocn)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
-    ! a grade OCN era criada SEM dimensao
-    ! periodica (ESMF_GridCreateNoPeriDim). Isso significa que o ESMF nao
-    ! sabe que a coluna i=nx_ocn (longitude ~360) e a coluna i=1 (longitude
-    ! ~0) sao fisicamente vizinhas - o regrid bilinear trata a borda leste/
-    ! oeste da grade como um limite de dominio, nao como um ponto de
-    ! continuidade. Resultado: uma coluna de celulas "sem vizinho valido"
-    ! exatamente na costura (visivel como uma faixa de valores indefinidos
-    ! no Oceano Indico, ~60E, onde a longitude bruta do supergrid do MOM6
-    ! da volta: intervalo nativo -300..60 fecha exatamente ali).
-    ! FIX: ESMF_GridCreate1PeriDim com periodicDim=1 (longitude periodica).
-    ! Essa parte, testada, funcionou (costura do Indico desapareceu).
-    ! REVERT PARCIAL (Ago 2026): a primeira versao desta correcao tambem
-    ! especificava polekindflag=(/MONOPOLE,MONOPOLE/) explicitamente. Isso foi
-    ! REVERTIDO - o usuario confirmou que a versao anterior a qualquer
-    ! mudanca de grade rodava sem SIGSEGV, e a grade ATM (que ja' usava
-    ! GridCreate1PeriDim SEM polekindflag explicito) fazia parte dessa
-    ! configuracao que funcionava. Declarar MONOPOLE numa borda de latitude
-    ! que NAO e' um ponto geometrico unico (j=1 desta grade fica em -78°, a
-    ! borda da Antartida - uma linha inteira de pontos, nao um polo) e'
-    ! fisicamente incorreto e e' o principal suspeito de ter corrompido os
-    ! pesos de regrid perto dos polos/dobra, alimentando valores invalidos
-    ! para a malha Voronoi do MPAS-A e causando o SIGSEGV em core_run.
-    ! Mantendo periodicDim=1 (beneficio confirmado) e deixando o ESMF usar
-    ! seu polekindflag padrao (mesma config que ja' funcionava no atm_grid).
-    ! ATENCAO: a assinatura exata de ESMF_GridCreate1PeriDim deve ser
-    ! conferida contra a versao instalada do ESMF (8.9.1) antes do build -
-    ! nomes/ordem de argumentos podem variar entre versoes.
+    ! Longitude periodica (periodicDim=1): o ESMF trata a coluna i=nx_ocn
+    ! (longitude ~360) e a coluna i=1 (longitude ~0) como vizinhas. Sem isso,
+    ! o regrid bilinear trata a borda leste/oeste como limite de dominio e
+    ! deixa uma coluna de celulas "sem vizinho valido" na costura (no MOM6,
+    ! uma faixa de valores indefinidos no Oceano Indico, ~60E, onde o
+    ! intervalo nativo -300..60 do supergrid fecha).
+    ! polekindflag fica no padrao do ESMF, como na grade ATM: a linha j=1
+    ! (-78°, borda da Antartida) e a dobra norte NAO sao pontos geometricos
+    ! unicos, e declara-las MONOPOLE e' fisicamente incorreto. Uma tentativa
+    ! de faze-lo coincidiu com SIGSEGV em core_run do MPAS-A, atribuido a
+    ! pesos de regrid corrompidos perto dos polos e da dobra.
     ocn_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
       regDecomp=regDecomp, periodicDim=1, &
       indexflag=ESMF_INDEX_GLOBAL, &
@@ -677,7 +634,7 @@ contains
       end if
     end do  ! lde OCN
 
-    ! stagger CORNER, necessario para
+    ! Stagger CORNER, necessario para
     ! ESMF_REGRIDMETHOD_CONSERVE (calcula peso por sobreposicao de area,
     ! exige os 4 cantos de cada celula). Aditivo ao CENTER ja existente —
     ! nao afeta nenhum RouteHandle ja criado com staggerloc=CENTER (Cd_neut,
@@ -716,7 +673,7 @@ contains
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade OCN ' // &
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
 
-    ! sanidade dos cantos lidos — confirma que os
+    ! Sanidade dos cantos lidos — confirma que os
     ! valores estao numa faixa fisica plausivel (lon em [0,360), lat em
     ! [-90,90]) e nao sao um bloco de zeros/garbage por leitura silenciosa
     ! mal-sucedida. Compara tambem com o CENTRO da mesma celula (i1,j1
@@ -726,7 +683,7 @@ contains
       call check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
     end if
 
-    ! Opção 1: item de MÁSCARA na grade OCN (terra = SST fill ≈200 K do MOM6).
+    ! Item de MÁSCARA na grade OCN (terra = SST fill ≈200 K do MOM6).
     call ESMF_GridAddItem(ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
       staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha GridAddItem MASK OCN', &
@@ -771,10 +728,8 @@ contains
     end if
 
     !--------------------------------------------------------------------------
-    ! Realizar So_t (SST) na grade ATM (placeholder)
-    ! CORRECAO 1: So_t (SST) realizado na grade OCN (era atm_grid - bug critico)
-    ! O campo So_t vem do oceano, portanto sua grade nativa e ocn_grid.
-    ! Realiza-lo na atm_grid causava conflito ao criar o routehandle OCN->ATM.
+    ! Realizar So_t (SST) na grade OCN, a grade nativa do campo. Na atm_grid,
+    ! a rota OCN->ATM teria origem e destino na mesma grade.
     !--------------------------------------------------------------------------
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
       staggerloc=ESMF_STAGGERLOC_CENTER, name="So_t", rc=rc)
@@ -782,7 +737,7 @@ contains
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! v13.0): realizar So_u e So_v na grade OCN.
+    ! Realizar So_u e So_v na grade OCN.
     ! Simétrico ao tratamento de So_t: correntes vêm do OCN, portanto
     ! devem ser realizadas em ocn_grid para que o rh_ocn2atm funcione.
     tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
@@ -805,7 +760,7 @@ contains
     call NUOPC_Realize(importState, field=tmp_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! FIX SIS2-ATIVACAO (Ago 2026): realizar Si_ifrac_sis2 (gelo real do
+    ! Realizar Si_ifrac_sis2 (gelo real do
     ! ICE) na MESMA grade ocn_grid — a grade do componente ICE (ver
     ! sis_cap_MONAN.F90) foi construída com a mesma geometria (mesma
     ! ocean_hgrid.nc, mesmas dimensões, mesma periodicidade), então é
@@ -893,7 +848,7 @@ contains
     call CreateInternalField(is%f_duu10n_atm, atm_grid, "med_duu10n", rc)
     ! f_sst_atm: campo de SST interpolado para a grade ATM (destino do OCN->ATM)
     call CreateInternalField(is%f_sst_atm,    atm_grid, "med_sst",    rc)
-    ! v13.0): correntes oceânicas interpoladas OCN → ATM.
+    ! Correntes oceânicas interpoladas OCN → ATM.
     ! Usadas no cálculo de So_duu10n = |(V_atm − V_ocn)|² (protocolo CMEPS).
     call CreateInternalField(is%f_uocn_atm,   atm_grid, "med_uocn",   rc)
     call CreateInternalField(is%f_vocn_atm,   atm_grid, "med_vocn",   rc)
@@ -906,16 +861,16 @@ contains
     call CreateInternalField(is%f_alb_idf_ice, atm_grid, "med_albidf_ice", rc)
     call CreateInternalField(is%f_coszen_atm,  atm_grid, "med_coszen",     rc)
     call CreateInternalField(is%f_albedo_atm,  atm_grid, "med_albedo",     rc)
-    ! Fase 3
+    ! Temperatura do gelo na grade ATM
     call CreateInternalField(is%f_tice_atm,    atm_grid, "med_tice",       rc)
-    ! Fase 4b
+    ! Temperatura composta (Sx_tsfc) e fluxos turbulentos e de onda longa do gelo
     call CreateInternalField(is%f_tsfc_atm,    atm_grid, "med_tsfc_comp",  rc)
     call CreateInternalField(is%f_taux_ice,    atm_grid, "med_taux_ice",   rc)
     call CreateInternalField(is%f_tauy_ice,    atm_grid, "med_tauy_ice",   rc)
     call CreateInternalField(is%f_sen_ice,     atm_grid, "med_sen_ice",    rc)
     call CreateInternalField(is%f_evap_ice,    atm_grid, "med_evap_ice",   rc)
     call CreateInternalField(is%f_lwnet_ice,   atm_grid, "med_lwnet_ice",  rc)
-    ! Fase 4
+    ! Onda curta liquida sobre o gelo, por banda
     call CreateInternalField(is%f_swvdr_ice,   atm_grid, "med_swvdr_ice",  rc)
     call CreateInternalField(is%f_swvdf_ice,   atm_grid, "med_swvdf_ice",  rc)
     call CreateInternalField(is%f_swidr_ice,   atm_grid, "med_swidr_ice",  rc)
@@ -937,7 +892,7 @@ contains
     call ZeroInternalField(is%f_ifrac_atm,  rc)
     call ZeroInternalField(is%f_duu10n_atm, rc)
     ! fallback nao-zero (mesmo valor de ALBEDO_ICE_FALLBACK em
-    ! sis_cap_MONAN.F90) ate o primeiro regrid real via rh_ice2atm — evita
+    ! sis_cap_MONAN.F90) ate o primeiro regrid real do gelo — evita
     ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
     ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
     call FillInternalField(is%f_alb_vdr_ice, 0.65_ESMF_KIND_R8, rc)
@@ -1010,7 +965,7 @@ contains
       ' | canto-centro (amostra) dlon=', dlon_sample, ' dlat=', dlat_sample
     call ESMF_LogWrite(trim(diag_msg_corner), ESMF_LOGMSG_INFO)
 
-    ! checagem especifica da(s)
+    ! Checagem especifica da(s)
     ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
     ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
     ! > 80) -- a maioria dos PETs nao chega la' e nao tem o que checar.
@@ -1067,12 +1022,10 @@ contains
 
 
   !============================================================================
-  ! InitializeDataComplete - cria routehandles
-  ! CORRECAO 2: usa NUOPC_MediatorGet em vez de ESMF_GridCompGet para obter
-  !   importState/exportState, que e a API correta para mediadores NUOPC.
-  ! CORRECAO 4: busca Sa_u10m_mpas (MPAS, grade ATM) para obter a grade ATM,
-  !   em vez de Sa_u10m (DATM), que pode nao estar presente se o DATM nao
-  !   tiver sido conectado ainda. Usa fallback para Sa_u10m caso necessario.
+  ! InitializeDataComplete - cria as rotas de interpolacao
+  ! importState/exportState vem de NUOPC_MediatorGet, a API propria dos
+  ! mediadores NUOPC. A grade ATM e' obtida de Sa_u10m_mpas (modo MPAS) ou de
+  ! Sa_u10m (modo DATM), conforme is%use_mpas_atm.
   !============================================================================
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -1104,7 +1057,7 @@ contains
     is => iswrap%wrap
 
 
-    ! CORRECAO 2: NUOPC_MediatorGet e a API correta para mediadores
+    ! NUOPC_MediatorGet e a API correta para mediadores
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -1133,20 +1086,20 @@ contains
   !==========================================================================
   ! FASE A — GEOMETRIA (uma unica vez, na primeira iteracao)
   !
-  ! (v14.21): esta rotina foi dividida em duas fases porque
+  ! Esta rotina foi dividida em duas fases porque
   ! ela pode ser chamada MAIS DE UMA VEZ. O laco de resolucao de dependencia
   ! de dados do driver NUOPC percorre a RunSequence repetidamente, executando
   ! o Run dos conectores e o label_DataInitialize dos componentes, ate que
-  ! todos declarem InitializeDataComplete. Antes deste fix o MED declarava
-  ! "true" incondicionalmente na primeira passagem, e o laco parava ali.
+  ! todos declarem InitializeDataComplete. Se o MED declarasse "true"
+  ! incondicionalmente na primeira passagem, o laco pararia ali.
   !
   ! Na RunSequence SEQUENCIAL o conector "OCN -> MED" vem ANTES do elemento
   ! "OCN", ou seja, antes de o mom_cap escrever So_t em InitializeDataComplete.
   ! Com uma unica passagem, o So_t que chega aqui e' o campo ainda nao
   ! preenchido. Na RunSequence CONCORRENTE a ordem e' inversa ("OCN" antes de
-  ! "OCN -> MED"), e por isso o modo concorrente funcionava — por acidente de
-  ! ordenacao, nao por corretude. O pet_layout nao tem parte nisso: o mesmo
-  ! defeito ocorre em sequential+shared.
+  ! "OCN -> MED"), e uma unica passagem bastaria, mas so' por acidente de
+  ! ordenacao. O pet_layout nao tem parte nisso: o mesmo problema ocorreria
+  ! em sequential+shared.
   !
   ! O FieldRegridStore abaixo depende so' da GEOMETRIA dos campos, nunca dos
   ! valores, entao permanece na primeira passagem — e' caro e nao deve repetir.
@@ -1190,14 +1143,10 @@ contains
         deallocate(fieldNameList)
       end if
 
-      ! ──.2 (Set/2026): Si_ifrac_sis2 reutiliza rh_ocn2atm ──────────
-      ! Correcao de curso: Si_ifrac_sis2 (e os 4 campos de albedo do gelo,
-      ! Fase 2, mais abaixo) sao realizados pelo MED em ocn_grid — a MESMA
-      ! grade de So_t (ver InitializeRealize) — logo NAO precisam de um
-      ! RouteHandle proprio. rh_ocn2atm (ja criado acima) e reutilizado,
-      ! exatamente como ja e feito para So_u/So_v alguns blocos acima.
-      ! (Uma primeira versao desta correcao criava um "rh_ice2atm" separado,
-      ! redundante — revertido ao perceber que a geometria ja e' a mesma.)
+      ! Si_ifrac_sis2 e os 4 albedos do gelo sao realizados pelo MED em
+      ! ocn_grid, a MESMA grade de So_t (ver InitializeRealize); a rota
+      ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
+      ! de update_ice_fields_on_atm_grid.
 
       call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
     end if
@@ -1209,8 +1158,7 @@ contains
   ! seu InitializeDataComplete, e o conector NUOPC propaga o carimbo ao campo
   ! de destino. Portanto NUOPC_IsAtTime distingue exatamente os dois casos:
   ! So_t recem-chegado do oceano (carimbado) contra o campo ainda nao escrito
-  ! (sem carimbo). Esse carimbo ja' existia no mom_cap desde a v7.0; nenhum
-  ! consumidor o verificava.
+  ! (sem carimbo).
   !
   ! Enquanto o dado nao chega, declaramos Progress=true (a fase A progrediu:
   ! os routehandles existem) e Complete=false. Isso forca o driver a percorrer
@@ -1228,16 +1176,16 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
   !--------------------------------------------------------------------------
-  ! (v14.21): CARIMBO NAO E' DADO.
+  ! CARIMBO NAO E' DADO.
   !
   ! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
   ! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
   ! verificar quais deles o mom_export realmente preencheu. Um So_t
-  ! identicamente nulo passa no NUOPC_IsAtTime — foi o que aconteceu enquanto
+  ! identicamente nulo passa no NUOPC_IsAtTime. Foi o que aconteceu quando
   ! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
   ! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
-  ! o que por sua vez fazia a mascara.5.1 classificar o planeta
-  ! inteiro como terra e zerar os 11 campos de fluxo.
+  ! o que levava a mascara de terra, entao baseada na SST, a classificar o
+  ! planeta inteiro como terra e zerar os 11 campos de fluxo.
   !
   ! Exigir tambem VALOR fisicamente plausivel em alguma celula, contado
   ! GLOBALMENTE: um DE pode legitimamente conter so' terra e gelo.
@@ -1311,10 +1259,10 @@ contains
   !==========================================================================
   ! FASE B — DADOS (So_t valido em maos)
   !
-  ! v13.0): primeiro regrid de So_u e So_v para
+  ! Primeiro regrid de So_u e So_v para
   ! f_uocn_atm/f_vocn_atm. So_u e So_v sao anunciados e realizados no
-  ! importState do MED (ocn_grid), portanto ESMF_StateGet e' seguro. O
-  ! routehandle rh_ocn2atm (bilinear, ja' criado na fase A) e' reutilizado:
+  ! importState do MED (ocn_grid), portanto ESMF_StateGet e' seguro. A
+  ! rota 'ocn2atm' (bilinear, ja' criada na fase A) e' reutilizada:
   ! So_u/So_v compartilham a mesma grade OCN que So_t → mapeamento identico.
   !==========================================================================
     call regrid_ocean_currents(is, importState, zero_on_error=.true.)
@@ -1411,15 +1359,13 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-    ! (GT Acoplamento MONAN/INPE — Maio 2026):
-    ! NUOPC_MediatorGet e ESMF_ClockGet devem ser chamados ANTES da guarda
-    ! localDeCount==0. A subrotina med_write_import_fields contém MPI_Allreduce
-    ! e MPI_Reduce — operações MPI coletivas que exigem participação de TODOS os
-    ! PETs. Na versão anterior, PETs sem DE local retornavam em (*)  sem chamar
-    ! med_write_import_fields, enquanto PETs ativos bloqueavam no MPI_Allreduce
-    ! aguardando os PETs ausentes → deadlock determinístico com petCount > 160.
-    ! Solução: obter o estado antes do teste; PETs inativos chamam a função com
-    ! contribuição vazia (grid_local = FILL_IMP) antes de retornar.
+    ! NUOPC_MediatorGet e ESMF_ClockGet sao chamados ANTES da guarda
+    ! localDeCount==0. med_write_import_fields contém MPI_Allreduce e
+    ! MPI_Reduce, operações coletivas que exigem participação de TODOS os
+    ! PETs: um PET sem DE local que retornasse sem chamá-la deixaria os PETs
+    ! ativos bloqueados no MPI_Allreduce (deadlock). Por isso os PETs sem DE
+    ! local chamam a função com contribuição vazia (grid_local = FILL_IMP)
+    ! antes de retornar.
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -1429,12 +1375,12 @@ contains
 
     stampTime = med_stamp_time(currTime, nextTime)
 
-    ! com regDecomp(2)=min(petCount,ny_atm/2), PETs acima de ny_atm/2
-    ! têm localDeCount=0 para o atm_grid interno do MED. Esses PETs não têm
-    ! dados locais — nenhum campo interno pode ser acessado via farrayPtr.
+    ! O atm_grid do MED tem um DE por PET (grid_regdecomp); a guarda abaixo
+    ! protege PETs sem DE local, que não podem acessar campos internos via
+    ! farrayPtr.
     call ESMF_FieldGet(is%f_taux_atm, localDeCount=localDeCount_med, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    if (localDeCount_med == 0) then  ! (*) — ponto de retorno corrigido
+    if (localDeCount_med == 0) then
       ! PET sem DE local: participar nas operações MPI coletivas dentro de
       ! med_write_import_fields antes de retornar (evita deadlock).
       ! Contribuição local = FILL_IMP (neutro no MPI_Reduce MAX).
@@ -1475,48 +1421,36 @@ contains
     call local_atm_bounds(is, i1, i2, j1, j2, rc)
 
     !==========================================================================
-    ! 3. SST: regrid OCN -> ATM (So_t esta agora na grade OCN)
+    ! 3. SST: regrid OCN -> ATM (So_t esta na grade OCN)
     !
-    ! 5 (Maio 2026): aplica mascara terra/oceano apos o regrid.
-    !
-    ! CAUSA-RAIZ DETECTADA NO POSTPROC:
-    ! O mom_cap_methods::state_setexport multiplica SST por ocean_grid%mask2dT
-    ! antes do export (linha 1126 do mom_cap_methods.F90). Sobre terra,
-    ! mask2dT=0 -> SST=0 K na grade OCN. Apos regrid bilinear OCN->ATM, celulas
-    ! oceanicas proximas a costa ficam contaminadas pela mistura com zero,
-    ! caindo abaixo de 270 K. Resultado: ~37% das celulas oceanicas mascaradas
-    ! como "fill" pelo postproc (limiar fill_min_threshold=270 K).
-    !
-    ! a mascara terra/oceano usada no regrid
-    ! bilinear OCN->ATM NAO deve ser adivinhada a partir do proprio campo de
-    ! SST (limiar T<270K). Isso e' fragil e inconsistente com a mascara real
-    ! do modelo oceanico: a mascara agora vem diretamente de So_omask =
-    ! nint(mask2dT), exportada pelo MOM6 (mom_cap_methods.F90::mom_export).
-    ! Assim o bilinear so' usa celulas OCEANICAS VALIDAS como fonte da
-    ! interpolacao, nunca preenchimentos de terra (SST=0K sob mask2dT=0).
-    ! Residual nao mapeado na costa (onde nenhum vizinho valido bilinear
-    ! existe) e' tratado pela extrapolacao por vizinhanca logo abaixo.
+    ! Mascara terra/oceano: o mom_cap_methods::state_setexport multiplica a
+    ! SST por ocean_grid%mask2dT antes do export; sobre terra, SST=0 K na
+    ! grade OCN. Um regrid bilinear sem mascara misturaria esses zeros nas
+    ! celulas oceanicas proximas a costa, que cairiam abaixo de 270 K (o
+    ! postproc as marcaria como "fill"). A mascara nao e' adivinhada pelo
+    ! proprio valor da SST: vem de So_omask = nint(mask2dT), exportada pelo
+    ! MOM6 (mom_cap_methods.F90::mom_export). Assim o bilinear so' usa celulas
+    ! OCEANICAS VALIDAS como fonte da interpolacao. O residuo nao mapeado na
+    ! costa (sem vizinho valido) e' tratado pela extrapolacao por vizinhanca.
     !==========================================================================
     call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
 
     !==========================================================================
-    ! 3b. Si_ifrac —.1.1: fill_ifrac_from_oisst apenas no 1º passo
+    ! 3b. Si_ifrac do OISST (use_docn_ice)
     !
     ! Modos (nuopc.input &nuopc_mode):
-    !   use_docn_ice=T  init_only=F  → Alternativa 1 original:
-    !     fill_ifrac_from_oisst a cada passo (campo congelado em OISST).
-    ! use_docn_ice=T init_only=T →.1.1:
-    !     fill_ifrac_from_oisst apenas na 1ª MediatorAdvance (flag
-    !     med_ifrac_init_done). is%f_ifrac_atm fica congelado no valor
-    !     OISST de t=0 nas demais chamadas.
-    !     NÃO tentar rh_ocn2atm para Si_ifrac: zera is%f_ifrac_atm antes
-    ! de falhar (rh é específico para So_t)..2 criará rh dedicado.
-    !   use_docn_ice=F              → regrid OCN sigmoid via importState.
+    !   use_docn_ice=T  init_only=F  → fill_ifrac_from_oisst a cada passo
+    !     (campo congelado em OISST).
+    !   use_docn_ice=T  init_only=T  → fill_ifrac_from_oisst apenas na 1ª
+    !     MediatorAdvance (flag med_ifrac_init_done); nas demais, o campo
+    !     decai exponencialmente (SI_IFRAC_DECAY_MED).
+    !   use_docn_ice=F               → nada a fazer aqui; com SIS2 dinamico,
+    !     Si_ifrac ja' veio do gelo na secao 3.
     !==========================================================================
     ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
     ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
-    ! use_docn_ice=F: is%f_ifrac_atm foi zerado acima; permanece zero
+    ! use_docn_ice=F: is%f_ifrac_atm fica como saiu da secao 3
 
     !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
@@ -1531,35 +1465,25 @@ contains
 
     !==========================================================================
     ! 5. REGRID E EXPORTA PARA O OCEANO
-    ! CORRECAO 3: RegridOrCopy agora tem ramo else explicito: se routehandles
-    !   nao estiverem criados, copia direto da grade ATM interna para a grade
-    !   OCN do exportState via ESMF_FieldSMM (ou copia simples). Isso evita
-    !   que os campos exportados permane�am zerados silenciosamente.
     !
-    ! 5.1 (Maio 2026): aplicacao de mascara terra/oceano nos fluxos
-    ! antes do export, eliminando valores absurdos sobre continentes.
+    ! RegridOrCopy leva cada campo interno (grade ATM) ao exportState (grade
+    ! OCN) pela rota 'atm2ocn'; sem a rota, copia direto, para que os campos
+    ! exportados nao fiquem zerados silenciosamente.
     !
-    ! CONTEXTO:
-    ! O bulk NCAR roda em TODAS as celulas da grade ATM (oceano + terra).
-    ! Apos o.5, celulas terra recebem sst = 271.35 K (marcador).
-    ! Combinado com T_2m, U_10m, P_slv reais (continentais), o bulk produz
+    ! Antes do export, os fluxos sobre terra sao zerados no proprio MED
+    ! (zero_fluxes_over_land). O bulk NCAR roda em TODAS as celulas da grade
+    ! ATM (oceano + terra); com T_2m, U_10m e P_slv continentais, produz
     ! fluxos enormes sobre terra (Foxx_sen saturando em +-500 W/m^2;
-    ! Foxx_lwnet em -300 W/m^2 sobre o Saara).
+    ! Foxx_lwnet em -300 W/m^2 sobre o Saara). O MOM6 descarta essas celulas
+    ! em state_setexport (mask2dT), mas o diagnostico NetCDF do MED e' escrito
+    ! antes dessa mascara.
     !
-    ! O MOM6 ja descarta essas celulas em state_setexport (mask2dT), mas o
-    ! diagnostico NetCDF do MED captura ANTES dessa mascara, registrando
-    ! os valores absurdos..5.1 zera os fluxos sobre terra no
-    ! proprio MED, antes da escrita do NetCDF e antes do envio ao MOM6.
-    !
-    ! HEURISTICA: celulas terra tem sst exatamente = 271.35 K (marcador
-    ! cravado pelo where do.5). Celulas marinhas polares reais
-    ! tem sst variavel em torno de 270-272 K (raramente exato em 271.35).
+    ! A mascara de terra e' So_omask interpolada para a grade ATM uma unica
+    ! vez (regrid_land_mask, NEAREST_STOD: so' precisa distinguir terra e
+    ! oceano). Uma heuristica pela SST (celulas de terra com exatamente
+    ! 271,35 K) colidiria com agua aberta no ponto de congelamento (borda do
+    ! gelo).
     !==========================================================================
-    ! cria/regrida is%f_omask_atm uma unica
-    ! vez (So_omask, ocn_grid -> atm_grid, NEAREST_STOD -- so' precisa
-    ! discriminar terra/oceano, nao precisao subcelular). Usado abaixo no
-    ! 5.1 no lugar da heuristica SST~=271,35K, que colidia com
-    ! agua aberta genuina no ponto de congelamento (borda do gelo).
     call export_to_components(is, importState, exportState, rc)
     if (allocated(uas_g)) deallocate(uas_g)
     if (allocated(vas_g)) deallocate(vas_g)
@@ -1607,7 +1531,7 @@ contains
   !============================================================================
   !> @brief Instante que rotula o resultado desta execucao do mediador.
   !!
-  !! o instante que rotula o resultado do
+  !! O instante que rotula o resultado do
   !! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
   !!
   !! O relogio do mediador marca currTime = t durante toda a execucao do passo,
@@ -1625,30 +1549,28 @@ contains
   !!                componente escreveu no fim do passo anterior). O rotulo
   !!                correto e' currTime.
   !!
-  !! Ate' esta correcao nextTime era usado nos dois modos. Consequencias no
-  !! modo sequencial:
+  !! Usar nextTime tambem no modo sequencial teria duas consequencias:
   !!
   !!   (a) Todo arquivo de diagnostico mom6_import_YYYYMMDD_HHMMSS.nc e
-  !!       monan2_import_YYYYMMDD_HHMMSS.nc saia com o nome e a variavel de
-  !!       tempo adiantados em um dt_coupling em relacao ao dado que continha.
-  !!       Comparar uma rodada sequential com uma concurrent mostrava as duas
-  !!       deslocadas de um passo, e as animacoes ficavam fora de fase.
-  !!   (b) O exportState era carimbado com t+dt e entregue a componentes cujo
-  !!       relogio marcava t. Os tres caps usam CheckImport tolerante (janela
-  !!       de +/- dt_coupling) ou no-op, entao isso nao abortava a execucao;
-  !!       passava sem sinal nenhum. Com currTime o carimbo passa a coincidir
-  !!       exatamente com o relogio do consumidor.
+  !!       monan2_import_YYYYMMDD_HHMMSS.nc sairia com o nome e a variavel de
+  !!       tempo adiantados em um dt_coupling em relacao ao dado que contem.
+  !!       Uma rodada sequential e uma concurrent ficariam deslocadas de um
+  !!       passo, e as animacoes, fora de fase.
+  !!   (b) O exportState seria carimbado com t+dt e entregue a componentes
+  !!       cujo relogio marca t. Os tres caps usam CheckImport tolerante
+  !!       (janela de +/- dt_coupling) ou no-op, entao isso nao abortaria a
+  !!       execucao; passaria sem sinal nenhum. Com currTime o carimbo
+  !!       coincide exatamente com o relogio do consumidor.
   !!
-  !! O modo concorrente nao muda: stampTime = nextTime, byte a byte como antes.
+  !! No modo concorrente, stampTime = nextTime.
   !!--------------------------------------------------------------------------
   !! seq_repro: na variante REPRODUTIVEL do sequential+split+SIS2 o elemento
   !! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
   !! campos importados descrevem o estado em t+dt e o rotulo correto e'
   !! nextTime — nao currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
   !! sairia adiantado de um dt e quebraria a comparacao bit-a-bit contra o
-  !! concurrent. O sequential classico (cfg_seq_repro=.false.) continua com
-  !! 'MED' cedo -> currTime; o concurrent continua nextTime. Nenhum dos dois
-  !! muda de comportamento.
+  !! concurrent. O sequential classico (cfg_seq_repro=.false.) usa
+  !! 'MED' cedo -> currTime; o concurrent usa nextTime.
   !!
   !! @param[in] currTime  instante corrente do relogio do mediador
   !! @param[in] nextTime  currTime + dt_coupling
@@ -1672,7 +1594,7 @@ contains
   !============================================================================
   !> @brief Ponteiros dos forcantes atmosfericos: MPAS (primario) ou DATM.
   !!
-  !! Obtem do importState os campos do MPAS (7 obrigatorios, 2 da Fase 2 e 4
+  !! Obtem do importState os campos do MPAS (7 obrigatorios, umidade e neve opcionais e 4
   !! fluxos nativos opcionais). Sem os obrigatorios, e com use_mpas_atm
   !! falso, usa os campos do DATM. Os ponteiros de saida apontam para os
   !! dados do importState ou, para shum e snow ausentes, para shum_local e
@@ -1734,7 +1656,7 @@ contains
     mpas_available = is%use_mpas_atm
 
     !--------------------------------------------------------------------------
-    ! 1a. CAMPOS OBRIGATORIOS DO MPAS (7 campos do EXP_NAMES v7)
+    ! 1a. CAMPOS OBRIGATORIOS DO MPAS (7 campos do EXP_NAMES do cap MPAS)
     !--------------------------------------------------------------------------
     i1_glob = 1; i2_glob = 1; j1_glob = 1; j2_glob = 1  ! defaults
     if (mpas_available) then
@@ -1765,18 +1687,18 @@ contains
     end if
 
     !--------------------------------------------------------------------------
-    ! 1b. CAMPOS FASE 2 OPCIONAIS (Sa_shum_mpas, Faxa_snow_mpas)
-    !     Ausentes em mpas_cap v7 — usar defaults fisicos quando null.
+    ! 1b. CAMPOS OPCIONAIS DE UMIDADE E NEVE (Sa_shum_mpas, Faxa_snow_mpas)
+    !     Na ausencia, usar valores padrao fisicos.
     !--------------------------------------------------------------------------
     if (mpas_available) then
       call GetFieldPtrOptional(importState, "Sa_shum_mpas",   shum_mpas, rc)
       call GetFieldPtrOptional(importState, "Faxa_snow_mpas", snow_mpas, rc)
-      ! rc pode ser ESMF_FAILURE se campos Fase 2 ausentes — nao e erro
+      ! rc pode ser ESMF_FAILURE se os campos opcionais estiverem ausentes — nao e erro
     end if
 
     !--------------------------------------------------------------------------
-    ! 1c. CAMPOS FASE 3 OPCIONAIS — fluxos nativos do PBL do MONAN-A.
-    !     Ausencia (mpas_cap antigo, ou modo DATM) NAO desabilita
+    ! 1c. CAMPOS OPCIONAIS — fluxos nativos do PBL do MONAN-A.
+    !     Ausencia (modo DATM, ou cap MPAS sem esses campos) NAO desabilita
     !     mpas_available; apenas mantem sen/evap/taux/tauy vindos do bulk
     !     NCAR (calc_bulk_ncar) mais abaixo.
     !--------------------------------------------------------------------------
@@ -1790,17 +1712,14 @@ contains
     !==========================================================================
     ! 2. SE MPAS NAO DISPONIVEL E use_mpas_atm=false: USAR DATM (FALLBACK)
     !    SE use_mpas_atm=true mas campos obrigatorios ausentes: verificar se
-    !    é PET sem DE local na grade MPAS (normal com 512 PETs) ou erro real.
+    !    é PET sem DE local na grade MPAS (caso normal) ou erro real.
     !==========================================================================
     if (.not. mpas_available) then
       if (is%use_mpas_atm) then
-        ! com regDecomp(2)=min(petCount,NLAT/2), PETs acima de NLAT/2
-        ! (ex: PETs 90-159 com 512 PETs e NLAT=180) têm localDeCount=0 na
-        ! grade MPAS (360×180) mas localDeCount>0 na grade MED (640×320).
-        ! GetFieldPtrOptional retorna mpas_available=false para esses PETs
-        ! porque os campos MPAS não têm dados locais — comportamento normal.
-        ! Retorno silencioso (rc=SUCCESS): o cálculo bulk é local, os PETs
-        ! sem dados MPAS simplesmente não contribuem para os campos internos.
+        ! PETs sem DE local na grade MPAS nao tem dados locais dos campos MPAS, e
+        ! GetFieldPtrOptional devolve mpas_available=false para eles, o que e'
+        ! normal. Retorno silencioso (rc=SUCCESS): o calculo bulk e' local, e
+        ! esses PETs simplesmente nao contribuem para os campos internos.
         call ESMF_LogWrite('MED: PET sem dados MPAS locais — skip bulk (B-45)', &
           ESMF_LOGMSG_INFO)
         rc = ESMF_SUCCESS; return
@@ -1827,7 +1746,7 @@ contains
       psl  => psl_mpas;  swdn => swdn_mpas; lwdn => lwdn_mpas
       rain => rain_mpas
 
-      ! shum: Fase 2 opcional — usar SHUM_OCEAN_DEFAULT quando ausente
+      ! shum opcional — usar SHUM_OCEAN_DEFAULT quando ausente
       if (associated(shum_mpas)) then
         shum => shum_mpas
       else
@@ -1838,7 +1757,7 @@ contains
           //'-- usando SHUM_DEFAULT=0.010 kg/kg', ESMF_LOGMSG_INFO)
       end if
 
-      ! snow: Fase 2 opcional — zero quando ausente
+      ! snow opcional — zero quando ausente
       if (associated(snow_mpas)) then
         snow => snow_mpas
       else
@@ -1908,7 +1827,7 @@ contains
     call allreduce_atm_tile(snow, i1, i2, j1, j2, tmp_local, snow_g)
 
     ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
-    ! Espera-se que após, n_nz_uas > 30000/64800 (cobertura global).
+    ! Espera-se n_nz_uas > 30000 de 64800 celulas (cobertura global).
     call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
 
     deallocate(tmp_local)
@@ -1976,9 +1895,9 @@ contains
   end subroutine local_atm_bounds
 
   !============================================================================
-  !> @brief Fase 3: fluxos nativos do MONAN-A no lugar dos do bulk NCAR.
+  !> @brief Fluxos nativos do MONAN-A no lugar dos do bulk NCAR.
   !!
-  !! 4b. FASE 3 — SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
+  !! 4b. SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
   !!     MONAN-A (Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
   !!     Faxa_tauy_mpas), onde disponiveis. calc_bulk_ncar acima continua
   !!     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
@@ -1990,13 +1909,13 @@ contains
   !! inconsistencia entre o balanco de energia do MONAN-A e o forcante
   !! entregue ao MOM6/SIS2.
   !!
-  !! CONFIRMADO (Set/2026): sinal de hfx/lh e' POSITIVO PARA CIMA (convencao
+  !! CONFIRMADO: sinal de hfx/lh e' POSITIVO PARA CIMA (convencao
   !!  usual WRF/MPAS/GFS), verificado com a equipe de fisica do MONAN-A —
   !!  por isso invertido (-sen_g2, -lat_g2) abaixo, para bater com a
   !!  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
   !!  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
   !!  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
-  !! em sis_cap_MONAN.F90 para o sinal desses.
+  !!  sis_cap_MONAN.F90 para o sinal desses.
   !!  1) Sinal de hfx/lh: POSITIVO PARA CIMA (convencao
   !!     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
   !!     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
@@ -2101,63 +2020,48 @@ contains
     call RegridOrCopy(is%f_rain_atm,   exportState, "Faxa_rain",      is, rc)
     call RegridOrCopy(is%f_snow_atm,   exportState, "Faxa_snow",      is, rc)
     call RegridOrCopy(is%f_pslv_atm,   exportState, "Sa_pslv",        is, rc)
-    ! Si_ifrac exportado SEM o RegridOrCopy
-    ! generico. O /02 corrigiu so' a perna OCN(SIS2)->ATM
-    ! (populando is%f_ifrac_atm corretamente). Mas o RegridOrCopy generico
-    ! faz uma SEGUNDA perna, ATM->OCN (via rh_atm2ocn, NEAREST_STOD,
-    ! zeroregion=TOTAL, sem mascara, sem extrapolacao), para preencher o
-    ! campo "Si_ifrac" do exportState (realizado em ocn_grid, mesmo padrao
-    ! generico de todo export_names) — essa perna nunca recebeu nenhuma das
-    ! correcoes anteriores e sofre da MESMA classe de problema (celula nao
-    ! mapeada -> zerada), agora na direcao oposta, perto do mesmo fold
-    ! tripolar. Resultado observado: manchas isoladas em vez de calota
-    ! continua, mesmo com is%f_ifrac_atm ja correto na entrada.
+    ! Si_ifrac e' exportado SEM o RegridOrCopy generico, que faria a perna
+    ! ATM->OCN pela rota 'atm2ocn' (NEAREST_STOD, zeroregion=TOTAL, sem
+    ! mascara nem extrapolacao) e deixaria zeradas as celulas nao mapeadas
+    ! perto da dobra tripolar: manchas isoladas em vez de calota continua,
+    ! mesmo com is%f_ifrac_atm correto. export_ice_fraction usa a rota
+    ! conservativa 'atm2ocn_ice' e extrapola por vizinhanca.
     call export_ice_fraction(is, exportState, rc)
     call RegridOrCopy(is%f_duu10n_atm, exportState, "So_duu10n",      is, rc)
-    ! mascara terra/oceano REAL do MOM6 no
-    ! exportState. is%f_omask_atm ja' esta' pronta neste ponto (regridada
-    ! uma unica vez logo acima,). Aqui ela segue para o
-    ! conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
+    ! Mascara terra/oceano REAL do MOM6 no exportState. is%f_omask_atm ja'
+    ! esta' pronta neste ponto (regridada uma unica vez logo acima). Aqui ela
+    ! segue para o conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
     ! mom6_import_*.nc NAO passa por este caminho — le is%f_omask_atm
     ! diretamente na grade ATM (med_cap_netcdf.F90), evitando o ida-e-volta
     ! ATM->OCN->Voronoi. O corte binario fica sempre no consumidor final,
     ! nunca no meio do caminho, para nao criar escadinha na linha de costa.
     call RegridOrCopy(is%f_omask_atm,  exportState, "Sx_omask",       is, rc)
-    call RegridOrCopy(is%f_coszen_atm, exportState, "Faxa_coszen",    is, rc)  ! Fase 2.5
-    call RegridOrCopy(is%f_albedo_atm, exportState, "Sf_albedo",      is, rc)  ! Fase 2.6
-    ! Fase 3
+    call RegridOrCopy(is%f_coszen_atm, exportState, "Faxa_coszen",    is, rc)  ! angulo zenital solar -> SIS2
+    call RegridOrCopy(is%f_albedo_atm, exportState, "Sf_albedo",      is, rc)  ! albedo de banda larga -> MPAS
+    ! Fluxos turbulentos e de onda longa sobre o gelo -> SIS2
     call RegridOrCopy(is%f_taux_ice,   exportState, "Fioi_taux",      is, rc)
     call RegridOrCopy(is%f_tauy_ice,   exportState, "Fioi_tauy",      is, rc)
     call RegridOrCopy(is%f_sen_ice,    exportState, "Fioi_sen",       is, rc)
     call RegridOrCopy(is%f_evap_ice,   exportState, "Fioi_evap",      is, rc)
     call RegridOrCopy(is%f_lwnet_ice,  exportState, "Fioi_lwnet",     is, rc)
-    ! Fase 4
+    ! Onda curta liquida sobre o gelo, por banda -> SIS2
     call RegridOrCopy(is%f_swvdr_ice,  exportState, "Fioi_swnet_vdr", is, rc)
     call RegridOrCopy(is%f_swvdf_ice,  exportState, "Fioi_swnet_vdf", is, rc)
     call RegridOrCopy(is%f_swidr_ice,  exportState, "Fioi_swnet_idr", is, rc)
     call RegridOrCopy(is%f_swidf_ice,  exportState, "Fioi_swnet_idf", is, rc)
 
-    ! Fase 4b (, Set/2026): CORRECAO da Fase 4
-    ! anterior. Aquela versao sobrescrevia
-    ! is%f_sst_atm IN-PLACE com a mistura (1-ifrac)*SST + ifrac*Si_t_sis2,
-    ! reaproveitando o export "So_t" ja existente. Problema descoberto em
-    ! producao: sis_cap_MONAN.F90 TAMBEM importa "So_t" (linha ~914) para
-    ! calcular o fluxo de calor da BASE do gelo (ICE_KMELT no SIS2, que
-    ! precisa da SST REAL do oceano sob o gelo). Misturar Si_t_sis2 (a
-    ! propria temperatura de pele do gelo, calculada pelo SIS2) de volta
-    ! em "So_t" antes de devolve-la ao SIS2 e' circular: o gradiente
-    ! T_oceano - T_congelamento que controla o derretimento/crescimento
-    ! basal fica artificialmente reduzido em celulas com gelo, suprimindo
-    ! o derretimento basal e contribuindo para crescimento excessivo de
-    ! espessura (observado em producao apos a Fase 4b original + Fase 4
-    ! SW-split, que ja reduziam o derretimento por si so').
-    !
-    ! Fix: is%f_sst_atm NUNCA mais e' sobrescrito — "So_t" (abaixo)
-    ! permanece SST pura, como o SIS2 (e potencialmente outros
-    ! consumidores futuros) esperam. O composto vai para um campo
-    ! SEPARADO, is%f_tsfc_atm, exportado sob um StandardName NOVO,
-    ! "Sx_tsfc", que so' o MPAS-A importa (ver mpas_cap_MONAN.F90 —
-    ! IMP_NAMES trocado de "So_t" para "Sx_tsfc" para atm_bnd%sst).
+    ! Sx_tsfc: temperatura de superficie composta para o MPAS-A,
+    ! (1-ifrac)*SST + ifrac*Si_t_sis2, num campo SEPARADO (is%f_tsfc_atm).
+    ! is%f_sst_atm NUNCA e' sobrescrito: "So_t" (abaixo) permanece SST pura,
+    ! porque o sis_cap_MONAN.F90 tambem importa "So_t" para o fluxo de calor
+    ! da BASE do gelo (ICE_KMELT no SIS2, que precisa da SST REAL do oceano
+    ! sob o gelo). Devolver ao SIS2 uma So_t misturada com a propria
+    ! temperatura de pele do gelo seria circular: o gradiente T_oceano -
+    ! T_congelamento que controla o derretimento/crescimento basal ficaria
+    ! artificialmente reduzido em celulas com gelo, suprimindo o derretimento
+    ! basal e engrossando o gelo em excesso (efeito observado quando a mistura
+    ! era feita na propria So_t). Sx_tsfc so' e' importado pelo MPAS-A
+    ! (IMP_NAMES em mpas_cap_MONAN.F90, para atm_bnd%sst).
     call export_surface_temperature(is)
 
     ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector MED→MPAS
@@ -2182,7 +2086,7 @@ contains
       flush(6)
     end if
 
-    ! Fase 4b: Sx_tsfc — composto (SST+Si_t_sis2 por
+    ! Sx_tsfc — composto (SST+Si_t_sis2 por
     ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst via IMP_NAMES em
     ! mpas_cap_MONAN.F90). So_t acima permanece SST pura para o SIS2.
     call RegridOrCopy(is%f_tsfc_atm,   exportState, "Sx_tsfc",        is, rc)
@@ -2192,7 +2096,7 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ── ────────────────────────────────────────
+    ! ──────────────────────────────────────────
     ! So_u, So_v: correntes superficiais MOM6 -> exportState para conector
     ! MED -> MPAS. Os campos f_uocn_atm/f_vocn_atm já contêm os valores
     ! regridados OCN -> ATM (preenchidos no bloco acima a partir
@@ -2217,7 +2121,7 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ── ───────────────────────────────────────────────
+    ! ──────────────────────────────────────────
     ! Sf_zorl: rugosidade superficial Charnock+Smith calculada no bulk NCAR
     ! a partir de Foxx_taux/tauy. Mesmo padrão arquitetural de So_t/So_u/So_v:
     ! f_zorl_atm (grade ATM interna) -> RegridOrCopy -> exportState.Sf_zorl
@@ -2247,8 +2151,8 @@ contains
 
     else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
              med_ifrac_init_done) then
-      ! 1.1: decaimento exponencial do campo OISST retido em
-      ! is%f_ifrac_atm. O campo NÃO foi zerado (fix acima).
+      ! init_only: decaimento exponencial do campo OISST retido em
+      ! is%f_ifrac_atm (zero_med_fluxes nao o zera neste modo).
       ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
       ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
       ! de desaparecer instantaneamente no passo seguinte ao t=0.
@@ -2288,7 +2192,7 @@ contains
     if (is%regrid%has('ocn2atm')) then
       call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
 
-      ! DIAGNOSTICO TEMPORARIO valores BRUTOS de So_t (antes de
+      ! Diagnostico dos valores BRUTOS de So_t (antes de
       ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
       ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
         if (.not. raw_sst_diag_done) then
@@ -2312,8 +2216,8 @@ contains
         end if
 
 
-      ! ?? Opção 1 (v4.18, corrigido v5.0): regrid SST ciente da mascara real
-      !    do oceano (So_omask) + extrapolação de vizinhança para a costa. ??
+      ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
+      ! por vizinhança para a costa.
       if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
 
       if (is%regrid%has('ocn2atm_sst')) then
@@ -2328,29 +2232,23 @@ contains
         call fill_sst_gaps(sst)
       end if
 
-      ! v13.0): regrid de correntes oceânicas OCN → ATM.
-      ! So_u e So_v agora anunciados e realizados no importState do MED (ocn_grid).
-      ! ESMF_StateGet é seguro — sem risco de "Not found" no log.
+      ! Regrid de correntes oceânicas OCN → ATM.
+      ! So_u e So_v são anunciados e realizados no importState do MED
+      ! (ocn_grid); ESMF_StateGet é seguro.
       ! Fallback seguro: se regrid falhar, mantém zeros em f_uocn_atm/f_vocn_atm.
       call regrid_ocean_currents(is, importState, zero_on_error=.false.)
 
-      ! ──.2 (Set/2026) + Si_ifrac_sis2 real +
-      !    albedo + T_gelo, regridados via RouteHandle MASCARADO dedicado
-      !    (rh_ocn2atm_ice), com extrapolacao por vizinhanca pos-regrid —
-      !    mesmo tratamento ja validado para So_t (rh_ocn2atm_sst), agora
-      !    estendido ao gelo. Antes usava rh_ocn2atm generico (sem mascara,
-      !    sem extrapolacao), problematico justamente porque o gelo se
-      !    concentra na regiao de deformacao da malha tripolar (alta
-      !    latitude) — o mesmo tipo de artefato que ja exigiu tratamento
-      !    especial para SST, so' que sem diluicao no resto do dominio.
+      ! Si_ifrac_sis2, albedos e T_gelo, pela rota MASCARADA 'ocn2atm_ice',
+      ! com extrapolacao por vizinhanca apos o regrid: o mesmo tratamento da
+      ! SST ('ocn2atm_sst'). A rota generica 'ocn2atm' (sem mascara nem
+      ! extrapolacao) daria artefatos justamente onde o gelo se concentra, na
+      ! regiao de deformacao da malha tripolar (alta latitude).
       if (cfg_use_sis2_dynamic) then
         call update_ice_fields_on_atm_grid(is, importState)
 
-        ! validacao. is%f_ifrac_atm deve agora
-        ! refletir o Ice%part_size real (ver no cap do
-        ! gelo) regridado para a grade ATM — nao mais zero nem OISST
-        ! sintetico. Os 4 bandos de albedo devem estar entre o fallback
-        ! (0,65) e valores de neve fria (~0,85-0,9) onde ha gelo espesso.
+        ! Diagnostico: is%f_ifrac_atm deve refletir o Ice%part_size real do
+        ! SIS2 interpolado para a grade ATM. Os 4 albedos devem ficar entre o
+        ! valor padrao (0,65) e o de neve fria (~0,85-0,9) sob gelo espesso.
         if (cfg_write_fixdiag) then
             call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_if,  rc=rc)
             call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr, rc=rc)
@@ -2387,18 +2285,18 @@ contains
     call ZeroInternalField(is%f_rain_atm,   rc)
     call ZeroInternalField(is%f_snow_atm,   rc)
     call ZeroInternalField(is%f_pslv_atm,   rc)
-    ! (v2.5): NÃO zerar is%f_ifrac_atm incondicionalmente.
-    ! Em.1.1 (use_docn_ice=T, init_only=T, med_ifrac_init_done=T),
-    ! fill_ifrac_from_oisst é pulado após o primeiro passo, então zerando aqui
+    ! NÃO zerar is%f_ifrac_atm incondicionalmente.
+    ! Com use_docn_ice=T, init_only=T e med_ifrac_init_done=T,
+    ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o
     ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
     ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
-    ! No.1.1, o decaimento é aplicado no bloco 3b abaixo.
+    ! No modo init_only, o decaimento é aplicado no bloco 3b.
     if (.not. (cfg_use_docn_ice .and. &
                cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
       call ZeroInternalField(is%f_ifrac_atm, rc)
     end if
     call ZeroInternalField(is%f_duu10n_atm, rc)
-    ! v13.0): zerar correntes para evitar persistência
+    ! Zerar correntes para evitar persistência
     call ZeroInternalField(is%f_uocn_atm,   rc)
     call ZeroInternalField(is%f_vocn_atm,   rc)
     rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
@@ -2449,8 +2347,7 @@ contains
           call ESMF_LogWrite(trim(diag_msg_tsfc), ESMF_LOGMSG_INFO)
       end if
     else
-      ! Sem dado para compor — Sx_tsfc degrada para SST pura (mesmo
-      ! comportamento que o MPAS-A teria antes de qualquer Fase 4b).
+      ! Sem dado para compor — Sx_tsfc degrada para SST pura.
       if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
         p_tsfc_out(:,:) = p_sst_src(:,:)
       call ESMF_LogWrite('MED(B-TSFC-DUALEXPORT-01): AVISO — ponteiros ' // &
@@ -2473,11 +2370,8 @@ contains
     if (rc_ifrac2 == ESMF_SUCCESS) then
       call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
 
-      ! CONSERVE reativado aqui tambem —
-      ! ver comentario completo em (bloco rh_ocn2atm_ice)
-      ! sobre por que a reversao anterior tinha
-      ! diagnostico errado (causa real era, nao o
-      ! metodo de regrid).
+      ! Rota conservativa 'atm2ocn_ice', como a 'ocn2atm_ice' na ida, com
+      ! 'atm2ocn' como reserva.
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
         call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
           is%f_ifrac_atm, f_ifrac_exp, rc_store2, fallback='atm2ocn')
@@ -2524,7 +2418,7 @@ contains
 
     call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask, rc=rc)
     if (associated(p_omask)) then
-      ! mascara REAL (So_omask regridada), nao mais
+      ! Mascara REAL (So_omask regridada), e nao
       ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
       ! 0=terra e 1=oceano; robusto a pequena mistura de borda do
       ! regrid NEAREST_STOD, que deveria ser quase sempre exatamente
@@ -3239,7 +3133,7 @@ contains
 
 
   !============================================================================
-  !> @brief Alternativa 1 (MED) — preenche is%f_ifrac_atm com dados OISST.
+  !> @brief Preenche is%f_ifrac_atm com dados OISST (use_docn_ice).
   !!
   !! Lê arquivo NetCDF OISST diretamente via netcdf + ESMF_VMBroadcast.
   !! Chamada em MediatorAdvance ANTES de calc_bulk_ncar quando
@@ -3305,14 +3199,12 @@ contains
 
     ! PET0 lê o arquivo; todos os outros PETs aguardam o broadcast.
     !
-    ! (v14.20): usar a VM do COMPONENTE, não a global — mesmo
-    ! motivo já aplicado em DATM_cap.F90, DOCN_cap.F90 e docn_cap_netcdf.F90
-    ! na v13.1. Este era o último ESMF_VMGetGlobal dentro de uma rotina de
-    ! componente. Hoje o MED roda em todos os PETs nos dois layouts, então
-    ! as duas VMs coincidem e o broadcast funciona; a chamada global passa a
-    ! ser incorreta no instante em que o mediador ganhar uma petList própria,
-    ! e falharia com deadlock, não com erro. ESMF_VMGetCurrent devolve a VM
-    ! do componente em execução, tornando rootPet=0 local ao MED.
+    ! Usa a VM do COMPONENTE, não a global, como DATM_cap.F90, DOCN_cap.F90
+    ! e docn_cap_netcdf.F90. Hoje o MED roda em todos os PETs nos dois
+    ! layouts e as duas VMs coincidem, mas a chamada global ficaria incorreta
+    ! se o mediador ganhasse uma petList própria, e falharia com deadlock, não
+    ! com erro. ESMF_VMGetCurrent devolve a VM do componente em execução,
+    ! tornando rootPet=0 local ao MED.
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(f0, f1, buf); return

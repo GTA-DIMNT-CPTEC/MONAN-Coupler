@@ -1,18 +1,15 @@
 !> @file med_cap_methods.F90
 !! @brief Utilitários de manipulação de campos ESMF/NUOPC do mediador.
 !!
-!! Versão 1.0 (Mai/2026) — GT Acoplamento de Modelos / INPE/CGCT/DIMNT
-!!
-!! Contém as sub-rotinas de utilidade extraídas de MED_cap.F90
-!! como parte da reorganização de responsabilidades (Passo 3):
+!! Utilitários do mediador separados de MED_cap.F90:
 !!
 !!   CreateInternalField      — cria campo ESMF na grade interna
-!! ZeroInternalField — zera campo com guard
+!!   ZeroInternalField        — zera campo com guard
 !!   FillInternalField        — preenche campo com valor constante
 !!   GetFieldPtr              — obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional      — obtém ponteiro sem erro de log para campos opcionais
 !!   RegridOrCopy             — regrid ATM→OCN com fallback temporário
-!!   RouteOcnToAtm            — exporta campos OCN→ATM via mediador (Fase 2)
+!!   RouteOcnToAtm            — exporta campos OCN→ATM via mediador
 
 module med_cap_methods_mod
 
@@ -237,9 +234,9 @@ contains
   end subroutine RegridOrCopy
 
   !============================================================================
-  !> @brief Roteia campos oceânicos para a atmosfera (Fase 2 — MOM6 dinâmico).
+  !> @brief Roteia campos oceânicos para a atmosfera (MOM6 dinâmico).
   !!
-  !! (MOM6 dinâmico — grade tripolar B-grid):
+  !! MOM6 dinâmico (grade tripolar B-grid):
   !!   Chamada em MediatorAdvance quando use_med_to_mpas=.true. (nuopc.input).
   !!   O conector direto OCN→MPAS não existe neste modo; tudo passa pelo MED.
   !!
@@ -261,7 +258,7 @@ contains
     rc = ESMF_SUCCESS
     nullify(ptr_atm)
 
-    ! Guard: routehandles devem estar criados para Fase 2
+    ! Guard: routehandles devem estar criados
     if (.not. is%regrid%has('ocn2atm')) then
       call ESMF_LogWrite( &
         'MED RouteOcnToAtm: rota ocn2atm ainda nao criada; pulando', &

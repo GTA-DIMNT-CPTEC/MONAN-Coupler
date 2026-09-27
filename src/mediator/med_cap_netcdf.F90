@@ -1,10 +1,7 @@
 !> @file med_cap_netcdf.F90
 !! @brief Diagnóstico NetCDF do mediador MED — leitura de configuração e escrita de campos.
 !!
-!! Versão 1.0 (Mai/2026) — GT Acoplamento de Modelos / INPE/CGCT/DIMNT
-!!
-!! Contém as sub-rotinas de I/O NetCDF extraídas de MED_cap.F90
-!! como parte da reorganização de responsabilidades (Passo 2):
+!! Sub-rotinas de I/O NetCDF separadas de MED_cap.F90:
 !!
 !!   med_read_import_config    — lê mom6_output.nml → configura diagnóstico
 !!   med_write_import_fields   — escreve mom6_import_YYYYMMDD_HHMMSS.nc
@@ -97,7 +94,7 @@ contains
   !! Lê dos campos ATM internos (grade 360×180 global), faz MPI_Allreduce(MAX)
   !! para montar o campo global completo, e PET0 cria o NetCDF.
   !!
-  !! (GT Acoplamento de Modelos/INPE — Mai/2026):
+  !! Caracteristicas do arquivo:
   !! MPI gather global (Allreduce MAX) — campo completo no NetCDF.
   !! Coordenadas lat/lon variáveis CF com eixo centrado em células.
   !! Variável 'time' CF com units="hours since...".
@@ -498,7 +495,7 @@ contains
       case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
       case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
       case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
-      ! Onda curta sobre gelo (f_sw*_ice, calculados na Fase 4 do
+      ! Onda curta sobre gelo (f_sw*_ice, calculados no
       ! med_bulk_ncar) e temperatura de superficie usada pelo bulk sobre gelo.
       case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%f_swvdr_ice,  farrayPtr=fptr2d, rc=rc)
       case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%f_swvdf_ice,  farrayPtr=fptr2d, rc=rc)

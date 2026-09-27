@@ -1,15 +1,12 @@
 !> @file med_bulk_ncar.F90
 !! @brief Física bulk NCAR do mediador: cálculo de fluxos superficiais e rugosidade.
 !!
-!! Versão 1.0 (Mai/2026) — GT Acoplamento MONAN / INPE/CGCT/DIMNT
-!!
-!! Contém a seção 4 + Charnock extraída de MediatorAdvance (Passo 4):
-!!
-!!   calc_bulk_ncar   — calcula os 14 fluxos bulk + duu10n + ifrac + Charnock
+!! calc_bulk_ncar calcula os 14 fluxos bulk, duu10n, Si_ifrac (modos sem
+!! SIS2 dinamico) e a rugosidade de Charnock, na grade ATM do mediador.
 !!
 !! Formulações:
 !!   Large & Yeager (2009) — taux, tauy, fluxo sensível, evaporação, LW, SW
-!! Smith (1988) — rugosidade Charnock + viscosa (Maio 2026)
+!!   Smith (1988) — rugosidade Charnock + viscosa
 !!
 !! A sub-rotina recebe os campos ATM globais reunidos por MPI_Allreduce e
 !! escreve os resultados diretamente nos campos ESMF do estado interno (is).
@@ -216,8 +213,7 @@ contains
     call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-      ! (v14.21): pular celulas sem psl fisico, simetrico as
-      ! guardas (lwdn) e (tas).
+      ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
       !
       ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
       ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
@@ -262,24 +258,23 @@ contains
     !==========================================================================
     ! Componentes SW: 4 bandas (vis-dir, vis-dif, nir-dir, nir-dif)
     !
-    ! o albedo efetivo de cada célula passa a ser
-    ! uma média ponderada pela fração de gelo real (is%f_ifrac_atm, regrid
-    ! 2 de Si_ifrac_sis2) entre a constante de água aberta
+    ! O albedo efetivo de cada célula e'
+    ! uma média ponderada pela fração de gelo real (is%f_ifrac_atm,
+    ! interpolada de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
-    ! (is%f_alb_*_ice, regrid de Si_a*sdr/f_sis2 — ver export_si_albedo em
-    ! sis_cap_MONAN.F90). Antes desta correção, toda celula — com ou sem
-    ! gelo — usava albedo_ocn = 0,06, superestimando fortemente a absorcao
-    ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85).
+    ! (is%f_alb_*_ice, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
+    ! em sis_cap_MONAN.F90). Com albedo_ocn = 0,06 em toda celula, a absorcao
+    ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
+    ! superestimada.
     !==========================================================================
     call blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
 
     !==========================================================================
-    ! fluxos Fioi_* — mesma forma bulk NCAR
-    ! acima, mas usando a temperatura de pele REAL do gelo (is%f_tice_atm,
-    ! regrid de Si_t_sis2) em vez de SST. Antes desta correcao, o SIS2
-    ! recebia os MESMOS Foxx_* calculados com SST que o MOM6 recebe —
+    ! Fluxos Fioi_*: mesma forma bulk NCAR de acima, mas com a temperatura
+    ! de pele REAL do gelo (is%f_tice_atm, interpolada de Si_t_sis2) em vez
+    ! da SST. Enviar ao SIS2 os mesmos Foxx_* calculados com a SST seria
     ! fisicamente incorreto: a diferenca de temperatura ar-superficie sobre
-    ! gelo frio pode ser MUITO maior que ar-SST (SST fica travada perto do
+    ! gelo frio pode ser MUITO maior que ar-SST (a SST fica travada perto do
     ! ponto de congelamento; T_gelo pode chegar a -40 C ou mais frio).
     !
     ! Coeficientes de transferencia: reusa Cd_neut/Ch_neut/Ce_neut (mesmos
@@ -342,7 +337,7 @@ contains
     call compute_roughness_length(is, j1, j2, i1, i2)
 
     !==========================================================================
-    ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS — v13.0)
+    ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS)
     !==========================================================================
     call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr, rc=rc)
     if (associated(uocn) .and. associated(vocn)) then
@@ -360,26 +355,16 @@ contains
     end if
 
     !==========================================================================
-    ! Si_ifrac: regrid OCN→ATM via rh_ocn2atm (SIS2) + mascara terra (A.5.2)
-    ! Fallback: limiar de SST quando routehandle não disponível
-    !==========================================================================
-    ! todo o bloco abaixo — que le
-    ! "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2") via
-    ! rh_ocn2atm generico SEM mascara, e ainda aplica a mascara SST~=
-    ! T_FILL_LAND (.5.2) que zera ifrac tambem em agua aberta
-    ! genuina proxima da borda do gelo (SST no congelamento e' fisicamente
-    ! esperado ali, nao e' sinal de terra) — so' deveria rodar quando NAO
-    ! ha fonte melhor disponivel. Antes so' era gated por cfg_use_docn_ice;
-    ! como cfg_use_docn_ice=.false. e' o estado correto agora (ver correcao
-    ! do decaimento OISST artificial, Set/2026), esse bloco passou a rodar
-    ! INCONDICIONALMENTE, sobrescrevendo is%f_ifrac_atm por cima do
-    ! pipeline.2/..04 (mascarado, CONSERVE,
-    ! extrapolacao com alcance limitado) que roda ANTES desta subrotina
-    ! ser chamada (calc_bulk_ncar e' chamado depois de tudo isso em
-    ! MED_cap.F90). Com cfg_use_sis2_dynamic=.true. (gelo real do SIS2
-    ! ativo), o pipeline.2 e' a fonte AUTORITATIVA -- este bloco
-    ! legado deve ficar totalmente inativo nesse caso, nao so' o ramo
-    ! regrid_ok=T original.
+    ! Si_ifrac legado (sem SIS2 dinamico)
+    !
+    ! Com cfg_use_sis2_dynamic=.true., a fonte AUTORITATIVA de is%f_ifrac_atm
+    ! e' a rota mascarada 'ocn2atm_ice' com extrapolacao, aplicada em
+    ! MED_cap.F90 antes desta subrotina, e este bloco fica inativo. Sem SIS2
+    ! dinamico, legacy_ice_fraction usa o OISST (use_docn_ice) ou le
+    ! "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2") pela rota
+    ! generica 'ocn2atm', SEM mascara, e aplica a mascara SST~=T_FILL_LAND,
+    ! que zera ifrac tambem em agua aberta proxima da borda do gelo (SST no
+    ! congelamento e' esperada ali, nao e' sinal de terra).
     !==========================================================================
     if (.not. cfg_use_sis2_dynamic) then
     call legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
@@ -409,20 +394,16 @@ contains
 
     ! Fonte de Si_ifrac por modo (nuopc.input &nuopc_mode):
     !   use_docn_ice=T  init_only=F  → is%f_ifrac_atm já preenchida
-    !     com OISST por fill_ifrac_from_oisst (Alternativa 1 original).
-    !     regrid_ok=T pula o ESMF_FieldRegrid (rh_ocn2atm falha para
-    !     Si_ifrac ≠ So_t) e o fallback SST.
-    ! use_docn_ice=T init_only=T →.1:
-    !     fill_ifrac_from_oisst NÃO foi chamado em MediatorAdvance.
-    !     Usar Si_ifrac do OCN (sigmoid) via importState.
-    !   use_docn_ice=F              → sigmoid do OCN via importState.
-    ! regrid_ok=T: usar is%f_ifrac_atm (de fill_ifrac_from_oisst).
-    ! NÃO reutilizar rh_ocn2atm para Si_ifrac (específico de So_t).
-    ! 2 criará rh dedicado para Si_ifrac dinâmico.
+    !     com OISST por fill_ifrac_from_oisst.
+    !     regrid_ok=T pula o regrid e o fallback SST.
+    !   use_docn_ice=T  init_only=T  → idem: is%f_ifrac_atm guarda o OISST
+    !     de t=0 (com decaimento) de fill_ifrac_from_oisst.
+    !   use_docn_ice=F               → Si_ifrac do OCN via importState,
+    !     pela rota 'ocn2atm'.
     if (cfg_use_docn_ice) then
       regrid_ok = .true.   ! is%f_ifrac_atm de fill_ifrac_from_oisst
     else
-      regrid_ok = .false.  ! OCN sigmoid via importState (.2+)
+      regrid_ok = .false.  ! Si_ifrac do OCN via importState
     end if
 
     if (.not. regrid_ok .and. is%regrid%has('ocn2atm')) then
@@ -462,8 +443,7 @@ contains
     if (.not. regrid_ok) then
       call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=fptr, rc=rc_if)
       if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
-        ! Construto block (Fortran 2008): escopo local para sst_eff_if.
-        ! Declarações são inválidas dentro de do-loops em Fortran.
+        ! SST efetiva de cada celula em sst_eff_if, com clamp.
           do j = j1, j2
             do i = i1, i2
               ! Clamp: valores fora de [271, 308] K são inválidos ou terra.
@@ -886,25 +866,17 @@ contains
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
 
-      ! (, Set/2026): ANTES desta correcao, Foxx_swnet_*
-      ! era calculado com alb_eff (media ponderada por Si_ifrac entre
-      ! albedo de agua aberta e albedo do gelo) e esse MESMO valor era
-      ! enviado tanto ao MOM6 (Foxx_swnet_*) quanto ao SIS2 (que importava
-      ! Foxx_swnet_* diretamente — ver sis_cap_MONAN.F90). Isso fazia o
-      ! gelo absorver SW calculada com um albedo mais baixo que o seu
-      ! proprio (contaminado pela agua aberta), e o oceano absorver SW
-      ! calculada com um albedo mais alto que o seu proprio (contaminado
-      ! pelo gelo) — dupla contabilizacao fisica incorreta em qualquer
-      ! celula com 0 < Si_ifrac < 1.
-      !
-      ! Agora: Foxx_swnet_* usa SOMENTE o albedo de agua aberta (alb_ocn_dir
-      ! nas bandas diretas, albedo_ocn nas difusas) — vai para o MOM6, que
-      ! representa so' a fracao (1-Si_ifrac) da celula. Fioi_swnet_* (novo)
-      ! usa SOMENTE o albedo do gelo por banda (alb_vdr/vdf/idr/idf) — vai
-      ! para o SIS2 (ver mudanca em sis_cap_MONAN.F90::import_forcing).
-      ! alb_eff (blend ponderado por Si_ifrac) continua sendo calculado e
-      ! acumulado em is%f_albedo_atm (Sf_albedo) sem nenhuma mudanca —
-      ! esse composto de banda larga PARA A ATMOSFERA continua correto e
+      ! Foxx_swnet_* usa SOMENTE o albedo de agua aberta (alb_ocn_dir nas
+      ! bandas diretas, albedo_ocn nas difusas) e vai para o MOM6, que
+      ! representa so' a fracao (1-Si_ifrac) da celula. Fioi_swnet_* usa
+      ! SOMENTE o albedo do gelo por banda (alb_vdr/vdf/idr/idf) e vai para o
+      ! SIS2 (ver sis_cap_MONAN.F90::import_forcing). Com um unico valor
+      ! calculado pelo albedo medio alb_eff para os dois, o gelo absorveria SW
+      ! com um albedo mais baixo que o seu proprio (contaminado pela agua
+      ! aberta) e o oceano, com um mais alto (contaminado pelo gelo): dupla
+      ! contabilizacao fisica incorreta em qualquer celula com 0 < Si_ifrac < 1.
+      ! alb_eff (blend ponderado por Si_ifrac) e' acumulado em is%f_albedo_atm
+      ! (Sf_albedo): esse composto de banda larga PARA A ATMOSFERA e' correto e
       ! necessario (a atmosfera so' enxerga uma celula, nao duas fracoes).
 
       call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=fptr, rc=rc)
@@ -936,8 +908,7 @@ contains
           ! Fioi_swnet_vdr (SIS2): SOMENTE albedo do gelo por banda.
           if (associated(fptr_ice2)) &
             fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_vdr(i,j)) * f_vis_dir
-          ! Sf_albedo (atmosfera): mantem o blend ponderado por Si_ifrac,
-          ! inalterado — Fase 2.6.
+          ! Sf_albedo (atmosfera): blend ponderado por Si_ifrac.
           alb_eff = (1.0_ESMF_KIND_R8 - fi) * alb_ocn_dir + fi * alb_vdr(i,j)
           if (associated(fptr_alb)) fptr_alb(i,j) = f_vis_dir * alb_eff
         end do; end do
@@ -995,7 +966,7 @@ contains
           if (associated(fptr_ice2)) &
             fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_idf(i,j)) * f_nir_dif
           alb_eff = (1.0_ESMF_KIND_R8 - fi) * albedo_ocn + fi * alb_idf(i,j)
-          ! ultima banda — fptr_alb(i,j) agora contem o albedo de
+          ! Ultima banda: fptr_alb(i,j) contem o albedo de
           ! banda larga efetivo completo (soma das 4 contribuicoes ponderadas).
           if (associated(fptr_alb)) fptr_alb(i,j) = fptr_alb(i,j) + f_nir_dif * alb_eff
         end do; end do
