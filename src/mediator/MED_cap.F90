@@ -1034,21 +1034,10 @@ contains
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
     type(ESMF_Time)          :: startTime
-    type(ESMF_Field)         :: atm_field, ocn_field, exp_field
+    type(ESMF_Field)         :: ocn_field, exp_field
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
-    integer :: fieldCount, i, localrc
-    character(len=64), allocatable :: fieldNameList(:)
-    character(len=160) :: msg_gate
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
-    real(ESMF_KIND_R8), pointer :: sstp(:,:)
     logical :: sst_ready
-    type(ESMF_VM) :: vm
-    integer :: lde, ldec_sst
-    integer :: n_phys_s(1), n_phys_g(1)
-    integer, save :: n_gate_tries = 0
-    integer, parameter :: MAX_GATE_TRIES = 5
-            integer :: localDeCount_exp
 
     rc = ESMF_SUCCESS
 
@@ -1056,27 +1045,13 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-
     ! NUOPC_MediatorGet e a API correta para mediadores
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Obtem campo de referencia para a grade ATM conforme o modo ativo.
-    ! use_mpas_atm ja esta no estado interno (lido em InitializeRealize).
-    if (is%use_mpas_atm) then
-      call ESMF_StateGet(importState, itemName="Sa_u10m_mpas", &
-        field=atm_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg="MED IDC: Sa_u10m_mpas nao encontrado", &
-        line=__LINE__, file=__FILE__)) return
-    else
-      call ESMF_StateGet(importState, itemName="Sa_u10m", &
-        field=atm_field, rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, &
-        msg="MED IDC: Sa_u10m nao encontrado", &
-        line=__LINE__, file=__FILE__)) return
-    end if
+    call idc_check_atm_field(is, importState, rc)
+    if (rc /= ESMF_SUCCESS) return
 
     ! Obter campo de export para o OCN (Foxx_taux esta na grade OCN)
     call ESMF_StateGet(exportState, itemName="Foxx_taux", field=exp_field, rc=rc)
@@ -1105,50 +1080,8 @@ contains
   ! valores, entao permanece na primeira passagem — e' caro e nao deve repetir.
   !==========================================================================
     if (.not. is%regrid%has('ocn2atm')) then
-
-      if (.not. is%regrid%has('atm2ocn')) then
-        call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), is%f_taux_atm, exp_field, rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end if
-
-      ! So_t está na grade OCN (ver InitializeRealize)
-      call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call is%regrid%add('ocn2atm', regrid_spec('bilinear'), ocn_field, is%f_sst_atm, rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
-      call regrid_ocean_currents(is, importState, zero_on_error=.true.)
-
-      ! Inicializar exportState com valores fisicamente razoaveis
-      ! ESMF_FieldGet(farrayPtr) falha em PETs sem DE local.
-      ! Verificar localDeCount antes de acessar dados do campo.
-      call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-      if (fieldCount > 0) then
-        allocate(fieldNameList(fieldCount))
-        call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-        do i = 1, fieldCount
-          call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
-            field=exp_field, rc=rc)
-            call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
-            if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
-          call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
-          select case(trim(fieldNameList(i)))
-            case('Sa_pslv')
-              fptr = 101325.0_ESMF_KIND_R8
-            case default
-              fptr = 0.0_ESMF_KIND_R8
-          end select
-        end do
-        deallocate(fieldNameList)
-      end if
-
-      ! Si_ifrac_sis2 e os 4 albedos do gelo sao realizados pelo MED em
-      ! ocn_grid, a MESMA grade de So_t (ver InitializeRealize); a rota
-      ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
-      ! de update_ice_fields_on_atm_grid.
-
-      call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
+      call idc_create_routes(is, importState, exportState, exp_field, rc)
+      if (rc /= ESMF_SUCCESS) return
     end if
 
   !==========================================================================
@@ -1158,7 +1091,7 @@ contains
   ! seu InitializeDataComplete, e o conector NUOPC propaga o carimbo ao campo
   ! de destino. Portanto NUOPC_IsAtTime distingue exatamente os dois casos:
   ! So_t recem-chegado do oceano (carimbado) contra o campo ainda nao escrito
-  ! (sem carimbo).
+  ! (sem carimbo). Carimbo, porem, nao e' dado: ver sst_has_physical_values.
   !
   ! Enquanto o dado nao chega, declaramos Progress=true (a fase A progrediu:
   ! os routehandles existem) e Complete=false. Isso forca o driver a percorrer
@@ -1175,117 +1108,265 @@ contains
     sst_ready = NUOPC_IsAtTime(ocn_field, startTime, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-  !--------------------------------------------------------------------------
-  ! CARIMBO NAO E' DADO.
-  !
-  ! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
-  ! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
-  ! verificar quais deles o mom_export realmente preencheu. Um So_t
-  ! identicamente nulo passa no NUOPC_IsAtTime. Foi o que aconteceu quando
-  ! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
-  ! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
-  ! o que levava a mascara de terra, entao baseada na SST, a classificar o
-  ! planeta inteiro como terra e zerar os 11 campos de fluxo.
-  !
-  ! Exigir tambem VALOR fisicamente plausivel em alguma celula, contado
-  ! GLOBALMENTE: um DE pode legitimamente conter so' terra e gelo.
-  !--------------------------------------------------------------------------
     if (sst_ready) then
-      call ESMF_VMGetCurrent(vm, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      n_phys_s(1) = 0
-      call ESMF_FieldGet(ocn_field, localDeCount=ldec_sst, rc=localrc)
-      if (localrc == ESMF_SUCCESS) then
-        do lde = 0, ldec_sst - 1
-          nullify(sstp)
-          call ESMF_FieldGet(ocn_field, localDe=lde, farrayPtr=sstp, rc=localrc)
-          if (localrc /= ESMF_SUCCESS .or. .not. associated(sstp)) cycle
-          n_phys_s(1) = n_phys_s(1) + &
-            count(sstp > 270.0_ESMF_KIND_R8 .and. sstp < 310.0_ESMF_KIND_R8)
-        end do
-      end if
-
-      ! Coletivo sobre a VM do MED — todos os PETs do mediador entram aqui.
-      call ESMF_VMAllReduce(vm, n_phys_s, n_phys_g, 1, ESMF_REDUCE_SUM, rc=localrc)
-      if (localrc /= ESMF_SUCCESS) n_phys_g(1) = n_phys_s(1)
-
-      if (n_phys_g(1) == 0) then
-        sst_ready = .false.
-        call ESMF_LogWrite('MED: IDC — So_t carimbado mas SEM valor fisico '// &
-          '(nenhuma celula em [270,310] K no globo)', ESMF_LOGMSG_WARNING)
-      else
-        write(msg_gate,'(A,I0,A)') 'MED: IDC — So_t com ', n_phys_g(1), &
-          ' celulas em [270,310] K'
-        call ESMF_LogWrite(trim(msg_gate), ESMF_LOGMSG_INFO)
-      end if
+      call sst_has_physical_values(ocn_field, sst_ready, rc)
+      if (rc /= ESMF_SUCCESS) return
     end if
 
     if (.not. sst_ready) then
-      n_gate_tries = n_gate_tries + 1
-      ! Falhar alto em vez de seguir com SST nula: era exatamente esse
-      ! prosseguimento silencioso que produzia mapas de fluxo em branco no
-      ! passo 1, com a causa escondida a tres camadas de distancia.
-      if (n_gate_tries >= MAX_GATE_TRIES) then
-        ! AVISO, nao aborto. O modelo de como o driver NUOPC percorre a
-        ! RunSequence durante a resolucao de dependencia de dados ainda nao
-        ! esta plenamente verificado: o gate ja' foi observado fechando uma
-        ! vez em coupling_mode='concurrent', onde a ordem dos elementos
-        ! preveria abertura imediata. Enquanto essa discrepancia nao for
-        ! entendida, abortar aqui arriscaria derrubar execucoes que hoje
-        ! funcionam. O aviso e' alto e nomeia o que inspecionar; o
-        ! comportamento anterior a este gate e' preservado.
-        call ESMF_LogWrite('MED: AVISO — So_t sem valores fisicos apos '// &
-          'varias iteracoes do laco de dependencia de dados; prosseguindo.', &
-          ESMF_LOGMSG_WARNING)
-        call ESMF_LogWrite('  A SST em t=0 pode estar nula. Inspecione '// &
-          '"So_t BRUTO" e "[MED-DIAG] f_sst_atm" no passo 1 antes de '// &
-          'confiar nos fluxos.', ESMF_LOGMSG_WARNING)
-        call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
-          value="true", rc=rc)
-        call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
-          value="true", rc=rc)
-        return
-      end if
-      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
-        value="true", rc=rc)
-      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
-        value="false", rc=rc)
-      call ESMF_LogWrite('MED: IDC aguardando So_t do OCN — '// &
-        'nova iteracao do laco de dependencia de dados', ESMF_LOGMSG_INFO)
+      call idc_wait_for_sst(gcomp, rc)
       return
     end if
 
   !==========================================================================
   ! FASE B — DADOS (So_t valido em maos)
-  !
-  ! Primeiro regrid de So_u e So_v para
-  ! f_uocn_atm/f_vocn_atm. So_u e So_v sao anunciados e realizados no
-  ! importState do MED (ocn_grid), portanto ESMF_StateGet e' seguro. A
-  ! rota 'ocn2atm' (bilinear, ja' criada na fase A) e' reutilizada:
-  ! So_u/So_v compartilham a mesma grade OCN que So_t → mapeamento identico.
   !==========================================================================
+    call idc_publish_initial_sst(is, importState, exportState, ocn_field)
+    call idc_stamp_export(exportState, startTime, rc)
+
+    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
+    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
+
+    call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED (So_t em t=0)', &
+      ESMF_LOGMSG_INFO)
+  end subroutine InitializeDataComplete
+
+  !> Confere que o campo de referencia da grade ATM existe no importState:
+  !! Sa_u10m_mpas no modo MPAS, Sa_u10m no modo DATM (is%use_mpas_atm, lido
+  !! em InitializeRealize). rc de falha quando o campo nao existe.
+  subroutine idc_check_atm_field(is, importState, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    integer, intent(inout) :: rc
+    type(ESMF_Field) :: atm_field
+
+    if (is%use_mpas_atm) then
+      call ESMF_StateGet(importState, itemName="Sa_u10m_mpas", &
+        field=atm_field, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg="MED IDC: Sa_u10m_mpas nao encontrado", &
+        line=__LINE__, file=__FILE__)) return
+    else
+      call ESMF_StateGet(importState, itemName="Sa_u10m", &
+        field=atm_field, rc=rc)
+      if (ESMF_LogFoundError(rcToCheck=rc, &
+        msg="MED IDC: Sa_u10m nao encontrado", &
+        line=__LINE__, file=__FILE__)) return
+    end if
+  end subroutine idc_check_atm_field
+
+  !> Fase A de InitializeDataComplete: cria as rotas 'atm2ocn' (de
+  !! is%f_taux_atm para exp_field, na grade OCN) e 'ocn2atm', interpola as
+  !! correntes e preenche o exportState com valores iniciais. Roda uma unica
+  !! vez (enquanto a rota 'ocn2atm' nao existe).
+  subroutine idc_create_routes(is, importState, exportState, exp_field, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Field), intent(inout) :: exp_field
+    integer, intent(inout) :: rc
+    type(ESMF_Field) :: ocn_field
+
+    if (.not. is%regrid%has('atm2ocn')) then
+      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), is%f_taux_atm, exp_field, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end if
+
+    ! So_t está na grade OCN (ver InitializeRealize)
+    call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call is%regrid%add('ocn2atm', regrid_spec('bilinear'), ocn_field, is%f_sst_atm, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
     call regrid_ocean_currents(is, importState, zero_on_error=.true.)
 
-    ! SST de t=0 para a grade ATM. Sem isto, f_sst_atm permaneceria no valor de
-    ! bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
-    ! conector MED -> MPAS entregaria essa constante ao MPAS na inicializacao.
+    call idc_init_export_fields(exportState)
+
+    ! Si_ifrac_sis2 e os 4 albedos do gelo sao realizados pelo MED em
+    ! ocn_grid, a MESMA grade de So_t (ver InitializeRealize); a rota
+    ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
+    ! de update_ice_fields_on_atm_grid.
+
+    call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
+  end subroutine idc_create_routes
+
+  !> Inicializa o exportState com valores fisicamente razoaveis: Sa_pslv
+  !! com 101325 Pa e os demais campos com zero. PETs sem DE local nao tem o
+  !! que inicializar (ESMF_FieldGet com farrayPtr falharia neles).
+  subroutine idc_init_export_fields(exportState)
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Field) :: exp_field
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    character(len=64), allocatable :: fieldNameList(:)
+    integer :: fieldCount
+    integer :: i
+    integer :: localDeCount_exp
+    integer :: localrc
+    integer :: rc
+
+    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    if (fieldCount > 0) then
+      allocate(fieldNameList(fieldCount))
+      call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
+      do i = 1, fieldCount
+        call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
+          field=exp_field, rc=rc)
+        call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
+        if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
+        call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
+        select case(trim(fieldNameList(i)))
+          case('Sa_pslv')
+            fptr = 101325.0_ESMF_KIND_R8
+          case default
+            fptr = 0.0_ESMF_KIND_R8
+        end select
+      end do
+      deallocate(fieldNameList)
+    end if
+  end subroutine idc_init_export_fields
+
+  !> CARIMBO NAO E' DADO: com So_t carimbado (sst_ready), exige tambem VALOR
+  !! fisicamente plausivel, em [270,310] K, em alguma celula, contado
+  !! GLOBALMENTE (um DE pode legitimamente conter so' terra e gelo). Sem
+  !! nenhuma, sst_ready passa a .false.
+  !!
+  !! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
+  !! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
+  !! verificar quais deles o mom_export realmente preencheu. Um So_t
+  !! identicamente nulo passa no NUOPC_IsAtTime. Foi o que aconteceu quando
+  !! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
+  !! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
+  !! o que levava a mascara de terra, entao baseada na SST, a classificar o
+  !! planeta inteiro como terra e zerar os 11 campos de fluxo.
+  !!
+  !! Coletivo sobre a VM do MED (ESMF_VMAllReduce): todos os PETs do
+  !! mediador entram aqui.
+  subroutine sst_has_physical_values(ocn_field, sst_ready, rc)
+    type(ESMF_Field), intent(in) :: ocn_field
+    logical, intent(inout) :: sst_ready
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer :: sstp(:,:)
+    type(ESMF_VM) :: vm
+    character(len=160) :: msg_gate
+    integer :: lde, ldec_sst, localrc
+    integer :: n_phys_s(1), n_phys_g(1)
+
+    call ESMF_VMGetCurrent(vm, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    n_phys_s(1) = 0
+    call ESMF_FieldGet(ocn_field, localDeCount=ldec_sst, rc=localrc)
+    if (localrc == ESMF_SUCCESS) then
+      do lde = 0, ldec_sst - 1
+        nullify(sstp)
+        call ESMF_FieldGet(ocn_field, localDe=lde, farrayPtr=sstp, rc=localrc)
+        if (localrc /= ESMF_SUCCESS .or. .not. associated(sstp)) cycle
+        n_phys_s(1) = n_phys_s(1) + &
+          count(sstp > 270.0_ESMF_KIND_R8 .and. sstp < 310.0_ESMF_KIND_R8)
+      end do
+    end if
+
+    call ESMF_VMAllReduce(vm, n_phys_s, n_phys_g, 1, ESMF_REDUCE_SUM, rc=localrc)
+    if (localrc /= ESMF_SUCCESS) n_phys_g(1) = n_phys_s(1)
+
+    if (n_phys_g(1) == 0) then
+      sst_ready = .false.
+      call ESMF_LogWrite('MED: IDC — So_t carimbado mas SEM valor fisico '// &
+        '(nenhuma celula em [270,310] K no globo)', ESMF_LOGMSG_WARNING)
+    else
+      write(msg_gate,'(A,I0,A)') 'MED: IDC — So_t com ', n_phys_g(1), &
+        ' celulas em [270,310] K'
+      call ESMF_LogWrite(trim(msg_gate), ESMF_LOGMSG_INFO)
+    end if
+  end subroutine sst_has_physical_values
+
+  !> So_t ainda sem dado: pede ao driver mais uma iteracao do laco de
+  !! dependencia de dados (Progress=true, Complete=false). Depois de
+  !! MAX_GATE_TRIES tentativas, avisa e declara Complete=true.
+  !!
+  !! Falhar alto em vez de seguir com SST nula: era exatamente esse
+  !! prosseguimento silencioso que produzia mapas de fluxo em branco no
+  !! passo 1, com a causa escondida a tres camadas de distancia.
+  subroutine idc_wait_for_sst(gcomp, rc)
+    type(ESMF_GridComp) :: gcomp
+    integer, intent(inout) :: rc
+    integer, parameter :: MAX_GATE_TRIES = 5
+    integer, save :: n_gate_tries = 0
+
+    n_gate_tries = n_gate_tries + 1
+    if (n_gate_tries >= MAX_GATE_TRIES) then
+      ! AVISO, nao aborto. O modelo de como o driver NUOPC percorre a
+      ! RunSequence durante a resolucao de dependencia de dados ainda nao
+      ! esta plenamente verificado: o gate ja' foi observado fechando uma
+      ! vez em coupling_mode='concurrent', onde a ordem dos elementos
+      ! preveria abertura imediata. Enquanto essa discrepancia nao for
+      ! entendida, abortar aqui arriscaria derrubar execucoes que hoje
+      ! funcionam. O aviso e' alto e nomeia o que inspecionar; o
+      ! comportamento anterior a este gate e' preservado.
+      call ESMF_LogWrite('MED: AVISO — So_t sem valores fisicos apos '// &
+        'varias iteracoes do laco de dependencia de dados; prosseguindo.', &
+        ESMF_LOGMSG_WARNING)
+      call ESMF_LogWrite('  A SST em t=0 pode estar nula. Inspecione '// &
+        '"So_t BRUTO" e "[MED-DIAG] f_sst_atm" no passo 1 antes de '// &
+        'confiar nos fluxos.', ESMF_LOGMSG_WARNING)
+      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
+        value="true", rc=rc)
+      call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
+        value="true", rc=rc)
+      return
+    end if
+    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
+      value="true", rc=rc)
+    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
+      value="false", rc=rc)
+    call ESMF_LogWrite('MED: IDC aguardando So_t do OCN — '// &
+      'nova iteracao do laco de dependencia de dados', ESMF_LOGMSG_INFO)
+  end subroutine idc_wait_for_sst
+
+  !> Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
+  !!
+  !! Primeiro regrid de So_u e So_v para f_uocn_atm/f_vocn_atm, pela rota
+  !! 'ocn2atm' (bilinear, criada na fase A): So_u/So_v compartilham a grade
+  !! OCN de So_t. Depois, a SST de t=0: sem ela, f_sst_atm ficaria no valor
+  !! de bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
+  !! conector MED -> MPAS entregaria essa constante ao MPAS. A SST e'
+  !! publicada no exportState (zerado na fase A), para que o "MED -> MPAS"
+  !! desta mesma passagem entregue SST fisica, e nao zero.
+  subroutine idc_publish_initial_sst(is, importState, exportState, ocn_field)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Field), intent(inout) :: ocn_field
+    integer :: localrc
+
+    call regrid_ocean_currents(is, importState, zero_on_error=.true.)
+
     call is%regrid%apply('ocn2atm', ocn_field, is%f_sst_atm, localrc, &
           zero_total=.true.)
     if (localrc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
         'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)
     else
-      ! Publica a SST de t=0 no exportState (zerado na fase A), de modo que o
-      ! "MED -> MPAS" desta mesma passagem entregue SST fisica, e nao zero.
       call RegridOrCopy(is%f_sst_atm, exportState, "So_t", is, localrc)
       if (localrc /= ESMF_SUCCESS) &
         call ESMF_LogWrite('MED: IDC — RegridOrCopy So_t falhou', &
           ESMF_LOGMSG_WARNING)
     end if
+  end subroutine idc_publish_initial_sst
 
-    ! Carimbar os campos exportados com startTime: e' o que permite ao MPAS
-    ! (e a qualquer consumidor futuro) aplicar o mesmo gate NUOPC_IsAtTime.
+  !> Carimba os campos exportados com startTime: e' o que permite ao MPAS
+  !! (e a qualquer consumidor futuro) aplicar o mesmo gate NUOPC_IsAtTime.
+  subroutine idc_stamp_export(exportState, startTime, rc)
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Time), intent(in) :: startTime
+    integer, intent(inout) :: rc
+    type(ESMF_Field) :: exp_field
+    character(len=64), allocatable :: fieldNameList(:)
+    integer :: fieldCount
+    integer :: i
+    integer :: localrc
+
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
     if (fieldCount > 0) then
       allocate(fieldNameList(fieldCount))
@@ -1298,13 +1379,7 @@ contains
       end do
       deallocate(fieldNameList)
     end if
-
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
-
-    call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED (So_t em t=0)', &
-      ESMF_LOGMSG_INFO)
-  end subroutine InitializeDataComplete
+  end subroutine idc_stamp_export
 
   !============================================================================
   ! MediatorAdvance - com fallback MPAS -> DATM

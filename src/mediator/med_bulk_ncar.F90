@@ -267,7 +267,7 @@ contains
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
     !==========================================================================
-    call blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
+    call blend_albedo_with_ice(is, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
 
     !==========================================================================
     ! Fluxos Fioi_*: mesma forma bulk NCAR de acima, mas com a temperatura
@@ -827,8 +827,24 @@ contains
     end if
   end subroutine log_ice_flux_check
 
-  subroutine blend_albedo_with_ice(is, fptr, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
-    real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
+  !> @brief Onda curta líquida por banda (água aberta e gelo) e albedo de
+  !! banda larga para a atmosfera, com o gelo real do SIS2.
+  !!
+  !! Foxx_swnet_* usa SOMENTE o albedo de agua aberta (Briegleb nas bandas
+  !! diretas, albedo_ocn nas difusas) e vai para o MOM6, que representa so' a
+  !! fracao (1-Si_ifrac) da celula. Fioi_swnet_* usa SOMENTE o albedo do gelo
+  !! por banda (alb_vdr/vdf/idr/idf) e vai para o SIS2 (ver
+  !! sis_cap_MONAN.F90::import_forcing). Com um unico valor calculado pelo
+  !! albedo medio para os dois, o gelo absorveria SW com um albedo mais baixo
+  !! que o seu proprio (contaminado pela agua aberta) e o oceano, com um mais
+  !! alto (contaminado pelo gelo): dupla contabilizacao fisica incorreta em
+  !! qualquer celula com 0 < Si_ifrac < 1. O blend ponderado por Si_ifrac vai
+  !! para is%f_albedo_atm (Sf_albedo): esse composto de banda larga PARA A
+  !! ATMOSFERA e' correto e necessario (a atmosfera so' enxerga uma celula).
+  !!
+  !! Sem a fracao ou os albedos do gelo, usa albedo_ocn constante em toda
+  !! celula (sw_band_fallback).
+  subroutine blend_albedo_with_ice(is, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
     type(MED_InternalState), intent(inout) :: is
     integer, intent(in) :: j1
     integer, intent(in) :: j2
@@ -836,24 +852,13 @@ contains
     integer, intent(in) :: i2
     real(ESMF_KIND_R8), intent(in) :: utc_hour
     real(ESMF_KIND_R8), intent(in) :: decl
-    integer, intent(inout) :: rc
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
     real(ESMF_KIND_R8), intent(in) :: swdn(:,:)
-    real(ESMF_KIND_R8) :: alb_ocn_dir
-    real(ESMF_KIND_R8) :: coszen_ij
-    real(ESMF_KIND_R8) :: hour_angle
-    integer :: i
-    integer :: j
-    real(ESMF_KIND_R8) :: lat_ij
-    real(ESMF_KIND_R8) :: lon_ij
+    integer, intent(inout) :: rc
     real(ESMF_KIND_R8), pointer :: ifr(:,:)
     real(ESMF_KIND_R8), pointer :: alb_vdr(:,:), alb_vdf(:,:)
     real(ESMF_KIND_R8), pointer :: alb_idr(:,:), alb_idf(:,:)
-    real(ESMF_KIND_R8) :: alb_eff, fi
+    real(ESMF_KIND_R8), pointer :: fptr_alb(:,:)
     integer :: rc_alb
-    real(ESMF_KIND_R8), pointer :: fptr_cz(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: fptr_alb(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: fptr_ice2(:,:) => null()
 
     nullify(ifr, alb_vdr, alb_vdf, alb_idr, alb_idf)
     call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=ifr,     rc=rc_alb)
@@ -861,165 +866,166 @@ contains
     call ESMF_FieldGet(is%f_alb_vdf_ice, farrayPtr=alb_vdf, rc=rc_alb)
     call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=alb_idr, rc=rc_alb)
     call ESMF_FieldGet(is%f_alb_idf_ice, farrayPtr=alb_idf, rc=rc_alb)
-    rc_alb = ESMF_SUCCESS
 
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
-
-      ! Foxx_swnet_* usa SOMENTE o albedo de agua aberta (alb_ocn_dir nas
-      ! bandas diretas, albedo_ocn nas difusas) e vai para o MOM6, que
-      ! representa so' a fracao (1-Si_ifrac) da celula. Fioi_swnet_* usa
-      ! SOMENTE o albedo do gelo por banda (alb_vdr/vdf/idr/idf) e vai para o
-      ! SIS2 (ver sis_cap_MONAN.F90::import_forcing). Com um unico valor
-      ! calculado pelo albedo medio alb_eff para os dois, o gelo absorveria SW
-      ! com um albedo mais baixo que o seu proprio (contaminado pela agua
-      ! aberta) e o oceano, com um mais alto (contaminado pelo gelo): dupla
-      ! contabilizacao fisica incorreta em qualquer celula com 0 < Si_ifrac < 1.
-      ! alb_eff (blend ponderado por Si_ifrac) e' acumulado em is%f_albedo_atm
-      ! (Sf_albedo): esse composto de banda larga PARA A ATMOSFERA e' correto e
-      ! necessario (a atmosfera so' enxerga uma celula, nao duas fracoes).
-
-      call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=fptr, rc=rc)
-        call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr_cz, rc=rc)
-        call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
-        call ESMF_FieldGet(is%f_swvdr_ice,  farrayPtr=fptr_ice2, rc=rc)
-        do j=j1,j2; do i=i1,i2
-          fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          ! lat/lon analiticos da grade ATM 360x180 (mesma formula
-          ! usada na criacao da grade em MED_cap.F90::InitializeRealize).
-          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
-                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
-          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/ATM_NY) &
-                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
-          hour_angle = (PI_ZEN/12.0_ESMF_KIND_R8) * (utc_hour + lon_ij/15.0_ESMF_KIND_R8 - 12.0_ESMF_KIND_R8)
-          coszen_ij = sin(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * sin(decl) + &
-                      cos(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * cos(decl) * cos(hour_angle)
-          coszen_ij = max(0.0_ESMF_KIND_R8, coszen_ij)
-          if (associated(fptr_cz)) fptr_cz(i,j) = coszen_ij
-          ! Briegleb et al. (1986); clip coszen>=0.02 evita blowup perto do
-          ! horizonte (celula ja recebe swdn~0 ali de qualquer forma).
-          alb_ocn_dir = 0.026_ESMF_KIND_R8/(max(coszen_ij,0.02_ESMF_KIND_R8)**1.7_ESMF_KIND_R8 + 0.065_ESMF_KIND_R8) &
-                      + 0.15_ESMF_KIND_R8*(max(coszen_ij,0.02_ESMF_KIND_R8)-0.1_ESMF_KIND_R8) &
-                                          *(max(coszen_ij,0.02_ESMF_KIND_R8)-0.5_ESMF_KIND_R8) &
-                                          *(max(coszen_ij,0.02_ESMF_KIND_R8)-1.0_ESMF_KIND_R8)
-          alb_ocn_dir = max(0.03_ESMF_KIND_R8, min(0.99_ESMF_KIND_R8, alb_ocn_dir))
-          ! Foxx_swnet_vdr (MOM6): SOMENTE albedo de agua aberta (Briegleb).
-          fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_ocn_dir) * f_vis_dir
-          ! Fioi_swnet_vdr (SIS2): SOMENTE albedo do gelo por banda.
-          if (associated(fptr_ice2)) &
-            fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_vdr(i,j)) * f_vis_dir
-          ! Sf_albedo (atmosfera): blend ponderado por Si_ifrac.
-          alb_eff = (1.0_ESMF_KIND_R8 - fi) * alb_ocn_dir + fi * alb_vdr(i,j)
-          if (associated(fptr_alb)) fptr_alb(i,j) = f_vis_dir * alb_eff
-        end do; end do
-        rc = ESMF_SUCCESS
-
-      call ESMF_FieldGet(is%f_swvdf_atm, farrayPtr=fptr, rc=rc)
-      nullify(fptr_alb, fptr_ice2)
-        call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
-        call ESMF_FieldGet(is%f_swvdf_ice,  farrayPtr=fptr_ice2, rc=rc)
-        do j=j1,j2; do i=i1,i2
-          fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          ! Banda DIFUSA: mantem albedo_ocn constante (Briegleb e' so' p/ feixe direto).
-          fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_vis_dif
-          if (associated(fptr_ice2)) &
-            fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_vdf(i,j)) * f_vis_dif
-          alb_eff = (1.0_ESMF_KIND_R8 - fi) * albedo_ocn + fi * alb_vdf(i,j)
-          if (associated(fptr_alb)) fptr_alb(i,j) = fptr_alb(i,j) + f_vis_dif * alb_eff
-        end do; end do
-        rc = ESMF_SUCCESS
-
-      call ESMF_FieldGet(is%f_swidr_atm, farrayPtr=fptr, rc=rc)
-      nullify(fptr_alb, fptr_ice2)
-        call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
-        call ESMF_FieldGet(is%f_swidr_ice,  farrayPtr=fptr_ice2, rc=rc)
-        do j=j1,j2; do i=i1,i2
-          fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
-                   + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
-          lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/ATM_NY) &
-                   + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
-          hour_angle = (PI_ZEN/12.0_ESMF_KIND_R8) * (utc_hour + lon_ij/15.0_ESMF_KIND_R8 - 12.0_ESMF_KIND_R8)
-          coszen_ij = sin(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * sin(decl) + &
-                      cos(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * cos(decl) * cos(hour_angle)
-          coszen_ij = max(0.0_ESMF_KIND_R8, coszen_ij)
-          alb_ocn_dir = 0.026_ESMF_KIND_R8/(max(coszen_ij,0.02_ESMF_KIND_R8)**1.7_ESMF_KIND_R8 + 0.065_ESMF_KIND_R8) &
-                      + 0.15_ESMF_KIND_R8*(max(coszen_ij,0.02_ESMF_KIND_R8)-0.1_ESMF_KIND_R8) &
-                                          *(max(coszen_ij,0.02_ESMF_KIND_R8)-0.5_ESMF_KIND_R8) &
-                                          *(max(coszen_ij,0.02_ESMF_KIND_R8)-1.0_ESMF_KIND_R8)
-          alb_ocn_dir = max(0.03_ESMF_KIND_R8, min(0.99_ESMF_KIND_R8, alb_ocn_dir))
-          fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_ocn_dir) * f_nir_dir
-          if (associated(fptr_ice2)) &
-            fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_idr(i,j)) * f_nir_dir
-          alb_eff = (1.0_ESMF_KIND_R8 - fi) * alb_ocn_dir + fi * alb_idr(i,j)
-          if (associated(fptr_alb)) fptr_alb(i,j) = fptr_alb(i,j) + f_nir_dir * alb_eff
-        end do; end do
-        rc = ESMF_SUCCESS
-
-      call ESMF_FieldGet(is%f_swidf_atm, farrayPtr=fptr, rc=rc)
-      nullify(fptr_alb, fptr_ice2)
-        call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
-        call ESMF_FieldGet(is%f_swidf_ice,  farrayPtr=fptr_ice2, rc=rc)
-        do j=j1,j2; do i=i1,i2
-          fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
-          fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_nir_dif
-          if (associated(fptr_ice2)) &
-            fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_idf(i,j)) * f_nir_dif
-          alb_eff = (1.0_ESMF_KIND_R8 - fi) * albedo_ocn + fi * alb_idf(i,j)
-          ! Ultima banda: fptr_alb(i,j) contem o albedo de
-          ! banda larga efetivo completo (soma das 4 contribuicoes ponderadas).
-          if (associated(fptr_alb)) fptr_alb(i,j) = fptr_alb(i,j) + f_nir_dif * alb_eff
-        end do; end do
-        rc = ESMF_SUCCESS
-
+      ! Ordem das bandas: a primeira atribui o albedo de banda larga, as
+      ! demais somam; a ultima deixa em is%f_albedo_atm o albedo efetivo
+      ! completo (soma das 4 contribuicoes ponderadas).
+      call sw_band(is, is%f_swvdr_atm, is%f_swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
+                   alb_vdr, f_vis_dir, .true., .true., utc_hour, decl, rc)
+      call sw_band(is, is%f_swvdf_atm, is%f_swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
+                   alb_vdf, f_vis_dif, .false., .false., utc_hour, decl, rc)
+      call sw_band(is, is%f_swidr_atm, is%f_swidr_ice, j1, j2, i1, i2, swdn, ifr, &
+                   alb_idr, f_nir_dir, .true., .false., utc_hour, decl, rc)
+      call sw_band(is, is%f_swidf_atm, is%f_swidf_ice, j1, j2, i1, i2, swdn, ifr, &
+                   alb_idf, f_nir_dif, .false., .false., utc_hour, decl, rc)
     else
-      ! Fallback: campos de albedo/ifrac do gelo indisponiveis — mantem
-      ! o comportamento antigo (albedo_ocn constante em toda celula) para
-      ! Foxx_swnet_*, e copia o mesmo valor para Fioi_swnet_* (sem dado
-      ! real de gelo, nao ha' base para calcular algo diferente).
+      ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
+      ! mesmo valor em Fioi_swnet_* (nao ha' base para calcular algo
+      ! diferente).
       call ESMF_LogWrite('MED(bulk_ncar): f_ifrac_atm/f_alb_*_ice nao ' // &
         'associados — SW usa albedo_ocn constante (sem Fase 2/4)', &
         ESMF_LOGMSG_WARNING)
-
-      call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=fptr, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_vis_dir
-      end do; end do
-      nullify(fptr_ice2)
-        call ESMF_FieldGet(is%f_swvdr_ice, farrayPtr=fptr_ice2, rc=rc)
-        if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
-
-      call ESMF_FieldGet(is%f_swvdf_atm, farrayPtr=fptr, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_vis_dif
-      end do; end do
-      nullify(fptr_ice2)
-        call ESMF_FieldGet(is%f_swvdf_ice, farrayPtr=fptr_ice2, rc=rc)
-        if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
-
-      call ESMF_FieldGet(is%f_swidr_atm, farrayPtr=fptr, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_nir_dir
-      end do; end do
-      nullify(fptr_ice2)
-        call ESMF_FieldGet(is%f_swidr_ice, farrayPtr=fptr_ice2, rc=rc)
-        if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
-
-      call ESMF_FieldGet(is%f_swidf_atm, farrayPtr=fptr, rc=rc)
-      do j=j1,j2; do i=i1,i2
-        fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * f_nir_dif
-      end do; end do
-      nullify(fptr_ice2)
-        call ESMF_FieldGet(is%f_swidf_ice, farrayPtr=fptr_ice2, rc=rc)
-        if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
-
-      ! sem dado de gelo/zenite -- exporta a constante antiga
-      ! como albedo de banda larga tambem (degrada de forma consistente).
+      call sw_band_fallback(is%f_swvdr_atm, is%f_swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir, rc)
+      call sw_band_fallback(is%f_swvdf_atm, is%f_swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif, rc)
+      call sw_band_fallback(is%f_swidr_atm, is%f_swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir, rc)
+      call sw_band_fallback(is%f_swidf_atm, is%f_swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif, rc)
+      ! Sem dado de gelo nem de zenite, exporta a constante tambem como
+      ! albedo de banda larga (degrada de forma consistente).
       nullify(fptr_alb)
-        call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
-        if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
-        rc = ESMF_SUCCESS
+      call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
+      if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
     end if
+    rc = ESMF_SUCCESS
   end subroutine blend_albedo_with_ice
+
+  !> Uma banda de onda curta com o gelo real: Foxx_swnet (agua aberta),
+  !! Fioi_swnet (gelo) e a contribuicao da banda ao albedo de banda larga.
+  !!
+  !! Nas bandas diretas (direct), o albedo da agua aberta depende do zenite
+  !! solar (ocean_direct_albedo, Briegleb et al. 1986); nas difusas, e' a
+  !! constante albedo_ocn. A banda visivel direta tambem grava o cosseno do
+  !! zenite (is%f_coszen_atm). Na primeira banda (first), o albedo de banda
+  !! larga recebe a contribuicao; nas demais, soma-se a ela.
+  subroutine sw_band(is, f_sw, f_sw_ice, j1, j2, i1, i2, swdn, ifr, alb_ice, frac, &
+                     direct, first, utc_hour, decl, rc)
+    type(MED_InternalState), intent(in) :: is
+    type(ESMF_Field), intent(in) :: f_sw
+    type(ESMF_Field), intent(in) :: f_sw_ice
+    integer, intent(in) :: j1
+    integer, intent(in) :: j2
+    integer, intent(in) :: i1
+    integer, intent(in) :: i2
+    real(ESMF_KIND_R8), intent(in) :: swdn(:,:)
+    real(ESMF_KIND_R8), pointer :: ifr(:,:)
+    real(ESMF_KIND_R8), pointer :: alb_ice(:,:)
+    real(ESMF_KIND_R8), intent(in) :: frac
+    logical, intent(in) :: direct
+    logical, intent(in) :: first
+    real(ESMF_KIND_R8), intent(in) :: utc_hour
+    real(ESMF_KIND_R8), intent(in) :: decl
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: fptr_alb(:,:)
+    real(ESMF_KIND_R8), pointer :: fptr_cz(:,:)
+    real(ESMF_KIND_R8), pointer :: fptr_ice2(:,:)
+    real(ESMF_KIND_R8) :: alb_eff
+    real(ESMF_KIND_R8) :: alb_ocn
+    real(ESMF_KIND_R8) :: coszen_ij
+    real(ESMF_KIND_R8) :: fi
+    integer :: i
+    integer :: j
+
+    nullify(fptr, fptr_alb, fptr_cz, fptr_ice2)
+    call ESMF_FieldGet(f_sw, farrayPtr=fptr, rc=rc)
+    if (direct .and. first) call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr_cz, rc=rc)
+    call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
+    call ESMF_FieldGet(f_sw_ice, farrayPtr=fptr_ice2, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))
+      if (direct) then
+        call ocean_direct_albedo(i, j, utc_hour, decl, coszen_ij, alb_ocn)
+        if (associated(fptr_cz)) fptr_cz(i,j) = coszen_ij
+      else
+        alb_ocn = albedo_ocn
+      end if
+      ! Foxx_swnet (MOM6): SOMENTE albedo de agua aberta.
+      fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_ocn) * frac
+      ! Fioi_swnet (SIS2): SOMENTE albedo do gelo por banda.
+      if (associated(fptr_ice2)) &
+        fptr_ice2(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_ice(i,j)) * frac
+      ! Sf_albedo (atmosfera): blend ponderado por Si_ifrac.
+      alb_eff = (1.0_ESMF_KIND_R8 - fi) * alb_ocn + fi * alb_ice(i,j)
+      if (associated(fptr_alb)) then
+        if (first) then
+          fptr_alb(i,j) = frac * alb_eff
+        else
+          fptr_alb(i,j) = fptr_alb(i,j) + frac * alb_eff
+        end if
+      end if
+    end do; end do
+    rc = ESMF_SUCCESS
+  end subroutine sw_band
+
+  !> Cosseno do zenite solar e albedo da agua aberta para feixe direto na
+  !! celula (i,j) da grade ATM 360x180.
+  !!
+  !! lat/lon analiticos da grade ATM (mesma formula da criacao da grade em
+  !! MED_cap.F90::InitializeRealize). Albedo de Briegleb et al. (1986); o
+  !! corte coszen>=0.02 evita divergencia perto do horizonte (ali a celula
+  !! ja recebe swdn~0), e o resultado fica em [0.03, 0.99].
+  subroutine ocean_direct_albedo(i, j, utc_hour, decl, coszen_ij, alb_ocn_dir)
+    real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
+    integer, intent(in) :: i
+    integer, intent(in) :: j
+    real(ESMF_KIND_R8), intent(in) :: utc_hour
+    real(ESMF_KIND_R8), intent(in) :: decl
+    real(ESMF_KIND_R8), intent(out) :: coszen_ij
+    real(ESMF_KIND_R8), intent(out) :: alb_ocn_dir
+    real(ESMF_KIND_R8) :: hour_angle
+    real(ESMF_KIND_R8) :: lat_ij
+    real(ESMF_KIND_R8) :: lon_ij
+
+    lon_ij = (real(i,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (360.0_ESMF_KIND_R8/ATM_NX) &
+             + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
+    lat_ij = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * (180.0_ESMF_KIND_R8/ATM_NY) &
+             + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
+    hour_angle = (PI_ZEN/12.0_ESMF_KIND_R8) * (utc_hour + lon_ij/15.0_ESMF_KIND_R8 - 12.0_ESMF_KIND_R8)
+    coszen_ij = sin(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * sin(decl) + &
+                cos(lat_ij*PI_ZEN/180.0_ESMF_KIND_R8) * cos(decl) * cos(hour_angle)
+    coszen_ij = max(0.0_ESMF_KIND_R8, coszen_ij)
+    alb_ocn_dir = 0.026_ESMF_KIND_R8/(max(coszen_ij,0.02_ESMF_KIND_R8)**1.7_ESMF_KIND_R8 + 0.065_ESMF_KIND_R8) &
+                + 0.15_ESMF_KIND_R8*(max(coszen_ij,0.02_ESMF_KIND_R8)-0.1_ESMF_KIND_R8) &
+                                    *(max(coszen_ij,0.02_ESMF_KIND_R8)-0.5_ESMF_KIND_R8) &
+                                    *(max(coszen_ij,0.02_ESMF_KIND_R8)-1.0_ESMF_KIND_R8)
+    alb_ocn_dir = max(0.03_ESMF_KIND_R8, min(0.99_ESMF_KIND_R8, alb_ocn_dir))
+  end subroutine ocean_direct_albedo
+
+  !> Uma banda de onda curta sem dado de gelo: albedo_ocn constante em
+  !! Foxx_swnet, e o mesmo valor copiado em Fioi_swnet.
+  subroutine sw_band_fallback(f_sw, f_sw_ice, j1, j2, i1, i2, swdn, frac, rc)
+    type(ESMF_Field), intent(in) :: f_sw
+    type(ESMF_Field), intent(in) :: f_sw_ice
+    integer, intent(in) :: j1
+    integer, intent(in) :: j2
+    integer, intent(in) :: i1
+    integer, intent(in) :: i2
+    real(ESMF_KIND_R8), intent(in) :: swdn(:,:)
+    real(ESMF_KIND_R8), intent(in) :: frac
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: fptr_ice2(:,:)
+    integer :: i
+    integer :: j
+
+    nullify(fptr, fptr_ice2)
+    call ESMF_FieldGet(f_sw, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - albedo_ocn) * frac
+    end do; end do
+    call ESMF_FieldGet(f_sw_ice, farrayPtr=fptr_ice2, rc=rc)
+    if (associated(fptr_ice2)) fptr_ice2(i1:i2,j1:j2) = fptr(i1:i2,j1:j2)
+  end subroutine sw_band_fallback
 
 end module med_bulk_ncar_mod
