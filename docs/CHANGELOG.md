@@ -9,12 +9,22 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Mediador: estado de comunicação e de diagnóstico no estado interno (R-FASE7-01).** Primeira etapa da fase 7 do roteiro de código limpo. Nenhum cálculo muda.
+  - `med_cap_types.F90` passa a ter `private` como padrão, com a lista explícita do que é público: os tipos `MED_InternalState` e `MED_InternalStateWrapper`, as constantes físicas e os parâmetros do bulk e as listas de campos. A constante `u_FILE_u`, sem uso, deixa de ser exportada.
+  - As cinco variáveis de módulo com `save` (`med_mpi_comm`, `med_local_pet`, `med_pet_count`, `med_write_import_diag` e `med_import_diag_dir`) viram os componentes `mpi_comm`, `local_pet`, `pet_count`, `write_import_diag` e `import_diag_dir` do `MED_InternalState`, com os mesmos valores iniciais (-1, `.false.` e `'diag_import'`) e preenchidos no mesmo momento (`InitializeRealize`). O módulo fica sem variáveis.
+  - `med_read_import_config(is)` grava a configuração no estado interno. O comunicador chega por argumento a `gather_atm_forcing`, `allreduce_atm_tile` e `gather_field_global`, e o número de PETs a `define_import_file` (atributo `petCount`); `substitute_native_fluxes` e `gather_ocean_mask` usam o `is` que já recebiam.
+  - Corrigido o comentário de `atm_grid`, que dava a grade ATM como 640×320; ela é 360×180.
+  - Testes: `tests/writers/test_writers.F90` preenche os componentes do estado interno no lugar das variáveis de módulo. Para que uma etapa possa mudar a interface dos gravadores, `compara-gravadores.bash` passa a ligar a versão antiga ao `test_writers.F90` do commit de referência e a nova ao da árvore de trabalho; os dados sintéticos são os mesmos.
+  - Conferências locais: `confere-tudo.bash HEAD` sem falhas; gravadores com os 6 arquivos NetCDF e as mensagens do log iguais byte a byte; constantes de texto iguais.
+  - Indicadores: variáveis de módulo públicas de 5 para 0; as demais contagens não mudam (o maior arquivo, `MED_cap.F90`, passa de 3 379 para 3 381 linhas).
+
 - **Testes com valor esperado da grade do cap atmosférico (R-FASE6-03).** Terceira etapa da fase 6. Nenhum cálculo muda.
   - Novo `tests/unit/test_grade_atm.F90`, com 20 casos, sem MPI, para as duas etapas de cálculo de `map_cells_to_regular_grid`. `bin_cells_local`: duas células na mesma caixa, longitude negativa (coluna 360), latitudes de 90° e -90° (linhas 180 e 1), célula além de `n` ignorada, soma e contagem totais. `fill_empty_bins`: média dos vizinhos preenchidos, vizinha ainda vazia que não conta, caixa recém-preenchida usada na mesma passada, longitude periódica, borda norte, zero passadas e grade toda vazia. Os valores esperados do preenchimento foram calculados em aritmética exata para o campo f(i, j) = i + 1000 j.
   - O teste registra um comportamento atual: na borda norte, a linha 181 vira a própria linha 180, e os vizinhos (i-1, 180) e (i+1, 180) contam duas vezes na média. Mudar isso altera resultados e fica para uma decisão própria.
   - `mpas_cap_methods.F90`: `bin_cells_local` e `fill_empty_bins` passam a ser públicas, para os testes; é a única mudança no fonte (`confere-instrucoes.py`: só a declaração `public`); constantes de texto iguais. `roda-unitarios.bash` passa a ligar também os objetos do cap atmosférico.
   - Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a volta da longitude para [0°, 360°), arredondar a latitude em vez de truncar, mudar a marca 0,5 das caixas preenchidas e ignorar o `n` fizeram o teste falhar, uma de cada vez.
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase6-03-validada`). Com ela, a fase 6 está concluída.
 
 - **Testes com valor esperado das fórmulas da física bulk (R-FASE6-02).** Segunda etapa da fase 6. Nenhum cálculo muda.
   - Novo `tests/unit/test_formulas_bulk.F90`, com 26 casos: `ice_temp_eff` (dentro, nos limites e fora da faixa (180 K; 273,16 K]), `louis_stability` (estável, neutro, instável, piso 0,05 e teto 3 do fator) e `ocean_direct_albedo` (sol a pino, noite, latitudes de 60,5° e 78,5°, declinação de 0,4 rad; piso de 0,03 do albedo). Os valores esperados foram calculados à parte, da fórmula publicada (Louis, 1979; Briegleb et al., 1986), em precisão de 40 algarismos, e a comparação usa tolerância relativa de 1e-12. Diferente dos testes de regressão, que comparam duas versões, estes conferem se o código calcula o que a fórmula diz.

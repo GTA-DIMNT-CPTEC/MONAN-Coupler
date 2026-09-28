@@ -5,7 +5,10 @@
 !!   MED_InternalState, MED_InternalStateWrapper — estado interno ESMF
 !!   Constantes físicas Large & Yeager (2009) — usadas pelo bulk NCAR
 !!   Listas de campos import/export — usadas em Advertise e Advance
-!!   Variáveis de módulo para diagnóstico NetCDF (save, persistem entre chamadas)
+!!
+!! O módulo não tem variáveis: o que muda durante a rodada (comunicador MPI,
+!! PET local e configuração do diagnóstico de importação) fica no estado
+!! interno, MED_InternalState.
 !!
 !! Todos os outros módulos do mediador devem usar este como base:
 !!   use med_cap_types_mod, only: MED_InternalState, rho_air, ...
@@ -17,9 +20,20 @@ module med_cap_types_mod
   use regrid_manager_mod, only : regrid_manager_t
 
   implicit none
-  public
+  private
 
-  character(len=*), parameter :: u_FILE_u = __FILE__
+  public :: MED_InternalState, MED_InternalStateWrapper
+  ! Constantes físicas de coupler_constants_mod, re-exportadas
+  public :: rho_air, Cp_air, L_evap, T_freeze, eps_q
+  public :: es_coef_a, es_coef_b, es_coef_c, sigma_sb
+  ! Parâmetros do bulk e do balanço radiativo
+  public :: Cd_neut, Ch_neut, Ce_neut, albedo_ocn
+  public :: SST_BULK_FALLBACK, SHUM_OCEAN_DEFAULT
+  public :: f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif
+  ! Listas de campos
+  public :: n_import_mpas, import_mpas_names
+  public :: n_import_datm, import_datm_names
+  public :: n_export, export_names
 
   !----------------------------------------------------------------------------
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
@@ -47,7 +61,7 @@ module med_cap_types_mod
   !----------------------------------------------------------------------------
   type :: MED_InternalState
 
-    type(ESMF_Grid) :: atm_grid   !< Grade ATM regular 640×320 para cálculo do bulk
+    type(ESMF_Grid) :: atm_grid   !< Grade ATM regular 360×180 para cálculo do bulk
     type(ESMF_Grid) :: ocn_grid   !< Grade OCN para campos exportados ao oceano
 
     ! Campos internos na grade ATM
@@ -128,6 +142,17 @@ module med_cap_types_mod
     logical :: use_mpas_atm     = .false.   !< .true. = MPAS, .false. = DATM (de use_datm)
     logical :: use_med_to_mpas  = .false.   !< cópia de cfg_use_med_to_mpas
 
+    !> Comunicador MPI e PETs do mediador, obtidos da VM em InitializeRealize.
+    !! Alimentam os MPI_Allreduce coletivos do Advance e do diagnóstico.
+    integer :: mpi_comm  = -1   !< Comunicador MPI do mediador
+    integer :: local_pet = -1   !< PET local
+    integer :: pet_count = -1   !< Número de PETs
+
+    !> Diagnóstico de importação (mom6_output.nml, lido por
+    !! med_read_import_config e usado por med_write_import_fields).
+    logical            :: write_import_diag = .false.
+    character(len=256) :: import_diag_dir   = 'diag_import'
+
   end type MED_InternalState
 
   type :: MED_InternalStateWrapper
@@ -180,15 +205,5 @@ module med_cap_types_mod
     "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", "Fioi_swnet_idf", &  ! onda curta do gelo
     "Sx_tsfc       ", &  ! composto p/ MPAS-A
     "Sx_omask      " ]  ! mascara terra/oceano MOM6 → diag + MPAS
-
-  !----------------------------------------------------------------------------
-  ! Variáveis de módulo para diagnóstico de importação NetCDF (save)
-  ! Inicializadas em med_read_import_config e usadas em med_write_import_fields.
-  !----------------------------------------------------------------------------
-  logical,            save :: med_write_import_diag = .false.
-  character(len=256), save :: med_import_diag_dir   = 'diag_import'
-  integer,            save :: med_mpi_comm  = -1   !< Comunicador MPI do mediador
-  integer,            save :: med_local_pet = -1   !< PET local
-  integer,            save :: med_pet_count = -1   !< Número de PETs
 
 end module med_cap_types_mod

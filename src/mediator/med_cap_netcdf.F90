@@ -18,12 +18,7 @@ module med_cap_netcdf_mod
   use mpi
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
 
-  use med_cap_types_mod, only: MED_InternalState,      &
-                                med_write_import_diag,  &
-                                med_import_diag_dir,    &
-                                med_mpi_comm,           &
-                                med_local_pet,          &
-                                med_pet_count
+  use med_cap_types_mod, only: MED_InternalState
 
   implicit none
   private
@@ -48,8 +43,12 @@ contains
   !! import_diag_dir. Sem essa restrição, o read(nml=...) reportaria ios/=0
   !! ao encontrar outras variáveis do namelist original.
   !! Arquivo lido: mom6_output.nml no diretório de execução.
+  !!
+  !! @param[inout] is  estado interno do mediador (write_import_diag e
+  !!                   import_diag_dir; sem o arquivo, ficam os padrões)
   !============================================================================
-  subroutine med_read_import_config()
+  subroutine med_read_import_config(is)
+    type(MED_InternalState), intent(inout) :: is
 
     logical            :: write_import_diag
     character(len=256) :: import_diag_dir
@@ -78,13 +77,13 @@ contains
     close(unitn)
     if (ios /= 0) return
 
-    ! Escreve nas variáveis de módulo de med_cap_types_mod (save, persistentes)
-    med_write_import_diag = write_import_diag
-    med_import_diag_dir   = trim(import_diag_dir)
+    ! Guarda no estado interno do mediador
+    is%write_import_diag = write_import_diag
+    is%import_diag_dir   = trim(import_diag_dir)
 
     call ESMF_LogWrite( &
       'MED: mom6_output.nml lido — diag import = ' // &
-      merge('T', 'F', med_write_import_diag), ESMF_LOGMSG_INFO)
+      merge('T', 'F', is%write_import_diag), ESMF_LOGMSG_INFO)
 
   end subroutine med_read_import_config
 
@@ -108,7 +107,7 @@ contains
   !!   terra passa a sair como _FillValue em vez de zero, e a própria máscara
   !!   é gravada na variável Sx_omask (1=oceano, 0=terra).
   !!
-  !! Saída: <med_import_diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
+  !! Saída: <is%import_diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
   !!   Dimensões: lat(180), lon(360)  [grade MED interna ATM]
   !!   Variáveis: lat, lon, time + campos Foxx_*/Faxa_*/Sa_*/So_*/Fioi_*/Sx_*
   !!
@@ -140,8 +139,8 @@ contains
     character(len=64),  allocatable :: fieldNameList(:)
 
     rc = ESMF_SUCCESS
-    if (.not. med_write_import_diag) return
-    if (med_mpi_comm == -1) then
+    if (.not. is%write_import_diag) return
+    if (is%mpi_comm == -1) then
       call ESMF_LogWrite(subname//': MPI comm nao inicializado', ESMF_LOGMSG_WARNING)
       return
     end if
@@ -151,7 +150,7 @@ contains
     if (rc /= ESMF_SUCCESS) return
     write(tstamp,'(I4.4,I2.2,I2.2,A1,I2.2,I2.2,I2.2)') yy,mm,dd,'_',hh,mn,ss
 
-    dpath = trim(med_import_diag_dir)
+    dpath = trim(is%import_diag_dir)
     call execute_command_line('mkdir -p '//trim(dpath), wait=.true.)
     fname = trim(dpath)//'/mom6_import_'//trim(tstamp)//'.nc'
 
@@ -175,12 +174,12 @@ contains
     ny_global = ATM_NY
 
     ! PET0: criar arquivo NetCDF, definir variaveis e gravar os eixos
-    if (med_local_pet == 0) then
+    if (is%local_pet == 0) then
       if (.not. nc_create(fname, ncid, subname)) then
         deallocate(fieldNameList); return
       end if
       call define_import_file(ncid, fieldNameList, tstamp, yy, mm, dd, hh, mn, ss, &
-                              nx_global, ny_global, ok)
+                              nx_global, ny_global, is%pet_count, ok)
       if (.not. ok) then
         ios = nf90_close(ncid)
         deallocate(fieldNameList)
@@ -206,7 +205,7 @@ contains
       end if
 
       call gather_field_global(fptr2d, fieldNameList(n), nx_global, ny_global, &
-                               grid_local, grid_global)
+                               is%mpi_comm, grid_local, grid_global)
 
       ! guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
@@ -220,7 +219,7 @@ contains
         where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_VALUE_R8
       end if
 
-      if (med_local_pet == 0) then
+      if (is%local_pet == 0) then
         ios = nf90_inq_varid(ncid, trim(fieldNameList(n)), varid)
         if (ios == NF90_NOERR) ios = nf90_put_var(ncid, varid, real(grid_global, 4))
       end if
@@ -231,7 +230,7 @@ contains
     deallocate(grid_local, grid_global, fieldNameList)
     deallocate(mask_global)
 
-    if (med_local_pet == 0) then
+    if (is%local_pet == 0) then
       ios = nf90_close(ncid)
       call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
     end if
@@ -292,15 +291,17 @@ contains
   !! @param[in]  yy,mm,dd,hh,mn,ss  instante corrente
   !! @param[in]  nx_global      número de longitudes
   !! @param[in]  ny_global      número de latitudes
+  !! @param[in]  pet_count      número de PETs do mediador (atributo petCount)
   !! @param[out] ok             .false. se a definição dos eixos ou o enddef falhou
   !============================================================================
   subroutine define_import_file(ncid, fieldNameList, tstamp, yy, mm, dd, hh, mn, ss, &
-                                nx_global, ny_global, ok)
+                                nx_global, ny_global, pet_count, ok)
     integer,           intent(in)  :: ncid
     character(len=64), allocatable, intent(in) :: fieldNameList(:)
     character(len=*),  intent(in)  :: tstamp
     integer,           intent(in)  :: yy, mm, dd, hh, mn, ss
     integer,           intent(in)  :: nx_global, ny_global
+    integer,           intent(in)  :: pet_count
     logical,           intent(out) :: ok
 
     ! _FillValue NC_FLOAT deve ser real(4) — tipo deve bater com NF90_FLOAT.
@@ -326,7 +327,7 @@ contains
       'variavel Sx_omask (1=oceano, 0=terra)')
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'nx_global', nx_global)
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'ny_global', ny_global)
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'petCount',  med_pet_count)
+    ios = nf90_put_att(ncid, NF90_GLOBAL, 'petCount',  pet_count)
 
     if (.not. nc_def_latlon(ncid, nx_global, ny_global, dimid_lon, dimid_lat, &
                             varid_lon, varid_lat, subname)) return
@@ -424,7 +425,7 @@ contains
     end if
 
     call MPI_Allreduce(mask_local, mask_global, nx_global*ny_global, &
-                       MPI_DOUBLE_PRECISION, MPI_MAX, med_mpi_comm, mpi_ierr)
+                       MPI_DOUBLE_PRECISION, MPI_MAX, is%mpi_comm, mpi_ierr)
     deallocate(mask_local)
 
     ! mask_ok e' decidido DEPOIS do gather, e nao por PET: um PET sem DE
@@ -433,7 +434,7 @@ contains
     ! e' o comportamento anterior. Falhar para o lado de nao apagar dado.
     mask_ok = any(mask_global >= 0.5_ESMF_KIND_R8)
 
-    if (med_local_pet == 0) then
+    if (is%local_pet == 0) then
       if (mask_ok) then
         n_ocn_g = count(mask_global >= 0.5_ESMF_KIND_R8)
         write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
@@ -530,13 +531,15 @@ contains
   !! @param[in]  name         nome do campo
   !! @param[in]  nx_global    número de longitudes
   !! @param[in]  ny_global    número de latitudes
+  !! @param[in]  comm         comunicador MPI do mediador
   !! @param[out] grid_local   buffer de trabalho (fatia local + preenchimento)
   !! @param[out] grid_global  campo global combinado
   !============================================================================
-  subroutine gather_field_global(fptr2d, name, nx_global, ny_global, grid_local, grid_global)
+  subroutine gather_field_global(fptr2d, name, nx_global, ny_global, comm, grid_local, grid_global)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr2d(:,:)
     character(len=*),   intent(in)  :: name
     integer,            intent(in)  :: nx_global, ny_global
+    integer,            intent(in)  :: comm
     real(ESMF_KIND_R8), intent(out) :: grid_local(nx_global, ny_global)
     real(ESMF_KIND_R8), intent(out) :: grid_global(nx_global, ny_global)
 
@@ -560,7 +563,7 @@ contains
 
     ! MPI_Allreduce(MAX): combina subdomínios; descarta fill_val (−9.99e20)
     call MPI_Allreduce(grid_local, grid_global, nx_global*ny_global, &
-                       MPI_DOUBLE_PRECISION, MPI_MAX, med_mpi_comm, mpi_ierr)
+                       MPI_DOUBLE_PRECISION, MPI_MAX, comm, mpi_ierr)
   end subroutine gather_field_global
 
   subroutine put_field_metadata(fieldNameList, n, ios, ncid, varid)

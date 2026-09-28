@@ -62,9 +62,7 @@ module MED_cap_MONAN_mod
                                   es_coef_a, es_coef_b, es_coef_c,    &
                                   sigma_sb, albedo_ocn,               &
                                   SST_BULK_FALLBACK, SHUM_OCEAN_DEFAULT, &
-                                  f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif, &
-                                  med_write_import_diag, med_import_diag_dir, &
-                                  med_mpi_comm, med_local_pet, med_pet_count
+                                  f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField,   &
                                   FillInternalField,                        &
@@ -421,12 +419,12 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Ler a configuração do diagnóstico de importação
-    call med_read_import_config()
+    call med_read_import_config(is)
 
     ! salvar informação MPI do mediador para uso em med_write_import_fields
     !
     ! Não cair para MPI_COMM_WORLD em
-    ! caso de erro. med_mpi_comm alimenta os MPI_Allreduce coletivos de
+    ! caso de erro. is%mpi_comm alimenta os MPI_Allreduce coletivos de
     ! med_write_import_fields. No modo concurrent o MED tem seu próprio
     ! comunicador de componente; substituí-lo silenciosamente por
     ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
@@ -436,8 +434,8 @@ contains
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='MED: falha ESMF_VMGetCurrent em InitializeRealize', &
         line=__LINE__, file=__FILE__)) return
-      call ESMF_VMGet(med_vm, localPet=med_local_pet, petCount=med_pet_count, &
-        mpiCommunicator=med_mpi_comm, rc=rc)
+      call ESMF_VMGet(med_vm, localPet=is%local_pet, petCount=is%pet_count, &
+        mpiCommunicator=is%mpi_comm, rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='MED: falha ESMF_VMGet mpiCommunicator em InitializeRealize', &
         line=__LINE__, file=__FILE__)) return
@@ -1486,7 +1484,7 @@ contains
 
     ! Forcantes reunidos na grade ATM global em todos os PETs do mediador
     call gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
-                            i1, i2, j1, j2,                                    &
+                            i1, i2, j1, j2, is%mpi_comm,                       &
                             uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
                             rain_g, shum_g, snow_g, rc)
 
@@ -1866,17 +1864,19 @@ contains
   !!
   !! @param[in]  uas..snow        forcantes na grade ATM local
   !! @param[in]  i1, i2, j1, j2   limites locais dos forcantes
+  !! @param[in]  comm             comunicador MPI do mediador
   !! @param[out] uas_g..snow_g    forcantes na grade ATM global
   !! @param[inout] rc             codigo de retorno (log_atm_forcing_summary)
   !============================================================================
   subroutine gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
-                                i1, i2, j1, j2,                                    &
+                                i1, i2, j1, j2, comm,                              &
                                 uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
                                 rain_g, shum_g, snow_g, rc)
     real(ESMF_KIND_R8), pointer, intent(in) :: uas(:,:), vas(:,:), tas(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: rain(:,:), shum(:,:), snow(:,:)
     integer,            intent(in)  :: i1, i2, j1, j2
+    integer,            intent(in)  :: comm
     real(ESMF_KIND_R8), allocatable, intent(out) :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
     real(ESMF_KIND_R8), allocatable, intent(out) :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
     real(ESMF_KIND_R8), allocatable, intent(out) :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
@@ -1889,17 +1889,17 @@ contains
     allocate(rain_g(ATM_NX,ATM_NY), shum_g(ATM_NX,ATM_NY), snow_g(ATM_NX,ATM_NY))
     allocate(tmp_local(ATM_NX,ATM_NY))
 
-    call allreduce_atm_tile(uas,  i1, i2, j1, j2, tmp_local, uas_g)
-    call allreduce_atm_tile(vas,  i1, i2, j1, j2, tmp_local, vas_g)
-    call allreduce_atm_tile(tas,  i1, i2, j1, j2, tmp_local, tas_g)
-    call allreduce_atm_tile(psl,  i1, i2, j1, j2, tmp_local, psl_g)
-    call allreduce_atm_tile(swdn, i1, i2, j1, j2, tmp_local, swdn_g)
-    call allreduce_atm_tile(lwdn, i1, i2, j1, j2, tmp_local, lwdn_g)
-    call allreduce_atm_tile(rain, i1, i2, j1, j2, tmp_local, rain_g)
-    call allreduce_atm_tile(shum, i1, i2, j1, j2, tmp_local, shum_g)
+    call allreduce_atm_tile(uas,  i1, i2, j1, j2, comm, tmp_local, uas_g)
+    call allreduce_atm_tile(vas,  i1, i2, j1, j2, comm, tmp_local, vas_g)
+    call allreduce_atm_tile(tas,  i1, i2, j1, j2, comm, tmp_local, tas_g)
+    call allreduce_atm_tile(psl,  i1, i2, j1, j2, comm, tmp_local, psl_g)
+    call allreduce_atm_tile(swdn, i1, i2, j1, j2, comm, tmp_local, swdn_g)
+    call allreduce_atm_tile(lwdn, i1, i2, j1, j2, comm, tmp_local, lwdn_g)
+    call allreduce_atm_tile(rain, i1, i2, j1, j2, comm, tmp_local, rain_g)
+    call allreduce_atm_tile(shum, i1, i2, j1, j2, comm, tmp_local, shum_g)
     ! Onde shum_g=0 (não preenchido) e shum tem fallback, usar SHUM_OCEAN_DEFAULT
     where (shum_g <= 0.0_ESMF_KIND_R8) shum_g = SHUM_OCEAN_DEFAULT
-    call allreduce_atm_tile(snow, i1, i2, j1, j2, tmp_local, snow_g)
+    call allreduce_atm_tile(snow, i1, i2, j1, j2, comm, tmp_local, snow_g)
 
     ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
     ! Espera-se n_nz_uas > 30000 de 64800 celulas (cobertura global).
@@ -1917,12 +1917,14 @@ contains
   !!
   !! @param[in]  src        campo na grade ATM local (limites preservados)
   !! @param[in]  i1, i2, j1, j2  limites locais do tile
+  !! @param[in]  comm       comunicador MPI do mediador
   !! @param[out] tmp_local  buffer de trabalho (1:ATM_NX, 1:ATM_NY)
   !! @param[out] dst        campo global (1:ATM_NX, 1:ATM_NY)
   !============================================================================
-  subroutine allreduce_atm_tile(src, i1, i2, j1, j2, tmp_local, dst)
+  subroutine allreduce_atm_tile(src, i1, i2, j1, j2, comm, tmp_local, dst)
     real(ESMF_KIND_R8), pointer, intent(in) :: src(:,:)
     integer,            intent(in)  :: i1, i2, j1, j2
+    integer,            intent(in)  :: comm
     real(ESMF_KIND_R8), intent(out) :: tmp_local(ATM_NX, ATM_NY)
     real(ESMF_KIND_R8), intent(out) :: dst(ATM_NX, ATM_NY)
 
@@ -1933,7 +1935,7 @@ contains
       if (gi >= 1 .and. gi <= ATM_NX .and. gj >= 1 .and. gj <= ATM_NY) tmp_local(gi,gj) = src(gi,gj)
     end do; end do
     call MPI_Allreduce(tmp_local, dst, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, med_mpi_comm, mpi_ierr_g)
+      MPI_SUM, comm, mpi_ierr_g)
   end subroutine allreduce_atm_tile
 
   !============================================================================
@@ -2603,7 +2605,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, sen_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, med_mpi_comm, ierr2)
+      MPI_SUM, is%mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
@@ -2613,7 +2615,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, lat_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, med_mpi_comm, ierr2)
+      MPI_SUM, is%mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
@@ -2623,7 +2625,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, taux_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, med_mpi_comm, ierr2)
+      MPI_SUM, is%mpi_comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
@@ -2633,7 +2635,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, tauy_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, med_mpi_comm, ierr2)
+      MPI_SUM, is%mpi_comm, ierr2)
 
     call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
     call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr_evap, rc=rc)

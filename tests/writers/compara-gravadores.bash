@@ -4,9 +4,10 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
-# programa test_writers.F90 e o executa com 4 processos MPI e dados
-# sintéticos. O programa chama med_write_import_fields e
-# write_mpas_import_diag duas vezes cada (com e sem membros de atm_bnd,
+# seu programa test_writers.F90 (o de REV na versão antiga, o da árvore de
+# trabalho na nova, para que uma etapa possa mudar a interface dos
+# gravadores) e o executa com 4 processos MPI e dados sintéticos. O
+# programa chama med_write_import_fields e write_mpas_import_diag duas vezes cada (com e sem membros de atm_bnd,
 # com valores inválidos e máscara de terra) e WriteDOCNDiag três vezes
 # (sem e com correntes, gelo em fração e em %, arquivo de SST ausente),
 # com configurações e arquivos de dados próprios. Os arquivos NetCDF gravados e
@@ -41,9 +42,9 @@ OBJS="mpas_stubs.o coupler_utils.o coupler_constants.o coupler_config.o nc_write
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o mpas_atm_types.o
       mpas_cap_netcdf.o med_cap_types.o med_cap_netcdf.o docn_cap_netcdf.o"
 
-# Fontes da versão de referência, extraídos do git
+# Fontes da versão de referência e o seu test_writers.F90, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
-git -C "${RAIZ}" archive "${REV}" src | tar -x -C "${SAIDA}/fonte_antiga" \
+git -C "${RAIZ}" archive "${REV}" src tests/writers/test_writers.F90 | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
 
 for versao in antiga nova; do
@@ -55,7 +56,7 @@ for versao in antiga nova; do
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -I"$(nf-config --includedir)" -ffree-line-length-none -fallow-argument-mismatch \
-      -O2 -ffp-contract=off -c "${RAIZ}/tests/writers/test_writers.F90" -o test_writers.o &&
+      -O2 -ffp-contract=off -c "${src}/tests/writers/test_writers.F90" -o test_writers.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_writers test_writers.o ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \

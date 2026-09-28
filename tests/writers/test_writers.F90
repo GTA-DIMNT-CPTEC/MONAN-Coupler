@@ -7,7 +7,7 @@
 program test_writers
   use ESMF
   use mpi
-  use med_cap_types_mod
+  use med_cap_types_mod, only : MED_InternalState, n_export, export_names
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
   use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock
@@ -32,11 +32,11 @@ program test_writers
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, mpiCommunicator=comm, rc=rc)
 
   ! ── mediador ─────────────────────────────────────────────────────────
-  med_write_import_diag = .true.
-  med_import_diag_dir   = 'out_med'
-  med_mpi_comm  = comm
-  med_local_pet = localPet
-  med_pet_count = petCount
+  is%write_import_diag = .true.
+  is%import_diag_dir   = 'out_med'
+  is%mpi_comm  = comm
+  is%local_pet = localPet
+  is%pet_count = petCount
 
   grid = ESMF_GridCreateNoPeriDim(maxIndex=[360,180], regDecomp=[2,petCount/2], &
            indexflag=ESMF_INDEX_GLOBAL, rc=rc)
