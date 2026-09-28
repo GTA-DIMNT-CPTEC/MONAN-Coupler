@@ -5,7 +5,9 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
-# programa test_mpas_export.F90 e o executa com processos MPI e células
+# seu programa test_mpas_export.F90 (o de REV na versão antiga, o da árvore
+# de trabalho na nova, para que uma etapa possa mudar a interface do cap) e
+# o executa com processos MPI e células
 # sintéticas. O programa chama mpas_export duas vezes, o que exercita
 # state_set_field_1d e map_cells_to_regular_grid (soma e contagem por caixa,
 # soma reprodutível entre PETs, média, preenchimento de caixas vazias e cópia
@@ -43,7 +45,8 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o nc_writer.o mpas_stub
 
 # Fontes da versão de referência, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
-git -C "${RAIZ}" archive "${REV}" src tests/interfaces tools/dev/compila-local.bash \
+git -C "${RAIZ}" archive "${REV}" src tests/interfaces tests/atmgrid/test_mpas_export.F90 \
+  tools/dev/compila-local.bash \
   | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
 
@@ -56,7 +59,7 @@ for versao in antiga nova; do
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
-      -O2 -ffp-contract=off -c "${RAIZ}/tests/atmgrid/test_mpas_export.F90" -o test_mpas_export.o &&
+      -O2 -ffp-contract=off -c "${src}/tests/atmgrid/test_mpas_export.F90" -o test_mpas_export.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_mpas_export test_mpas_export.o ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \

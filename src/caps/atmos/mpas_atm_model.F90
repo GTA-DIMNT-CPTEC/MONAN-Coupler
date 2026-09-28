@@ -859,7 +859,7 @@ contains
     ! mais uma dependencia de namelist so' para um valor de bootstrap.
     atm_bnd%alb          = 0.08_MPAS_RKIND
     ! default 1,0 (tudo oceano) ate a 1a troca real com o
-    ! mediador. Mesmo criterio do fallback de is%f_omask_atm no MED: se a
+    ! mediador. Mesmo criterio do fallback de is%ocn%omask no MED: se a
     ! mascara nao chegar, o diagnostico sai como saia antes (sem mascarar),
     ! em vez de apagar o globo inteiro.
     atm_bnd%omask        = 1.0_MPAS_RKIND

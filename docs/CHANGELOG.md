@@ -9,6 +9,25 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Mediador: estado interno agrupado por assunto (R-FASE7-02).** Segunda etapa da fase 7. Nenhum cálculo muda.
+  - `MED_InternalState` deixa de ser uma lista de 49 componentes soltos e passa a ter seis subtipos, declarados e públicos em `med_cap_types.F90`. A tabela mostra onde foi parar cada componente.
+
+    | Subtipo (componente de `is`) | Conteúdo | Nomes antigos |
+    | --- | --- | --- |
+    | `med_ocn_flux_fields_t` (`is%ocn_flx`) | o que vai para o oceano: fluxos do bulk sobre água aberta (Foxx_*) e campos repassados | `f_taux_atm` a `f_swidf_atm`, `f_rain_atm`, `f_snow_atm`, `f_pslv_atm`, `f_duu10n_atm` |
+    | `med_ocn_fields_t` (`is%ocn`) | estado do oceano na grade ATM | `f_sst_atm`, `f_uocn_atm` e `f_vocn_atm` (agora `u` e `v`), `f_omask_atm`, `landmask_done` (agora `omask_done`) |
+    | `med_ice_fields_t` (`is%ice`) | gelo: fração, temperatura de pele, fluxos Fioi_* e albedos por banda | `f_ifrac_atm`, `f_tice_atm`, `f_*_ice`, `f_alb_*_ice` (agora `alb_*`) |
+    | `med_sfc_fields_t` (`is%sfc`) | superfície vista pela atmosfera | `f_zorl_atm`, `f_coszen_atm`, `f_albedo_atm`, `f_tsfc_atm` |
+    | `med_par_t` (`is%par`) | comunicador MPI e PETs | `mpi_comm` (agora `comm`), `local_pet`, `pet_count` |
+    | `med_diag_config_t` (`is%diag`) | diagnóstico de importação | `write_import_diag` e `import_diag_dir` (agora `write_import` e `import_dir`) |
+
+    As grades (`atm_grid`, `ocn_grid`), as rotas (`regrid`) e as duas opções (`use_mpas_atm`, `use_med_to_mpas`) continuam no primeiro nível. Os comentários de cada campo foram levados para o subtipo. Os campos ficaram agrupados pelo destino (oceano, gelo, atmosfera), e não por tipo de grandeza como previa o roteiro, porque é assim que o `Advance` e a exportação os percorrem.
+  - Saiu o componente `ocn_mask_atm(:,:)`, alocável e sem uso em nenhum fonte.
+  - Primeira rotina que recebe só o que usa: `med_read_import_config(is%diag)`. As demais continuam recebendo `is`; passar só o subtipo necessário acompanha a divisão do `MED_cap.F90` na fase 8.
+  - As constantes de texto não mudam; as mensagens de log que citam os nomes antigos (por exemplo `[MED-DIAG] f_sst_atm`) ficam como estão, porque os scripts de análise as reconhecem.
+  - Testes: `test_bulk_ncar.F90` e `test_writers.F90` usam os nomes novos. Como já feito para os gravadores na R-FASE7-01, `compara-bulk.bash` e `compara-grade-atm.bash` passam a ligar a versão antiga ao programa de teste do commit de referência e a nova ao da árvore de trabalho.
+  - Conferências locais: `confere-tudo.bash HEAD` sem falhas (física bulk, gravadores e grade atmosférica iguais byte a byte; constantes de texto iguais). Indicadores sem mudança.
+
 - **Mediador: estado de comunicação e de diagnóstico no estado interno (R-FASE7-01).** Primeira etapa da fase 7 do roteiro de código limpo. Nenhum cálculo muda.
   - `med_cap_types.F90` passa a ter `private` como padrão, com a lista explícita do que é público: os tipos `MED_InternalState` e `MED_InternalStateWrapper`, as constantes físicas e os parâmetros do bulk e as listas de campos. A constante `u_FILE_u`, sem uso, deixa de ser exportada.
   - As cinco variáveis de módulo com `save` (`med_mpi_comm`, `med_local_pet`, `med_pet_count`, `med_write_import_diag` e `med_import_diag_dir`) viram os componentes `mpi_comm`, `local_pet`, `pet_count`, `write_import_diag` e `import_diag_dir` do `MED_InternalState`, com os mesmos valores iniciais (-1, `.false.` e `'diag_import'`) e preenchidos no mesmo momento (`InitializeRealize`). O módulo fica sem variáveis.
@@ -17,6 +36,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Testes: `tests/writers/test_writers.F90` preenche os componentes do estado interno no lugar das variáveis de módulo. Para que uma etapa possa mudar a interface dos gravadores, `compara-gravadores.bash` passa a ligar a versão antiga ao `test_writers.F90` do commit de referência e a nova ao da árvore de trabalho; os dados sintéticos são os mesmos.
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas; gravadores com os 6 arquivos NetCDF e as mensagens do log iguais byte a byte; constantes de texto iguais.
   - Indicadores: variáveis de módulo públicas de 5 para 0; as demais contagens não mudam (o maior arquivo, `MED_cap.F90`, passa de 3 379 para 3 381 linhas).
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-01-validada`).
 
 - **Testes com valor esperado da grade do cap atmosférico (R-FASE6-03).** Terceira etapa da fase 6. Nenhum cálculo muda.
   - Novo `tests/unit/test_grade_atm.F90`, com 20 casos, sem MPI, para as duas etapas de cálculo de `map_cells_to_regular_grid`. `bin_cells_local`: duas células na mesma caixa, longitude negativa (coluna 360), latitudes de 90° e -90° (linhas 180 e 1), célula além de `n` ignorada, soma e contagem totais. `fill_empty_bins`: média dos vizinhos preenchidos, vizinha ainda vazia que não conta, caixa recém-preenchida usada na mesma passada, longitude periódica, borda norte, zero passadas e grade toda vazia. Os valores esperados do preenchimento foram calculados em aritmética exata para o campo f(i, j) = i + 1000 j.

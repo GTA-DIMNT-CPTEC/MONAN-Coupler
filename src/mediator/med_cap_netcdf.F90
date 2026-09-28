@@ -18,7 +18,7 @@ module med_cap_netcdf_mod
   use mpi
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
 
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, med_diag_config_t
 
   implicit none
   private
@@ -44,11 +44,12 @@ contains
   !! ao encontrar outras variáveis do namelist original.
   !! Arquivo lido: mom6_output.nml no diretório de execução.
   !!
-  !! @param[inout] is  estado interno do mediador (write_import_diag e
-  !!                   import_diag_dir; sem o arquivo, ficam os padrões)
+  !! @param[inout] diag  configuração do diagnóstico de importação do
+  !!                     estado interno (is%diag); sem o arquivo, ficam os
+  !!                     padrões
   !============================================================================
-  subroutine med_read_import_config(is)
-    type(MED_InternalState), intent(inout) :: is
+  subroutine med_read_import_config(diag)
+    type(med_diag_config_t), intent(inout) :: diag
 
     logical            :: write_import_diag
     character(len=256) :: import_diag_dir
@@ -78,12 +79,12 @@ contains
     if (ios /= 0) return
 
     ! Guarda no estado interno do mediador
-    is%write_import_diag = write_import_diag
-    is%import_diag_dir   = trim(import_diag_dir)
+    diag%write_import = write_import_diag
+    diag%import_dir   = trim(import_diag_dir)
 
     call ESMF_LogWrite( &
       'MED: mom6_output.nml lido — diag import = ' // &
-      merge('T', 'F', is%write_import_diag), ESMF_LOGMSG_INFO)
+      merge('T', 'F', diag%write_import), ESMF_LOGMSG_INFO)
 
   end subroutine med_read_import_config
 
@@ -103,11 +104,11 @@ contains
   !! Atributos globais revisados para clareza semântica.
   !!
   !! continentes mascarados com a máscara REAL
-  !!   do MOM6 (ocean_grid%mask2dT → So_omask → is%f_omask_atm). Célula de
+  !!   do MOM6 (ocean_grid%mask2dT → So_omask → is%ocn%omask). Célula de
   !!   terra passa a sair como _FillValue em vez de zero, e a própria máscara
   !!   é gravada na variável Sx_omask (1=oceano, 0=terra).
   !!
-  !! Saída: <is%import_diag_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
+  !! Saída: <is%diag%import_dir>/mom6_import_YYYYMMDD_HHMMSS.nc
   !!   Dimensões: lat(180), lon(360)  [grade MED interna ATM]
   !!   Variáveis: lat, lon, time + campos Foxx_*/Faxa_*/Sa_*/So_*/Fioi_*/Sx_*
   !!
@@ -139,8 +140,8 @@ contains
     character(len=64),  allocatable :: fieldNameList(:)
 
     rc = ESMF_SUCCESS
-    if (.not. is%write_import_diag) return
-    if (is%mpi_comm == -1) then
+    if (.not. is%diag%write_import) return
+    if (is%par%comm == -1) then
       call ESMF_LogWrite(subname//': MPI comm nao inicializado', ESMF_LOGMSG_WARNING)
       return
     end if
@@ -150,7 +151,7 @@ contains
     if (rc /= ESMF_SUCCESS) return
     write(tstamp,'(I4.4,I2.2,I2.2,A1,I2.2,I2.2,I2.2)') yy,mm,dd,'_',hh,mn,ss
 
-    dpath = trim(is%import_diag_dir)
+    dpath = trim(is%diag%import_dir)
     call execute_command_line('mkdir -p '//trim(dpath), wait=.true.)
     fname = trim(dpath)//'/mom6_import_'//trim(tstamp)//'.nc'
 
@@ -174,12 +175,12 @@ contains
     ny_global = ATM_NY
 
     ! PET0: criar arquivo NetCDF, definir variaveis e gravar os eixos
-    if (is%local_pet == 0) then
+    if (is%par%local_pet == 0) then
       if (.not. nc_create(fname, ncid, subname)) then
         deallocate(fieldNameList); return
       end if
       call define_import_file(ncid, fieldNameList, tstamp, yy, mm, dd, hh, mn, ss, &
-                              nx_global, ny_global, is%pet_count, ok)
+                              nx_global, ny_global, is%par%pet_count, ok)
       if (.not. ok) then
         ios = nf90_close(ncid)
         deallocate(fieldNameList)
@@ -205,7 +206,7 @@ contains
       end if
 
       call gather_field_global(fptr2d, fieldNameList(n), nx_global, ny_global, &
-                               is%mpi_comm, grid_local, grid_global)
+                               is%par%comm, grid_local, grid_global)
 
       ! guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
@@ -219,7 +220,7 @@ contains
         where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_VALUE_R8
       end if
 
-      if (is%local_pet == 0) then
+      if (is%par%local_pet == 0) then
         ios = nf90_inq_varid(ncid, trim(fieldNameList(n)), varid)
         if (ios == NF90_NOERR) ios = nf90_put_var(ncid, varid, real(grid_global, 4))
       end if
@@ -230,7 +231,7 @@ contains
     deallocate(grid_local, grid_global, fieldNameList)
     deallocate(mask_global)
 
-    if (is%local_pet == 0) then
+    if (is%par%local_pet == 0) then
       ios = nf90_close(ncid)
       call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
     end if
@@ -386,7 +387,7 @@ contains
   !! exportState permanece com os zeros sobre terra; se -9,99e20 vazasse
   !! para lá, viraria forçante do MOM6.
   !!
-  !! @param[in]  is           estado interno do mediador (campo f_omask_atm)
+  !! @param[in]  is           estado interno do mediador (campo is%ocn%omask)
   !! @param[in]  nx_global    número de longitudes da grade de saída
   !! @param[in]  ny_global    número de latitudes da grade de saída
   !! @param[out] mask_global  máscara global (1=oceano, 0=terra)
@@ -412,9 +413,9 @@ contains
     ! antes de acessar, como ja' e' feito no resto do mediador — senao o
     ! ERROR do ESMF poluiria o log a cada passo nesses PETs.
     ldec_mask = 0
-    call ESMF_FieldGet(is%f_omask_atm, localDeCount=ldec_mask, rc=rc_mask)
+    call ESMF_FieldGet(is%ocn%omask, localDeCount=ldec_mask, rc=rc_mask)
     if (rc_mask == ESMF_SUCCESS .and. ldec_mask > 0) then
-      call ESMF_FieldGet(is%f_omask_atm, farrayPtr=pmask2d, rc=rc_mask)
+      call ESMF_FieldGet(is%ocn%omask, farrayPtr=pmask2d, rc=rc_mask)
       if (rc_mask /= ESMF_SUCCESS) nullify(pmask2d)
     end if
     if (associated(pmask2d)) then
@@ -425,7 +426,7 @@ contains
     end if
 
     call MPI_Allreduce(mask_local, mask_global, nx_global*ny_global, &
-                       MPI_DOUBLE_PRECISION, MPI_MAX, is%mpi_comm, mpi_ierr)
+                       MPI_DOUBLE_PRECISION, MPI_MAX, is%par%comm, mpi_ierr)
     deallocate(mask_local)
 
     ! mask_ok e' decidido DEPOIS do gather, e nao por PET: um PET sem DE
@@ -434,7 +435,7 @@ contains
     ! e' o comportamento anterior. Falhar para o lado de nao apagar dado.
     mask_ok = any(mask_global >= 0.5_ESMF_KIND_R8)
 
-    if (is%local_pet == 0) then
+    if (is%par%local_pet == 0) then
       if (mask_ok) then
         n_ocn_g = count(mask_global >= 0.5_ESMF_KIND_R8)
         write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
@@ -471,40 +472,40 @@ contains
 
     nullify(fptr2d)
     select case (trim(name))
-      case ('Foxx_taux');      call ESMF_FieldGet(is%f_taux_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_tauy');      call ESMF_FieldGet(is%f_tauy_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_sen');       call ESMF_FieldGet(is%f_sen_atm,    farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_evap');      call ESMF_FieldGet(is%f_evap_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_lwnet');     call ESMF_FieldGet(is%f_lwnet_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_vdr'); call ESMF_FieldGet(is%f_swvdr_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_vdf'); call ESMF_FieldGet(is%f_swvdf_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_idr'); call ESMF_FieldGet(is%f_swidr_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_idf'); call ESMF_FieldGet(is%f_swidf_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_rain');      call ESMF_FieldGet(is%f_rain_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_snow');      call ESMF_FieldGet(is%f_snow_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Sa_pslv');        call ESMF_FieldGet(is%f_pslv_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Si_ifrac');       call ESMF_FieldGet(is%f_ifrac_atm,  farrayPtr=fptr2d, rc=rc)
-      case ('So_duu10n');      call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr2d, rc=rc)
-      case ('So_t');           call ESMF_FieldGet(is%f_sst_atm,    farrayPtr=fptr2d, rc=rc)
-      case ('So_u');           call ESMF_FieldGet(is%f_uocn_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('So_v');           call ESMF_FieldGet(is%f_vocn_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Sf_zorl');        call ESMF_FieldGet(is%f_zorl_atm,   farrayPtr=fptr2d, rc=rc)
-      case ('Sf_albedo');      call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_coszen');    call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_taux');      call ESMF_FieldGet(is%f_taux_ice,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_tauy');      call ESMF_FieldGet(is%f_tauy_ice,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_sen');       call ESMF_FieldGet(is%f_sen_ice,    farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_evap');      call ESMF_FieldGet(is%f_evap_ice,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_lwnet');     call ESMF_FieldGet(is%f_lwnet_ice,  farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_taux');      call ESMF_FieldGet(is%ocn_flx%taux,   farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_tauy');      call ESMF_FieldGet(is%ocn_flx%tauy,   farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_sen');       call ESMF_FieldGet(is%ocn_flx%sen,    farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_evap');      call ESMF_FieldGet(is%ocn_flx%evap,   farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_lwnet');     call ESMF_FieldGet(is%ocn_flx%lwnet,  farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_swnet_vdr'); call ESMF_FieldGet(is%ocn_flx%swvdr,  farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_swnet_vdf'); call ESMF_FieldGet(is%ocn_flx%swvdf,  farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_swnet_idr'); call ESMF_FieldGet(is%ocn_flx%swidr,  farrayPtr=fptr2d, rc=rc)
+      case ('Foxx_swnet_idf'); call ESMF_FieldGet(is%ocn_flx%swidf,  farrayPtr=fptr2d, rc=rc)
+      case ('Faxa_rain');      call ESMF_FieldGet(is%ocn_flx%rain,   farrayPtr=fptr2d, rc=rc)
+      case ('Faxa_snow');      call ESMF_FieldGet(is%ocn_flx%snow,   farrayPtr=fptr2d, rc=rc)
+      case ('Sa_pslv');        call ESMF_FieldGet(is%ocn_flx%pslv,   farrayPtr=fptr2d, rc=rc)
+      case ('Si_ifrac');       call ESMF_FieldGet(is%ice%ifrac,  farrayPtr=fptr2d, rc=rc)
+      case ('So_duu10n');      call ESMF_FieldGet(is%ocn_flx%duu10n, farrayPtr=fptr2d, rc=rc)
+      case ('So_t');           call ESMF_FieldGet(is%ocn%sst,    farrayPtr=fptr2d, rc=rc)
+      case ('So_u');           call ESMF_FieldGet(is%ocn%u,   farrayPtr=fptr2d, rc=rc)
+      case ('So_v');           call ESMF_FieldGet(is%ocn%v,   farrayPtr=fptr2d, rc=rc)
+      case ('Sf_zorl');        call ESMF_FieldGet(is%sfc%zorl,   farrayPtr=fptr2d, rc=rc)
+      case ('Sf_albedo');      call ESMF_FieldGet(is%sfc%albedo, farrayPtr=fptr2d, rc=rc)
+      case ('Faxa_coszen');    call ESMF_FieldGet(is%sfc%coszen, farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_taux');      call ESMF_FieldGet(is%ice%taux,   farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_tauy');      call ESMF_FieldGet(is%ice%tauy,   farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_sen');       call ESMF_FieldGet(is%ice%sen,    farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_evap');      call ESMF_FieldGet(is%ice%evap,   farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_lwnet');     call ESMF_FieldGet(is%ice%lwnet,  farrayPtr=fptr2d, rc=rc)
       ! Onda curta sobre gelo (f_sw*_ice, calculados no
       ! med_bulk_ncar) e temperatura de superficie usada pelo bulk sobre gelo.
-      case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%f_swvdr_ice,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%f_swvdf_ice,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%f_swidr_ice,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%f_swidf_ice,  farrayPtr=fptr2d, rc=rc)
-      case ('Sx_tsfc');        call ESMF_FieldGet(is%f_tsfc_atm,   farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%ice%swvdr,  farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%ice%swvdf,  farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%ice%swidr,  farrayPtr=fptr2d, rc=rc)
+      case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%ice%swidf,  farrayPtr=fptr2d, rc=rc)
+      case ('Sx_tsfc');        call ESMF_FieldGet(is%sfc%tsfc,   farrayPtr=fptr2d, rc=rc)
       ! a propria mascara vira variavel do arquivo.
-      case ('Sx_omask');       call ESMF_FieldGet(is%f_omask_atm,  farrayPtr=fptr2d, rc=rc)
+      case ('Sx_omask');       call ESMF_FieldGet(is%ocn%omask,  farrayPtr=fptr2d, rc=rc)
       case default
         call ESMF_LogWrite(subname//': AVISO — campo "'// &
           trim(name)//'" nao tem mapeamento no select case; '// &

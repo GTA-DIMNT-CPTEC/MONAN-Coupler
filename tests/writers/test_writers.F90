@@ -32,27 +32,27 @@ program test_writers
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, mpiCommunicator=comm, rc=rc)
 
   ! ── mediador ─────────────────────────────────────────────────────────
-  is%write_import_diag = .true.
-  is%import_diag_dir   = 'out_med'
-  is%mpi_comm  = comm
-  is%local_pet = localPet
-  is%pet_count = petCount
+  is%diag%write_import = .true.
+  is%diag%import_dir   = 'out_med'
+  is%par%comm  = comm
+  is%par%local_pet = localPet
+  is%par%pet_count = petCount
 
   grid = ESMF_GridCreateNoPeriDim(maxIndex=[360,180], regDecomp=[2,petCount/2], &
            indexflag=ESMF_INDEX_GLOBAL, rc=rc)
   k = 0
-  call mk(is%f_taux_atm);  call mk(is%f_tauy_atm);  call mk(is%f_sen_atm);  call mk(is%f_evap_atm)
-  call mk(is%f_lwnet_atm); call mk(is%f_swvdr_atm); call mk(is%f_swvdf_atm)
-  call mk(is%f_swidr_atm); call mk(is%f_swidf_atm)
-  call mk(is%f_rain_atm);  call mk(is%f_snow_atm);  call mk(is%f_pslv_atm)
-  call mk(is%f_ifrac_atm); call mk(is%f_duu10n_atm); call mk(is%f_sst_atm)
-  call mk(is%f_uocn_atm);  call mk(is%f_vocn_atm);  call mk(is%f_zorl_atm)
-  call mk(is%f_albedo_atm); call mk(is%f_coszen_atm)
-  call mk(is%f_taux_ice);  call mk(is%f_tauy_ice);  call mk(is%f_sen_ice)
-  call mk(is%f_evap_ice);  call mk(is%f_lwnet_ice)
-  call mk(is%f_swvdr_ice); call mk(is%f_swvdf_ice); call mk(is%f_swidr_ice); call mk(is%f_swidf_ice)
-  call mk(is%f_tsfc_atm)
-  call mkmask(is%f_omask_atm)
+  call mk(is%ocn_flx%taux);  call mk(is%ocn_flx%tauy);  call mk(is%ocn_flx%sen);  call mk(is%ocn_flx%evap)
+  call mk(is%ocn_flx%lwnet); call mk(is%ocn_flx%swvdr); call mk(is%ocn_flx%swvdf)
+  call mk(is%ocn_flx%swidr); call mk(is%ocn_flx%swidf)
+  call mk(is%ocn_flx%rain);  call mk(is%ocn_flx%snow);  call mk(is%ocn_flx%pslv)
+  call mk(is%ice%ifrac); call mk(is%ocn_flx%duu10n); call mk(is%ocn%sst)
+  call mk(is%ocn%u);  call mk(is%ocn%v);  call mk(is%sfc%zorl)
+  call mk(is%sfc%albedo); call mk(is%sfc%coszen)
+  call mk(is%ice%taux);  call mk(is%ice%tauy);  call mk(is%ice%sen)
+  call mk(is%ice%evap);  call mk(is%ice%lwnet)
+  call mk(is%ice%swvdr); call mk(is%ice%swvdf); call mk(is%ice%swidr); call mk(is%ice%swidf)
+  call mk(is%sfc%tsfc)
+  call mkmask(is%ocn%omask)
 
   expState = ESMF_StateCreate(name='exp', rc=rc)
   do n = 1, n_export + 1

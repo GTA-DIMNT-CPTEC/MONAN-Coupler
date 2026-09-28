@@ -50,27 +50,27 @@ program test_bulk_ncar
     indexflag=ESMF_INDEX_GLOBAL, rc=rc)
 
   ! Todos os campos que calc_bulk_ncar usa, entradas e saídas
-  call cria(is%f_taux_atm);   call cria(is%f_tauy_atm);   call cria(is%f_sen_atm)
-  call cria(is%f_evap_atm);   call cria(is%f_lwnet_atm);  call cria(is%f_swvdr_atm)
-  call cria(is%f_swvdf_atm);  call cria(is%f_swidr_atm);  call cria(is%f_swidf_atm)
-  call cria(is%f_rain_atm);   call cria(is%f_snow_atm);   call cria(is%f_pslv_atm)
-  call cria(is%f_ifrac_atm);  call cria(is%f_duu10n_atm); call cria(is%f_sst_atm)
-  call cria(is%f_uocn_atm);   call cria(is%f_vocn_atm);   call cria(is%f_zorl_atm)
-  call cria(is%f_coszen_atm); call cria(is%f_albedo_atm); call cria(is%f_tice_atm)
-  call cria(is%f_taux_ice);   call cria(is%f_tauy_ice);   call cria(is%f_sen_ice)
-  call cria(is%f_evap_ice);   call cria(is%f_lwnet_ice);  call cria(is%f_swvdr_ice)
-  call cria(is%f_swvdf_ice);  call cria(is%f_swidr_ice);  call cria(is%f_swidf_ice)
-  call cria(is%f_omask_atm);  call cria(is%f_alb_vdr_ice); call cria(is%f_alb_vdf_ice)
-  call cria(is%f_alb_idr_ice); call cria(is%f_alb_idf_ice)
-  todos = [is%f_taux_atm, is%f_tauy_atm, is%f_sen_atm, is%f_evap_atm, is%f_lwnet_atm, &
-           is%f_swvdr_atm, is%f_swvdf_atm, is%f_swidr_atm, is%f_swidf_atm,           &
-           is%f_rain_atm, is%f_snow_atm, is%f_pslv_atm, is%f_ifrac_atm,              &
-           is%f_duu10n_atm, is%f_sst_atm, is%f_uocn_atm, is%f_vocn_atm,              &
-           is%f_zorl_atm, is%f_coszen_atm, is%f_albedo_atm, is%f_tice_atm,           &
-           is%f_taux_ice, is%f_tauy_ice, is%f_sen_ice, is%f_evap_ice,                &
-           is%f_lwnet_ice, is%f_swvdr_ice, is%f_swvdf_ice, is%f_swidr_ice,           &
-           is%f_swidf_ice, is%f_omask_atm, is%f_alb_vdr_ice, is%f_alb_vdf_ice,       &
-           is%f_alb_idr_ice, is%f_alb_idf_ice]
+  call cria(is%ocn_flx%taux);   call cria(is%ocn_flx%tauy);   call cria(is%ocn_flx%sen)
+  call cria(is%ocn_flx%evap);   call cria(is%ocn_flx%lwnet);  call cria(is%ocn_flx%swvdr)
+  call cria(is%ocn_flx%swvdf);  call cria(is%ocn_flx%swidr);  call cria(is%ocn_flx%swidf)
+  call cria(is%ocn_flx%rain);   call cria(is%ocn_flx%snow);   call cria(is%ocn_flx%pslv)
+  call cria(is%ice%ifrac);  call cria(is%ocn_flx%duu10n); call cria(is%ocn%sst)
+  call cria(is%ocn%u);   call cria(is%ocn%v);   call cria(is%sfc%zorl)
+  call cria(is%sfc%coszen); call cria(is%sfc%albedo); call cria(is%ice%tice)
+  call cria(is%ice%taux);   call cria(is%ice%tauy);   call cria(is%ice%sen)
+  call cria(is%ice%evap);   call cria(is%ice%lwnet);  call cria(is%ice%swvdr)
+  call cria(is%ice%swvdf);  call cria(is%ice%swidr);  call cria(is%ice%swidf)
+  call cria(is%ocn%omask);  call cria(is%ice%alb_vdr); call cria(is%ice%alb_vdf)
+  call cria(is%ice%alb_idr); call cria(is%ice%alb_idf)
+  todos = [is%ocn_flx%taux, is%ocn_flx%tauy, is%ocn_flx%sen, is%ocn_flx%evap, is%ocn_flx%lwnet, &
+           is%ocn_flx%swvdr, is%ocn_flx%swvdf, is%ocn_flx%swidr, is%ocn_flx%swidf,           &
+           is%ocn_flx%rain, is%ocn_flx%snow, is%ocn_flx%pslv, is%ice%ifrac,              &
+           is%ocn_flx%duu10n, is%ocn%sst, is%ocn%u, is%ocn%v,              &
+           is%sfc%zorl, is%sfc%coszen, is%sfc%albedo, is%ice%tice,           &
+           is%ice%taux, is%ice%tauy, is%ice%sen, is%ice%evap,                &
+           is%ice%lwnet, is%ice%swvdr, is%ice%swvdf, is%ice%swidr,           &
+           is%ice%swidf, is%ocn%omask, is%ice%alb_vdr, is%ice%alb_vdf,       &
+           is%ice%alb_idr, is%ice%alb_idf]
 
   importState = ESMF_StateCreate(name='import vazio', rc=rc)
   call ESMF_TimeSet(t0, yy=2026, mm=3, dd=29, h=6, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
@@ -100,27 +100,27 @@ program test_bulk_ncar
       call preenche(todos(n), -1.0d3, 1.0d3)
     end do
     ! ...depois as entradas, em faixas plausíveis
-    call preenche(is%f_sst_atm, 260.0d0, 310.0d0)
-    call preenche(is%f_uocn_atm, -1.0d0, 1.0d0)
-    call preenche(is%f_vocn_atm, -1.0d0, 1.0d0)
-    call preenche(is%f_tice_atm, 150.0d0, 290.0d0)
-    call preenche(is%f_ifrac_atm, -0.5d0, 1.0d0)
-    call preenche(is%f_omask_atm, -0.5d0, 1.0d0)
-    call preenche(is%f_taux_atm, -1.0d0, 1.0d0)
-    call preenche(is%f_tauy_atm, -1.0d0, 1.0d0)
-    call preenche(is%f_alb_vdr_ice, 0.0d0, 1.0d0)
-    call preenche(is%f_alb_vdf_ice, 0.0d0, 1.0d0)
-    call preenche(is%f_alb_idr_ice, 0.0d0, 1.0d0)
-    call preenche(is%f_alb_idf_ice, 0.0d0, 1.0d0)
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p, rc=rc)
+    call preenche(is%ocn%sst, 260.0d0, 310.0d0)
+    call preenche(is%ocn%u, -1.0d0, 1.0d0)
+    call preenche(is%ocn%v, -1.0d0, 1.0d0)
+    call preenche(is%ice%tice, 150.0d0, 290.0d0)
+    call preenche(is%ice%ifrac, -0.5d0, 1.0d0)
+    call preenche(is%ocn%omask, -0.5d0, 1.0d0)
+    call preenche(is%ocn_flx%taux, -1.0d0, 1.0d0)
+    call preenche(is%ocn_flx%tauy, -1.0d0, 1.0d0)
+    call preenche(is%ice%alb_vdr, 0.0d0, 1.0d0)
+    call preenche(is%ice%alb_vdf, 0.0d0, 1.0d0)
+    call preenche(is%ice%alb_idr, 0.0d0, 1.0d0)
+    call preenche(is%ice%alb_idf, 0.0d0, 1.0d0)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p, rc=rc)
     where (p < 0.0d0) p = 0.0d0                      ! um terço sem gelo
     p(lbound(p,1):lbound(p,1)+3, :) = 5.0d-4         ! abaixo do limiar dos Fioi_*
-    call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p, rc=rc)
+    call ESMF_FieldGet(is%ocn%omask, farrayPtr=p, rc=rc)
     p = merge(1.0d0, 0.0d0, p > 0.0d0)               ! terra onde era negativo
-    call ESMF_FieldGet(is%f_tice_atm, farrayPtr=p, rc=rc)
+    call ESMF_FieldGet(is%ice%tice, farrayPtr=p, rc=rc)
     p(:, lbound(p,2)) = 271.35d0                     ! valor padrão do cap do gelo
 
-    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=p, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=p, rc=rc)
     i1 = lbound(p,1); i2 = ubound(p,1); j1 = lbound(p,2); j2 = ubound(p,2)
     call calc_bulk_ncar(is, importState, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                         i1, i2, j1, j2, clock, rc)

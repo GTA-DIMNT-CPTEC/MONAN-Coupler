@@ -75,15 +75,15 @@ contains
   !!   snow_g    — precipitação sólida (opcional) [kg/m²/s]
   !!
   !! Saídas escritas nos campos internos de `is`:
-  !!   f_taux_atm, f_tauy_atm  — tensão de cisalhamento  [Pa]
-  !!   f_sen_atm               — calor sensível          [W/m²]
-  !!   f_evap_atm              — evaporação              [kg/m²/s]
-  !!   f_lwnet_atm             — balanço LW              [W/m²]
-  !!   f_swvdr_atm .. f_swidf_atm — componentes SW       [W/m²]
-  !!   f_rain_atm, f_snow_atm, f_pslv_atm — pass-through
-  !!   f_duu10n_atm            — |V_atm − V_ocn|²        [m²/s²]
-  !!   f_zorl_atm              — rugosidade Charnock+Smith [m]
-  !!   f_ifrac_atm             — fração de gelo (regrid SIS2 ou fallback SST)
+  !!   is%ocn_flx%taux, is%ocn_flx%tauy: tensão de cisalhamento [Pa]
+  !!   is%ocn_flx%sen: calor sensível [W/m²]
+  !!   is%ocn_flx%evap: evaporação [kg/m²/s]
+  !!   is%ocn_flx%lwnet: balanço LW [W/m²]
+  !!   is%ocn_flx%swvdr a is%ocn_flx%swidf: componentes SW [W/m²]
+  !!   is%ocn_flx%rain, is%ocn_flx%snow, is%ocn_flx%pslv: repassados
+  !!   is%ocn_flx%duu10n: |V_atm − V_ocn|² [m²/s²]
+  !!   is%sfc%zorl: rugosidade Charnock+Smith [m]
+  !!   is%ice%ifrac: fração de gelo (regrid SIS2 ou fallback SST)
   !!
   !! @param[inout] is          Estado interno do mediador
   !! @param[inout] importState State de import (Si_ifrac do SIS2 para regrid)
@@ -163,20 +163,20 @@ contains
          - 0.002697_ESMF_KIND_R8 * cos(3.0_ESMF_KIND_R8*gamma_doy) + 0.001480_ESMF_KIND_R8 * sin(3.0_ESMF_KIND_R8*gamma_doy)
 
     ! Obter SST da grade ATM interna (preenchida na seção 3 por regrid OCN→ATM)
-    call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
+    call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
     if (rc /= ESMF_SUCCESS) nullify(sst)
 
     ! Obter correntes oceânicas na grade ATM (preenchidas na seção 3 ou zeros)
-    call ESMF_FieldGet(is%f_uocn_atm, farrayPtr=uocn, rc=rc)
+    call ESMF_FieldGet(is%ocn%u, farrayPtr=uocn, rc=rc)
     if (rc /= ESMF_SUCCESS) nullify(uocn)
-    call ESMF_FieldGet(is%f_vocn_atm, farrayPtr=vocn, rc=rc)
+    call ESMF_FieldGet(is%ocn%v, farrayPtr=vocn, rc=rc)
     if (rc /= ESMF_SUCCESS) nullify(vocn)
     rc = ESMF_SUCCESS
 
     !==========================================================================
     ! Taux = rho * Cd * |V| * u10
     !==========================================================================
-    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
@@ -187,7 +187,7 @@ contains
     !==========================================================================
     ! Tauy = rho * Cd * |V| * v10
     !==========================================================================
-    call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%tauy, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
@@ -197,7 +197,7 @@ contains
     !==========================================================================
     ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
     !==========================================================================
-    call ESMF_FieldGet(is%f_sen_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%sen, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       ! pular células sem tas físico (tas < 100 K = sem dado)
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
@@ -212,7 +212,7 @@ contains
     !==========================================================================
     ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
     !==========================================================================
-    call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%evap, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
       ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
@@ -246,7 +246,7 @@ contains
     !==========================================================================
     ! Balanço LW = lwdn − emissividade·σ·SST⁴
     !==========================================================================
-    call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%lwnet, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       ! pular células sem lwdn real (lwdn=0 indica ausência)
       if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
@@ -261,10 +261,10 @@ contains
     ! Componentes SW: 4 bandas (vis-dir, vis-dif, nir-dir, nir-dif)
     !
     ! O albedo efetivo de cada célula e'
-    ! uma média ponderada pela fração de gelo real (is%f_ifrac_atm,
+    ! uma média ponderada pela fração de gelo real (is%ice%ifrac,
     ! interpolada de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
-    ! (is%f_alb_*_ice, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
+    ! (is%ice%alb_*, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
     ! em sis_cap_MONAN.F90). Com albedo_ocn = 0,06 em toda celula, a absorcao
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
@@ -273,7 +273,7 @@ contains
 
     !==========================================================================
     ! Fluxos Fioi_*: mesma forma bulk NCAR de acima, mas com a temperatura
-    ! de pele REAL do gelo (is%f_tice_atm, interpolada de Si_t_sis2) em vez
+    ! de pele REAL do gelo (is%ice%tice, interpolada de Si_t_sis2) em vez
     ! da SST. Enviar ao SIS2 os mesmos Foxx_* calculados com a SST seria
     ! fisicamente incorreto: a diferenca de temperatura ar-superficie sobre
     ! gelo frio pode ser MUITO maior que ar-SST (a SST fica travada perto do
@@ -309,17 +309,17 @@ contains
     !==========================================================================
     ! Rain, snow, pslv — cópia direta (pass-through para o OCN)
     !==========================================================================
-    call ESMF_FieldGet(is%f_rain_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%rain, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(rain(i,j), 0.0_ESMF_KIND_R8)  ! clamp ≥ 0 (artefato bilinear)
     end do; end do
 
-    call ESMF_FieldGet(is%f_snow_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%snow, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(snow_g(i,j), 0.0_ESMF_KIND_R8)
     end do; end do
 
-    call ESMF_FieldGet(is%f_pslv_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%pslv, farrayPtr=fptr, rc=rc)
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = psl(i,j)
     end do; end do
@@ -341,7 +341,7 @@ contains
     !==========================================================================
     ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS)
     !==========================================================================
-    call ESMF_FieldGet(is%f_duu10n_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%duu10n, farrayPtr=fptr, rc=rc)
     if (associated(uocn) .and. associated(vocn)) then
       do j=j1,j2; do i=i1,i2
         fptr(i,j) = (uas(i,j) - uocn(i,j))**2 + (vas(i,j) - vocn(i,j))**2
@@ -359,7 +359,7 @@ contains
     !==========================================================================
     ! Si_ifrac legado (sem SIS2 dinamico)
     !
-    ! Com cfg_use_sis2_dynamic=.true., a fonte AUTORITATIVA de is%f_ifrac_atm
+    ! Com cfg_use_sis2_dynamic=.true., a fonte AUTORITATIVA de is%ice%ifrac
     ! e' a rota mascarada 'ocn2atm_ice' com extrapolacao, aplicada em
     ! MED_cap.F90 antes desta subrotina, e este bloco fica inativo. Sem SIS2
     ! dinamico, legacy_ice_fraction usa o OISST (use_docn_ice) ou le
@@ -395,15 +395,15 @@ contains
     real(ESMF_KIND_R8) :: sst_eff_if
 
     ! Fonte de Si_ifrac por modo (nuopc.input &nuopc_mode):
-    !   use_docn_ice=T  init_only=F  → is%f_ifrac_atm já preenchida
+    !   use_docn_ice=T  init_only=F  → is%ice%ifrac já preenchida
     !     com OISST por fill_ifrac_from_oisst.
     !     regrid_ok=T pula o regrid e o fallback SST.
-    !   use_docn_ice=T  init_only=T  → idem: is%f_ifrac_atm guarda o OISST
+    !   use_docn_ice=T  init_only=T  → idem: is%ice%ifrac guarda o OISST
     !     de t=0 (com decaimento) de fill_ifrac_from_oisst.
     !   use_docn_ice=F               → Si_ifrac do OCN via importState,
     !     pela rota 'ocn2atm'.
     if (cfg_use_docn_ice) then
-      regrid_ok = .true.   ! is%f_ifrac_atm de fill_ifrac_from_oisst
+      regrid_ok = .true.   ! is%ice%ifrac de fill_ifrac_from_oisst
     else
       regrid_ok = .false.  ! Si_ifrac do OCN via importState
     end if
@@ -412,11 +412,11 @@ contains
       call ESMF_StateGet(importState, itemName="Si_ifrac", &
                          field=f_ifrac_src, rc=rc_if)
       if (rc_if == ESMF_SUCCESS) then
-        call is%regrid%apply('ocn2atm', f_ifrac_src, is%f_ifrac_atm, rc_if, &
+        call is%regrid%apply('ocn2atm', f_ifrac_src, is%ice%ifrac, rc_if, &
           zero_total=.true.)
         if (rc_if == ESMF_SUCCESS) then
           regrid_ok = .true.
-          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=fptr, rc=rc_if)
+          call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
           if (rc_if == ESMF_SUCCESS .and. associated(fptr)) then
             where (fptr < 0.0_ESMF_KIND_R8) fptr = 0.0_ESMF_KIND_R8
             where (fptr > 1.0_ESMF_KIND_R8) fptr = 1.0_ESMF_KIND_R8
@@ -443,7 +443,7 @@ contains
 
     ! Fallback: limiar de SST (.5.2 — condicao mais restritiva)
     if (.not. regrid_ok) then
-      call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=fptr, rc=rc_if)
+      call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
       if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
         ! SST efetiva de cada celula em sst_eff_if, com clamp.
           do j = j1, j2
@@ -487,13 +487,13 @@ contains
     real(ESMF_KIND_R8) :: tau_mag, ustar, z0_charnock, z0_smith, z0_total
     integer :: rc_z
 
-    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=p_taux, rc=rc_z)
-    call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=p_tauy, rc=rc_z)
-    call ESMF_FieldGet(is%f_zorl_atm, farrayPtr=p_zorl, rc=rc_z)
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=p_taux, rc=rc_z)
+    call ESMF_FieldGet(is%ocn_flx%tauy, farrayPtr=p_tauy, rc=rc_z)
+    call ESMF_FieldGet(is%sfc%zorl, farrayPtr=p_zorl, rc=rc_z)
     ! mascara real (So_omask regridada), nao mais
     ! heuristica de SST~=T_FILL_LAND (colidia com agua aberta genuina no
     ! ponto de congelamento, perto da borda do gelo).
-    call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask_z, rc=rc_z)
+    call ESMF_FieldGet(is%ocn%omask, farrayPtr=p_omask_z, rc=rc_z)
 
     if (associated(p_taux) .and. associated(p_tauy) .and. associated(p_zorl)) then
       do j = j1, j2
@@ -530,7 +530,7 @@ contains
   !! temperatura real; ali cada fluxo recebe o valor já calculado para a
   !! água aberta (Foxx_*), em vez de um gradiente de temperatura fictício.
   !!
-  !! Sem f_tice_atm associado, os Fioi_* ficam com o valor inicial.
+  !! Sem is%ice%tice associado, os Fioi_* ficam com o valor inicial.
   !============================================================================
   subroutine compute_ice_fluxes(is, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
     type(MED_InternalState), intent(inout) :: is
@@ -553,33 +553,33 @@ contains
     real(ESMF_KIND_R8), pointer :: f_lwnet_ocn(:,:)
     integer :: rc_ice2
 
-    call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=tice,       rc=rc_ice2)
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifr_g,      rc=rc_ice2)
-    call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=f_taux_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=f_tauy_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=f_sen_ocn,  rc=rc_ice2)
-    call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=f_evap_ocn, rc=rc_ice2)
-    call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=f_lwnet_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%ice%tice,  farrayPtr=tice,       rc=rc_ice2)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=ifr_g,      rc=rc_ice2)
+    call ESMF_FieldGet(is%ocn_flx%taux,  farrayPtr=f_taux_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%ocn_flx%tauy,  farrayPtr=f_tauy_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%ocn_flx%sen,   farrayPtr=f_sen_ocn,  rc=rc_ice2)
+    call ESMF_FieldGet(is%ocn_flx%evap,  farrayPtr=f_evap_ocn, rc=rc_ice2)
+    call ESMF_FieldGet(is%ocn_flx%lwnet, farrayPtr=f_lwnet_ocn, rc=rc_ice2)
 
     if (associated(tice)) then
 
-      call ESMF_FieldGet(is%f_taux_ice, farrayPtr=fptr_ice, rc=rc)
+      call ESMF_FieldGet(is%ice%taux, farrayPtr=fptr_ice, rc=rc)
       call ice_wind_stress(fptr_ice, f_taux_ocn, ifr_g, tice, uas, vas, tas, uas, &
                            i1, i2, j1, j2)
 
-      call ESMF_FieldGet(is%f_tauy_ice, farrayPtr=fptr_ice, rc=rc)
+      call ESMF_FieldGet(is%ice%tauy, farrayPtr=fptr_ice, rc=rc)
       call ice_wind_stress(fptr_ice, f_tauy_ocn, ifr_g, tice, uas, vas, tas, vas, &
                            i1, i2, j1, j2)
 
-      call ESMF_FieldGet(is%f_sen_ice, farrayPtr=fptr_ice, rc=rc)
+      call ESMF_FieldGet(is%ice%sen, farrayPtr=fptr_ice, rc=rc)
       call ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
                              i1, i2, j1, j2)
 
-      call ESMF_FieldGet(is%f_evap_ice, farrayPtr=fptr_ice, rc=rc)
+      call ESMF_FieldGet(is%ice%evap, farrayPtr=fptr_ice, rc=rc)
       call ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
                            i1, i2, j1, j2)
 
-      call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=fptr_ice, rc=rc)
+      call ESMF_FieldGet(is%ice%lwnet, farrayPtr=fptr_ice, rc=rc)
       call ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
 
       call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
@@ -815,9 +815,9 @@ contains
     character(len=250) :: diag_msg9
     integer :: rc
 
-    call ESMF_FieldGet(is%f_sen_ice,   farrayPtr=p_sen_ice,   rc=rc)
-    call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen_ocn,   rc=rc)
-    call ESMF_FieldGet(is%f_lwnet_ice, farrayPtr=p_lwnet_ice, rc=rc)
+    call ESMF_FieldGet(is%ice%sen,   farrayPtr=p_sen_ice,   rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%sen,   farrayPtr=p_sen_ocn,   rc=rc)
+    call ESMF_FieldGet(is%ice%lwnet, farrayPtr=p_lwnet_ice, rc=rc)
     rc = ESMF_SUCCESS
     if (associated(p_sen_ice) .and. associated(p_sen_ocn) .and. &
         associated(p_lwnet_ice)) then
@@ -841,7 +841,7 @@ contains
   !! que o seu proprio (contaminado pela agua aberta) e o oceano, com um mais
   !! alto (contaminado pelo gelo): dupla contabilizacao fisica incorreta em
   !! qualquer celula com 0 < Si_ifrac < 1. O blend ponderado por Si_ifrac vai
-  !! para is%f_albedo_atm (Sf_albedo): esse composto de banda larga PARA A
+  !! para is%sfc%albedo (Sf_albedo): esse composto de banda larga PARA A
   !! ATMOSFERA e' correto e necessario (a atmosfera so' enxerga uma celula).
   !!
   !! Sem a fracao ou os albedos do gelo, usa albedo_ocn constante em toda
@@ -863,24 +863,24 @@ contains
     integer :: rc_alb
 
     nullify(ifr, alb_vdr, alb_vdf, alb_idr, alb_idf)
-    call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=ifr,     rc=rc_alb)
-    call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=alb_vdr, rc=rc_alb)
-    call ESMF_FieldGet(is%f_alb_vdf_ice, farrayPtr=alb_vdf, rc=rc_alb)
-    call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=alb_idr, rc=rc_alb)
-    call ESMF_FieldGet(is%f_alb_idf_ice, farrayPtr=alb_idf, rc=rc_alb)
+    call ESMF_FieldGet(is%ice%ifrac,   farrayPtr=ifr,     rc=rc_alb)
+    call ESMF_FieldGet(is%ice%alb_vdr, farrayPtr=alb_vdr, rc=rc_alb)
+    call ESMF_FieldGet(is%ice%alb_vdf, farrayPtr=alb_vdf, rc=rc_alb)
+    call ESMF_FieldGet(is%ice%alb_idr, farrayPtr=alb_idr, rc=rc_alb)
+    call ESMF_FieldGet(is%ice%alb_idf, farrayPtr=alb_idf, rc=rc_alb)
 
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
       ! Ordem das bandas: a primeira atribui o albedo de banda larga, as
-      ! demais somam; a ultima deixa em is%f_albedo_atm o albedo efetivo
+      ! demais somam; a ultima deixa em is%sfc%albedo o albedo efetivo
       ! completo (soma das 4 contribuicoes ponderadas).
-      call sw_band(is, is%f_swvdr_atm, is%f_swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(is, is%ocn_flx%swvdr, is%ice%swvdr, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdr, f_vis_dir, .true., .true., utc_hour, decl, rc)
-      call sw_band(is, is%f_swvdf_atm, is%f_swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(is, is%ocn_flx%swvdf, is%ice%swvdf, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdf, f_vis_dif, .false., .false., utc_hour, decl, rc)
-      call sw_band(is, is%f_swidr_atm, is%f_swidr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(is, is%ocn_flx%swidr, is%ice%swidr, j1, j2, i1, i2, swdn, ifr, &
                    alb_idr, f_nir_dir, .true., .false., utc_hour, decl, rc)
-      call sw_band(is, is%f_swidf_atm, is%f_swidf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(is, is%ocn_flx%swidf, is%ice%swidf, j1, j2, i1, i2, swdn, ifr, &
                    alb_idf, f_nir_dif, .false., .false., utc_hour, decl, rc)
     else
       ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
@@ -889,14 +889,14 @@ contains
       call ESMF_LogWrite('MED(bulk_ncar): f_ifrac_atm/f_alb_*_ice nao ' // &
         'associados — SW usa albedo_ocn constante (sem Fase 2/4)', &
         ESMF_LOGMSG_WARNING)
-      call sw_band_fallback(is%f_swvdr_atm, is%f_swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir, rc)
-      call sw_band_fallback(is%f_swvdf_atm, is%f_swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif, rc)
-      call sw_band_fallback(is%f_swidr_atm, is%f_swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir, rc)
-      call sw_band_fallback(is%f_swidf_atm, is%f_swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif, rc)
+      call sw_band_fallback(is%ocn_flx%swvdr, is%ice%swvdr, j1, j2, i1, i2, swdn, f_vis_dir, rc)
+      call sw_band_fallback(is%ocn_flx%swvdf, is%ice%swvdf, j1, j2, i1, i2, swdn, f_vis_dif, rc)
+      call sw_band_fallback(is%ocn_flx%swidr, is%ice%swidr, j1, j2, i1, i2, swdn, f_nir_dir, rc)
+      call sw_band_fallback(is%ocn_flx%swidf, is%ice%swidf, j1, j2, i1, i2, swdn, f_nir_dif, rc)
       ! Sem dado de gelo nem de zenite, exporta a constante tambem como
       ! albedo de banda larga (degrada de forma consistente).
       nullify(fptr_alb)
-      call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
+      call ESMF_FieldGet(is%sfc%albedo, farrayPtr=fptr_alb, rc=rc)
       if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
     end if
     rc = ESMF_SUCCESS
@@ -908,7 +908,7 @@ contains
   !! Nas bandas diretas (direct), o albedo da agua aberta depende do zenite
   !! solar (ocean_direct_albedo, Briegleb et al. 1986); nas difusas, e' a
   !! constante albedo_ocn. A banda visivel direta tambem grava o cosseno do
-  !! zenite (is%f_coszen_atm). Na primeira banda (first), o albedo de banda
+  !! zenite (is%sfc%coszen). Na primeira banda (first), o albedo de banda
   !! larga recebe a contribuicao; nas demais, soma-se a ela.
   subroutine sw_band(is, f_sw, f_sw_ice, j1, j2, i1, i2, swdn, ifr, alb_ice, frac, &
                      direct, first, utc_hour, decl, rc)
@@ -941,8 +941,8 @@ contains
 
     nullify(fptr, fptr_alb, fptr_cz, fptr_ice2)
     call ESMF_FieldGet(f_sw, farrayPtr=fptr, rc=rc)
-    if (direct .and. first) call ESMF_FieldGet(is%f_coszen_atm, farrayPtr=fptr_cz, rc=rc)
-    call ESMF_FieldGet(is%f_albedo_atm, farrayPtr=fptr_alb, rc=rc)
+    if (direct .and. first) call ESMF_FieldGet(is%sfc%coszen, farrayPtr=fptr_cz, rc=rc)
+    call ESMF_FieldGet(is%sfc%albedo, farrayPtr=fptr_alb, rc=rc)
     call ESMF_FieldGet(f_sw_ice, farrayPtr=fptr_ice2, rc=rc)
     do j=j1,j2; do i=i1,i2
       fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))

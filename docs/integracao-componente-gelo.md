@@ -205,7 +205,7 @@ O segundo dizia que o `MED -> ICE` fica depois do `OCN` "para que o SIS2 veja o 
 
 O `Si_ifrac_sis2` continua sendo copiado ponto a ponto do componente ICE para o `Si_ifrac` do exportState do mediador. O PK2 não mexeu nisso.
 
-Há uma dúvida concreta aqui que vale investigar no Jaci. O campo `Si_ifrac_sis2` é realizado na grade do oceano, enquanto o `Si_ifrac` do exportState é alimentado a partir de `is%f_ifrac_atm`, que é criado na grade da atmosfera. Se as duas grades tiverem formatos diferentes, a cópia é pulada e sai aviso no log; se tiverem o mesmo formato por coincidência da configuração, a cópia acontece mas mistura grades diferentes.
+Há uma dúvida concreta aqui que vale investigar no Jaci. O campo `Si_ifrac_sis2` é realizado na grade do oceano, enquanto o `Si_ifrac` do exportState é alimentado a partir de `is%ice%ifrac`, que é criado na grade da atmosfera. Se as duas grades tiverem formatos diferentes, a cópia é pulada e sai aviso no log; se tiverem o mesmo formato por coincidência da configuração, a cópia acontece mas mistura grades diferentes.
 
 O PK2 afirma que a mensagem de sobrescrita apareceu em execução, o que sugere que os formatos coincidiram naquele caso. Isso não prova que a cópia esteja correta: prova que a guarda de formato não a impediu.
 

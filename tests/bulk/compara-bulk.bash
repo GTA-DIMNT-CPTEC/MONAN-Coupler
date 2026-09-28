@@ -4,9 +4,11 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
-# programa test_bulk_ncar.F90 e o executa com 4 processos MPI e dados
-# sintéticos. O programa chama calc_bulk_ncar (fluxos sobre a água aberta e
-# sobre o gelo, albedo, rugosidade) três vezes e grava todos os campos do
+# seu programa test_bulk_ncar.F90 (o de REV na versão antiga, o da árvore de
+# trabalho na nova, para que uma etapa possa mudar o estado interno do
+# mediador) e o executa com 4 processos MPI e dados sintéticos. O programa
+# chama calc_bulk_ncar (fluxos sobre a água aberta e sobre o gelo, albedo,
+# rugosidade) três vezes e grava todos os campos do
 # estado interno que ela usa. Os arquivos gravados e as mensagens da física
 # bulk no log do ESMF têm de ser idênticos, bit a bit, nas duas versões.
 #
@@ -39,9 +41,9 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writ
       regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
       med_cap_types.o med_bulk_ncar.o"
 
-# Fontes da versão de referência, extraídos do git
+# Fontes da versão de referência e o seu test_bulk_ncar.F90, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
-git -C "${RAIZ}" archive "${REV}" src | tar -x -C "${SAIDA}/fonte_antiga" \
+git -C "${RAIZ}" archive "${REV}" src tests/bulk/test_bulk_ncar.F90 | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
 
 for versao in antiga nova; do
@@ -53,7 +55,7 @@ for versao in antiga nova; do
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
-      -O2 -ffp-contract=off -c "${RAIZ}/tests/bulk/test_bulk_ncar.F90" -o test_bulk_ncar.o &&
+      -O2 -ffp-contract=off -c "${src}/tests/bulk/test_bulk_ncar.F90" -o test_bulk_ncar.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_bulk_ncar test_bulk_ncar.o ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \

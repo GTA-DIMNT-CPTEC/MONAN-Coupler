@@ -419,12 +419,12 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Ler a configuração do diagnóstico de importação
-    call med_read_import_config(is)
+    call med_read_import_config(is%diag)
 
     ! salvar informação MPI do mediador para uso em med_write_import_fields
     !
     ! Não cair para MPI_COMM_WORLD em
-    ! caso de erro. is%mpi_comm alimenta os MPI_Allreduce coletivos de
+    ! caso de erro. is%par%comm alimenta os MPI_Allreduce coletivos de
     ! med_write_import_fields. No modo concurrent o MED tem seu próprio
     ! comunicador de componente; substituí-lo silenciosamente por
     ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
@@ -434,8 +434,8 @@ contains
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='MED: falha ESMF_VMGetCurrent em InitializeRealize', &
         line=__LINE__, file=__FILE__)) return
-      call ESMF_VMGet(med_vm, localPet=is%local_pet, petCount=is%pet_count, &
-        mpiCommunicator=is%mpi_comm, rc=rc)
+      call ESMF_VMGet(med_vm, localPet=is%par%local_pet, petCount=is%par%pet_count, &
+        mpiCommunicator=is%par%comm, rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='MED: falha ESMF_VMGet mpiCommunicator em InitializeRealize', &
         line=__LINE__, file=__FILE__)) return
@@ -823,107 +823,107 @@ contains
     type(MED_InternalState), pointer :: is
     type(ESMF_Grid), intent(inout) :: atm_grid
     integer, intent(inout) :: rc
-    call CreateInternalField(is%f_taux_atm,   atm_grid, "med_taux",   rc)
-    call CreateInternalField(is%f_tauy_atm,   atm_grid, "med_tauy",   rc)
-    call CreateInternalField(is%f_sen_atm,    atm_grid, "med_sen",    rc)
-    call CreateInternalField(is%f_evap_atm,   atm_grid, "med_evap",   rc)
-    call CreateInternalField(is%f_lwnet_atm,  atm_grid, "med_lwnet",  rc)
-    call CreateInternalField(is%f_swvdr_atm,  atm_grid, "med_swvdr",  rc)
-    call CreateInternalField(is%f_swvdf_atm,  atm_grid, "med_swvdf",  rc)
-    call CreateInternalField(is%f_swidr_atm,  atm_grid, "med_swidr",  rc)
-    call CreateInternalField(is%f_swidf_atm,  atm_grid, "med_swidf",  rc)
-    call CreateInternalField(is%f_rain_atm,   atm_grid, "med_rain",   rc)
-    call CreateInternalField(is%f_snow_atm,   atm_grid, "med_snow",   rc)
-    call CreateInternalField(is%f_pslv_atm,   atm_grid, "med_pslv",   rc)
-    call CreateInternalField(is%f_ifrac_atm,  atm_grid, "med_ifrac",  rc)
+    call CreateInternalField(is%ocn_flx%taux,   atm_grid, "med_taux",   rc)
+    call CreateInternalField(is%ocn_flx%tauy,   atm_grid, "med_tauy",   rc)
+    call CreateInternalField(is%ocn_flx%sen,    atm_grid, "med_sen",    rc)
+    call CreateInternalField(is%ocn_flx%evap,   atm_grid, "med_evap",   rc)
+    call CreateInternalField(is%ocn_flx%lwnet,  atm_grid, "med_lwnet",  rc)
+    call CreateInternalField(is%ocn_flx%swvdr,  atm_grid, "med_swvdr",  rc)
+    call CreateInternalField(is%ocn_flx%swvdf,  atm_grid, "med_swvdf",  rc)
+    call CreateInternalField(is%ocn_flx%swidr,  atm_grid, "med_swidr",  rc)
+    call CreateInternalField(is%ocn_flx%swidf,  atm_grid, "med_swidf",  rc)
+    call CreateInternalField(is%ocn_flx%rain,   atm_grid, "med_rain",   rc)
+    call CreateInternalField(is%ocn_flx%snow,   atm_grid, "med_snow",   rc)
+    call CreateInternalField(is%ocn_flx%pslv,   atm_grid, "med_pslv",   rc)
+    call CreateInternalField(is%ice%ifrac,  atm_grid, "med_ifrac",  rc)
     ! mascara terra/oceano real na grade ATM (1=oceano,
     ! 0=terra). Default 1.0 (oceano) ate' o primeiro regrid de So_omask —
     ! seguro porque so' e' USADA para EXCLUIR terra, nao para validar
     ! oceano; ficar em "tudo oceano" ate' o regrid real e' menos arriscado
     ! do que ficar em "tudo terra" (zeraria fluxos legitimos ate' la').
-    call CreateInternalField(is%f_omask_atm,  atm_grid, "med_omask",  rc)
-    call FillInternalField(is%f_omask_atm, 1.0_ESMF_KIND_R8, rc)
-    call CreateInternalField(is%f_duu10n_atm, atm_grid, "med_duu10n", rc)
-    ! f_sst_atm: campo de SST interpolado para a grade ATM (destino do OCN->ATM)
-    call CreateInternalField(is%f_sst_atm,    atm_grid, "med_sst",    rc)
+    call CreateInternalField(is%ocn%omask,  atm_grid, "med_omask",  rc)
+    call FillInternalField(is%ocn%omask, 1.0_ESMF_KIND_R8, rc)
+    call CreateInternalField(is%ocn_flx%duu10n, atm_grid, "med_duu10n", rc)
+    ! is%ocn%sst: campo de SST interpolado para a grade ATM (destino do OCN->ATM)
+    call CreateInternalField(is%ocn%sst,    atm_grid, "med_sst",    rc)
     ! Correntes oceânicas interpoladas OCN → ATM.
     ! Usadas no cálculo de So_duu10n = |(V_atm − V_ocn)|² (protocolo CMEPS).
-    call CreateInternalField(is%f_uocn_atm,   atm_grid, "med_uocn",   rc)
-    call CreateInternalField(is%f_vocn_atm,   atm_grid, "med_vocn",   rc)
+    call CreateInternalField(is%ocn%u,   atm_grid, "med_uocn",   rc)
+    call CreateInternalField(is%ocn%v,   atm_grid, "med_vocn",   rc)
     ! rugosidade Charnock + Smith — calculada no MED e enviada ao MPAS.
-    call CreateInternalField(is%f_zorl_atm,   atm_grid, "med_zorl",   rc)
+    call CreateInternalField(is%sfc%zorl,   atm_grid, "med_zorl",   rc)
     ! albedo do gelo por banda, regridado do SIS2.
-    call CreateInternalField(is%f_alb_vdr_ice, atm_grid, "med_albvdr_ice", rc)
-    call CreateInternalField(is%f_alb_vdf_ice, atm_grid, "med_albvdf_ice", rc)
-    call CreateInternalField(is%f_alb_idr_ice, atm_grid, "med_albidr_ice", rc)
-    call CreateInternalField(is%f_alb_idf_ice, atm_grid, "med_albidf_ice", rc)
-    call CreateInternalField(is%f_coszen_atm,  atm_grid, "med_coszen",     rc)
-    call CreateInternalField(is%f_albedo_atm,  atm_grid, "med_albedo",     rc)
+    call CreateInternalField(is%ice%alb_vdr, atm_grid, "med_albvdr_ice", rc)
+    call CreateInternalField(is%ice%alb_vdf, atm_grid, "med_albvdf_ice", rc)
+    call CreateInternalField(is%ice%alb_idr, atm_grid, "med_albidr_ice", rc)
+    call CreateInternalField(is%ice%alb_idf, atm_grid, "med_albidf_ice", rc)
+    call CreateInternalField(is%sfc%coszen,  atm_grid, "med_coszen",     rc)
+    call CreateInternalField(is%sfc%albedo,  atm_grid, "med_albedo",     rc)
     ! Temperatura do gelo na grade ATM
-    call CreateInternalField(is%f_tice_atm,    atm_grid, "med_tice",       rc)
+    call CreateInternalField(is%ice%tice,    atm_grid, "med_tice",       rc)
     ! Temperatura composta (Sx_tsfc) e fluxos turbulentos e de onda longa do gelo
-    call CreateInternalField(is%f_tsfc_atm,    atm_grid, "med_tsfc_comp",  rc)
-    call CreateInternalField(is%f_taux_ice,    atm_grid, "med_taux_ice",   rc)
-    call CreateInternalField(is%f_tauy_ice,    atm_grid, "med_tauy_ice",   rc)
-    call CreateInternalField(is%f_sen_ice,     atm_grid, "med_sen_ice",    rc)
-    call CreateInternalField(is%f_evap_ice,    atm_grid, "med_evap_ice",   rc)
-    call CreateInternalField(is%f_lwnet_ice,   atm_grid, "med_lwnet_ice",  rc)
+    call CreateInternalField(is%sfc%tsfc,    atm_grid, "med_tsfc_comp",  rc)
+    call CreateInternalField(is%ice%taux,    atm_grid, "med_taux_ice",   rc)
+    call CreateInternalField(is%ice%tauy,    atm_grid, "med_tauy_ice",   rc)
+    call CreateInternalField(is%ice%sen,     atm_grid, "med_sen_ice",    rc)
+    call CreateInternalField(is%ice%evap,    atm_grid, "med_evap_ice",   rc)
+    call CreateInternalField(is%ice%lwnet,   atm_grid, "med_lwnet_ice",  rc)
     ! Onda curta liquida sobre o gelo, por banda
-    call CreateInternalField(is%f_swvdr_ice,   atm_grid, "med_swvdr_ice",  rc)
-    call CreateInternalField(is%f_swvdf_ice,   atm_grid, "med_swvdf_ice",  rc)
-    call CreateInternalField(is%f_swidr_ice,   atm_grid, "med_swidr_ice",  rc)
-    call CreateInternalField(is%f_swidf_ice,   atm_grid, "med_swidf_ice",  rc)
+    call CreateInternalField(is%ice%swvdr,   atm_grid, "med_swvdr_ice",  rc)
+    call CreateInternalField(is%ice%swvdf,   atm_grid, "med_swvdf_ice",  rc)
+    call CreateInternalField(is%ice%swidr,   atm_grid, "med_swidr_ice",  rc)
+    call CreateInternalField(is%ice%swidf,   atm_grid, "med_swidf_ice",  rc)
 
     ! Zerar campos internos
-    call ZeroInternalField(is%f_taux_atm,   rc)
-    call ZeroInternalField(is%f_tauy_atm,   rc)
-    call ZeroInternalField(is%f_sen_atm,    rc)
-    call ZeroInternalField(is%f_evap_atm,   rc)
-    call ZeroInternalField(is%f_lwnet_atm,  rc)
-    call ZeroInternalField(is%f_swvdr_atm,  rc)
-    call ZeroInternalField(is%f_swvdf_atm,  rc)
-    call ZeroInternalField(is%f_swidr_atm,  rc)
-    call ZeroInternalField(is%f_swidf_atm,  rc)
-    call ZeroInternalField(is%f_rain_atm,   rc)
-    call ZeroInternalField(is%f_snow_atm,   rc)
-    call ZeroInternalField(is%f_pslv_atm,   rc)
-    call ZeroInternalField(is%f_ifrac_atm,  rc)
-    call ZeroInternalField(is%f_duu10n_atm, rc)
+    call ZeroInternalField(is%ocn_flx%taux,   rc)
+    call ZeroInternalField(is%ocn_flx%tauy,   rc)
+    call ZeroInternalField(is%ocn_flx%sen,    rc)
+    call ZeroInternalField(is%ocn_flx%evap,   rc)
+    call ZeroInternalField(is%ocn_flx%lwnet,  rc)
+    call ZeroInternalField(is%ocn_flx%swvdr,  rc)
+    call ZeroInternalField(is%ocn_flx%swvdf,  rc)
+    call ZeroInternalField(is%ocn_flx%swidr,  rc)
+    call ZeroInternalField(is%ocn_flx%swidf,  rc)
+    call ZeroInternalField(is%ocn_flx%rain,   rc)
+    call ZeroInternalField(is%ocn_flx%snow,   rc)
+    call ZeroInternalField(is%ocn_flx%pslv,   rc)
+    call ZeroInternalField(is%ice%ifrac,  rc)
+    call ZeroInternalField(is%ocn_flx%duu10n, rc)
     ! fallback nao-zero (mesmo valor de ALBEDO_ICE_FALLBACK em
     ! sis_cap_MONAN.F90) ate o primeiro regrid real do gelo — evita
     ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
     ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
-    call FillInternalField(is%f_alb_vdr_ice, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%f_alb_vdf_ice, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%f_alb_idr_ice, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%f_alb_idf_ice, 0.65_ESMF_KIND_R8, rc)
-    call ZeroInternalField(is%f_coszen_atm, rc)
-    call FillInternalField(is%f_albedo_atm, 0.08_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%alb_vdr, 0.65_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%alb_vdf, 0.65_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%alb_idr, 0.65_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%alb_idf, 0.65_ESMF_KIND_R8, rc)
+    call ZeroInternalField(is%sfc%coszen, rc)
+    call FillInternalField(is%sfc%albedo, 0.08_ESMF_KIND_R8, rc)
     ! T_gelo default = ponto de congelamento da agua do mar; fluxos
     ! turbulentos do gelo comecam zerados ate o 1o calc_bulk_ncar real.
-    call FillInternalField(is%f_tice_atm,   271.35_ESMF_KIND_R8, rc)
-    call FillInternalField(is%f_tsfc_atm,   271.35_ESMF_KIND_R8, rc)
-    call ZeroInternalField(is%f_taux_ice,  rc)
-    call ZeroInternalField(is%f_tauy_ice,  rc)
-    call ZeroInternalField(is%f_sen_ice,   rc)
-    call ZeroInternalField(is%f_evap_ice,  rc)
-    call ZeroInternalField(is%f_lwnet_ice, rc)
+    call FillInternalField(is%ice%tice,   271.35_ESMF_KIND_R8, rc)
+    call FillInternalField(is%sfc%tsfc,   271.35_ESMF_KIND_R8, rc)
+    call ZeroInternalField(is%ice%taux,  rc)
+    call ZeroInternalField(is%ice%tauy,  rc)
+    call ZeroInternalField(is%ice%sen,   rc)
+    call ZeroInternalField(is%ice%evap,  rc)
+    call ZeroInternalField(is%ice%lwnet, rc)
     ! comeca zerado ate o 1o calc_bulk_ncar real,
-    ! mesma logica de f_sen_ice/f_lwnet_ice acima.
-    call ZeroInternalField(is%f_swvdr_ice, rc)
-    call ZeroInternalField(is%f_swvdf_ice, rc)
-    call ZeroInternalField(is%f_swidr_ice, rc)
-    call ZeroInternalField(is%f_swidf_ice, rc)
+    ! mesma logica de is%ice%sen/is%ice%lwnet acima.
+    call ZeroInternalField(is%ice%swvdr, rc)
+    call ZeroInternalField(is%ice%swvdf, rc)
+    call ZeroInternalField(is%ice%swidr, rc)
+    call ZeroInternalField(is%ice%swidf, rc)
     ! Inicializa SST com valor padrao (nao zero, para evitar bulk erratico no t=0)
-    call FillInternalField(is%f_sst_atm, SST_BULK_FALLBACK, rc)
+    call FillInternalField(is%ocn%sst, SST_BULK_FALLBACK, rc)
     ! Valor de bootstrap: será substituído no primeiro passo pelo So_t do DOCN/MOM6.
     ! correntes oceânicas inicializadas a zero (oceano em repouso).
     ! Serão regridadas de So_u/So_v a partir do primeiro passo de acoplamento.
-    call ZeroInternalField(is%f_uocn_atm, rc)
-    call ZeroInternalField(is%f_vocn_atm, rc)
+    call ZeroInternalField(is%ocn%u, rc)
+    call ZeroInternalField(is%ocn%v, rc)
     ! rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
     ! Substituida no primeiro passo pela parametrizacao Charnock no bulk NCAR.
-    call FillInternalField(is%f_zorl_atm, 0.01_ESMF_KIND_R8, rc)
+    call FillInternalField(is%sfc%zorl, 0.01_ESMF_KIND_R8, rc)
   end subroutine create_internal_fields
 
   subroutine check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
@@ -1154,7 +1154,7 @@ contains
   end subroutine idc_check_atm_field
 
   !> Fase A de InitializeDataComplete: cria as rotas 'atm2ocn' (de
-  !! is%f_taux_atm para exp_field, na grade OCN) e 'ocn2atm', interpola as
+  !! is%ocn_flx%taux para exp_field, na grade OCN) e 'ocn2atm', interpola as
   !! correntes e preenche o exportState com valores iniciais. Roda uma unica
   !! vez (enquanto a rota 'ocn2atm' nao existe).
   subroutine idc_create_routes(is, importState, exportState, exp_field, rc)
@@ -1166,14 +1166,14 @@ contains
     type(ESMF_Field) :: ocn_field
 
     if (.not. is%regrid%has('atm2ocn')) then
-      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), is%f_taux_atm, exp_field, rc)
+      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), is%ocn_flx%taux, exp_field, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
 
     ! So_t está na grade OCN (ver InitializeRealize)
     call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call is%regrid%add('ocn2atm', regrid_spec('bilinear'), ocn_field, is%f_sst_atm, rc)
+    call is%regrid%add('ocn2atm', regrid_spec('bilinear'), ocn_field, is%ocn%sst, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
@@ -1324,9 +1324,9 @@ contains
 
   !> Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
   !!
-  !! Primeiro regrid de So_u e So_v para f_uocn_atm/f_vocn_atm, pela rota
+  !! Primeiro regrid de So_u e So_v para is%ocn%u/is%ocn%v, pela rota
   !! 'ocn2atm' (bilinear, criada na fase A): So_u/So_v compartilham a grade
-  !! OCN de So_t. Depois, a SST de t=0: sem ela, f_sst_atm ficaria no valor
+  !! OCN de So_t. Depois, a SST de t=0: sem ela, is%ocn%sst ficaria no valor
   !! de bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
   !! conector MED -> MPAS entregaria essa constante ao MPAS. A SST e'
   !! publicada no exportState (zerado na fase A), para que o "MED -> MPAS"
@@ -1340,13 +1340,13 @@ contains
 
     call regrid_ocean_currents(is, importState, zero_on_error=.true.)
 
-    call is%regrid%apply('ocn2atm', ocn_field, is%f_sst_atm, localrc, &
+    call is%regrid%apply('ocn2atm', ocn_field, is%ocn%sst, localrc, &
           zero_total=.true.)
     if (localrc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
         'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)
     else
-      call RegridOrCopy(is%f_sst_atm, exportState, "So_t", is, localrc)
+      call RegridOrCopy(is%ocn%sst, exportState, "So_t", is, localrc)
       if (localrc /= ESMF_SUCCESS) &
         call ESMF_LogWrite('MED: IDC — RegridOrCopy So_t falhou', &
           ESMF_LOGMSG_WARNING)
@@ -1451,7 +1451,7 @@ contains
     ! O atm_grid do MED tem um DE por PET (grid_regdecomp); a guarda abaixo
     ! protege PETs sem DE local, que não podem acessar campos internos via
     ! farrayPtr.
-    call ESMF_FieldGet(is%f_taux_atm, localDeCount=localDeCount_med, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%taux, localDeCount=localDeCount_med, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     if (localDeCount_med == 0) then
       ! PET sem DE local: participar nas operações MPI coletivas dentro de
@@ -1484,13 +1484,13 @@ contains
 
     ! Forcantes reunidos na grade ATM global em todos os PETs do mediador
     call gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
-                            i1, i2, j1, j2, is%mpi_comm,                       &
+                            i1, i2, j1, j2, is%par%comm,                       &
                             uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
                             rain_g, shum_g, snow_g, rc)
 
     ! Os arrays globais cobrem 1..ATM_NX, 1..ATM_NY; os campos internos
-    ! (is%f_*_atm) tem os limites LOCAIS da DE do PET. O bulk percorre os
-    ! limites locais, acessando os arrays globais nas mesmas coordenadas.
+    ! (is%ocn_flx%*, is%ice%* etc.) tem os limites LOCAIS da DE do PET. O
+    ! bulk percorre os limites locais, acessando os arrays globais nas mesmas coordenadas.
     call local_atm_bounds(is, i1, i2, j1, j2, rc)
 
     !==========================================================================
@@ -1523,7 +1523,7 @@ contains
     ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
     ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
-    ! use_docn_ice=F: is%f_ifrac_atm fica como saiu da secao 3
+    ! use_docn_ice=F: is%ice%ifrac fica como saiu da secao 3
 
     !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
@@ -1941,7 +1941,7 @@ contains
   !============================================================================
   !> @brief Limites locais da DE dos campos internos, restritos a grade ATM global.
   !!
-  !! Obtidos de is%f_taux_atm (mesma decomposicao para todos os campos
+  !! Obtidos de is%ocn_flx%taux (mesma decomposicao para todos os campos
   !! internos). Em PET sem DE local, limites vazios: os laces nao executam.
   !!
   !! @param[in]    is              estado interno do mediador
@@ -1956,7 +1956,7 @@ contains
     real(ESMF_KIND_R8), pointer :: fpt_probe(:,:)
 
     nullify(fpt_probe)
-    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fpt_probe, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=fpt_probe, rc=rc)
     if (rc == ESMF_SUCCESS .and. associated(fpt_probe)) then
       i1 = lbound(fpt_probe,1); i2 = ubound(fpt_probe,1)
       j1 = lbound(fpt_probe,2); j2 = ubound(fpt_probe,2)
@@ -2076,60 +2076,60 @@ contains
     integer, intent(inout) :: rc
     integer :: rc_sst
     real(ESMF_KIND_R8), pointer :: sst_diag(:,:)
-    if (.not. is%landmask_done) then
+    if (.not. is%ocn%omask_done) then
       call regrid_land_mask(is, importState)
     end if
     ! (So_omask e' estatico no tempo -- uma vez regridada corretamente na
-    ! 1a chamada, is%f_omask_atm permanece valida sem precisar refazer o
+    ! 1a chamada, is%ocn%omask permanece valida sem precisar refazer o
     ! regrid a cada passo.)
 
     call zero_fluxes_over_land(is, rc)
 
-    call RegridOrCopy(is%f_taux_atm,   exportState, "Foxx_taux",      is, rc)
-    call RegridOrCopy(is%f_tauy_atm,   exportState, "Foxx_tauy",      is, rc)
-    call RegridOrCopy(is%f_sen_atm,    exportState, "Foxx_sen",       is, rc)
-    call RegridOrCopy(is%f_evap_atm,   exportState, "Foxx_evap",      is, rc)
-    call RegridOrCopy(is%f_lwnet_atm,  exportState, "Foxx_lwnet",     is, rc)
-    call RegridOrCopy(is%f_swvdr_atm,  exportState, "Foxx_swnet_vdr", is, rc)
-    call RegridOrCopy(is%f_swvdf_atm,  exportState, "Foxx_swnet_vdf", is, rc)
-    call RegridOrCopy(is%f_swidr_atm,  exportState, "Foxx_swnet_idr", is, rc)
-    call RegridOrCopy(is%f_swidf_atm,  exportState, "Foxx_swnet_idf", is, rc)
-    call RegridOrCopy(is%f_rain_atm,   exportState, "Faxa_rain",      is, rc)
-    call RegridOrCopy(is%f_snow_atm,   exportState, "Faxa_snow",      is, rc)
-    call RegridOrCopy(is%f_pslv_atm,   exportState, "Sa_pslv",        is, rc)
+    call RegridOrCopy(is%ocn_flx%taux,   exportState, "Foxx_taux",      is, rc)
+    call RegridOrCopy(is%ocn_flx%tauy,   exportState, "Foxx_tauy",      is, rc)
+    call RegridOrCopy(is%ocn_flx%sen,    exportState, "Foxx_sen",       is, rc)
+    call RegridOrCopy(is%ocn_flx%evap,   exportState, "Foxx_evap",      is, rc)
+    call RegridOrCopy(is%ocn_flx%lwnet,  exportState, "Foxx_lwnet",     is, rc)
+    call RegridOrCopy(is%ocn_flx%swvdr,  exportState, "Foxx_swnet_vdr", is, rc)
+    call RegridOrCopy(is%ocn_flx%swvdf,  exportState, "Foxx_swnet_vdf", is, rc)
+    call RegridOrCopy(is%ocn_flx%swidr,  exportState, "Foxx_swnet_idr", is, rc)
+    call RegridOrCopy(is%ocn_flx%swidf,  exportState, "Foxx_swnet_idf", is, rc)
+    call RegridOrCopy(is%ocn_flx%rain,   exportState, "Faxa_rain",      is, rc)
+    call RegridOrCopy(is%ocn_flx%snow,   exportState, "Faxa_snow",      is, rc)
+    call RegridOrCopy(is%ocn_flx%pslv,   exportState, "Sa_pslv",        is, rc)
     ! Si_ifrac e' exportado SEM o RegridOrCopy generico, que faria a perna
     ! ATM->OCN pela rota 'atm2ocn' (NEAREST_STOD, zeroregion=TOTAL, sem
     ! mascara nem extrapolacao) e deixaria zeradas as celulas nao mapeadas
     ! perto da dobra tripolar: manchas isoladas em vez de calota continua,
-    ! mesmo com is%f_ifrac_atm correto. export_ice_fraction usa a rota
+    ! mesmo com is%ice%ifrac correto. export_ice_fraction usa a rota
     ! conservativa 'atm2ocn_ice' e extrapola por vizinhanca.
     call export_ice_fraction(is, exportState, rc)
-    call RegridOrCopy(is%f_duu10n_atm, exportState, "So_duu10n",      is, rc)
-    ! Mascara terra/oceano REAL do MOM6 no exportState. is%f_omask_atm ja'
+    call RegridOrCopy(is%ocn_flx%duu10n, exportState, "So_duu10n",      is, rc)
+    ! Mascara terra/oceano REAL do MOM6 no exportState. is%ocn%omask ja'
     ! esta' pronta neste ponto (regridada uma unica vez logo acima). Aqui ela
     ! segue para o conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
-    ! mom6_import_*.nc NAO passa por este caminho — le is%f_omask_atm
+    ! mom6_import_*.nc NAO passa por este caminho — le is%ocn%omask
     ! diretamente na grade ATM (med_cap_netcdf.F90), evitando o ida-e-volta
     ! ATM->OCN->Voronoi. O corte binario fica sempre no consumidor final,
     ! nunca no meio do caminho, para nao criar escadinha na linha de costa.
-    call RegridOrCopy(is%f_omask_atm,  exportState, "Sx_omask",       is, rc)
-    call RegridOrCopy(is%f_coszen_atm, exportState, "Faxa_coszen",    is, rc)  ! angulo zenital solar -> SIS2
-    call RegridOrCopy(is%f_albedo_atm, exportState, "Sf_albedo",      is, rc)  ! albedo de banda larga -> MPAS
+    call RegridOrCopy(is%ocn%omask,  exportState, "Sx_omask",       is, rc)
+    call RegridOrCopy(is%sfc%coszen, exportState, "Faxa_coszen",    is, rc)  ! angulo zenital solar -> SIS2
+    call RegridOrCopy(is%sfc%albedo, exportState, "Sf_albedo",      is, rc)  ! albedo de banda larga -> MPAS
     ! Fluxos turbulentos e de onda longa sobre o gelo -> SIS2
-    call RegridOrCopy(is%f_taux_ice,   exportState, "Fioi_taux",      is, rc)
-    call RegridOrCopy(is%f_tauy_ice,   exportState, "Fioi_tauy",      is, rc)
-    call RegridOrCopy(is%f_sen_ice,    exportState, "Fioi_sen",       is, rc)
-    call RegridOrCopy(is%f_evap_ice,   exportState, "Fioi_evap",      is, rc)
-    call RegridOrCopy(is%f_lwnet_ice,  exportState, "Fioi_lwnet",     is, rc)
+    call RegridOrCopy(is%ice%taux,   exportState, "Fioi_taux",      is, rc)
+    call RegridOrCopy(is%ice%tauy,   exportState, "Fioi_tauy",      is, rc)
+    call RegridOrCopy(is%ice%sen,    exportState, "Fioi_sen",       is, rc)
+    call RegridOrCopy(is%ice%evap,   exportState, "Fioi_evap",      is, rc)
+    call RegridOrCopy(is%ice%lwnet,  exportState, "Fioi_lwnet",     is, rc)
     ! Onda curta liquida sobre o gelo, por banda -> SIS2
-    call RegridOrCopy(is%f_swvdr_ice,  exportState, "Fioi_swnet_vdr", is, rc)
-    call RegridOrCopy(is%f_swvdf_ice,  exportState, "Fioi_swnet_vdf", is, rc)
-    call RegridOrCopy(is%f_swidr_ice,  exportState, "Fioi_swnet_idr", is, rc)
-    call RegridOrCopy(is%f_swidf_ice,  exportState, "Fioi_swnet_idf", is, rc)
+    call RegridOrCopy(is%ice%swvdr,  exportState, "Fioi_swnet_vdr", is, rc)
+    call RegridOrCopy(is%ice%swvdf,  exportState, "Fioi_swnet_vdf", is, rc)
+    call RegridOrCopy(is%ice%swidr,  exportState, "Fioi_swnet_idr", is, rc)
+    call RegridOrCopy(is%ice%swidf,  exportState, "Fioi_swnet_idf", is, rc)
 
     ! Sx_tsfc: temperatura de superficie composta para o MPAS-A,
-    ! (1-ifrac)*SST + ifrac*Si_t_sis2, num campo SEPARADO (is%f_tsfc_atm).
-    ! is%f_sst_atm NUNCA e' sobrescrito: "So_t" (abaixo) permanece SST pura,
+    ! (1-ifrac)*SST + ifrac*Si_t_sis2, num campo SEPARADO (is%sfc%tsfc).
+    ! is%ocn%sst NUNCA e' sobrescrito: "So_t" (abaixo) permanece SST pura,
     ! porque o sis_cap_MONAN.F90 tambem importa "So_t" para o fluxo de calor
     ! da BASE do gelo (ICE_KMELT no SIS2, que precisa da SST REAL do oceano
     ! sob o gelo). Devolver ao SIS2 uma So_t misturada com a propria
@@ -2142,8 +2142,8 @@ contains
     call export_surface_temperature(is)
 
     ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector MED→MPAS
-    ! Diagnóstico: imprimir min/max de is%f_sst_atm para confirmar que tem dados reais.
-      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst_diag, rc=rc_sst)
+    ! Diagnóstico: imprimir min/max de is%ocn%sst para confirmar que tem dados reais.
+      call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst_diag, rc=rc_sst)
       if (rc_sst == ESMF_SUCCESS .and. associated(sst_diag)) then
         write(*,'(A,F10.3,A,F10.3,A,I0)') &
           '[MED-DIAG] f_sst_atm antes RegridOrCopy: min=', minval(sst_diag), &
@@ -2153,7 +2153,7 @@ contains
         write(*,'(A,I0)') '[MED-DIAG] f_sst_atm: FieldGet falhou rc=', rc_sst
         flush(6)
       end if
-    call RegridOrCopy(is%f_sst_atm,    exportState, "So_t",           is, rc)
+    call RegridOrCopy(is%ocn%sst,    exportState, "So_t",           is, rc)
     if (rc /= ESMF_SUCCESS) then
       write(*,'(A,I0)') '[MED-DIAG] RegridOrCopy So_t FALHOU rc=', rc
       flush(6)
@@ -2166,7 +2166,7 @@ contains
     ! Sx_tsfc — composto (SST+Si_t_sis2 por
     ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst via IMP_NAMES em
     ! mpas_cap_MONAN.F90). So_t acima permanece SST pura para o SIS2.
-    call RegridOrCopy(is%f_tsfc_atm,   exportState, "Sx_tsfc",        is, rc)
+    call RegridOrCopy(is%sfc%tsfc,   exportState, "Sx_tsfc",        is, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: RegridOrCopy Sx_tsfc FALHOU — exportState ' // &
         'mantem fallback (ver FillInternalField f_tsfc_atm)', ESMF_LOGMSG_WARNING)
@@ -2175,7 +2175,7 @@ contains
 
     ! ──────────────────────────────────────────
     ! So_u, So_v: correntes superficiais MOM6 -> exportState para conector
-    ! MED -> MPAS. Os campos f_uocn_atm/f_vocn_atm já contêm os valores
+    ! MED -> MPAS. Os campos is%ocn%u/is%ocn%v já contêm os valores
     ! regridados OCN -> ATM (preenchidos no bloco acima a partir
     ! do importState.So_u/So_v). RegridOrCopy faz ATM -> OCN para o exportState;
     ! depois o conector MED -> MPAS fará OCN -> ATM. Mesmo round-trip que So_t —
@@ -2184,14 +2184,14 @@ contains
     ! Sobre regiões continentais e PETs sem dados: ZeroInternalField em
     ! InitializeRealize e os clamps em RegridOrCopy garantem zeros físicos.
     ! O cap MPAS (mpas_import) também clampa |V_ocn| <= 5 m/s defensivamente.
-    call RegridOrCopy(is%f_uocn_atm, exportState, "So_u", is, rc)
+    call RegridOrCopy(is%ocn%u, exportState, "So_u", is, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: RegridOrCopy So_u FALHOU — exportState mantem zeros', &
         ESMF_LOGMSG_WARNING)
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    call RegridOrCopy(is%f_vocn_atm, exportState, "So_v", is, rc)
+    call RegridOrCopy(is%ocn%v, exportState, "So_v", is, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: RegridOrCopy So_v FALHOU — exportState mantem zeros', &
         ESMF_LOGMSG_WARNING)
@@ -2201,11 +2201,11 @@ contains
     ! ──────────────────────────────────────────
     ! Sf_zorl: rugosidade superficial Charnock+Smith calculada no bulk NCAR
     ! a partir de Foxx_taux/tauy. Mesmo padrão arquitetural de So_t/So_u/So_v:
-    ! f_zorl_atm (grade ATM interna) -> RegridOrCopy -> exportState.Sf_zorl
+    ! is%sfc%zorl (grade ATM interna) -> RegridOrCopy -> exportState.Sf_zorl
     ! (grade OCN) -> conector MED -> MPAS faz o regrid final para Voronoi.
     ! O cap MPAS atualiza atm_bnd%zorl com este valor a cada passo
     ! em vez de manter o default fixo de 0.01 m.
-    call RegridOrCopy(is%f_zorl_atm, exportState, "Sf_zorl", is, rc)
+    call RegridOrCopy(is%sfc%zorl, exportState, "Sf_zorl", is, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: RegridOrCopy Sf_zorl FALHOU — exportState mantem default 0.01 m', &
         ESMF_LOGMSG_WARNING)
@@ -2229,13 +2229,13 @@ contains
     else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
              med_ifrac_init_done) then
       ! init_only: decaimento exponencial do campo OISST retido em
-      ! is%f_ifrac_atm (zero_med_fluxes nao o zera neste modo).
+      ! is%ice%ifrac (zero_med_fluxes nao o zera neste modo).
       ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
       ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
       ! de desaparecer instantaneamente no passo seguinte ao t=0.
-        call ESMF_FieldGet(is%f_ifrac_atm, localDeCount=ldec, rc=rc)
+        call ESMF_FieldGet(is%ice%ifrac, localDeCount=ldec, rc=rc)
         if (rc == ESMF_SUCCESS .and. ldec > 0) then
-          call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=ifrac_ptr, rc=rc)
+          call ESMF_FieldGet(is%ice%ifrac, farrayPtr=ifrac_ptr, rc=rc)
           if (rc == ESMF_SUCCESS .and. associated(ifrac_ptr)) then
             ifrac_ptr = ifrac_ptr * SI_IFRAC_DECAY
             where (ifrac_ptr < 0.0_ESMF_KIND_R8) ifrac_ptr = 0.0_ESMF_KIND_R8
@@ -2298,11 +2298,11 @@ contains
       if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
 
       if (is%regrid%has('ocn2atm_sst')) then
-        call is%regrid%apply('ocn2atm_sst', field, is%f_sst_atm, rc, zero_total=.true.)
+        call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc, zero_total=.true.)
       else
-        call is%regrid%apply('ocn2atm', field, is%f_sst_atm, rc, zero_total=.true.)
+        call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc, zero_total=.true.)
       end if
-      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
+      call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
 
       ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
       if (associated(sst)) then
@@ -2312,7 +2312,7 @@ contains
       ! Regrid de correntes oceânicas OCN → ATM.
       ! So_u e So_v são anunciados e realizados no importState do MED
       ! (ocn_grid); ESMF_StateGet é seguro.
-      ! Fallback seguro: se regrid falhar, mantém zeros em f_uocn_atm/f_vocn_atm.
+      ! Fallback seguro: se regrid falhar, mantém zeros em is%ocn%u/is%ocn%v.
       call regrid_ocean_currents(is, importState, zero_on_error=.false.)
 
       ! Si_ifrac_sis2, albedos e T_gelo, pela rota MASCARADA 'ocn2atm_ice',
@@ -2323,13 +2323,13 @@ contains
       if (cfg_use_sis2_dynamic) then
         call update_ice_fields_on_atm_grid(is, importState)
 
-        ! Diagnostico: is%f_ifrac_atm deve refletir o Ice%part_size real do
+        ! Diagnostico: is%ice%ifrac deve refletir o Ice%part_size real do
         ! SIS2 interpolado para a grade ATM. Os 4 albedos devem ficar entre o
         ! valor padrao (0,65) e o de neve fria (~0,85-0,9) sob gelo espesso.
         if (cfg_write_fixdiag) then
-            call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_if,  rc=rc)
-            call ESMF_FieldGet(is%f_alb_vdr_ice, farrayPtr=p_vdr, rc=rc)
-            call ESMF_FieldGet(is%f_alb_idr_ice, farrayPtr=p_idr, rc=rc)
+            call ESMF_FieldGet(is%ice%ifrac,   farrayPtr=p_if,  rc=rc)
+            call ESMF_FieldGet(is%ice%alb_vdr, farrayPtr=p_vdr, rc=rc)
+            call ESMF_FieldGet(is%ice%alb_idr, farrayPtr=p_idr, rc=rc)
             rc = ESMF_SUCCESS
             if (associated(p_if) .and. associated(p_vdr) .and. associated(p_idr)) then
               write(diag_msgB2,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
@@ -2343,26 +2343,26 @@ contains
       end if
     else
       ! Routehandles nao criados: usa SST padrao (ja preenchido em InitializeRealize)
-      call ESMF_FieldGet(is%f_sst_atm, farrayPtr=sst, rc=rc)
+      call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
     end if
   end subroutine update_ocean_fields_on_atm_grid
 
   subroutine zero_med_fluxes(is, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
-    call ZeroInternalField(is%f_taux_atm,   rc)
-    call ZeroInternalField(is%f_tauy_atm,   rc)
-    call ZeroInternalField(is%f_sen_atm,    rc)
-    call ZeroInternalField(is%f_evap_atm,   rc)
-    call ZeroInternalField(is%f_lwnet_atm,  rc)
-    call ZeroInternalField(is%f_swvdr_atm,  rc)
-    call ZeroInternalField(is%f_swvdf_atm,  rc)
-    call ZeroInternalField(is%f_swidr_atm,  rc)
-    call ZeroInternalField(is%f_swidf_atm,  rc)
-    call ZeroInternalField(is%f_rain_atm,   rc)
-    call ZeroInternalField(is%f_snow_atm,   rc)
-    call ZeroInternalField(is%f_pslv_atm,   rc)
-    ! NÃO zerar is%f_ifrac_atm incondicionalmente.
+    call ZeroInternalField(is%ocn_flx%taux,   rc)
+    call ZeroInternalField(is%ocn_flx%tauy,   rc)
+    call ZeroInternalField(is%ocn_flx%sen,    rc)
+    call ZeroInternalField(is%ocn_flx%evap,   rc)
+    call ZeroInternalField(is%ocn_flx%lwnet,  rc)
+    call ZeroInternalField(is%ocn_flx%swvdr,  rc)
+    call ZeroInternalField(is%ocn_flx%swvdf,  rc)
+    call ZeroInternalField(is%ocn_flx%swidr,  rc)
+    call ZeroInternalField(is%ocn_flx%swidf,  rc)
+    call ZeroInternalField(is%ocn_flx%rain,   rc)
+    call ZeroInternalField(is%ocn_flx%snow,   rc)
+    call ZeroInternalField(is%ocn_flx%pslv,   rc)
+    ! NÃO zerar is%ice%ifrac incondicionalmente.
     ! Com use_docn_ice=T, init_only=T e med_ifrac_init_done=T,
     ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o
     ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
@@ -2370,12 +2370,12 @@ contains
     ! No modo init_only, o decaimento é aplicado no bloco 3b.
     if (.not. (cfg_use_docn_ice .and. &
                cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
-      call ZeroInternalField(is%f_ifrac_atm, rc)
+      call ZeroInternalField(is%ice%ifrac, rc)
     end if
-    call ZeroInternalField(is%f_duu10n_atm, rc)
+    call ZeroInternalField(is%ocn_flx%duu10n, rc)
     ! Zerar correntes para evitar persistência
-    call ZeroInternalField(is%f_uocn_atm,   rc)
-    call ZeroInternalField(is%f_vocn_atm,   rc)
+    call ZeroInternalField(is%ocn%u,   rc)
+    call ZeroInternalField(is%ocn%v,   rc)
     rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
   end subroutine zero_med_fluxes
 
@@ -2388,10 +2388,10 @@ contains
     integer :: ii_c, jj_c
     character(len=220) :: diag_msg_tsfc
 
-    call ESMF_FieldGet(is%f_sst_atm,   farrayPtr=p_sst_src,   rc=rc_tsfc)
-    call ESMF_FieldGet(is%f_tice_atm,  farrayPtr=p_tice_comp, rc=rc_tsfc)
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_comp,rc=rc_tsfc)
-    call ESMF_FieldGet(is%f_tsfc_atm,  farrayPtr=p_tsfc_out,  rc=rc_tsfc)
+    call ESMF_FieldGet(is%ocn%sst,   farrayPtr=p_sst_src,   rc=rc_tsfc)
+    call ESMF_FieldGet(is%ice%tice,  farrayPtr=p_tice_comp, rc=rc_tsfc)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p_ifrac_comp,rc=rc_tsfc)
+    call ESMF_FieldGet(is%sfc%tsfc,  farrayPtr=p_tsfc_out,  rc=rc_tsfc)
     if (associated(p_sst_src) .and. associated(p_tice_comp) .and. &
         associated(p_ifrac_comp) .and. associated(p_tsfc_out)) then
       do jj_c = lbound(p_sst_src,2), ubound(p_sst_src,2)
@@ -2451,13 +2451,13 @@ contains
       ! 'atm2ocn' como reserva.
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
         call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
-          is%f_ifrac_atm, f_ifrac_exp, rc_store2, fallback='atm2ocn')
+          is%ice%ifrac, f_ifrac_exp, rc_store2, fallback='atm2ocn')
 
       if (is%regrid%has('atm2ocn_ice')) then
-        call is%regrid%apply('atm2ocn_ice', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
+        call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
           zero_total=.false.)
       else
-        call is%regrid%apply('atm2ocn', is%f_ifrac_atm, f_ifrac_exp, rc_ifrac2, &
+        call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
           zero_total=.true.)
       end if
       call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
@@ -2473,7 +2473,7 @@ contains
     else
       ! Fallback: exportState sem Si_ifrac realizado (nao deveria
       ! acontecer) -- mantem o comportamento antigo em vez de travar.
-      call RegridOrCopy(is%f_ifrac_atm, exportState, "Si_ifrac", is, rc)
+      call RegridOrCopy(is%ice%ifrac, exportState, "Si_ifrac", is, rc)
     end if
   end subroutine export_ice_fraction
 
@@ -2493,7 +2493,7 @@ contains
     nullify(p_taux, p_tauy, p_sen, p_evap, p_lwnet)
     nullify(p_swvdr, p_swvdf, p_swidr, p_swidf, p_rain, p_snow, p_omask)
 
-    call ESMF_FieldGet(is%f_omask_atm, farrayPtr=p_omask, rc=rc)
+    call ESMF_FieldGet(is%ocn%omask, farrayPtr=p_omask, rc=rc)
     if (associated(p_omask)) then
       ! Mascara REAL (So_omask regridada), e nao
       ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
@@ -2506,37 +2506,37 @@ contains
       n_land_masked = count(land_mask)
 
       ! Helper macro: aplicar mascara em cada fluxo
-      call ESMF_FieldGet(is%f_taux_atm,  farrayPtr=p_taux,  rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%taux,  farrayPtr=p_taux,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_taux))  &
         where (land_mask) p_taux  = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_tauy_atm,  farrayPtr=p_tauy,  rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%tauy,  farrayPtr=p_tauy,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_tauy))  &
         where (land_mask) p_tauy  = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_sen_atm,   farrayPtr=p_sen,   rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%sen,   farrayPtr=p_sen,   rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_sen))   &
         where (land_mask) p_sen   = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_evap_atm,  farrayPtr=p_evap,  rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%evap,  farrayPtr=p_evap,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_evap))  &
         where (land_mask) p_evap  = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_lwnet_atm, farrayPtr=p_lwnet, rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%lwnet, farrayPtr=p_lwnet, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_lwnet)) &
         where (land_mask) p_lwnet = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_swvdr_atm, farrayPtr=p_swvdr, rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%swvdr, farrayPtr=p_swvdr, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_swvdr)) &
         where (land_mask) p_swvdr = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_swvdf_atm, farrayPtr=p_swvdf, rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%swvdf, farrayPtr=p_swvdf, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_swvdf)) &
         where (land_mask) p_swvdf = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_swidr_atm, farrayPtr=p_swidr, rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%swidr, farrayPtr=p_swidr, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_swidr)) &
         where (land_mask) p_swidr = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_swidf_atm, farrayPtr=p_swidf, rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%swidf, farrayPtr=p_swidf, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_swidf)) &
         where (land_mask) p_swidf = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_rain_atm,  farrayPtr=p_rain,  rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%rain,  farrayPtr=p_rain,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_rain))  &
         where (land_mask) p_rain  = 0.0_ESMF_KIND_R8
-      call ESMF_FieldGet(is%f_snow_atm,  farrayPtr=p_snow,  rc=rc)
+      call ESMF_FieldGet(is%ocn_flx%snow,  farrayPtr=p_snow,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_snow))  &
         where (land_mask) p_snow  = 0.0_ESMF_KIND_R8
       rc = ESMF_SUCCESS
@@ -2561,14 +2561,14 @@ contains
       field=omask_src_field, rc=rc_lm)
     if (rc_lm == ESMF_SUCCESS) then
       call is%regrid%add('ocn2atm_landmask', regrid_spec('nearest_stod'), &
-        omask_src_field, is%f_omask_atm, rc_lm)
+        omask_src_field, is%ocn%omask, rc_lm)
       if (rc_lm == ESMF_SUCCESS) then
-        call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%f_omask_atm, rc_lm, &
+        call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm, &
           zero_total=.false.)
         call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
           ESMF_LOGMSG_INFO)
       else
-        ! is%f_omask_atm continua 1.0 (tudo oceano)
+        ! is%ocn%omask continua 1.0 (tudo oceano)
         call ESMF_LogWrite('MED: falha no regrid da mascara So_omask; ' // &
           'mantido tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
       end if
@@ -2576,7 +2576,7 @@ contains
       call ESMF_LogWrite('MED B-LANDMASK-01: So_omask indisponivel -- ' // &
         'mantendo fallback tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
     end if
-    is%landmask_done = .true.
+    is%ocn%omask_done = .true.
   end subroutine regrid_land_mask
 
   subroutine substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
@@ -2605,7 +2605,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, sen_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, is%mpi_comm, ierr2)
+      MPI_SUM, is%par%comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(lat_mpas,2), ubound(lat_mpas,2)
@@ -2615,7 +2615,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, lat_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, is%mpi_comm, ierr2)
+      MPI_SUM, is%par%comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(taux_mpas,2), ubound(taux_mpas,2)
@@ -2625,7 +2625,7 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, taux_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, is%mpi_comm, ierr2)
+      MPI_SUM, is%par%comm, ierr2)
 
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(tauy_mpas,2), ubound(tauy_mpas,2)
@@ -2635,12 +2635,12 @@ contains
       end do
     end do
     call MPI_Allreduce(tmp2, tauy_g2, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-      MPI_SUM, is%mpi_comm, ierr2)
+      MPI_SUM, is%par%comm, ierr2)
 
-    call ESMF_FieldGet(is%f_sen_atm,  farrayPtr=fptr_sen,  rc=rc)
-    call ESMF_FieldGet(is%f_evap_atm, farrayPtr=fptr_evap, rc=rc)
-    call ESMF_FieldGet(is%f_taux_atm, farrayPtr=fptr_taux, rc=rc)
-    call ESMF_FieldGet(is%f_tauy_atm, farrayPtr=fptr_tauy, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%sen,  farrayPtr=fptr_sen,  rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%evap, farrayPtr=fptr_evap, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=fptr_taux, rc=rc)
+    call ESMF_FieldGet(is%ocn_flx%tauy, farrayPtr=fptr_tauy, rc=rc)
     rc = ESMF_SUCCESS
 
     if (associated(fptr_sen) .and. associated(fptr_evap) .and. &
@@ -2701,7 +2701,7 @@ contains
       call log_ice_source(f_ifrac_src)
 
     if (rc_ice == ESMF_SUCCESS) &
-      call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%f_ifrac_atm, rc_ice, &
+      call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_ice, &
         zero_total=.false.)
 
     if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) &
@@ -2709,37 +2709,37 @@ contains
 
     if (cfg_write_fixdiag) call log_ifrac_raw(is)
 
-    call regrid_ice_member(is%regrid, importState, "Si_avsdr_sis2", is%f_alb_vdr_ice)
-    call regrid_ice_member(is%regrid, importState, "Si_avsdf_sis2", is%f_alb_vdf_ice)
-    call regrid_ice_member(is%regrid, importState, "Si_anidr_sis2", is%f_alb_idr_ice)
-    call regrid_ice_member(is%regrid, importState, "Si_anidf_sis2", is%f_alb_idf_ice)
-    call regrid_ice_member(is%regrid, importState, "Si_t_sis2",     is%f_tice_atm)
+    call regrid_ice_member(is%regrid, importState, "Si_avsdr_sis2", is%ice%alb_vdr)
+    call regrid_ice_member(is%regrid, importState, "Si_avsdf_sis2", is%ice%alb_vdf)
+    call regrid_ice_member(is%regrid, importState, "Si_anidr_sis2", is%ice%alb_idr)
+    call regrid_ice_member(is%regrid, importState, "Si_anidf_sis2", is%ice%alb_idf)
+    call regrid_ice_member(is%regrid, importState, "Si_t_sis2",     is%ice%tice)
 
     ! Extrapolação por vizinhança: fecha buracos e a costura da região de
     ! deformação tripolar, com o mesmo algoritmo usado para So_t.
-    call ESMF_FieldGet(is%f_ifrac_atm,   farrayPtr=p_ifrac_out, rc=rc_nfe)
+    call ESMF_FieldGet(is%ice%ifrac,   farrayPtr=p_ifrac_out, rc=rc_nfe)
     if (associated(p_ifrac_out)) &
       call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
 
-    ! Checksum exato de f_ifrac_atm depois da extrapolação.
+    ! Checksum exato de is%ice%ifrac depois da extrapolação.
     if (cfg_write_fixdiag) then
         call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
-                             is%f_ifrac_atm, rc_bs)
+                             is%ice%ifrac, rc_bs)
     end if
 
     if (cfg_write_fixdiag .and. associated(p_ifrac_out)) &
       call check_ice_geography(p_ifrac_out)
 
-    call extrapolate_ice_field(is%f_alb_vdr_ice, regrid_fill_t(enabled=.true., &
+    call extrapolate_ice_field(is%ice%alb_vdr, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-    call extrapolate_ice_field(is%f_alb_vdf_ice, regrid_fill_t(enabled=.true., &
+    call extrapolate_ice_field(is%ice%alb_vdf, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-    call extrapolate_ice_field(is%f_alb_idr_ice, regrid_fill_t(enabled=.true., &
+    call extrapolate_ice_field(is%ice%alb_idr, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-    call extrapolate_ice_field(is%f_alb_idf_ice, regrid_fill_t(enabled=.true., &
+    call extrapolate_ice_field(is%ice%alb_idf, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
-    call extrapolate_ice_field(is%f_tice_atm, regrid_fill_t(enabled=.true., &
+    call extrapolate_ice_field(is%ice%tice, regrid_fill_t(enabled=.true., &
       vmin=180.0_ESMF_KIND_R8, vmax=273.16_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8))
 
     call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
@@ -2807,7 +2807,7 @@ contains
         call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
     end if
     call is%regrid%add('ocn2atm_ice', regrid_spec('conserve,bilinear', mask_src=.true.), &
-      f_ifrac_src, is%f_ifrac_atm, rc_store, fallback='ocn2atm')
+      f_ifrac_src, is%ice%ifrac, rc_store, fallback='ocn2atm')
   end subroutine add_ice_route
 
   !============================================================================
@@ -2819,18 +2819,18 @@ contains
   !! inválidas. Com zero, que está dentro da faixa [0,1], essas células
   !! passariam por válidas.
   !!
-  !! rc recebe o resultado do último preenchimento (f_tice_atm).
+  !! rc recebe o resultado do último preenchimento (is%ice%tice).
   !============================================================================
   subroutine fill_ice_sentinels(is, rc_ice)
     type(MED_InternalState), intent(inout) :: is
     integer,                 intent(out)   :: rc_ice
 
-    call FillInternalField(is%f_ifrac_atm,   -999.0_ESMF_KIND_R8, rc_ice)
-    call FillInternalField(is%f_alb_vdr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-    call FillInternalField(is%f_alb_vdf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-    call FillInternalField(is%f_alb_idr_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-    call FillInternalField(is%f_alb_idf_ice,  -999.0_ESMF_KIND_R8, rc_ice)
-    call FillInternalField(is%f_tice_atm,     -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%ifrac,   -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%alb_vdr,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%alb_vdf,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%alb_idr,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%alb_idf,  -999.0_ESMF_KIND_R8, rc_ice)
+    call FillInternalField(is%ice%tice,     -999.0_ESMF_KIND_R8, rc_ice)
   end subroutine fill_ice_sentinels
 
   !============================================================================
@@ -2884,7 +2884,7 @@ contains
     integer :: n_sent
     integer :: rc_bs
 
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_dst, rc=rc_dst)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p_ifrac_dst, rc=rc_dst)
     if (rc_dst == ESMF_SUCCESS .and. associated(p_ifrac_dst)) then
       ! A sentinela -999 marca celula nao mapeada pelo regrid; ela
       ! domina min e soma, entao entra contada a parte para que o
@@ -2901,7 +2901,7 @@ contains
     end if
 
     call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
-                         is%f_ifrac_atm, rc_bs)
+                         is%ice%ifrac, rc_bs)
   end subroutine log_ice_destination
 
   !============================================================================
@@ -2919,7 +2919,7 @@ contains
     integer :: n_total
     integer :: rc_ice
 
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=p_ifrac_raw, rc=rc_ice)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p_ifrac_raw, rc=rc_ice)
     if (associated(p_ifrac_raw)) then
       n_exact_zero = count(p_ifrac_raw == 0.0_ESMF_KIND_R8)
       n_total = size(p_ifrac_raw)
@@ -3127,7 +3127,7 @@ contains
       ! Conservativo contorna a deformação da costura tripolar; bilinear
       ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
       call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.true.), &
-        sst_ocn, is%f_sst_atm, rc, fallback='ocn2atm')
+        sst_ocn, is%ocn%sst, rc, fallback='ocn2atm')
     end if
   end subroutine set_ocean_mask_for_sst
 
@@ -3189,8 +3189,8 @@ contains
     type(ESMF_State),        intent(inout) :: importState
     logical,                 intent(in)    :: zero_on_error
 
-    call regrid_one('So_u', is%f_uocn_atm)
-    call regrid_one('So_v', is%f_vocn_atm)
+    call regrid_one('So_u', is%ocn%u)
+    call regrid_one('So_v', is%ocn%v)
 
   contains
 
@@ -3210,7 +3210,7 @@ contains
 
 
   !============================================================================
-  !> @brief Preenche is%f_ifrac_atm com dados OISST (use_docn_ice).
+  !> @brief Preenche is%ice%ifrac com dados OISST (use_docn_ice).
   !!
   !! Lê arquivo NetCDF OISST diretamente via netcdf + ESMF_VMBroadcast.
   !! Chamada em MediatorAdvance ANTES de calc_bulk_ncar quando
@@ -3222,7 +3222,7 @@ contains
   !!   2. Nearest-neighbor: converte coordenadas da grade ATM interna
   !!      (360×180, centros em lon=(i-0.5)*dx, lat=(j-0.5)*dy-90)
   !!      em índices OISST.
-  !!   3. Copia para ptr(:,:) de is%f_ifrac_atm.
+  !!   3. Copia para ptr(:,:) de is%ice%ifrac.
   subroutine fill_ifrac_from_oisst(is, clock, rc)
     use netcdf  ! deve preceder todas as declarações
 
@@ -3344,12 +3344,12 @@ contains
     f0 = reshape(buf, [nx_o, ny_o])
     deallocate(f1, buf)
 
-    ! Copiar para is%f_ifrac_atm (grade ATM interna 360×180)
-    call ESMF_FieldGet(is%f_ifrac_atm, localDeCount=localDeCount_f, rc=rc)
+    ! Copiar para is%ice%ifrac (grade ATM interna 360×180)
+    call ESMF_FieldGet(is%ice%ifrac, localDeCount=localDeCount_f, rc=rc)
     if (rc /= ESMF_SUCCESS .or. localDeCount_f == 0) then
       rc = ESMF_SUCCESS; deallocate(f0); return
     end if
-    call ESMF_FieldGet(is%f_ifrac_atm, farrayPtr=fptr, rc=rc)
+    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc)
     if (rc /= ESMF_SUCCESS .or. .not. associated(fptr)) then
       deallocate(f0); return
     end if
