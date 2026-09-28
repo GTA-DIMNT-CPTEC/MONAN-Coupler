@@ -24,6 +24,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tools/dev/confere-instrucoes.py REV arquivo` | numa etapa que só move código, alguma instrução foi alterada? |
 | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
+| `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
 
 ### 2.0 Todas as conferências de uma vez
@@ -44,6 +45,7 @@ Resumo (referência: HEAD)
   gravadores   OK                              86 s
   bulk         OK                              82 s
   grade        OK                              83 s
+  unitarios    OK                              31 s
 ```
 
 O que cada linha confere:
@@ -56,6 +58,7 @@ O que cada linha confere:
 | `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
+| `unitarios` | algum teste com valor esperado (seção 2.8) falha |
 
 A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de seis minutos numa máquina de 4 núcleos e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
 
@@ -130,6 +133,26 @@ tools/dev/indicadores.py -l .
 ```
 
 Mede, nos fontes próprios de `src/` (sem `upstream/`), os indicadores do roteiro de código limpo (`docs/roteiro-codigo-limpo.md`): arquivos com mais de 1 000 linhas, rotinas com mais de 100 e de 150 linhas de código, variáveis de módulo (públicas, protegidas e privadas), variáveis locais que conservam o valor entre chamadas (`save` explícito, ou implícito por valor na declaração), trechos de 6 linhas repetidos e comentários com marcas de histórico. Cada versão pedida vira uma coluna (`.` é a árvore de trabalho); com `-l`, lista os itens da última versão. A tabela sai em Markdown, pronta para o CHANGELOG. Os indicadores acompanham a evolução do código; não decidem se uma etapa está certa.
+
+### 2.8 Testes com valor esperado
+
+```bash
+tests/unit/roda-unitarios.bash
+```
+
+Os testes de regressão das seções 2.4 a 2.6 comparam duas versões do código e respondem se o resultado mudou; não dizem se o resultado está certo. Os testes de `tests/unit/` respondem a essa outra pergunta: comparam o resultado de rotinas do acoplador com valores esperados calculados à parte, diretamente da fórmula publicada, em precisão de 40 algarismos (biblioteca mpmath do Python), com tolerância relativa de 1e-12. A tolerância existe porque a ordem das operações no código não é a do cálculo de referência; um erro de fórmula (sinal, constante, ramo, limite) muda o resultado muito além dela.
+
+O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F90` e o executa; cada programa imprime PASSOU ou FALHOU por caso. O primeiro, `test_formulas_bulk.F90`, cobre três fórmulas da física bulk do mediador (`med_bulk_ncar`):
+
+| Rotina | O que calcula | Casos |
+| --- | --- | --- |
+| `ice_temp_eff` | temperatura do gelo usada nos fluxos: `Si_t_sis2` na faixa (180 K; 273,16 K], senão 271,35 K | dentro, nos dois limites e fora da faixa |
+| `louis_stability` | número de Richardson bulk e fator de estabilidade de Louis (1979) | estável, neutro, instável, e os dois casos extremos que batem no piso (0,05) e no teto (3) |
+| `ocean_direct_albedo` | cosseno do zênite na célula da grade ATM e albedo da água para feixe direto (Briegleb et al., 1986) | sol a pino, noite, sol a 60° e a 78° de latitude, declinação diferente de zero; inclui os casos que batem no piso de 0,03 |
+
+O teste foi conferido ao contrário, com cinco alterações de propósito no código, uma de cada vez: trocar `<=` por `<` no limite de 273,16 K, trocar um coeficiente do fator de Louis, trocar o expoente 1,7 do albedo, mudar o teto do fator e inverter o sinal da longitude no ângulo horário. Todas fizeram o teste falhar.
+
+Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
 
 ## 3. Interfaces mínimas
 

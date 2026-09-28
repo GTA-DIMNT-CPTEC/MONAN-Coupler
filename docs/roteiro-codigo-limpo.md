@@ -52,7 +52,7 @@ As fases 7 e 8 movem código entre arquivos e mudam a forma como as rotinas rece
 | Etapa | Conteúdo | Classe |
 | --- | --- | --- |
 | R-FASE6-01 | `tools/dev/confere-tudo.bash`: um comando que compila, confere as constantes de texto e roda os quatro testes de regressão, com resumo final OK/FALHOU. `tools/dev/indicadores.py`: mede os indicadores da seção 3 e grava uma tabela para o CHANGELOG. | só ferramentas |
-| R-FASE6-02 | testes com valor esperado para as funções puras do mediador: `louis_stability`, `ice_temp_eff`, `ocean_direct_albedo`, `sw_band`, e os casos-limite da física bulk (vento nulo, estável e instável). Os valores esperados vêm das fórmulas publicadas, calculados à parte; um arnês de teste simples em Fortran, sem dependência externa. | só testes |
+| R-FASE6-02 | testes com valor esperado para as funções puras do mediador: `louis_stability`, `ice_temp_eff` e `ocean_direct_albedo`. Os valores esperados vêm das fórmulas publicadas, calculados à parte; um arnês de teste simples em Fortran, sem dependência externa. `sw_band` e os casos-limite de `calc_bulk_ncar` (vento nulo, estável e instável) leem e gravam campos ESMF do estado interno; ganham teste com valor esperado depois da fase 7, quando o cálculo puder receber arrays. | só testes (e três funções passam a públicas) |
 | R-FASE6-03 | testes com valor esperado para o mapeamento de células para a grade (`map_cells_to_regular_grid`): um campo constante continua constante, uma célula sozinha cai na caixa certa, caixas vazias recebem o valor das vizinhas. | só testes |
 
 **Pronto quando:** `confere-tudo.bash` roda em menos de dez minutos e cada teste novo foi conferido "ao contrário" (quebrar a fórmula de propósito faz o teste falhar).

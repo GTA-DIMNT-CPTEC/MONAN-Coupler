@@ -42,6 +42,8 @@ module med_bulk_ncar_mod
   private
 
   public :: calc_bulk_ncar
+  ! Fórmulas puras, públicas para os testes com valor esperado (tests/unit).
+  public :: ice_temp_eff, louis_stability, ocean_direct_albedo
 
   ! Parâmetros dos fluxos sobre o gelo (compute_ice_fluxes).
   real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referencia [m]

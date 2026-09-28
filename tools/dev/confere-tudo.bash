@@ -15,6 +15,7 @@
 #   gravadores  tests/writers/compara-gravadores.bash REV
 #   bulk        tests/bulk/compara-bulk.bash REV
 #   grade       tests/atmgrid/compara-grade-atm.bash REV
+#   unitarios   testes com valor esperado (tests/unit/roda-unitarios.bash)
 # No fim, mostra um resumo (OK, FALHOU ou PULADO) e os indicadores de
 # código limpo de REV e da árvore de trabalho (indicadores.py).
 #
@@ -35,12 +36,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid gravadores bulk grade"
+TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,34p' "$0"; exit 2; }
+uso() { sed -n '2,35p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -176,6 +177,7 @@ quer regrid     && executa regrid teste_regrid
 quer gravadores && executa gravadores tests/writers/compara-gravadores.bash "${REV}" "${SAIDA}/writers"
 quer bulk       && executa bulk tests/bulk/compara-bulk.bash "${REV}" "${SAIDA}/bulk"
 quer grade      && executa grade tests/atmgrid/compara-grade-atm.bash "${REV}" "${SAIDA}/atmgrid"
+quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
 
 # ---------------------------------------------------------------------------
 # Resumo
