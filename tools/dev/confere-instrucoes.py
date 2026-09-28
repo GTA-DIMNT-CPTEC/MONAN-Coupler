@@ -8,9 +8,11 @@ espaços e diferença de maiúsculas, e compara o conjunto de instruções (com
 repetição) de um fonte num commit com o da árvore de trabalho.
 
 Uso (na raiz do repositório):
-  tools/dev/confere-instrucoes.py REV arquivo
+  tools/dev/confere-instrucoes.py REV arquivo [arquivo ...]
     REV       commit de referência (ex.: HEAD)
-    arquivo   fonte a conferir
+    arquivo   fonte a conferir; com mais de um, compara a soma das
+              instruções de todos (para trechos que mudaram de arquivo;
+              um arquivo novo conta como vazio em REV)
 
 Saída: as instruções removidas e as acrescentadas. Toda instrução removida
 tem de ser explicada (código morto anunciado, trecho que virou chamada); as
@@ -87,15 +89,21 @@ def instrucoes(texto):
 
 def main():
     saida_utf8()
-    if len(sys.argv) != 3 or sys.argv[1] in ('-h', '--help'):
+    if len(sys.argv) < 3 or sys.argv[1] in ('-h', '--help'):
         print(__doc__)
         return 2
-    rev, f = sys.argv[1], sys.argv[2]
+    rev, arquivos = sys.argv[1], sys.argv[2:]
     if git('rev-parse', '--verify', '--quiet', rev + '^{commit}')[0] != 0:
         print(f'ERRO: commit {rev!r} não encontrado', file=sys.stderr)
         return 2
-    antes = instrucoes(git('show', f'{rev}:{f}')[1])
-    depois = instrucoes(open(f, encoding='utf-8', errors='replace').read())
+    antes, depois = collections.Counter(), collections.Counter()
+    for f in arquivos:
+        codigo, texto = git('show', f'{rev}:{f}')
+        antes += instrucoes(texto if codigo == 0 else '')
+        try:
+            depois += instrucoes(open(f, encoding='utf-8', errors='replace').read())
+        except FileNotFoundError:
+            pass
     print('== removidas')
     for s, k in sorted((antes - depois).items()):
         print(f'   ({k}) {s}')

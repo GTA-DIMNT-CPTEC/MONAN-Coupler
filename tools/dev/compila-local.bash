@@ -10,9 +10,11 @@
 # driver e o programa principal ficam de fora.
 #
 # Uso:
-#   ESMFMKFILE=/caminho/esmf.mk tools/dev/compila-local.bash [-s RAIZ] [-o SAIDA]
+#   ESMFMKFILE=/caminho/esmf.mk tools/dev/compila-local.bash [-s RAIZ] [-o SAIDA] [-a]
 #     -s RAIZ    raiz do repositório a compilar (padrão: a deste script)
 #     -o SAIDA   diretório dos objetos e logs (padrão: RAIZ/build-local)
+#     -a         fonte ausente não conta como falha; para compilar uma versão
+#                anterior à criação de algum fonte da lista
 #
 # Saída: uma linha por fonte (OK ou FALHOU, e o número de avisos); o log de
 # cada fonte fica em SAIDA/<fonte>.log. Código de saída 1 se algum falhou.
@@ -24,11 +26,13 @@ set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=""
-while getopts ":s:o:h" opt; do
+ACEITA_AUSENTE=0
+while getopts ":s:o:ah" opt; do
   case "${opt}" in
     s) RAIZ=$(cd "${OPTARG}" && pwd) ;;
     o) SAIDA="${OPTARG}" ;;
-    h) sed -n '2,22p' "$0"; exit 0 ;;
+    a) ACEITA_AUSENTE=1 ;;
+    h) sed -n '2,24p' "$0"; exit 0 ;;
     *) echo "ERRO: opção inválida" >&2; exit 2 ;;
   esac
 done
@@ -59,9 +63,14 @@ for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergr
          mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
          mpas_atm_types mpas_atm_model mpas_cap_netcdf mpas_cap_methods mpas_cap_MONAN DATM_cap \
          docn_cap_netcdf DOCN_cap time_utils mom_cap_MONAN sis_cap_MONAN \
-         med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar MED_cap; do
+         med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
+         med_diag med_ice med_ocean med_init med_flux med_export MED_cap; do
   f=$(find "${RAIZ}/src" -name "${s}.F90" -not -path '*/upstream/*' | head -1)
-  [[ -n "${f}" ]] || { printf '%-24s %s\n' "${s}" "AUSENTE"; falhas=$((falhas + 1)); continue; }
+  if [[ -z "${f}" ]]; then
+    printf '%-24s %s\n' "${s}" "AUSENTE"
+    [[ ${ACEITA_AUSENTE} -eq 1 ]] || falhas=$((falhas + 1))
+    continue
+  fi
   extra=""
   # Como no Makefile: os fontes ligados ao MOM6 usam real de 8 bytes.
   case "${s}" in mom_cap_MONAN|sis_cap_MONAN|time_utils) extra="-fdefault-real-8" ;; esac

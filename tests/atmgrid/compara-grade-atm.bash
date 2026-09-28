@@ -53,8 +53,11 @@ git -C "${RAIZ}" archive "${REV}" src tests/interfaces tests/atmgrid/test_mpas_e
 for versao in antiga nova; do
   if [[ ${versao} == antiga ]]; then src="${SAIDA}/fonte_antiga"; else src="${RAIZ}"; fi
   dir="${SAIDA}/${versao}"
+  # A versão de referência pode não ter todos os fontes da lista atual.
+  ausente=""; [[ ${versao} == antiga ]] && ausente="-a"
   echo "--- versão ${versao}: compilando"
-  bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" > "${SAIDA}/compila_${versao}.txt" \
+  # shellcheck disable=SC2086
+  bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" ${ausente} > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086

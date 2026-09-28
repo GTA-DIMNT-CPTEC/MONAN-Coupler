@@ -68,7 +68,7 @@ MONAN-Coupler/
 ├── src/
 │   ├── main/        esmApp.F90 (programa principal)
 │   ├── driver/      esm.F90 (driver NUOPC, RunSequences, partição de PETs)
-│   ├── mediator/    MED_cap.F90, med_bulk_ncar.F90, escritores de diagnóstico
+│   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum

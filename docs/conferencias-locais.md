@@ -21,7 +21,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tools/dev/indicadores.py [REV ...]` | como estão os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos)? |
 | `tools/dev/compila-local.bash` | o código compila, com as opções de aviso e de ponto flutuante do Makefile? |
 | `tools/dev/confere-literais.py REV` | alguma mensagem de log, nome de campo, atributo ou formato mudou desde o commit `REV`? |
-| `tools/dev/confere-instrucoes.py REV arquivo` | numa etapa que só move código, alguma instrução foi alterada? |
+| `tools/dev/confere-instrucoes.py REV arquivo [...]` | numa etapa que só move código, alguma instrução foi alterada? |
 | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
@@ -81,15 +81,16 @@ Para saber se uma mudança criou avisos, compile também a versão anterior (ext
 tools/dev/confere-literais.py HEAD
 ```
 
-Compara os literais de texto (fora dos comentários) de cada fonte alterado desde `HEAD` com os da árvore de trabalho. Mensagens de log são lidas por ferramentas de `tools/` e comparadas entre rodadas, e nomes de campos e atributos acabam nos arquivos NetCDF: numa refatoração, não devem mudar. Toda diferença tem de ser explicada, e as esperadas (por exemplo, o formato de uma variável morta que foi removida) são anunciadas no CHANGELOG. Sai com código 1 se houver diferença.
+Compara os literais de texto (fora dos comentários) de cada fonte alterado desde `HEAD` com os da árvore de trabalho. Mensagens de log são lidas por ferramentas de `tools/` e comparadas entre rodadas, e nomes de campos e atributos acabam nos arquivos NetCDF: numa refatoração, não devem mudar. Toda diferença tem de ser explicada, e as esperadas (por exemplo, o formato de uma variável morta que foi removida) são anunciadas no CHANGELOG. Quando um trecho muda de arquivo (na divisão de um módulo, por exemplo), cada arquivo mostra só quantos literais saíram e entraram, e o que vale é a soma de todos os arquivos, que tem de continuar igual. Sai com código 1 se a soma tiver diferença.
 
 ### 2.3 Instruções
 
 ```bash
 tools/dev/confere-instrucoes.py HEAD src/mediator/MED_cap.F90
+tools/dev/confere-instrucoes.py HEAD src/mediator/*.F90
 ```
 
-Junta as linhas de continuação, retira comentários, espaços e diferença de maiúsculas, e compara o conjunto de instruções do arquivo no commit e na árvore de trabalho. Numa etapa que divide uma rotina em procedimentos, as únicas instruções acrescentadas devem ser as chamadas, as declarações, os cabeçalhos e os retornos das etapas novas; as removidas devem ser só as que viraram chamada e o código morto anunciado. A comparação ignora a ordem: a ordem das operações, em especial das coletivas do MPI, que precisam acontecer na mesma sequência em todos os processos, é conferida lendo o diff.
+Junta as linhas de continuação, retira comentários, espaços e diferença de maiúsculas, e compara o conjunto de instruções do arquivo no commit e na árvore de trabalho. Com vários arquivos, compara a soma de todos (um arquivo novo conta como vazio no commit): é a forma de conferir um trecho que mudou de arquivo. Numa etapa que divide uma rotina em procedimentos, as únicas instruções acrescentadas devem ser as chamadas, as declarações, os cabeçalhos e os retornos das etapas novas; as removidas devem ser só as que viraram chamada e o código morto anunciado. A comparação ignora a ordem: a ordem das operações, em especial das coletivas do MPI, que precisam acontecer na mesma sequência em todos os processos, é conferida lendo o diff.
 
 É a principal conferência dos fontes que só compilam de verdade na Jaci, como `mpas_atm_model.F90` e `mom_cap_MONAN.F90`.
 

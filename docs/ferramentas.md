@@ -86,8 +86,8 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | Instrumento | Onde | Para que serve |
 | --- | --- | --- |
 | stream `reprodiag` | bloco no `streams.atmosphere` | estado do MPAS a cada 10 minutos simulados em `reprodiag.nc`; retirar em produção |
-| `FIX-DIAG-BITSUM-01` | `src/mediator/MED_cap.F90`, atrás de `cfg_write_fixdiag` | checksum exato (soma inteira dos bits) do `Si_ifrac` em quatro etapas do mediador, gravado por PET; foi o instrumento que localizou a causa da não reprodutibilidade |
-| `FIX-DIAG-ICESRC-01/-02`, `FIX-DIAG-ICEMASK-01/-02` | `src/mediator/MED_cap.F90` | valores do `Si_ifrac` e da máscara no PET 0, com 17 e 4 algarismos |
+| `FIX-DIAG-BITSUM-01` | `src/mediator/med_ice.F90` (etapas 1 a 3) e `med_diag.F90` (etapa 4), atrás de `cfg_write_fixdiag` | checksum exato (soma inteira dos bits) do `Si_ifrac` em quatro etapas do mediador, gravado por PET; foi o instrumento que localizou a causa da não reprodutibilidade |
+| `FIX-DIAG-ICESRC-01/-02`, `FIX-DIAG-ICEMASK-01/-02` | `src/mediator/med_ice.F90` | valores do `Si_ifrac` e da máscara no PET 0, com 17 e 4 algarismos |
 | `DEBUG_CHKSUMS`, `DEBUG_SLOW_ICE`, `DEBUG_FAST_ICE` | `SIS_override` | checksums internos do SIS2 no `esmApp_run.log`; desligar em produção |
 | linha `B-CPL-TERMORDER-01` / `B-SRCTERM-01` no log do PET 0 | `src/driver/esm.F90` | confirma, a cada execução, que as 60 ligações entre componentes receberam as opções de reprodutibilidade (`sem espaco: 0`) |
 

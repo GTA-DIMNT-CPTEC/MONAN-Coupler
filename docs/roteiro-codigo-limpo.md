@@ -78,7 +78,7 @@ Com o estado explícito, dá para separar os arquivos grandes por assunto sem cr
 
 | Etapa | Conteúdo | Classe |
 | --- | --- | --- |
-| R-FASE8-01 | `MED_cap.F90` (3 379 linhas) dividido: o arquivo principal fica com os pontos de entrada NUOPC; saem `med_init` (grades, campos, rotas, verificação de cantos), `med_ice` (gelo na grade da atmosfera, 9 rotinas), `med_ocean` (SST, máscara, correntes, fração de gelo do OISST) e `med_diag` (resumos e diagnósticos do log) | B |
+| R-FASE8-01 | `MED_cap.F90` (3 379 linhas) dividido: o arquivo principal fica com os pontos de entrada NUOPC; saem `med_init` (grades, campos, rotas, verificação de cantos), `med_ice` (gelo na grade da atmosfera, 9 rotinas), `med_ocean` (SST, máscara, correntes, fração de gelo do OISST) e `med_diag` (resumos e diagnósticos do log). Na execução, saíram também `med_flux` (forçante atmosférica e fluxos nativos) e `med_export` (exportação para os componentes), para que o arquivo principal ficasse só com o ciclo NUOPC | B |
 | R-FASE8-02 | `mpas_atm_model.F90` (1 619 linhas) dividido em inicialização, passo e fluxos instantâneos | B |
 | R-FASE8-03 | as nove rotinas entre 100 e 150 linhas de código revistas; dividir apenas as que misturam responsabilidades (candidatas: `export_write_netcdf`, `mpas_atm_run`, `calc_bulk_ncar`, `compute_instantaneous_fluxes`, `get_atm_forcing`) | B |
 

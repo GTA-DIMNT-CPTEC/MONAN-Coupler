@@ -9,6 +9,27 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Mediador dividido em módulos por assunto (R-FASE8-01).** Primeira etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
+  - `MED_cap.F90` passa de 3 379 para 1 001 linhas e fica com o ciclo de vida NUOPC: `SetServices`, as fases de inicialização (com as etapas de `InitializeDataComplete` que esperam e publicam a SST) e `MediatorAdvance`. As demais 38 rotinas vão para seis módulos novos em `src/mediator/`:
+
+    | Módulo | Assunto | Rotinas | Públicas |
+    | --- | --- | --- | --- |
+    | `med_init` | grades ATM e OCN, verificação dos cantos, campos dos componentes e internos, rotas de interpolação | 8 | `create_atm_grid`, `create_ocn_grid`, `realize_component_fields`, `create_internal_fields`, `idc_create_routes` |
+    | `med_flux` | forçante atmosférica (MPAS ou DATM), recolhimento na grade ATM, fluxos nativos do MONAN-A, zeragem dos fluxos | 7 | `get_atm_forcing`, `gather_atm_forcing`, `local_atm_bounds`, `apply_native_fluxes`, `zero_med_fluxes` |
+    | `med_ocean` | SST, máscara de oceano, correntes e fração de gelo do OISST na grade ATM | 6 | `update_ocean_fields_on_atm_grid`, `regrid_ocean_currents`, `update_ice_fraction_from_docn` |
+    | `med_ice` | gelo do SIS2 na grade ATM (a rotina principal e as suas oito etapas) | 9 | `update_ice_fields_on_atm_grid` |
+    | `med_export` | exportação para os componentes, zeragem sobre terra, carimbo de tempo | 6 | `export_to_components`, `stamp_export_fields` |
+    | `med_diag` | resumo da forçante e somas de bits de `Si_ifrac` no log | 2 | `log_atm_forcing_summary`, `log_ifrac_export_bitsum` |
+
+  - As dependências seguem uma ordem só, sem ciclos: `med_diag` e `med_ice` não usam nenhum módulo novo; `med_ocean` usa `med_ice`; `med_init` usa `med_ocean`; `med_flux` usa `med_diag`; `MED_cap` usa todos. Cada módulo tem `private` padrão, lista só as rotinas que outros usam e importa só os nomes de que precisa. O cabeçalho de `MED_cap.F90` perde os nomes que não usava mais (constantes da física bulk, `use mpi`, `use netcdf`, entre outros).
+  - `Makefile` e `tools/dev/compila-local.bash` com os seis fontes novos e as dependências entre eles. `README.md` e `docs/ferramentas.md` apontam os arquivos novos.
+  - Ferramentas, para etapas que mudam código de arquivo:
+    - `confere-literais.py` soma os literais de todos os arquivos conferidos; se só mudaram de arquivo, cada um mostra quantos saíram e entraram e o total decide.
+    - `confere-instrucoes.py` aceita vários arquivos e compara a soma (arquivo novo conta como vazio na referência); `confere-tudo.bash -i` passa a usar essa soma.
+    - `compila-local.bash -a`: um fonte da lista ausente na versão compilada não conta como falha. Os testes de comparação (`gravadores`, `bulk`, `grade`) e a conferência de avisos usam essa opção para a versão de referência, que não tem os fontes novos.
+  - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos (nenhum nos fontes novos), literais (433, iguais no total), regrid, gravadores, física bulk, grade atmosférica e testes com valor esperado sem falhas. As 73 diferenças de instruções são só de estrutura de módulo (`module`, `use`, `public`, `private`, `implicit none`, `contains`), conferidas uma a uma; nenhuma instrução executável mudou.
+  - Indicadores: maior arquivo de 3 381 para 1 589 linhas (`mpas_atm_model.F90`, próxima etapa); rotinas continuam 294.
+
 - **Marcas de primeira vez e contadores no estado interno (R-FASE7-06).** Última etapa da fase 7. Nenhum cálculo muda.
   - Oito variáveis que guardavam valor entre chamadas passam para o estado interno do componente a que pertencem, com os mesmos valores iniciais e alteradas nos mesmos pontos:
 
@@ -30,6 +51,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas. `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam aqui com as interfaces mínimas, mas nenhum teste local os executa.
   - Indicadores: variáveis locais com `save` explícito de 6 para 1; variáveis de módulo privadas de 9 para 2 (a tabela de esquemas de `regrid_registry` e o seu contador).
   - Com esta etapa, a fase 7 fica completa: nenhum módulo próprio guarda em variável de módulo o estado de um componente.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-06-validada`). Fase 7 concluída.
 
 - **Cap atmosférico: estado interno ESMF (R-FASE7-05).** Quinta etapa da fase 7, acrescentada na R-FASE7-03. Nenhum cálculo muda.
   - `mpas_cap_MONAN.F90` ganha o tipo `mpas_cap_state_t`, guardado no próprio componente com `ESMF_GridCompSetInternalState` (como já faz o mediador) e recuperado em cada fase pela nova rotina `get_cap_state`. Ele reúne o que eram variáveis de módulo: `atm_public`, `atm_state` e `atm_bnd` (ponteiros, alocados em `InitializeRealize` como antes), a grade do cap, o gravador `diag_export` e o contador `step_count`, com o mesmo valor inicial (0).

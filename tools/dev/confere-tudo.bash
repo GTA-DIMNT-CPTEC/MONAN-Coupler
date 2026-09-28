@@ -9,8 +9,8 @@
 #   avisos      compila também a versão REV, com as mesmas interfaces
 #               mínimas, e falha se algum fonte tiver mais avisos que antes
 #   literais    constantes de texto iguais às de REV (confere-literais.py)
-#   instrucoes  só com -i: instruções idênticas às de REV em todo .F90
-#               alterado (etapas que só mudam comentários ou espaços)
+#   instrucoes  só com -i: instruções idênticas às de REV na soma dos .F90
+#               alterados (etapas que só mudam comentários ou espaços)
 #   regrid      testes do framework de interpolação (tests/regrid)
 #   gravadores  tests/writers/compara-gravadores.bash REV
 #   bulk        tests/bulk/compara-bulk.bash REV
@@ -109,7 +109,7 @@ compara_avisos() {
   local ref="${SAIDA}/rev"
   rm -rf "${ref}" && mkdir -p "${ref}/fonte" || return 2
   git archive "${REV}" src | tar -x -C "${ref}/fonte" || return 2
-  tools/dev/compila-local.bash -s "${ref}/fonte" -o "${ref}/build" > "${ref}/compilacao.txt" 2>&1
+  tools/dev/compila-local.bash -a -s "${ref}/fonte" -o "${ref}/build" > "${ref}/compilacao.txt" 2>&1
   local piorou=0 nome res avisos antes
   while read -r nome res avisos; do
     [[ "${res}" == OK ]] || continue
@@ -141,25 +141,23 @@ fi
 quer literais && executa literais tools/dev/confere-literais.py "${REV}"
 
 confere_instrucoes() {
-  local f alterou=0 n saida
+  local n saida
   mapfile -t arquivos < <(git diff --name-only "${REV}" -- '*.F90')
   if [[ ${#arquivos[@]} -eq 0 ]]; then
     echo "nenhum .F90 alterado desde ${REV}"
     return 0
   fi
-  for f in "${arquivos[@]}"; do
-    [[ -f "${f}" ]] || { echo "${f}: removido"; alterou=1; continue; }
-    saida=$(tools/dev/confere-instrucoes.py "${REV}" "${f}")
-    n=$(grep -c '^   (' <<< "${saida}")
-    if [[ ${n} -eq 0 ]]; then
-      echo "${f}: instruções idênticas"
-    else
-      echo "${f}: ${n} instrução(ões) diferente(s)"
-      echo "${saida}"
-      alterou=1
-    fi
-  done
-  return ${alterou}
+  # Soma de todos os arquivos alterados: um trecho que mudou de arquivo
+  # conta como a mesma instrução.
+  saida=$(tools/dev/confere-instrucoes.py "${REV}" "${arquivos[@]}")
+  n=$(grep -c '^   (' <<< "${saida}")
+  if [[ ${n} -eq 0 ]]; then
+    echo "${#arquivos[@]} arquivo(s) alterado(s): instruções idênticas"
+    return 0
+  fi
+  echo "${#arquivos[@]} arquivo(s) alterado(s): ${n} instrução(ões) diferente(s)"
+  echo "${saida}"
+  return 1
 }
 quer instrucoes && executa instrucoes confere_instrucoes
 

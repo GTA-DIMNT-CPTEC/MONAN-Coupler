@@ -11,7 +11,13 @@ Uso (na raiz do repositório):
     REV       commit de referência (ex.: HEAD, fase4-03-validada)
     arquivo   fontes a conferir (padrão: os .F90 alterados desde REV)
 
-Código de saída: 0 se nenhum literal sumiu ou apareceu; 1 caso contrário.
+Quando um trecho muda de arquivo (divisão de um módulo, por exemplo), as
+listas de cada arquivo diferem, mas a soma de todos os arquivos conferidos
+continua igual. Nesse caso o script avisa que os literais só mudaram de
+arquivo e termina com sucesso.
+
+Código de saída: 0 se nenhum literal sumiu ou apareceu, no total dos arquivos
+conferidos; 1 caso contrário.
 Diferenças esperadas (literal de código morto removido, por exemplo) devem
 ser conferidas uma a uma e anunciadas no CHANGELOG.
 """
@@ -84,22 +90,37 @@ def main():
         return 2
     arquivos = sys.argv[2:] or git('diff', '--name-only', rev, '--', '*.F90')[1].split()
     iguais = True
+    total_antes, total_depois = collections.Counter(), collections.Counter()
+    relatorio = []   # (arquivo, antes, sumiram, novos)
     for f in arquivos:
         antes = collections.Counter(literais(no_commit(rev, f)))
         try:
             depois = collections.Counter(literais(open(f, encoding='utf-8', errors='replace').read()))
         except FileNotFoundError:
             depois = collections.Counter()
+        total_antes += antes
+        total_depois += depois
         sumiram, novos = antes - depois, depois - antes
         if sumiram or novos:
             iguais = False
+        relatorio.append((f, antes, sumiram, novos))
+    so_mudaram = not iguais and total_antes == total_depois
+    for f, antes, sumiram, novos in relatorio:
+        if not (sumiram or novos):
+            print(f'== {f}: iguais ({sum(antes.values())} literais)')
+        elif so_mudaram:
+            print(f'== {f}: {sum(sumiram.values())} saíram, '
+                  f'{sum(novos.values())} entraram (mudança de arquivo)')
+        else:
             print(f'== {f}: DIFEREM')
             for s, k in sorted(sumiram.items()):
                 print(f'   - ({k}) {s!r}')
             for s, k in sorted(novos.items()):
                 print(f'   + ({k}) {s!r}')
-        else:
-            print(f'== {f}: iguais ({sum(antes.values())} literais)')
+    if so_mudaram:
+        print(f'== total dos {len(arquivos)} arquivos: iguais '
+              f'({sum(total_antes.values())} literais); só mudaram de arquivo')
+        iguais = True
     return 0 if iguais else 1
 
 
