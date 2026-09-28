@@ -37,6 +37,9 @@ module mpas_cap_methods_mod
   public :: mpas_export
   public :: mpas_create_grid
   public :: state_diagnose
+  ! Etapas de cálculo de map_cells_to_regular_grid, públicas para os testes
+  ! com valor esperado (tests/unit).
+  public :: bin_cells_local, fill_empty_bins
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 

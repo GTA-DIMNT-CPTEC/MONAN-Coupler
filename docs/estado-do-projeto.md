@@ -55,7 +55,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE6-02 | testes com valor esperado das fórmulas da física bulk (`tests/unit`) (validação pendente) |
+| R-FASE6-03 | testes com valor esperado da passagem das células MPAS para a grade do cap atmosférico (validação pendente) |
+| R-FASE6-02 | testes com valor esperado das fórmulas da física bulk (`tests/unit`) |
 | R-FASE6-01 e FIX01 | `confere-tudo.bash` e `indicadores.py`; roteiro de código limpo e levantamento do DTN-01; scripts de `tools/dev/` compatíveis com o Python 3.6 da Jaci |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 5, que cobre todas as etapas até a R-FASE5-07).
@@ -174,7 +175,7 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 
 | Fase | Objetivo | Etapas previstas | Situação |
 | --- | --- | --- | --- |
-| 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 entregue (validação pendente) |
+| 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 concluída (PASS, 73 iguais, tag `fase6-02-validada`); R-FASE6-03 entregue (validação pendente) |
 | 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-04 | a fazer |
 | 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 a R-FASE8-03 | a fazer |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-03 | a fazer |

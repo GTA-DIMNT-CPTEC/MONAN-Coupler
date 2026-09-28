@@ -29,10 +29,13 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-# Objetos de que os testes dependem (med_bulk_ncar e o que ele usa).
+# Objetos de que os testes dependem: med_bulk_ncar e mpas_cap_methods, com o
+# que eles usam (mpas_stubs.o são as interfaces mínimas do MPAS).
 OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writer.o
       regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
-      med_cap_types.o med_bulk_ncar.o"
+      med_cap_types.o med_bulk_ncar.o
+      mpas_stubs.o mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
+      mpas_atm_types.o mpas_cap_netcdf.o mpas_cap_methods.o"
 
 echo "--- compilando a árvore de trabalho"
 bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compila.txt" \

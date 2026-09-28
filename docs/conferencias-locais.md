@@ -142,7 +142,7 @@ tests/unit/roda-unitarios.bash
 
 Os testes de regressão das seções 2.4 a 2.6 comparam duas versões do código e respondem se o resultado mudou; não dizem se o resultado está certo. Os testes de `tests/unit/` respondem a essa outra pergunta: comparam o resultado de rotinas do acoplador com valores esperados calculados à parte, diretamente da fórmula publicada, em precisão de 40 algarismos (biblioteca mpmath do Python), com tolerância relativa de 1e-12. A tolerância existe porque a ordem das operações no código não é a do cálculo de referência; um erro de fórmula (sinal, constante, ramo, limite) muda o resultado muito além dela.
 
-O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F90` e o executa; cada programa imprime PASSOU ou FALHOU por caso. O primeiro, `test_formulas_bulk.F90`, cobre três fórmulas da física bulk do mediador (`med_bulk_ncar`):
+O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F90` e o executa; cada programa imprime PASSOU ou FALHOU por caso. Não usam MPI. `test_formulas_bulk.F90` cobre três fórmulas da física bulk do mediador (`med_bulk_ncar`):
 
 | Rotina | O que calcula | Casos |
 | --- | --- | --- |
@@ -151,6 +151,17 @@ O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F9
 | `ocean_direct_albedo` | cosseno do zênite na célula da grade ATM e albedo da água para feixe direto (Briegleb et al., 1986) | sol a pino, noite, sol a 60° e a 78° de latitude, declinação diferente de zero; inclui os casos que batem no piso de 0,03 |
 
 O teste foi conferido ao contrário, com cinco alterações de propósito no código, uma de cada vez: trocar `<=` por `<` no limite de 273,16 K, trocar um coeficiente do fator de Louis, trocar o expoente 1,7 do albedo, mudar o teto do fator e inverter o sinal da longitude no ângulo horário. Todas fizeram o teste falhar.
+
+`test_grade_atm.F90` cobre as duas etapas de cálculo de `map_cells_to_regular_grid` (`mpas_cap_methods`), que leva as células MPAS à grade regular 360 x 180 do cap atmosférico:
+
+| Rotina | O que confere | Casos |
+| --- | --- | --- |
+| `bin_cells_local` | cada célula cai na caixa de 1 grau certa, com soma e contagem por caixa | duas células na mesma caixa, longitude negativa (vai para a coluna 360), latitudes de 90° e -90° (linhas 180 e 1), célula além de `n` ignorada |
+| `fill_empty_bins` | caixa sem célula recebe a média dos vizinhos preenchidos | vizinha ainda vazia não conta, caixa recém-preenchida serve de vizinha na mesma passada, longitude periódica, borda norte, zero passadas, grade toda vazia |
+
+Os valores esperados do preenchimento foram calculados em aritmética exata (frações do Python) para o campo f(i, j) = i + 1000 j. Na borda norte, a linha 181 vira a própria linha 180, e dois vizinhos contam duas vezes; o teste registra esse comportamento atual, que só pode mudar numa etapa própria, com nova linha de base.
+
+Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a volta da longitude para [0°, 360°), arredondar a latitude em vez de truncar, mudar a marca 0,5 das caixas preenchidas e ignorar o `n` fizeram o teste falhar (o último, pela verificação de limites de array, que aborta o programa).
 
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
 
