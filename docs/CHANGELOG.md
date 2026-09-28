@@ -9,12 +9,19 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Exportação do cap atmosférico sem o bloco repetido 13 vezes (R-FASE8-06).** Quarta revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `mpas_export` (`mpas_cap_methods.F90`, 104 linhas de código) repetia, para cada um dos 13 campos exportados, o mesmo bloco de sete linhas: testar se o membro de `atm_public` está associado, guardá-lo no gravador (`netcdf_push_raw_field`), ignorar o código de retorno, levá-lo ao `exportState` (`state_set_field_1d`) e sair em caso de falha. O bloco vira a rotina `export_mpas_member`, e `mpas_export` passa a ter uma chamada por campo, na mesma ordem, com o mesmo nome de campo e o mesmo membro.
+  - Constantes de texto: os 13 nomes de campo (`Sa_pslv_mpas` a `Faxa_tauy_mpas`) apareciam duas vezes cada, uma em cada chamada do bloco; agora aparecem uma vez, na chamada de `export_mpas_member`, que os repassa às duas rotinas. O texto que chega ao gravador e ao `exportState` é o mesmo. É a única diferença apontada por `confere-literais.py`.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora literais (a diferença acima) e instruções (os blocos substituídos pelas chamadas e o corpo da rotina nova). Grade do cap atmosférico igual (o teste chama `mpas_export` duas vezes); gravadores iguais.
+  - Indicadores: rotinas de 300 para 301; rotinas com mais de 100 linhas de código de 7 para 6.
+
 - **Diagnóstico `monan2_import_*.nc`: reunião e gravação em etapas (R-FASE8-05).** Terceira revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `write_mpas_import_diag` (`mpas_cap_netcdf.F90`, 111 linhas de código) juntava as coletivas MPI de todos os PETs com a montagem e a gravação do arquivo no PET 0. Fica com a decomposição (contagens e deslocamentos) e com as coletivas, e dois trechos saem sem mudança:
     - `gather_cell_coords`: reunião das coordenadas das células no PET 0, com `lonCell` e `latCell` opcionais, como antes; os vetores de destino são `contiguous`, como em `gather_boundary_member`, para que o `MPI_Gatherv` escreva direto neles.
     - `write_import_diag_file`: no PET 0, grade lat/lon centrada em células, nome do arquivo pela data do relógio (ou pelo contador), eixos, campos e fechamento; incrementa `clk%step`, como antes. Recebe o mesmo prefixo de mensagens.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 22 diferenças são só declarações, cabeçalhos e chamadas das rotinas novas. Gravadores iguais byte a byte, inclusive os `monan2_import_*.nc` (com e sem correntes). Literais iguais (273).
   - Indicadores: rotinas de 298 para 300; rotinas com mais de 100 linhas de código de 8 para 7.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-05-validada`).
 
 - **Física bulk: geometria solar e fluxos de água aberta em rotinas próprias (R-FASE8-04).** Segunda revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `calc_bulk_ncar` (`med_bulk_ncar.F90`, 124 linhas de código) misturava o cálculo da hora UTC e da declinação solar a partir do relógio com as fórmulas de fluxo. Os dois trechos saem sem mudança:
