@@ -19,6 +19,7 @@ program test_mpas_export
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use mpas_atm_types_mod,    only : mpas_atm_public_type, MPAS_RKIND
   use mpas_cap_methods_mod,  only : mpas_export, mpas_create_grid
+  use mpas_cap_netcdf_mod,   only : mpas_diag_export_t
   implicit none
 
   integer, parameter :: NCAMPOS = 3
@@ -29,6 +30,7 @@ program test_mpas_export
   type(ESMF_State) :: expst
   type(ESMF_Field) :: campo(NCAMPOS)
   type(mpas_atm_public_type) :: pub
+  type(mpas_diag_export_t)   :: diag   ! sem netcdf_init_coords: nada é guardado
   real(ESMF_KIND_R8), allocatable :: glob(:,:)
   integer :: rc, localPet, petCount, n, k, i, chamada, u
   real(ESMF_KIND_R8) :: lon0, lon1, x
@@ -74,7 +76,7 @@ program test_mpas_export
       pub%u10(i)      = real(7.3_ESMF_KIND_R8 * cos(1.7_ESMF_KIND_R8 * x) + chamada / 3.0_ESMF_KIND_R8, MPAS_RKIND)
       pub%swdn_sfc(i) = real(max(0.0_ESMF_KIND_R8, 900.0_ESMF_KIND_R8 * sin(0.3_ESMF_KIND_R8 * x + chamada)), MPAS_RKIND)
     end do
-    call mpas_export(pub, expst, rc)
+    call mpas_export(diag, pub, expst, rc)
     if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)
     do k = 1, NCAMPOS
       if (localPet == 0) then

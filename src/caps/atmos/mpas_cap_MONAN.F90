@@ -42,6 +42,7 @@ module mpas_cap_MONAN_mod
                                     state_diagnose
 
   use mpas_cap_netcdf_mod,  only : export_write_netcdf, &
+                                    mpas_diag_export_t,  &
                                     netcdf_init_coords,  &
                                     netcdf_config_set,   &
                                     set_mpas_diag_clock   ! timestamp do diag import (mpas_cap_netcdf)
@@ -67,6 +68,9 @@ module mpas_cap_MONAN_mod
   type(mpas_atm_state_type),     pointer, save :: g_atm_state  => null()
   type(atm_ocean_boundary_type), pointer, save :: g_atm_bnd    => null()
   type(ESMF_Grid),                        save :: g_grid
+  !> Gravador monan_export_*.nc: grade de saída, coordenadas e campos MPAS
+  !! guardados. Configurado em InitializeRealize.
+  type(mpas_diag_export_t),               save :: g_diag_export
 
   ! ── Campos importados do mediador (MED→MPAS) ───────────────────────────────
   !
@@ -272,8 +276,8 @@ contains
         lon_local_nc(k) = real(g_atm_public%lonCell(k), ESMF_KIND_R8) * RAD2DEG
         lat_local_nc(k) = real(g_atm_public%latCell(k), ESMF_KIND_R8) * RAD2DEG
       end do
-      call netcdf_config_set(cfg_grid_res_deg, cfg_output_dir, localPet)
-      call netcdf_init_coords(lon_local_nc, lat_local_nc, n_local, vm, rc)
+      call netcdf_config_set(g_diag_export, cfg_grid_res_deg, cfg_output_dir, localPet)
+      call netcdf_init_coords(g_diag_export, lon_local_nc, lat_local_nc, n_local, vm, rc)
       deallocate(lon_local_nc, lat_local_nc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (allocated(lon_local_nc)) deallocate(lon_local_nc)
@@ -307,7 +311,7 @@ contains
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_atm_public, exportState, rc)
+    call mpas_export(g_diag_export, g_atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_CompAttributeSet(gcomp, &
          name='InitializeDataProgress', value='true', rc=rc)
@@ -365,7 +369,7 @@ contains
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_atm_public, exportState, rc)
+    call mpas_export(g_diag_export, g_atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (cfg_write_diag) then
       call state_diagnose(exportState, 'exportState@Advance', rc)
@@ -379,7 +383,7 @@ contains
       call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                         h=hr, m=mn, s=sc, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call export_write_netcdf(exportState, step_count * cfg_dt_coupling, &
+      call export_write_netcdf(g_diag_export, exportState, step_count * cfg_dt_coupling, &
                                 yr, mo, dy, hr, mn, sc, vm, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if

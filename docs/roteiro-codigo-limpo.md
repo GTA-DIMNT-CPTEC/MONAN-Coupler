@@ -67,6 +67,7 @@ Hoje parte do estado dos componentes vive em variáveis de módulo que qualquer 
 | R-FASE7-02 | `MED_InternalState` agrupado em subtipos por assunto (campos da atmosfera, do gelo, albedos, rotas e máscaras), para que cada rotina receba só o que usa | B |
 | R-FASE7-03 | gravador do cap atmosférico: `NLON`, `NLAT`, `GRID_RES`, `DLON`, `DLAT` e as coordenadas globais num tipo de configuração da grade de saída, criado uma vez e passado adiante | B |
 | R-FASE7-04 | `mpas_atm_model`: os ponteiros `g_*` (domínio, comunicador, campos do MPAS) num tipo de estado do modelo atmosférico | B |
+| R-FASE7-05 | cap atmosférico: estado interno ESMF próprio (hoje o cap guarda `g_atm_public`, `g_atm_state`, `g_atm_bnd`, `g_grid`, `g_diag_export` e `step_count` em variáveis de módulo), incluindo o relógio do diagnóstico de importação (`g_diag_*` de `mpas_cap_netcdf`). Etapa acrescentada na R-FASE7-03: o roteiro supunha que o cap já tinha estado interno | B |
 
 **Pronto quando:** nenhum módulo próprio exporta variável com estado de componente, e cada etapa reproduz a linha de base. As variáveis com `save` dentro de rotinas (seis, usadas para "primeira chamada" e contadores) passam para o estado interno nesta fase, cada uma com o cuidado de manter o mesmo momento de inicialização.
 

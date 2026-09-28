@@ -25,9 +25,7 @@ module mpas_cap_methods_mod
                                    cfg_grid_res_deg
   ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d
   use mpas_cap_netcdf_mod, only: netcdf_push_raw_field,     &
-                                  netcdf_config_set,         &
-                                  netcdf_init_coords,        &
-                                  export_write_netcdf,       &
+                                  mpas_diag_export_t,        &
                                   write_mpas_import_diag,    &  ! migrado de mpas_cap_methods
                                   set_mpas_diag_clock           ! migrado de mpas_cap_methods
   implicit none
@@ -329,7 +327,11 @@ contains
   !!
   !! Campos não associados (pool diag_physics inativo ou nome ausente no
   !! Registry.xml) são silenciosamente ignorados.
-  subroutine mpas_export(atm_public, exportState, rc)
+  !!
+  !! @param[inout] diag  gravador monan_export_*.nc do cap: guarda os campos
+  !!                     MPAS locais para export_write_netcdf
+  subroutine mpas_export(diag, atm_public, exportState, rc)
+    type(mpas_diag_export_t),   intent(inout) :: diag
     type(mpas_atm_public_type), intent(in)    :: atm_public
     type(ESMF_State),           intent(inout) :: exportState
     integer,                    intent(inout) :: rc
@@ -345,65 +347,65 @@ contains
     n  = merge(atm_public%nCellsSolve, atm_public%nCells, atm_public%nCellsSolve > 0)
 
     ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d.
-    ! Garante correspondência dado(k) ↔ g_lon_global(k) em voronoi_to_latlon.
+    ! Garante correspondência dado(k) ↔ diag%lon_local(k) em voronoi_accum_local.
     if (associated(atm_public%pslv)) then
-      call netcdf_push_raw_field('Sa_pslv_mpas', atm_public%pslv, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Sa_pslv_mpas', atm_public%pslv, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Sa_pslv_mpas',   n, atm_public%pslv, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%t2m)) then
-      call netcdf_push_raw_field('Sa_tbot_mpas', atm_public%t2m, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Sa_tbot_mpas', atm_public%t2m, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Sa_tbot_mpas',   n, atm_public%t2m,  rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%u10)) then
-      call netcdf_push_raw_field('Sa_u10m_mpas', atm_public%u10, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Sa_u10m_mpas', atm_public%u10, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Sa_u10m_mpas',   n, atm_public%u10,  rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%v10)) then
-      call netcdf_push_raw_field('Sa_v10m_mpas', atm_public%v10, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Sa_v10m_mpas', atm_public%v10, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Sa_v10m_mpas',   n, atm_public%v10,  rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%swdn_sfc)) then
-      call netcdf_push_raw_field('Faxa_swdn_mpas', atm_public%swdn_sfc, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_swdn_mpas', atm_public%swdn_sfc, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_swdn_mpas', n, atm_public%swdn_sfc, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%lwdn_sfc)) then
-      call netcdf_push_raw_field('Faxa_lwdn_mpas', atm_public%lwdn_sfc, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_lwdn_mpas', atm_public%lwdn_sfc, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_lwdn_mpas', n, atm_public%lwdn_sfc, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%prec_rain)) then
-      call netcdf_push_raw_field('Faxa_rain_mpas', atm_public%prec_rain, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_rain_mpas', atm_public%prec_rain, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_rain_mpas', n, atm_public%prec_rain, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%q2m)) then
-      call netcdf_push_raw_field('Sa_shum_mpas', atm_public%q2m, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Sa_shum_mpas', atm_public%q2m, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Sa_shum_mpas', n, atm_public%q2m, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%prec_snow)) then
-      call netcdf_push_raw_field('Faxa_snow_mpas', atm_public%prec_snow, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_snow_mpas', atm_public%prec_snow, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_snow_mpas', n, atm_public%prec_snow, rc, &
            atm_public%lonCell, atm_public%latCell)
@@ -411,28 +413,28 @@ contains
     end if
     ! ── fluxos nativos do PBL (antes descartados, ver docstring) ──────
     if (associated(atm_public%shflx)) then
-      call netcdf_push_raw_field('Faxa_sen_mpas', atm_public%shflx, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_sen_mpas', atm_public%shflx, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_sen_mpas', n, atm_public%shflx, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%lhflx)) then
-      call netcdf_push_raw_field('Faxa_lat_mpas', atm_public%lhflx, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_lat_mpas', atm_public%lhflx, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_lat_mpas', n, atm_public%lhflx, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%taux_sfc)) then
-      call netcdf_push_raw_field('Faxa_taux_mpas', atm_public%taux_sfc, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_taux_mpas', atm_public%taux_sfc, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_taux_mpas', n, atm_public%taux_sfc, rc, &
            atm_public%lonCell, atm_public%latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     if (associated(atm_public%tauy_sfc)) then
-      call netcdf_push_raw_field('Faxa_tauy_mpas', atm_public%tauy_sfc, n, vm, rc)
+      call netcdf_push_raw_field(diag, 'Faxa_tauy_mpas', atm_public%tauy_sfc, n, vm, rc)
       rc = ESMF_SUCCESS
       call state_set_field_1d(exportState, 'Faxa_tauy_mpas', n, atm_public%tauy_sfc, rc, &
            atm_public%lonCell, atm_public%latCell)

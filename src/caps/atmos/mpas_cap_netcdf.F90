@@ -65,37 +65,41 @@ module mpas_cap_netcdf_mod
   public :: write_mpas_import_diag  ! escreve monan2_import_YYYYMMDD_HHMMSS.nc
   public :: set_mpas_diag_clock     ! injeta timestamp de simulação no diagnóstico
 
-  ! ── Grade regular de saída ────────────────────────────────────────────────
-  ! Inicializada com 1°×1° (padrão do namelist &nuopc_netcdf).
-  ! Atualizada via netcdf_config_set() antes de export_write_netcdf.
-  integer,            save :: NLON     = 360   !  -180° a +179°
-  integer,            save :: NLAT     = 181   !   -90° a  +90°
-  real,               save :: GRID_RES = 1.0   !  resolução [°]
-  real(ESMF_KIND_R8), save :: DLON = 1.0_ESMF_KIND_R8  ! passo em lon
-  real(ESMF_KIND_R8), save :: DLAT = 1.0_ESMF_KIND_R8  ! passo em lat
+  ! ── Grade de saída, coordenadas e campos guardados do gravador ──────────
+  integer, parameter :: MAX_RAW = 15   !< máximo de campos MPAS guardados
 
-  ! Fill value para pontos da grade sem nenhuma célula Voronoi
+  !> Estado do gravador monan_export_*.nc. O cap cria um objeto deste tipo,
+  !! configura a grade (netcdf_config_set), reúne as coordenadas uma vez
+  !! (netcdf_init_coords) e o passa a netcdf_push_raw_field e a
+  !! export_write_netcdf a cada passo.
+  type, public :: mpas_diag_export_t
+    ! Grade regular de saída. Padrão 1°×1° (namelist &nuopc_netcdf);
+    ! atualizada por netcdf_config_set.
+    integer            :: nlon     = 360   !< -180° a +179°
+    integer            :: nlat     = 181   !<  -90° a  +90°
+    real               :: grid_res = 1.0   !< resolução [°]
+    real(ESMF_KIND_R8) :: dlon = 1.0_ESMF_KIND_R8   !< passo em lon
+    real(ESMF_KIND_R8) :: dlat = 1.0_ESMF_KIND_R8   !< passo em lat
+    character(len=256) :: output_dir = 'diag_export'
+    ! Coordenadas globais, reunidas no PET 0 por netcdf_init_coords
+    real(ESMF_KIND_R8), allocatable :: lon_global(:)   !< (nglobal) graus
+    real(ESMF_KIND_R8), allocatable :: lat_global(:)   !< (nglobal) graus
+    logical :: coords_ready = .false.
+    ! Decomposição MPI de netcdf_init_coords, reusada em export_write_netcdf
+    ! para que allCounts/displs sejam os mesmos e o mapeamento geográfico
+    ! não saia errado.
+    integer :: nlocal  = 0
+    integer :: nglobal = 0
+    integer, allocatable :: all_counts(:)
+    integer, allocatable :: displs(:)
+    real(ESMF_KIND_R8), allocatable :: lon_local(:)   !< coordenadas locais [°]
+    real(ESMF_KIND_R8), allocatable :: lat_local(:)
+    ! Campos MPAS locais guardados por netcdf_push_raw_field
+    integer            :: n_raw = 0
+    character(len=64)  :: raw_names(MAX_RAW)
+    real(ESMF_KIND_R8), allocatable :: raw_local(:,:)   !< (nlocal, MAX_RAW)
+  end type mpas_diag_export_t
 
-  ! ── Coordenadas globais (módulo save — preenchidas por netcdf_init_coords)
-  real(ESMF_KIND_R8), allocatable, save :: g_lon_global(:)  ! (nGlobal) graus
-  real(ESMF_KIND_R8), allocatable, save :: g_lat_global(:)  ! (nGlobal) graus
-  logical,                          save :: g_coords_ready = .false.
-
-  ! ── Decomposição MPI salva ─────────────────────────────────────────────────
-  ! Garante que allCounts/displs em export_write_netcdf sejam idênticos
-  ! aos usados em netcdf_init_coords, evitando mapeamento geográfico errado.
-  integer,                          save :: g_nLocal_saved  = 0
-  integer,                          save :: g_nGlobal_saved = 0
-  integer, allocatable,             save :: g_allCounts_saved(:)
-  integer, allocatable,             save :: g_displs_saved(:)
-
-  character(len=256), save :: OUTPUT_DIR = 'diag_export'
-  integer,            parameter :: MAX_RAW = 15
-  integer,            save      :: g_n_raw   = 0
-  character(len=64),  save      :: g_raw_names(MAX_RAW)
-  real(ESMF_KIND_R8), allocatable, save :: g_raw_local(:,:)
-  real(ESMF_KIND_R8), allocatable, save :: g_lon_local_saved(:)
-  real(ESMF_KIND_R8), allocatable, save :: g_lat_local_saved(:)
   character(len=*), parameter :: u_FILE_u   = __FILE__
 
   ! ── Estado do diagnóstico de importação MED→MPAS (migrado de mpas_cap_methods) ──
@@ -127,24 +131,25 @@ contains
   !! @param[in] res_deg   Resolução da grade em graus (ex: 1.0, 0.5, 0.25)
   !! @param[in] out_dir   Diretório de saída para os arquivos NetCDF
   !! @param[in] localPet PET local do ESMF — suprime impressão em PETs > 0
-  subroutine netcdf_config_set(res_deg, out_dir, localPet)
+  subroutine netcdf_config_set(diag, res_deg, out_dir, localPet)
+    type(mpas_diag_export_t), intent(inout) :: diag
     real,             intent(in) :: res_deg
     character(len=*), intent(in) :: out_dir
     integer,          intent(in) :: localPet  ! guarda de rank
 
-    GRID_RES   = res_deg
-    DLON       = real(res_deg, ESMF_KIND_R8)
-    DLAT       = real(res_deg, ESMF_KIND_R8)
-    NLON       = nint(360.0 / res_deg)
-    NLAT       = nint(180.0 / res_deg) + 1
-    OUTPUT_DIR = trim(out_dir)
+    diag%grid_res   = res_deg
+    diag%dlon       = real(res_deg, ESMF_KIND_R8)
+    diag%dlat       = real(res_deg, ESMF_KIND_R8)
+    diag%nlon       = nint(360.0 / res_deg)
+    diag%nlat       = nint(180.0 / res_deg) + 1
+    diag%output_dir = trim(out_dir)
 
     ! sem guarda, N PETs × N chamadas = N² mensagens em stdout.
     ! Só PET 0 imprime; demais passam silenciosamente.
     if (localPet == 0) &
       write(*,'(A,F5.2,A,I0,A,I0,A,A)') &
-        '[NetCDF] grade configurada: ', res_deg, '° -> NLON=', NLON, &
-        ' NLAT=', NLAT, ' output_dir=', trim(OUTPUT_DIR)
+        '[NetCDF] grade configurada: ', res_deg, '° -> NLON=', diag%nlon, &
+        ' NLAT=', diag%nlat, ' output_dir=', trim(diag%output_dir)
   end subroutine netcdf_config_set
 
   ! ============================================================================
@@ -161,7 +166,8 @@ contains
   !!
   !! Uso em mpas_cap_MONAN.F90 (InitializeRealize):
   !!   call netcdf_init_coords(lon_local, lat_local, nLocalElem, vm, rc)
-  subroutine netcdf_init_coords(lon_local, lat_local, nLocal, vm, rc)
+  subroutine netcdf_init_coords(diag, lon_local, lat_local, nLocal, vm, rc)
+    type(mpas_diag_export_t), intent(inout) :: diag
     real(ESMF_KIND_R8), intent(in)    :: lon_local(:)   ! longitudes do PET (graus)
     real(ESMF_KIND_R8), intent(in)    :: lat_local(:)   ! latitudes  do PET (graus)
     integer,            intent(in)    :: nLocal          ! número de células locais
@@ -173,7 +179,7 @@ contains
     character(len=*), parameter :: subname = '(netcdf_init_coords)'
 
     rc = ESMF_SUCCESS
-    if (g_coords_ready) return   ! idempotente
+    if (diag%coords_ready) return   ! idempotente
 
     call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, &
                     mpiCommunicator=mpiComm, rc=rc)
@@ -198,50 +204,50 @@ contains
 
     ! ── Alocar buffers (PETs >0 recebem array mínimo — argumento inativo) ─
     if (localPet == 0) then
-      allocate(g_lon_global(nGlobal))
-      allocate(g_lat_global(nGlobal))
+      allocate(diag%lon_global(nGlobal))
+      allocate(diag%lat_global(nGlobal))
     else
-      allocate(g_lon_global(1))
-      allocate(g_lat_global(1))
+      allocate(diag%lon_global(1))
+      allocate(diag%lat_global(1))
     end if
 
     ! ── Gather de lon e lat ────────────────────────────────────────────────
     call MPI_Gatherv(lon_local, nLocal, MPI_DOUBLE_PRECISION, &
-                     g_lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     diag%lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
       write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lon_local falhou'
 
     call MPI_Gatherv(lat_local, nLocal, MPI_DOUBLE_PRECISION, &
-                     g_lat_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                     diag%lat_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
       write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lat_local falhou'
 
     ! Salvar a decomposicao MPI para reuso em export_write_netcdf.
     ! Garante que recvBuf(i) corresponde a g_lon/lat_global(i) — sem desfase.
-    g_nLocal_saved  = nLocal
-    g_nGlobal_saved = nGlobal
-    allocate(g_allCounts_saved(petCount))
-    allocate(g_displs_saved(petCount))
-    g_allCounts_saved = allCounts
-    g_displs_saved    = displs
-    if (allocated(g_lon_local_saved)) deallocate(g_lon_local_saved)
-    if (allocated(g_lat_local_saved)) deallocate(g_lat_local_saved)
-    allocate(g_lon_local_saved(nLocal))
-    allocate(g_lat_local_saved(nLocal))
-    g_lon_local_saved = lon_local(1:nLocal)
-    g_lat_local_saved = lat_local(1:nLocal)
+    diag%nlocal  = nLocal
+    diag%nglobal = nGlobal
+    allocate(diag%all_counts(petCount))
+    allocate(diag%displs(petCount))
+    diag%all_counts = allCounts
+    diag%displs    = displs
+    if (allocated(diag%lon_local)) deallocate(diag%lon_local)
+    if (allocated(diag%lat_local)) deallocate(diag%lat_local)
+    allocate(diag%lon_local(nLocal))
+    allocate(diag%lat_local(nLocal))
+    diag%lon_local = lon_local(1:nLocal)
+    diag%lat_local = lat_local(1:nLocal)
 
-    ! CORREÇÃO 1: alocar g_raw_local AQUI onde g_nLocal_saved > 0 é garantido.
-    ! Se alocado em push_raw_field, g_nLocal_saved pode ser 0 → size=1 → OOB/skip.
-    if (allocated(g_raw_local)) deallocate(g_raw_local)
-    allocate(g_raw_local(nLocal, MAX_RAW))
-    g_raw_local = 0.0_ESMF_KIND_R8
-    g_n_raw = 0  ! resetar contagem de campos (nova execução)
+    ! CORREÇÃO 1: alocar diag%raw_local AQUI onde diag%nlocal > 0 é garantido.
+    ! Se alocado em push_raw_field, diag%nlocal pode ser 0 → size=1 → OOB/skip.
+    if (allocated(diag%raw_local)) deallocate(diag%raw_local)
+    allocate(diag%raw_local(nLocal, MAX_RAW))
+    diag%raw_local = 0.0_ESMF_KIND_R8
+    diag%n_raw = 0  ! resetar contagem de campos (nova execução)
 
     deallocate(allCounts, displs)
-    g_coords_ready = .true.
+    diag%coords_ready = .true.
 
     if (localPet == 0) then
       write(*,'(A,I0,A)') &
@@ -254,8 +260,9 @@ contains
 
   ! ============================================================================
   !> Guarda o dado MPAS LOCAL deste PET, sem MPI.
-  !! Todos os PETs têm g_raw_local(nLocal, MAX_RAW) com seus próprios dados.
-  subroutine netcdf_push_raw_field(fname, data1d, nLocal, vm, rc)
+  !! Todos os PETs têm diag%raw_local(nLocal, MAX_RAW) com seus próprios dados.
+  subroutine netcdf_push_raw_field(diag, fname, data1d, nLocal, vm, rc)
+    type(mpas_diag_export_t), intent(inout) :: diag
     character(len=*),   intent(in)    :: fname
     real(ESMF_KIND_R8), intent(in)    :: data1d(:)
     integer,            intent(in)    :: nLocal
@@ -263,22 +270,22 @@ contains
     integer,            intent(inout) :: rc
     integer :: idx, localPet, petCount
     rc = ESMF_SUCCESS
-    if (.not. g_coords_ready .or. nLocal <= 0) return
+    if (.not. diag%coords_ready .or. nLocal <= 0) return
     call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
     if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; return; end if
-    do idx = 1, g_n_raw
-      if (trim(g_raw_names(idx)) == trim(fname)) then
-        if (allocated(g_raw_local) .and. size(g_raw_local,1) >= nLocal) &
-          g_raw_local(1:nLocal, idx) = data1d(1:nLocal)
+    do idx = 1, diag%n_raw
+      if (trim(diag%raw_names(idx)) == trim(fname)) then
+        if (allocated(diag%raw_local) .and. size(diag%raw_local,1) >= nLocal) &
+          diag%raw_local(1:nLocal, idx) = data1d(1:nLocal)
         return
       end if
     end do
-    if (g_n_raw >= MAX_RAW) return
-    g_n_raw = g_n_raw + 1
-    g_raw_names(g_n_raw) = trim(fname)
-    ! g_raw_local já alocado em netcdf_init_coords com tamanho nLocal correto
-    if (allocated(g_raw_local) .and. size(g_raw_local,1) >= nLocal) then
-      g_raw_local(1:nLocal, g_n_raw) = data1d(1:nLocal)
+    if (diag%n_raw >= MAX_RAW) return
+    diag%n_raw = diag%n_raw + 1
+    diag%raw_names(diag%n_raw) = trim(fname)
+    ! diag%raw_local já alocado em netcdf_init_coords com tamanho nLocal correto
+    if (allocated(diag%raw_local) .and. size(diag%raw_local,1) >= nLocal) then
+      diag%raw_local(1:nLocal, diag%n_raw) = data1d(1:nLocal)
     end if
   end subroutine netcdf_push_raw_field
 
@@ -286,11 +293,12 @@ contains
   !!
   !! Todos os PETs participam das chamadas MPI coletivas; os campos chegam
   !! em unidades instantâneas de mpas_atm_model.F90 (sem conversão aqui).
-  subroutine export_write_netcdf(exportState,               &
+  subroutine export_write_netcdf(diag, exportState,         &
                                   elapsed_s,                &
                                   s_yr, s_mo, s_dy,         &
                                   s_hr, s_mn, s_sc,         &
                                   vm, rc)
+    type(mpas_diag_export_t), intent(in) :: diag
     type(ESMF_State), intent(in)    :: exportState
     integer,          intent(in)    :: elapsed_s
     integer,          intent(in)    :: s_yr, s_mo, s_dy, s_hr, s_mn, s_sc
@@ -311,7 +319,7 @@ contains
     real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf(:)
 
     real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
-    real(ESMF_KIND_R8) :: lat_axis(NLAT), lon_axis(NLON)
+    real(ESMF_KIND_R8) :: lat_axis(diag%nlat), lon_axis(diag%nlon)
     real(ESMF_KIND_R8) :: time_val
 
     character(len=36) :: fname_base
@@ -327,7 +335,7 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     ! Coordenadas requeridas — preenchidas por netcdf_init_coords em InitializeRealize
-    if (.not. g_coords_ready) then
+    if (.not. diag%coords_ready) then
       if (localPet == 0) write(*,'(A)') &
         '[NetCDF] ERRO: netcdf_init_coords nao foi chamado em InitializeRealize.'
       rc = ESMF_FAILURE
@@ -356,11 +364,11 @@ contains
     ! distintos, o mapeamento geográfico no NetCDF sairia errado. Reutilizar
     ! os mesmos allCounts/displs do init_coords garante que recvBuf(i)
     ! corresponde a g_lon/lat_global(i).
-    nLocal  = g_nLocal_saved
-    nGlobal = g_nGlobal_saved
+    nLocal  = diag%nlocal
+    nGlobal = diag%nglobal
     allocate(allCounts(petCount), displs(petCount))
-    allCounts = g_allCounts_saved
-    displs    = g_displs_saved
+    allCounts = diag%all_counts
+    displs    = diag%displs
     rc = ESMF_SUCCESS
 
     ! ── 4. Buffers ────────────────────────────────────────────────────────
@@ -374,7 +382,7 @@ contains
     ! ── 5. PET0: criar e definir estrutura do arquivo NetCDF ──────────────
     if (localPet == 0) then
       fname_base     = datetime_to_fname(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
-      fname          = trim(OUTPUT_DIR)//'/'//trim(fname_base)
+      fname          = trim(diag%output_dir)//'/'//trim(fname_base)
       valid_time_iso = datetime_to_iso(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
       ! startTime = currTime - elapsed_s (para CF time_units "seconds since startTime")
       call start_time_from_elapsed(s_yr,s_mo,s_dy,s_hr,s_mn,s_sc, elapsed_s, &
@@ -383,9 +391,9 @@ contains
       time_units_str = datetime_to_cf_base(st_yr,st_mo,st_dy,st_hr,st_mn,st_sc)
       time_val       = real(elapsed_s, ESMF_KIND_R8)
 
-      call execute_command_line('mkdir -p '//trim(OUTPUT_DIR), exitstat=cmd_stat)
+      call execute_command_line('mkdir -p '//trim(diag%output_dir), exitstat=cmd_stat)
 
-      allocate(grid_2d(NLON, NLAT))
+      allocate(grid_2d(diag%nlon, diag%nlat))
 
       ! ── Atributos globais CF-1.8 ────────────────────────────────────────
       if (.not. nc_create(fname, ncid, subname)) then
@@ -416,7 +424,7 @@ contains
       ! ── Dimensões ────────────────────────────────────────────────────────
       ! lat e lon — sem dimensão time (1 arquivo por passo)
       ! ── Variáveis de coordenada ──────────────────────────────────────────
-      if (.not. nc_def_latlon(ncid, NLON, NLAT, dimid_lon, dimid_lat, &
+      if (.not. nc_def_latlon(ncid, diag%nlon, diag%nlat, dimid_lon, dimid_lat, &
                               varid_lon, varid_lat, subname)) then
         ncstat = nf90_close(ncid)
         call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': definicao de lat/lon falhou', &
@@ -433,7 +441,7 @@ contains
       ncstat = nf90_put_att(ncid, varid_t, 'valid_time',trim(valid_time_iso))
 
       ! ── Variáveis dos campos (lon, lat) em Fortran column-major ──────────
-      ! Python: nc['campo'][:] → shape (NLAT, NLON) = (181, 360)  ✓
+      ! Python: nc['campo'][:] → shape (diag%nlat, diag%nlon) = (181, 360)  ✓
       do i = 1, itemCount
         if (.not. nc_def_field2d(ncid, fldnames(i), dimid_lon, dimid_lat, varid, subname, &
                                  long_name=field_long_name(fldnames(i)),             &
@@ -453,11 +461,11 @@ contains
       end if
 
       ! ── Escrever eixos e time ────────────────────────────────────────────
-      do i = 1, NLAT
-        lat_axis(i) = -90.0_ESMF_KIND_R8 + real(i-1, ESMF_KIND_R8) * DLAT
+      do i = 1, diag%nlat
+        lat_axis(i) = -90.0_ESMF_KIND_R8 + real(i-1, ESMF_KIND_R8) * diag%dlat
       end do
-      do i = 1, NLON
-        lon_axis(i) = -180.0_ESMF_KIND_R8 + real(i-1, ESMF_KIND_R8) * DLON
+      do i = 1, diag%nlon
+        lon_axis(i) = -180.0_ESMF_KIND_R8 + real(i-1, ESMF_KIND_R8) * diag%dlon
       end do
       ncstat = nf90_put_var(ncid, varid_lat, lat_axis)
       ncstat = nf90_put_var(ncid, varid_lon, lon_axis)
@@ -466,7 +474,7 @@ contains
     end if   ! localPet == 0
 
     ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce ───────────
-    call write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
+    call write_export_fields(diag, exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
         grid_2d, ncstat, ncid, varid, rc)
 
         ! ── 7. PET0: fechar arquivo ───────────────────────────────────────────
@@ -485,8 +493,9 @@ contains
     deallocate(fldnames, allCounts, displs, sendBuf, recvBuf)
   end subroutine export_write_netcdf
 
-  subroutine write_export_fields(exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, &
+  subroutine write_export_fields(diag, exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, &
       localPet, grid_2d, ncstat, ncid, varid, rc)
+    type(mpas_diag_export_t), intent(in) :: diag
     type(ESMF_State), intent(in) :: exportState
     integer, intent(in) :: itemCount
     integer, intent(inout) :: nLocal
@@ -503,30 +512,30 @@ contains
     integer :: i
     integer :: mpi_ierr
     real(ESMF_KIND_R8) :: othr
-    real(ESMF_KIND_R8) :: acc_local(NLON,NLAT), acc_global(NLON,NLAT)
-    integer            :: cnt_local(NLON,NLAT), cnt_global(NLON,NLAT)
+    real(ESMF_KIND_R8) :: acc_local(diag%nlon,diag%nlat), acc_global(diag%nlon,diag%nlat)
+    integer            :: cnt_local(diag%nlon,diag%nlat), cnt_global(diag%nlon,diag%nlat)
     integer :: raw_idx, jr
     real(ESMF_KIND_R8), pointer :: fp1(:)
     real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
 
     do i = 1, itemCount
       raw_idx = 0
-      do jr = 1, g_n_raw
-        if (trim(g_raw_names(jr)) == trim(fldnames(i))) then; raw_idx = jr; exit; end if
+      do jr = 1, diag%n_raw
+        if (trim(diag%raw_names(jr)) == trim(fldnames(i))) then; raw_idx = jr; exit; end if
       end do
 
       othr = field_outlier_threshold(fldnames(i))
       acc_local = 0.0_ESMF_KIND_R8; cnt_local = 0
 
-      if (raw_idx > 0 .and. allocated(g_raw_local) .and. g_nLocal_saved > 0 .and. &
-          allocated(g_lon_local_saved)) then
-        ! v2: g_raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
-        ! g_lon_local_saved — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
-        call voronoi_accum_local( &
-          g_raw_local(1:g_nLocal_saved, raw_idx), &
-          g_lon_local_saved(1:g_nLocal_saved),    &
-          g_lat_local_saved(1:g_nLocal_saved),    &
-          g_nLocal_saved, acc_local, cnt_local, othr)
+      if (raw_idx > 0 .and. allocated(diag%raw_local) .and. diag%nlocal > 0 .and. &
+          allocated(diag%lon_local)) then
+        ! v2: diag%raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
+        ! diag%lon_local — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
+        call voronoi_accum_local(diag, &
+          diag%raw_local(1:diag%nlocal, raw_idx), &
+          diag%lon_local(1:diag%nlocal),    &
+          diag%lat_local(1:diag%nlocal),    &
+          diag%nlocal, acc_local, cnt_local, othr)
       else
         ! Fallback ESMF field — cobertura parcial
         sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
@@ -552,14 +561,14 @@ contains
             end if
         end if
         rc = ESMF_SUCCESS
-        if (allocated(g_lon_local_saved) .and. nLocal>0) &
-          call voronoi_accum_local(sendBuf(1:nLocal), g_lon_local_saved(1:nLocal), &
-            g_lat_local_saved(1:nLocal), nLocal, acc_local, cnt_local, othr)
+        if (allocated(diag%lon_local) .and. nLocal>0) &
+          call voronoi_accum_local(diag, sendBuf(1:nLocal), diag%lon_local(1:nLocal), &
+            diag%lat_local(1:nLocal), nLocal, acc_local, cnt_local, othr)
       end if
 
       ! Wrappers isoladas em módulo separado (mpi_allreduce_wrappers_mod).
-      call allreduce_r8(acc_local, acc_global, NLON*NLAT, mpiComm, mpi_ierr)
-      call allreduce_i4(cnt_local, cnt_global, NLON*NLAT, mpiComm, mpi_ierr)
+      call allreduce_r8(acc_local, acc_global, diag%nlon*diag%nlat, mpiComm, mpi_ierr)
+      call allreduce_i4(cnt_local, cnt_global, diag%nlon*diag%nlat, mpiComm, mpi_ierr)
 
       if (localPet == 0) then
         grid_2d = FILL_VALUE_R8
@@ -577,18 +586,19 @@ contains
 
   ! ============================================================================
   !> Acumulação per-PET, por vizinho mais próximo, das células Voronoi na
-  !! grade regular NLON×NLAT. Não normaliza: usar com MPI_Allreduce(SUM) e
+  !! grade regular diag%nlon×diag%nlat. Não normaliza: usar com MPI_Allreduce(SUM) e
   !! dividir a soma pela contagem.
   !!
   !! Para cada célula k: descarta |data_in(k)| > outlier_thr (fill value ou
   !! lixo de memória), normaliza a longitude para [-180, 180), acha o ponto
   !! de grade mais próximo e acumula soma e contagem, com espalhamento
   !! adaptativo em longitude (ver comentários no código).
-  subroutine voronoi_accum_local(data_in, lon_v, lat_v, n, acc, cnt, outlier_thr)
+  subroutine voronoi_accum_local(diag, data_in, lon_v, lat_v, n, acc, cnt, outlier_thr)
+    type(mpas_diag_export_t), intent(in) :: diag
     real(ESMF_KIND_R8), intent(in)    :: data_in(n), lon_v(n), lat_v(n)
     integer,            intent(in)    :: n
-    real(ESMF_KIND_R8), intent(inout) :: acc(NLON, NLAT)
-    integer,            intent(inout) :: cnt(NLON, NLAT)
+    real(ESMF_KIND_R8), intent(inout) :: acc(diag%nlon, diag%nlat)
+    integer,            intent(inout) :: cnt(diag%nlon, diag%nlat)
     real(ESMF_KIND_R8), intent(in)    :: outlier_thr
     integer,   parameter :: NSPAN_LAT = 1
     real(ESMF_KIND_R8), parameter :: CELL_HALF = 0.60_ESMF_KIND_R8
@@ -601,17 +611,17 @@ contains
       lon_n = lon_v(k)
       do while (lon_n >= 180.0_ESMF_KIND_R8); lon_n = lon_n - 360.0_ESMF_KIND_R8; end do
       do while (lon_n < -180.0_ESMF_KIND_R8); lon_n = lon_n + 360.0_ESMF_KIND_R8; end do
-      ic = nint((lon_n + 180.0_ESMF_KIND_R8) / DLON) + 1
-      jc = nint((lat_v(k) + 90.0_ESMF_KIND_R8) / DLAT) + 1
-      ic = min(max(ic,1),NLON); jc = min(max(jc,1),NLAT)
+      ic = nint((lon_n + 180.0_ESMF_KIND_R8) / diag%dlon) + 1
+      jc = nint((lat_v(k) + 90.0_ESMF_KIND_R8) / diag%dlat) + 1
+      ic = min(max(ic,1),diag%nlon); jc = min(max(jc,1),diag%nlat)
       cos_lat = max(cos(lat_v(k)*PI/180.0_ESMF_KIND_R8), 0.009_ESMF_KIND_R8)
-      ns = min(max(int(CELL_HALF/(cos_lat*DLON))+1, NSPAN_LAT), NLON/4)
+      ns = min(max(int(CELL_HALF/(cos_lat*diag%dlon))+1, NSPAN_LAT), diag%nlon/4)
       do dj = -NSPAN_LAT, NSPAN_LAT
-        j2 = min(max(jc+dj,1),NLAT)
+        j2 = min(max(jc+dj,1),diag%nlat)
         do di = -ns, ns
           i2 = ic+di
-          if (i2 < 1)    i2 = i2 + NLON
-          if (i2 > NLON) i2 = i2 - NLON
+          if (i2 < 1)    i2 = i2 + diag%nlon
+          if (i2 > diag%nlon) i2 = i2 - diag%nlon
           acc(i2,j2) = acc(i2,j2) + val
           cnt(i2,j2) = cnt(i2,j2) + 1
         end do

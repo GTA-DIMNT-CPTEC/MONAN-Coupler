@@ -1,5 +1,5 @@
 ! Teste de regressão dos gravadores de diagnóstico: med_write_import_fields,
-! write_mpas_import_diag e WriteDOCNDiag, com dados sintéticos e vários
+! write_mpas_import_diag, export_write_netcdf e WriteDOCNDiag, com dados sintéticos e vários
 ! PETs. Ligado uma
 ! vez com os objetos antigos e uma vez com os novos; os arquivos gravados
 ! têm de ser idênticos. Executado por tests/writers/compara-gravadores.bash,
@@ -10,7 +10,10 @@ program test_writers
   use med_cap_types_mod, only : MED_InternalState, n_export, export_names
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
-  use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock
+  use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
+                                  mpas_diag_export_t, netcdf_config_set, &
+                                  netcdf_init_coords, netcdf_push_raw_field, &
+                                  export_write_netcdf
   use docn_cap_netcdf_mod, only : WriteDOCNDiag
   use coupler_config_mod, only : config_read
   use netcdf
@@ -96,6 +99,7 @@ program test_writers
   deallocate(bnd%alb, bnd%omask)
   call set_mpas_diag_clock(2026, 3, 29, 2, 0, 0)
   call write_mpas_import_diag(bnd, nloc, lonc, latc, rc)
+  call export_cases(nloc, lonc, latc, i0)
 
   ! ── oceano de dados (DOCN) ───────────────────────────────────────────
   call docn_cases()
@@ -103,6 +107,56 @@ program test_writers
   call ESMF_Finalize(rc=rc)
 
 contains
+
+  !> Casos do export_write_netcdf (monan_export_*.nc, em out_mpas_export):
+  !! grade de saída de 2°, coordenadas reunidas por netcdf_init_coords, dois
+  !! campos guardados por netcdf_push_raw_field (um com valor acima do limiar
+  !! de descarte) e um campo sem dado guardado, lido do exportState (caminho
+  !! de reserva). Duas escritas, a segunda com o campo guardado atualizado.
+  subroutine export_cases(n, lon_rad, lat_rad, ioff)
+    integer,          intent(in) :: n, ioff
+    real(MPAS_RKIND), intent(in) :: lon_rad(:), lat_rad(:)
+    type(mpas_diag_export_t) :: dx
+    type(ESMF_State) :: est
+    type(ESMF_Field) :: f3(3)
+    real(ESMF_KIND_R8), allocatable :: lond(:), latd(:), v1(:), v2(:)
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    character(len=16), parameter :: nomes3(3) = &
+      [character(len=16) :: 'Sa_pslv_mpas', 'Faxa_swdn_mpas', 'Sa_tbot_mpas']
+    integer :: m, i, j
+
+    allocate(lond(n), latd(n), v1(n), v2(n))
+    lond = real(lon_rad(1:n), ESMF_KIND_R8) * 180.0_ESMF_KIND_R8 / acos(-1.0_ESMF_KIND_R8)
+    latd = real(lat_rad(1:n), ESMF_KIND_R8) * 180.0_ESMF_KIND_R8 / acos(-1.0_ESMF_KIND_R8)
+    do m = 1, n
+      v1(m) = 101325.0_ESMF_KIND_R8 + 900.0_ESMF_KIND_R8 * sin(0.013_ESMF_KIND_R8 * (ioff + m))
+      v2(m) = max(0.0_ESMF_KIND_R8, 1000.0_ESMF_KIND_R8 * cos(0.021_ESMF_KIND_R8 * (ioff + m)))
+      if (mod(ioff + m, 211) == 0) v2(m) = 5.0e4_ESMF_KIND_R8   ! descartado pelo limiar
+    end do
+
+    call netcdf_config_set(dx, 2.0, 'out_mpas_export', localPet)
+    call netcdf_init_coords(dx, lond, latd, n, vm, rc)
+
+    est = ESMF_StateCreate(name='exp_mpas', rc=rc)
+    do m = 1, 3
+      f3(m) = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, name=trim(nomes3(m)), rc=rc)
+      call ESMF_FieldGet(f3(m), farrayPtr=p, rc=rc)
+      do j = lbound(p,2), ubound(p,2)
+        do i = lbound(p,1), ubound(p,1)
+          p(i,j) = 250.0_ESMF_KIND_R8 + 0.1_ESMF_KIND_R8 * i + 0.2_ESMF_KIND_R8 * j + m
+        end do
+      end do
+      call ESMF_StateAdd(est, [f3(m)], rc=rc)
+    end do
+
+    call netcdf_push_raw_field(dx, 'Sa_pslv_mpas', v1, n, vm, rc)
+    call netcdf_push_raw_field(dx, 'Faxa_swdn_mpas', v2, n, vm, rc)
+    call export_write_netcdf(dx, est, 3600, 2026, 3, 29, 1, 0, 0, vm, rc)
+    v1 = v1 + 7.5_ESMF_KIND_R8
+    call netcdf_push_raw_field(dx, 'Sa_pslv_mpas', v1, n, vm, rc)
+    call export_write_netcdf(dx, est, 7200, 2026, 3, 29, 2, 0, 0, vm, rc)
+    deallocate(lond, latd, v1, v2)
+  end subroutine export_cases
 
   subroutine mk(f)
     type(ESMF_Field), intent(out) :: f

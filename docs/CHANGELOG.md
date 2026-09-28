@@ -9,6 +9,16 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Cap atmosférico: gravador `monan_export_*.nc` com estado próprio (R-FASE7-03).** Terceira etapa da fase 7. Nenhum cálculo muda.
+  - As 18 variáveis de módulo do gravador em `mpas_cap_netcdf.F90` (grade de saída `NLON`, `NLAT`, `GRID_RES`, `DLON`, `DLAT` e `OUTPUT_DIR`; coordenadas globais; decomposição MPI salva; campos MPAS guardados) passam a ser componentes do tipo público `mpas_diag_export_t`, com os mesmos valores iniciais.
+  - O objeto é criado pelo cap (`g_diag_export`, em `mpas_cap_MONAN.F90`) e passado como primeiro argumento a `netcdf_config_set`, `netcdf_init_coords`, `netcdf_push_raw_field` e `export_write_netcdf`, e a `mpas_export`, que guarda os campos. As rotinas internas `write_export_fields` e `voronoi_accum_local` o recebem como `intent(in)`.
+  - O cap ainda guarda o objeto numa variável de módulo, como já faz com `g_atm_public`, `g_atm_state`, `g_atm_bnd` e `g_grid`: o roteiro supunha que o cap atmosférico tinha estado interno ESMF, e não tem. Foi acrescentada a etapa R-FASE7-05 para criá-lo; ela também leva para lá o relógio do diagnóstico de importação (`g_diag_*`), que fica em `mpas_cap_netcdf` por enquanto.
+  - Registrado para depois (sem mudança agora): as coordenadas globais reunidas no PET 0 por `netcdf_init_coords` (`lon_global`, `lat_global`) não são lidas por nenhuma rotina; e `write_export_fields` ainda tem um `BLOCK`, contra a convenção do README.
+  - Testes: `test_writers.F90` passa a chamar também `export_write_netcdf` (grade de 2°, dois campos guardados, um deles com valor acima do limiar de descarte, e um campo lido do `exportState` pelo caminho de reserva; duas escritas), gravando em `out_mpas_export`, que `compara-gravadores.bash` passa a comparar. Até aqui `export_write_netcdf` só era conferida pela rodada na Jaci. Nesta etapa a versão de referência não tem esse caso; a comparação foi feita uma vez com um programa de teste adaptado à interface antiga: os 8 arquivos NetCDF (inclusive os 2 `monan_export_*.nc`) e o log do ESMF saíram iguais byte a byte.
+  - `test_mpas_export.F90` passa um `mpas_diag_export_t` sem coordenadas a `mpas_export` (nada é guardado, como antes).
+  - Conferências locais: compilação, avisos, regrid, física bulk, grade atmosférica e testes com valor esperado sem falhas; constantes de texto iguais em todos os fontes de `src/` (só o programa de teste ganhou constantes); gravadores iguais byte a byte na comparação acima.
+  - Indicadores: variáveis de módulo privadas de 65 para 48.
+
 - **Mediador: estado interno agrupado por assunto (R-FASE7-02).** Segunda etapa da fase 7. Nenhum cálculo muda.
   - `MED_InternalState` deixa de ser uma lista de 49 componentes soltos e passa a ter seis subtipos, declarados e públicos em `med_cap_types.F90`. A tabela mostra onde foi parar cada componente.
 
@@ -27,6 +37,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - As constantes de texto não mudam; as mensagens de log que citam os nomes antigos (por exemplo `[MED-DIAG] f_sst_atm`) ficam como estão, porque os scripts de análise as reconhecem.
   - Testes: `test_bulk_ncar.F90` e `test_writers.F90` usam os nomes novos. Como já feito para os gravadores na R-FASE7-01, `compara-bulk.bash` e `compara-grade-atm.bash` passam a ligar a versão antiga ao programa de teste do commit de referência e a nova ao da árvore de trabalho.
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas (física bulk, gravadores e grade atmosférica iguais byte a byte; constantes de texto iguais). Indicadores sem mudança.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-02-validada`).
 
 - **Mediador: estado de comunicação e de diagnóstico no estado interno (R-FASE7-01).** Primeira etapa da fase 7 do roteiro de código limpo. Nenhum cálculo muda.
   - `med_cap_types.F90` passa a ter `private` como padrão, com a lista explícita do que é público: os tipos `MED_InternalState` e `MED_InternalStateWrapper`, as constantes físicas e os parâmetros do bulk e as listas de campos. A constante `u_FILE_u`, sem uso, deixa de ser exportada.

@@ -7,8 +7,10 @@
 # seu programa test_writers.F90 (o de REV na versão antiga, o da árvore de
 # trabalho na nova, para que uma etapa possa mudar a interface dos
 # gravadores) e o executa com 4 processos MPI e dados sintéticos. O
-# programa chama med_write_import_fields e write_mpas_import_diag duas vezes cada (com e sem membros de atm_bnd,
-# com valores inválidos e máscara de terra) e WriteDOCNDiag três vezes
+# programa chama med_write_import_fields e write_mpas_import_diag duas vezes
+# cada (com e sem membros de atm_bnd, com valores inválidos e máscara de
+# terra), export_write_netcdf duas vezes (campos guardados e caminho de
+# reserva, grade de 2°) e WriteDOCNDiag três vezes
 # (sem e com correntes, gelo em fração e em %, arquivo de SST ausente),
 # com configurações e arquivos de dados próprios. Os arquivos NetCDF gravados e
 # as mensagens de log dos gravadores têm de ser idênticos nas duas versões.
@@ -69,7 +71,7 @@ done
 
 difere=0
 n=0
-for f in $(cd "${SAIDA}/antiga/run" && find out_med diag_import out_docn -name '*.nc' | sort); do
+for f in $(cd "${SAIDA}/antiga/run" && find out_med diag_import out_docn out_mpas_export -name '*.nc' 2> /dev/null | sort); do
   n=$((n + 1))
   if cmp -s "${SAIDA}/antiga/run/${f}" "${SAIDA}/nova/run/${f}"; then
     echo "  igual (bytes)  ${f}"
