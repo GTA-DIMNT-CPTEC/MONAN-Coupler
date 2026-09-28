@@ -8,7 +8,7 @@
 !! upstream, chamada no passo 11a de mpas_atm_init): sem ela, os arquivos
 !! diag, history e restart saem só com o atributo file_id.
 !! Com -DMPAS_EXTERNAL_ESMF_LIB, mpas_timekeeping.F usa 'use ESMF' (externo).
-!! mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (g_domain%%clock),
+!! mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (atm_state%%domain%%clock),
 !! independente do relógio ESMF do driver. Ambos são necessários.
 !!
 !! Sequência de inicialização do MONAN-A (confirmada via probe no Jaci):
@@ -91,48 +91,10 @@ module mpas_atm_model_mod
   implicit none
   private
 
-  ! Ponteiros PRIVADOS de módulo
-  type(domain_type), pointer, private, save :: g_domain   => null()
-  integer,                    private, save :: g_mpi_comm = -1
-
-  ! ── Ponteiros para arrays de pool (leitura em mpas_atm_run) ────────────────
-  ! Necessários para computar incrementos de acumulados e stress superficial.
-  ! São ponteiros para memória do MPAS pool — NÃO devem ser desalocados aqui.
-  real(MPAS_RKIND), pointer, private, save :: g_pool_acswdnb(:) => null() ! J/m² acumulado
-  real(MPAS_RKIND), pointer, private, save :: g_pool_aclwdnb(:) => null() ! J/m² acumulado
-  real(MPAS_RKIND), pointer, private, save :: g_pool_rainnc(:)  => null() ! mm acumulado (estratiforme)
-  real(MPAS_RKIND), pointer, private, save :: g_pool_rainc(:)   => null() ! mm acumulado (convectiva)
-  real(MPAS_RKIND), pointer, private, save :: g_pool_ust(:)     => null() ! vel. atrito [m/s]
-  real(MPAS_RKIND), pointer, private, save :: g_pool_snownc(:)  => null() ! mm acum. neve estrat.
-  real(MPAS_RKIND), pointer, private, save :: g_pool_q2(:)      => null() ! hum. espec. 2m [kg/kg]
-
-  ! ── Valores do passo anterior (para cálculo de incrementos) ────────────────
-  real(MPAS_RKIND), allocatable, private, save :: g_prev_acswdnb(:) ! J/m²
-  real(MPAS_RKIND), allocatable, private, save :: g_prev_aclwdnb(:) ! J/m²
-  real(MPAS_RKIND), allocatable, private, save :: g_prev_precip(:)  ! mm (rainnc+rainc)
-
-  ! ── Buffers de saída em unidades instantâneas (apontados por atm_public) ───
-  ! atm_public%swdn_sfc, lwdn_sfc, prec_total, taux_sfc, tauy_sfc
-  ! apontam para estes arrays após mpas_atm_init.
-  ! OBRIGATÓRIO: atributo TARGET para que ptr => array seja válido em Fortran.
-  real(MPAS_RKIND), allocatable, target, private, save :: g_swdn_inst(:)  ! W/m²
-  real(MPAS_RKIND), allocatable, target, private, save :: g_lwdn_inst(:)  ! W/m²
-  real(MPAS_RKIND), allocatable, target, private, save :: g_prec_inst(:)  ! kg/m²/s
-  real(MPAS_RKIND), allocatable, target, private, save :: g_taux_buf(:)       ! N/m²
-  real(MPAS_RKIND), allocatable, target, private, save :: g_tauy_buf(:)       ! N/m²
-  real(MPAS_RKIND), allocatable, target, private, save :: g_q2m_buf(:)        ! kg/kg
-  real(MPAS_RKIND), allocatable, target, private, save :: g_prec_rain_buf(:)  ! kg/m²/s
-  real(MPAS_RKIND), allocatable, target, private, save :: g_prec_snow_buf(:)  ! kg/m²/s
-  ! buffers para u10/v10 calculados por fallback logarítmico
-  ! Usados quando bl_mynn_in=F e bl_ysu_in=F (u10/v10 ausentes do pool 'diag').
-  real(MPAS_RKIND), allocatable, target, private, save :: g_u10_buf(:)    ! m/s
-  real(MPAS_RKIND), allocatable, target, private, save :: g_v10_buf(:)    ! m/s
-  ! Ponteiros para uReconstructZonal/Meridional do pool 'diag' (campo 3D: nVertLevels x nCells)
-  ! Nível 1 = camada mais próxima da superfície no MPAS-A (ordem bottom-up)
-  real(MPAS_RKIND), pointer, private, save :: g_pool_uZonal(:,:) => null()  ! [m/s] 3D
-  real(MPAS_RKIND), pointer, private, save :: g_pool_vMerid(:,:) => null()  ! [m/s] 3D
-  real(MPAS_RKIND), pointer, private, save :: g_pool_zgrid(:,:)  => null()  ! [m] altura geopotencial
-  real(MPAS_RKIND), allocatable,         private, save :: g_prev_snow(:)      ! mm acum.
+  ! O estado do modelo (domínio MPAS, ponteiros para os campos dos pools,
+  ! acumulados do passo anterior e buffers de fluxos instantâneos) fica em
+  ! mpas_atm_state_type (mpas_atm_types.F90), guardado pelo cap e recebido
+  ! como argumento pelas rotinas deste módulo.
 
   ! Densidade do ar à superfície: constante de referência para cálculo de stress.
   ! Fonte: NIST, condições padrão (1013 hPa, 15°C). Erro < 5% na prática.
@@ -199,7 +161,7 @@ contains
                             dt_seconds, config_dir, mpi_comm, rc)
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
-    type(mpas_atm_state_type),     intent(inout) :: atm_state
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,          intent(in)  :: dt_seconds
     character(len=*), intent(in)  :: config_dir
@@ -226,7 +188,6 @@ contains
     character(len=256) :: msg
 
     rc = 0
-    g_mpi_comm           = mpi_comm
     atm_state%mpi_comm   = mpi_comm
     atm_state%dt_seconds = dt_seconds
     atm_state%config_dir = trim(config_dir)
@@ -236,14 +197,14 @@ contains
     if (rc /= 0) return
 
     ! Passos 10 a 12: malha, stream manager e streams
-    call setup_mpas_streams(rc)
+    call setup_mpas_streams(atm_state, rc)
     if (rc /= 0) return
 
     ! ------------------------------------------------------------------
     ! 13. Inicializa o núcleo atmosférico (core_init).
     ! ------------------------------------------------------------------
     startTimeStamp = ''
-    ierr = g_domain%core%core_init(g_domain, startTimeStamp)
+    ierr = atm_state%domain%core%core_init(atm_state%domain, startTimeStamp)
     if (ierr /= 0) then
       write(msg,'(A,I0)') 'ERRO mpas_atm_init: core_init retornou ierr=', ierr
       call mpas_log_write(trim(msg), messageType=MPAS_LOG_CRIT)
@@ -254,9 +215,9 @@ contains
     call bind_mesh_fields(atm_public, atm_state, n, nSolve, rc)
     if (rc /= 0) return
 
-    call bind_diag_fields(atm_public)
-    call setup_wind_fallback(atm_public, n)
-    call init_flux_buffers(atm_public, n)
+    call bind_diag_fields(atm_public, atm_state)
+    call setup_wind_fallback(atm_public, atm_state, n)
+    call init_flux_buffers(atm_public, atm_state, n)
     call init_boundary_arrays(atm_bnd, n)
 
     atm_state%initialized = .true.
@@ -274,7 +235,7 @@ contains
   !! @param[in]  atm_state  estado do cap (diretorio de configuracao)
   !! @param[out] rc         0 em caso de sucesso
   subroutine setup_mpas_domain(atm_state, rc)
-    type(mpas_atm_state_type), intent(in)  :: atm_state
+    type(mpas_atm_state_type), intent(inout) :: atm_state
     integer,                   intent(out) :: rc
 
     integer :: ierr
@@ -284,23 +245,23 @@ contains
     ! ------------------------------------------------------------------
     ! Sequência replicada de mpas_subdriver.F (confirmada pelo probe):
     !
-    ! Aqui: g_domain ≡ domain_ptr; g_domain%core ≡ corelist.
+    ! Aqui: atm_state%domain ≡ domain_ptr; atm_state%domain%core ≡ corelist.
     ! ------------------------------------------------------------------
-    allocate(g_domain)
-    nullify(g_domain%next)       ! linked-list: sem próximo domain
+    allocate(atm_state%domain)
+    nullify(atm_state%domain%next)       ! linked-list: sem próximo domain
 
-    allocate(g_domain%core)
-    nullify(g_domain%core%next)  ! linked-list: sem próximo core
+    allocate(atm_state%domain%core)
+    nullify(atm_state%domain%core%next)  ! linked-list: sem próximo core
 
     ! Back-link: core%domainlist aponta para o domain
-    g_domain%core%domainlist => g_domain
+    atm_state%domain%core%domainlist => atm_state%domain
 
     ! ------------------------------------------------------------------
     ! 1. mpas_allocate_domain: aloca configs, packages, clock,
     !    streamManager, ioContext e faz nullify(blocklist).
     !    Também faz allocate(dom%dminfo) — mas phase1 vai re-alocar.
     ! ------------------------------------------------------------------
-    call mpas_allocate_domain(g_domain)
+    call mpas_allocate_domain(atm_state%domain)
 
     ! ------------------------------------------------------------------
     ! 2. Inicializa timekeeping do MONAN-A com calendário gregoriano.
@@ -312,28 +273,28 @@ contains
     ! ------------------------------------------------------------------
     ! 3. Phase 1: inicializa MPI com o comunicador da VM ESMF.
     ! ------------------------------------------------------------------
-    nullify(g_domain%dminfo)
-    call mpas_framework_init_phase1(g_domain%dminfo, external_comm=g_mpi_comm)
+    nullify(atm_state%domain%dminfo)
+    call mpas_framework_init_phase1(atm_state%domain%dminfo, external_comm=atm_state%mpi_comm)
 
     ! ------------------------------------------------------------------
     ! 3. Registra procedure pointers do núcleo (APÓS phase1, conforme
-    !    mpas_subdriver.F). atm_setup_core recebe g_domain%core que é
+    !    mpas_subdriver.F). atm_setup_core recebe atm_state%domain%core que é
     !    do tipo core_type — já alocado acima.
     ! ------------------------------------------------------------------
-    call atm_setup_core(g_domain%core)
+    call atm_setup_core(atm_state%domain%core)
 
     ! ------------------------------------------------------------------
     ! 4. atm_setup_domain: registra campos adicionais no domain_type
     !    (nomes de variáveis, streams, etc.) — chamado por mpas_subdriver
     !    após atm_setup_core e antes de phase2.
     ! ------------------------------------------------------------------
-    call atm_setup_domain(g_domain)
+    call atm_setup_domain(atm_state%domain)
 
     ! ------------------------------------------------------------------
     ! 5. setup_log: inicializa o gerenciador de log do MPAS-A.
     !    DEVE ser chamado após atm_setup_core (que registra o procedure
-    !    pointer setup_log em g_domain%core) e após phase1 (dminfo pronto).
-    !    Qualquer mpas_log_write ANTES deste ponto → g_domain%logInfo
+    !    pointer setup_log em atm_state%domain%core) e após phase1 (dminfo pronto).
+    !    Qualquer mpas_log_write ANTES deste ponto → atm_state%domain%logInfo
     !    não inicializado → SIGSEGV.
     !
     ! removida chamada prematura a mpas_log_write que existia
@@ -344,7 +305,7 @@ contains
     !    Sequência de mpas_subdriver.F:
     !      ierr = domain_ptr%core%setup_log(domain_ptr%logInfo, domain_ptr)
     ! ------------------------------------------------------------------
-    ierr = g_domain%core%setup_log(g_domain%logInfo, g_domain)
+    ierr = atm_state%domain%core%setup_log(atm_state%domain%logInfo, atm_state%domain)
     if (ierr /= 0) then
       write(*,'(A)') 'ERRO mpas_atm_init: setup_log falhou'
       rc = ierr; return
@@ -359,12 +320,12 @@ contains
     !      ierr = domain_ptr%core%setup_namelist(domain_ptr%configs,
     !               domain_ptr%namelist_filename, domain_ptr%dminfo)
     ! ------------------------------------------------------------------
-    g_domain%namelist_filename = trim(atm_state%config_dir) // 'namelist.atmosphere'
-    g_domain%streams_filename  = trim(atm_state%config_dir) // 'streams.atmosphere'
+    atm_state%domain%namelist_filename = trim(atm_state%config_dir) // 'namelist.atmosphere'
+    atm_state%domain%streams_filename  = trim(atm_state%config_dir) // 'streams.atmosphere'
 
-    ierr = g_domain%core%setup_namelist(g_domain%configs,         &
-                                         g_domain%namelist_filename, &
-                                         g_domain%dminfo)
+    ierr = atm_state%domain%core%setup_namelist(atm_state%domain%configs,         &
+                                         atm_state%domain%namelist_filename, &
+                                         atm_state%domain%dminfo)
     if (ierr /= 0) then
       call mpas_log_write('ERRO mpas_atm_init: setup_namelist falhou', &
                           messageType=MPAS_LOG_CRIT)
@@ -378,18 +339,18 @@ contains
     !    Chamada sem calendar= pois setup_namelist já leu config_calendar_type
     !    para domain%configs; phase2 o lê de lá quando calendar não é passado.
     ! ------------------------------------------------------------------
-    call mpas_framework_init_phase2(g_domain)
+    call mpas_framework_init_phase2(atm_state%domain)
     call mpas_log_write('mpas_atm_init: phase2 concluida (I/O init, timekeeping)')
 
     ! ------------------------------------------------------------------
     ! 8. streamInfo: informações sobre streams (lido do XML).
     ! ------------------------------------------------------------------
-    g_domain%streamInfo => MPAS_stream_inquiry_new_streaminfo()
-    if (.not. associated(g_domain%streamInfo)) then
+    atm_state%domain%streamInfo => MPAS_stream_inquiry_new_streaminfo()
+    if (.not. associated(atm_state%domain%streamInfo)) then
       call mpas_log_write('ERRO: streamInfo falhou', messageType=MPAS_LOG_CRIT)
       rc = 1; return
     end if
-    if (g_domain%streamInfo%init(g_domain%dminfo%comm, g_domain%streams_filename) /= 0) then
+    if (atm_state%domain%streamInfo%init(atm_state%domain%dminfo%comm, atm_state%domain%streams_filename) /= 0) then
       call mpas_log_write('ERRO: streamInfo%init falhou', messageType=MPAS_LOG_CRIT)
       rc = 1; return
     end if
@@ -397,26 +358,26 @@ contains
     ! ------------------------------------------------------------------
     ! 9. define_packages / setup_packages / setup_decompositions / setup_clock
     ! ------------------------------------------------------------------
-    ierr = g_domain%core%define_packages(g_domain%packages)
+    ierr = atm_state%domain%core%define_packages(atm_state%domain%packages)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: define_packages falhou', messageType=MPAS_LOG_CRIT)
       rc = ierr; return
     end if
 
-    ierr = g_domain%core%setup_packages(g_domain%configs, g_domain%streamInfo, &
-                                         g_domain%packages, g_domain%ioContext)
+    ierr = atm_state%domain%core%setup_packages(atm_state%domain%configs, atm_state%domain%streamInfo, &
+                                         atm_state%domain%packages, atm_state%domain%ioContext)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: setup_packages falhou', messageType=MPAS_LOG_CRIT)
       rc = ierr; return
     end if
 
-    ierr = g_domain%core%setup_decompositions(g_domain%decompositions)
+    ierr = atm_state%domain%core%setup_decompositions(atm_state%domain%decompositions)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: setup_decompositions falhou', messageType=MPAS_LOG_CRIT)
       rc = ierr; return
     end if
 
-    ierr = g_domain%core%setup_clock(g_domain%clock, g_domain%configs)
+    ierr = atm_state%domain%core%setup_clock(atm_state%domain%clock, atm_state%domain%configs)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: setup_clock falhou', messageType=MPAS_LOG_CRIT)
       rc = ierr; return
@@ -427,8 +388,10 @@ contains
   !> Passos 10 a 12 de mpas_atm_init: le a malha (bootstrap fase 1),
   !! inicializa o stream manager, registra atributos globais e streams, e
   !! conclui a alocacao de campos e halos (bootstrap fase 2).
-  !! @param[out] rc  0 em caso de sucesso
-  subroutine setup_mpas_streams(rc)
+  !! @param[inout] atm_state  estado do modelo (domínio MPAS)
+  !! @param[out]   rc         0 em caso de sucesso
+  subroutine setup_mpas_streams(atm_state, rc)
+    type(mpas_atm_state_type), intent(inout) :: atm_state
     integer, intent(out) :: rc
 
     integer :: ierr
@@ -441,10 +404,10 @@ contains
     !     distribui domínio. Após esta chamada, blocklist está alocado.
     !     O filename do mesh é lido de config_input_name no namelist.
     ! ------------------------------------------------------------------
-    call mpas_bootstrap_framework_phase1(g_domain, &
-         trim(mesh_filename_for_bootstrap(g_domain)), MPAS_IO_PNETCDF)
+    call mpas_bootstrap_framework_phase1(atm_state%domain, &
+         trim(mesh_filename_for_bootstrap(atm_state%domain)), MPAS_IO_PNETCDF)
 
-    if (.not. associated(g_domain%blocklist)) then
+    if (.not. associated(atm_state%domain%blocklist)) then
       call mpas_log_write('ERRO: blocklist nulo apos bootstrap_phase1', &
                           messageType=MPAS_LOG_CRIT)
       rc = 1; return
@@ -454,9 +417,9 @@ contains
     ! ------------------------------------------------------------------
     ! 11. Configura stream manager e streams imutáveis.
     ! ------------------------------------------------------------------
-    call MPAS_stream_mgr_init(g_domain%streamManager, g_domain%ioContext, &
-                              g_domain%clock, g_domain%blocklist%allFields, &
-                              g_domain%packages, g_domain%blocklist%allStructs)
+    call MPAS_stream_mgr_init(atm_state%domain%streamManager, atm_state%domain%ioContext, &
+                              atm_state%domain%clock, atm_state%domain%blocklist%allFields, &
+                              atm_state%domain%packages, atm_state%domain%blocklist%allStructs)
 
     ! ------------------------------------------------------------------
     ! 11a. Registra os atributos globais no stream manager.
@@ -478,10 +441,10 @@ contains
     !        mpas_bootstrap_framework_phase1 (passo 10);
     !        domain%streamManager e inicializado logo acima.
     ! ------------------------------------------------------------------
-    call atm_add_stream_attributes(g_domain)
+    call atm_add_stream_attributes(atm_state%domain)
     call mpas_log_write('mpas_atm_init: atributos globais registrados')
 
-    ierr = g_domain%core%setup_immutable_streams(g_domain%streamManager)
+    ierr = atm_state%domain%core%setup_immutable_streams(atm_state%domain%streamManager)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: setup_immutable_streams falhou', messageType=MPAS_LOG_CRIT)
       rc = ierr; return
@@ -494,13 +457,13 @@ contains
     !      registradas → reads retornam garbage → crash na física.
     !      Interface C definida localmente (igual ao mpas_subdriver.F).
     ! ------------------------------------------------------------------
-    call parse_streams_xml(rc)
+    call parse_streams_xml(atm_state, rc)
     if (rc /= 0) return
 
     call mpas_log_write('mpas_atm_init: xml_stream_parser concluido')
 
     ! Valida streams após configuração
-    call MPAS_stream_mgr_validate_streams(g_domain%streamManager, ierr=ierr)
+    call MPAS_stream_mgr_validate_streams(atm_state%domain%streamManager, ierr=ierr)
     if (ierr /= 0) then
       call mpas_log_write('ERRO: stream manager validation falhou', messageType=MPAS_LOG_CRIT)
       rc = 1; return
@@ -510,7 +473,7 @@ contains
     ! ------------------------------------------------------------------
     ! 12. mpas_bootstrap_framework_phase2: finaliza alocação de campos e halos.
     ! ------------------------------------------------------------------
-    call mpas_bootstrap_framework_phase2(g_domain)
+    call mpas_bootstrap_framework_phase2(atm_state%domain)
     call mpas_log_write('mpas_atm_init: bootstrap_phase2 concluido')
   end subroutine setup_mpas_streams
 
@@ -541,7 +504,7 @@ contains
     !    Probe seção 7, mpas_atm_core.F linha 167:
     !    O campo do bloco é 'structs' (confirmado pelo probe).
     ! ------------------------------------------------------------------
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'mesh', meshPool)
+    call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'mesh', meshPool)
 
     if (.not. associated(meshPool)) then
       write(*,'(A)') 'ERRO mpas_atm_init: subpool mesh nao encontrado em blocklist%structs'
@@ -604,8 +567,10 @@ contains
   !> Liga os ponteiros dos campos de diagnostico (passo 7b de mpas_atm_init).
   !! @param[inout] atm_public  recebe os ponteiros pslv, u10, v10, t2m,
   !!                           lhflx e shflx
-  subroutine bind_diag_fields(atm_public)
+  !! @param[inout] atm_state   recebe os ponteiros para os acumulados do pool
+  subroutine bind_diag_fields(atm_public, atm_state)
     type(mpas_atm_public_type), intent(inout) :: atm_public
+    type(mpas_atm_state_type),  intent(inout) :: atm_state
 
     type(mpas_pool_type), pointer :: diagPool     => null()
     type(mpas_pool_type), pointer :: diagPhysPool => null()
@@ -631,18 +596,18 @@ contains
     ! ------------------------------------------------------------------
 
     ! Passa 1: subpool 'diag'
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag', diagPool)
+    call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag', diagPool)
 
     if (associated(diagPool)) then
       call mpas_pool_get_array(diagPool, 'mslp',    atm_public%pslv)     ! PSLV [Pa]
       call mpas_pool_get_array(diagPool, 'u10',     atm_public%u10)      ! U 10m [m/s]
       call mpas_pool_get_array(diagPool, 'v10',     atm_public%v10)      ! V 10m [m/s]
       ! Ponteiros privados para pools acumulados — não expostos diretamente
-      call mpas_pool_get_array(diagPool, 'acswdnb', g_pool_acswdnb)      ! J/m² acum.
-      call mpas_pool_get_array(diagPool, 'aclwdnb', g_pool_aclwdnb)      ! J/m² acum.
-      call mpas_pool_get_array(diagPool, 'rainnc',  g_pool_rainnc)       ! mm acum. (estrat.)
-      call mpas_pool_get_array(diagPool, 'rainc',   g_pool_rainc)        ! mm acum. (conv.)
-      call mpas_pool_get_array(diagPool, 'snownc',  g_pool_snownc)       ! mm acum. neve estrat.
+      call mpas_pool_get_array(diagPool, 'acswdnb', atm_state%pool_acswdnb)      ! J/m² acum.
+      call mpas_pool_get_array(diagPool, 'aclwdnb', atm_state%pool_aclwdnb)      ! J/m² acum.
+      call mpas_pool_get_array(diagPool, 'rainnc',  atm_state%pool_rainnc)       ! mm acum. (estrat.)
+      call mpas_pool_get_array(diagPool, 'rainc',   atm_state%pool_rainc)        ! mm acum. (conv.)
+      call mpas_pool_get_array(diagPool, 'snownc',  atm_state%pool_snownc)       ! mm acum. neve estrat.
       ! t2m, lh, hfx: tentativa em 'diag'
       call mpas_pool_get_array(diagPool, 't2m',     atm_public%t2m)
       call mpas_pool_get_array(diagPool, 'lh',      atm_public%lhflx)
@@ -653,7 +618,7 @@ contains
 
     ! Passa 2: subpool 'diag_physics' — fallback para campos de CLP/superfície
     ! No MONAN-A 2.0 com suíte mesoscale_reference_monan, t2m/lh/hfx/ust estão aqui.
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', diagPhysPool)
+    call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', diagPhysPool)
 
     if (associated(diagPhysPool)) then
       ! Sobrescreve apenas ponteiros ainda nulos após a busca em 'diag'
@@ -663,41 +628,43 @@ contains
         call mpas_pool_get_array(diagPhysPool, 'u10',     atm_public%u10)
       if (.not. associated(atm_public%v10))    &
         call mpas_pool_get_array(diagPhysPool, 'v10',     atm_public%v10)
-      if (.not. associated(g_pool_acswdnb))    &
-        call mpas_pool_get_array(diagPhysPool, 'acswdnb', g_pool_acswdnb)
-      if (.not. associated(g_pool_aclwdnb))    &
-        call mpas_pool_get_array(diagPhysPool, 'aclwdnb', g_pool_aclwdnb)
-      if (.not. associated(g_pool_rainnc))     &
-        call mpas_pool_get_array(diagPhysPool, 'rainnc',  g_pool_rainnc)
-      if (.not. associated(g_pool_rainc))      &
-        call mpas_pool_get_array(diagPhysPool, 'rainc',   g_pool_rainc)
-      if (.not. associated(g_pool_snownc))     &
-        call mpas_pool_get_array(diagPhysPool, 'snownc',  g_pool_snownc)
-      if (.not. associated(g_pool_q2))         &
-        call mpas_pool_get_array(diagPhysPool, 'q2',      g_pool_q2)
+      if (.not. associated(atm_state%pool_acswdnb))    &
+        call mpas_pool_get_array(diagPhysPool, 'acswdnb', atm_state%pool_acswdnb)
+      if (.not. associated(atm_state%pool_aclwdnb))    &
+        call mpas_pool_get_array(diagPhysPool, 'aclwdnb', atm_state%pool_aclwdnb)
+      if (.not. associated(atm_state%pool_rainnc))     &
+        call mpas_pool_get_array(diagPhysPool, 'rainnc',  atm_state%pool_rainnc)
+      if (.not. associated(atm_state%pool_rainc))      &
+        call mpas_pool_get_array(diagPhysPool, 'rainc',   atm_state%pool_rainc)
+      if (.not. associated(atm_state%pool_snownc))     &
+        call mpas_pool_get_array(diagPhysPool, 'snownc',  atm_state%pool_snownc)
+      if (.not. associated(atm_state%pool_q2))         &
+        call mpas_pool_get_array(diagPhysPool, 'q2',      atm_state%pool_q2)
       if (.not. associated(atm_public%lhflx))  &
         call mpas_pool_get_array(diagPhysPool, 'lh',      atm_public%lhflx)
       if (.not. associated(atm_public%shflx))  &
         call mpas_pool_get_array(diagPhysPool, 'hfx',     atm_public%shflx)
       ! Velocidade de atrito — necessária para calcular stress superficial
-      call mpas_pool_get_array(diagPhysPool, 'ust', g_pool_ust)
+      call mpas_pool_get_array(diagPhysPool, 'ust', atm_state%pool_ust)
     end if
 
     call warn_if_null(atm_public%t2m,      't2m')
     call warn_if_null(atm_public%pslv,     'mslp')
-    call warn_if_null(g_pool_acswdnb,      'acswdnb')
-    call warn_if_null(g_pool_rainnc,       'rainnc')
+    call warn_if_null(atm_state%pool_acswdnb,      'acswdnb')
+    call warn_if_null(atm_state%pool_rainnc,       'rainnc')
     call warn_if_null(atm_public%lhflx,    'lh')
-    if (.not. associated(g_pool_ust)) &
+    if (.not. associated(atm_state%pool_ust)) &
       write(*,'(A)') 'AVISO mpas_atm_init: ust nulo — taux/tauy serao zero'
   end subroutine bind_diag_fields
 
   !> Prepara o calculo de u10/v10 por perfil logaritmico quando os campos
   !! nao existem no pool.
   !! @param[inout] atm_public  u10 e v10 passam a apontar para os buffers
+  !! @param[inout] atm_state   guarda os ponteiros do pool e os buffers
   !! @param[in]    n           numero de celulas locais, com halos
-  subroutine setup_wind_fallback(atm_public, n)
+  subroutine setup_wind_fallback(atm_public, atm_state, n)
     type(mpas_atm_public_type), intent(inout) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     integer,                    intent(in)    :: n
 
     type(mpas_pool_type), pointer :: diagPool2 => null()
@@ -722,20 +689,20 @@ contains
       write(*,'(A)') '  Ativando fallback por perfil logaritmico de uReconstructZonal/Meridional.'
 
       ! Buscar uReconstructZonal e uReconstructMeridional (3D: nVertLevels x nCells)
-      call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag', diagPool2)
+      call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag', diagPool2)
       if (associated(diagPool2)) then
-        call mpas_pool_get_array(diagPool2, 'uReconstructZonal',     g_pool_uZonal)
-        call mpas_pool_get_array(diagPool2, 'uReconstructMeridional', g_pool_vMerid)
+        call mpas_pool_get_array(diagPool2, 'uReconstructZonal',     atm_state%pool_uZonal)
+        call mpas_pool_get_array(diagPool2, 'uReconstructMeridional', atm_state%pool_vMerid)
         ! zgrid: altura geopotencial nos centros de camada [m] (3D: nVertLevels x nCells)
-        call mpas_pool_get_array(diagPool2, 'zgrid',                  g_pool_zgrid)
+        call mpas_pool_get_array(diagPool2, 'zgrid',                  atm_state%pool_zgrid)
       end if
 
-      if (associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
-        allocate(g_u10_buf(n), g_v10_buf(n))
-        g_u10_buf = 0.0_MPAS_RKIND
-        g_v10_buf = 0.0_MPAS_RKIND
-        atm_public%u10 => g_u10_buf
-        atm_public%v10 => g_v10_buf
+      if (associated(atm_state%pool_uZonal) .and. associated(atm_state%pool_vMerid)) then
+        allocate(atm_state%u10_buf(n), atm_state%v10_buf(n))
+        atm_state%u10_buf = 0.0_MPAS_RKIND
+        atm_state%v10_buf = 0.0_MPAS_RKIND
+        atm_public%u10 => atm_state%u10_buf
+        atm_public%v10 => atm_state%v10_buf
         write(*,'(A)') '  BUG-WIND-01: buffers g_u10_buf/g_v10_buf alocados — OK.'
       else
         write(*,'(A)') '  BUG-WIND-01: uReconstructZonal nao encontrado no pool diag.'
@@ -749,9 +716,11 @@ contains
   !> Aloca os buffers de fluxos em unidades instantaneas e o estado do passo
   !! anterior (passo 7c de mpas_atm_init), e aponta atm_public para eles.
   !! @param[inout] atm_public  recebe os ponteiros dos fluxos
+  !! @param[inout] atm_state   guarda os buffers e o estado do passo anterior
   !! @param[in]    n           numero de celulas locais, com halos
-  subroutine init_flux_buffers(atm_public, n)
+  subroutine init_flux_buffers(atm_public, atm_state, n)
     type(mpas_atm_public_type), intent(inout) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     integer,                    intent(in)    :: n
 
     ! ------------------------------------------------------------------
@@ -774,57 +743,57 @@ contains
     !    taux = ρ · ust² · u10 / max(|V10|, VMIN)  [N/m²]
     !    tauy = ρ · ust² · v10 / max(|V10|, VMIN)  [N/m²]
     ! ------------------------------------------------------------------
-    allocate(g_prev_acswdnb(n), g_prev_aclwdnb(n), g_prev_precip(n))
-    allocate(g_swdn_inst(n), g_lwdn_inst(n), g_prec_inst(n))
-    allocate(g_taux_buf(n), g_tauy_buf(n))
-    allocate(g_q2m_buf(n), g_prec_rain_buf(n), g_prec_snow_buf(n))
-    allocate(g_prev_snow(n))
+    allocate(atm_state%prev_acswdnb(n), atm_state%prev_aclwdnb(n), atm_state%prev_precip(n))
+    allocate(atm_state%swdn_inst(n), atm_state%lwdn_inst(n), atm_state%prec_inst(n))
+    allocate(atm_state%taux_buf(n), atm_state%tauy_buf(n))
+    allocate(atm_state%q2m_buf(n), atm_state%prec_rain_buf(n), atm_state%prec_snow_buf(n))
+    allocate(atm_state%prev_snow(n))
 
     ! Inicializar valores do passo anterior com estado t=0 (após core_init)
-    if (associated(g_pool_acswdnb)) then
-      g_prev_acswdnb = g_pool_acswdnb(1:n)
+    if (associated(atm_state%pool_acswdnb)) then
+      atm_state%prev_acswdnb = atm_state%pool_acswdnb(1:n)
     else
-      g_prev_acswdnb = 0.0_MPAS_RKIND
+      atm_state%prev_acswdnb = 0.0_MPAS_RKIND
     end if
-    if (associated(g_pool_aclwdnb)) then
-      g_prev_aclwdnb = g_pool_aclwdnb(1:n)
+    if (associated(atm_state%pool_aclwdnb)) then
+      atm_state%prev_aclwdnb = atm_state%pool_aclwdnb(1:n)
     else
-      g_prev_aclwdnb = 0.0_MPAS_RKIND
+      atm_state%prev_aclwdnb = 0.0_MPAS_RKIND
     end if
     ! Precip total t=0: rainnc + rainc (podem ser não-zero após hot-start)
-    if (associated(g_pool_rainnc) .and. associated(g_pool_rainc)) then
-      g_prev_precip = g_pool_rainnc(1:n) + g_pool_rainc(1:n)
-    else if (associated(g_pool_rainnc)) then
-      g_prev_precip = g_pool_rainnc(1:n)
+    if (associated(atm_state%pool_rainnc) .and. associated(atm_state%pool_rainc)) then
+      atm_state%prev_precip = atm_state%pool_rainnc(1:n) + atm_state%pool_rainc(1:n)
+    else if (associated(atm_state%pool_rainnc)) then
+      atm_state%prev_precip = atm_state%pool_rainnc(1:n)
     else
-      g_prev_precip = 0.0_MPAS_RKIND
+      atm_state%prev_precip = 0.0_MPAS_RKIND
     end if
     ! Neve acumulada t=0
-    if (associated(g_pool_snownc)) then
-      g_prev_snow = g_pool_snownc(1:n)
+    if (associated(atm_state%pool_snownc)) then
+      atm_state%prev_snow = atm_state%pool_snownc(1:n)
     else
-      g_prev_snow = 0.0_MPAS_RKIND
+      atm_state%prev_snow = 0.0_MPAS_RKIND
     end if
 
     ! Buffers inicializados a zero (serão preenchidos no primeiro core_run)
-    g_swdn_inst     = 0.0_MPAS_RKIND
-    g_lwdn_inst     = 0.0_MPAS_RKIND
-    g_prec_inst     = 0.0_MPAS_RKIND
-    g_taux_buf      = 0.0_MPAS_RKIND
-    g_tauy_buf      = 0.0_MPAS_RKIND
-    g_q2m_buf       = 0.0_MPAS_RKIND
-    g_prec_rain_buf = 0.0_MPAS_RKIND
-    g_prec_snow_buf = 0.0_MPAS_RKIND
+    atm_state%swdn_inst     = 0.0_MPAS_RKIND
+    atm_state%lwdn_inst     = 0.0_MPAS_RKIND
+    atm_state%prec_inst     = 0.0_MPAS_RKIND
+    atm_state%taux_buf      = 0.0_MPAS_RKIND
+    atm_state%tauy_buf      = 0.0_MPAS_RKIND
+    atm_state%q2m_buf       = 0.0_MPAS_RKIND
+    atm_state%prec_rain_buf = 0.0_MPAS_RKIND
+    atm_state%prec_snow_buf = 0.0_MPAS_RKIND
 
     ! Redirecionar atm_public para buffers computados (em vez de pool diretamente)
-    atm_public%swdn_sfc   => g_swdn_inst
-    atm_public%lwdn_sfc   => g_lwdn_inst
-    atm_public%prec_total => g_prec_inst
-    atm_public%taux_sfc   => g_taux_buf
-    atm_public%tauy_sfc   => g_tauy_buf
-    atm_public%q2m        => g_q2m_buf
-    atm_public%prec_rain  => g_prec_rain_buf
-    atm_public%prec_snow  => g_prec_snow_buf
+    atm_public%swdn_sfc   => atm_state%swdn_inst
+    atm_public%lwdn_sfc   => atm_state%lwdn_inst
+    atm_public%prec_total => atm_state%prec_inst
+    atm_public%taux_sfc   => atm_state%taux_buf
+    atm_public%tauy_sfc   => atm_state%tauy_buf
+    atm_public%q2m        => atm_state%q2m_buf
+    atm_public%prec_rain  => atm_state%prec_rain_buf
+    atm_public%prec_snow  => atm_state%prec_snow_buf
   end subroutine init_flux_buffers
 
   !> Aloca os campos de contorno recebidos do oceano e atribui os valores
@@ -868,8 +837,9 @@ contains
   !> Lê streams.atmosphere e registra as streams no stream manager do MPAS,
   !! como faz o mpas_subdriver.F. Sem esta chamada as streams do namelist
   !! não são registradas e as leituras retornam lixo.
-  subroutine parse_streams_xml(rc)
+  subroutine parse_streams_xml(atm_state, rc)
     use iso_c_binding, only : c_loc, c_ptr, c_int, c_char
+    type(mpas_atm_state_type), intent(inout) :: atm_state
     integer, intent(out) :: rc
 
     interface
@@ -890,18 +860,18 @@ contains
     rc = 0
 
     ! streams_filename como texto C (terminado em caractere nulo)
-    slen = len_trim(g_domain%streams_filename)
+    slen = len_trim(atm_state%domain%streams_filename)
     do k = 1, slen
-      c_filename(k) = g_domain%streams_filename(k:k)
+      c_filename(k) = atm_state%domain%streams_filename(k:k)
     end do
     c_filename(slen+1) = achar(0)
 
 #ifdef MPAS_USE_MPI_F08
-    c_comm = g_domain%dminfo%comm%mpi_val
+    c_comm = atm_state%domain%dminfo%comm%mpi_val
 #else
-    c_comm = g_domain%dminfo%comm
+    c_comm = atm_state%domain%dminfo%comm
 #endif
-    mgr_p = c_loc(g_domain%streamManager)
+    mgr_p = c_loc(atm_state%domain%streamManager)
     call xml_stream_parser(c_filename, mgr_p, c_comm, c_ierr)
     if (c_ierr /= 0) then
       call mpas_log_write('ERRO: xml_stream_parser falhou para streams.atmosphere', &
@@ -938,7 +908,7 @@ contains
   subroutine mpas_atm_run(atm_public, atm_state, atm_bnd, dt_coupling, rc)
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
-    type(mpas_atm_state_type),     intent(inout) :: atm_state
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     type(atm_ocean_boundary_type), intent(in)    :: atm_bnd
     integer,                       intent(in)    :: dt_coupling
     integer,                       intent(out)   :: rc
@@ -994,7 +964,7 @@ contains
       nSolve_inj = n
     end if
 
-    if (.not. atm_state%initialized .or. .not. associated(g_domain)) then
+    if (.not. atm_state%initialized .or. .not. associated(atm_state%domain)) then
       write(*,'(A)') 'ERRO mpas_atm_run: modelo nao inicializado'
       rc = 1; return
     end if
@@ -1004,10 +974,10 @@ contains
     ! Probe seção 7 / mpas_atm_core.F linha 553:
     ! Nomes Registry.xml: sst, iceAreaCell, znt
     ! ------------------------------------------------------------------
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'sfc_input', sfcInputPool)
-    call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', diag_physicsPool)
+    call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'sfc_input', sfcInputPool)
+    call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
-    call mpas_pool_get_config(g_domain%configs, 'config_do_restart', config_do_restart)
+    call mpas_pool_get_config(atm_state%domain%configs, 'config_do_restart', config_do_restart)
     diag_alb_cell = -1
     diag_alb_before = -1.0_MPAS_RKIND
     if (associated(config_do_restart)) then
@@ -1132,24 +1102,24 @@ contains
 
     ! mpas_advance_stop_time: avança o stop time do relógio MPAS interno
     ! por exatamente dt_coupling antes de core_run.
-    ! Avança o stop time do relógio interno do MONAN-A (g_domain%clock),
+    ! Avança o stop time do relógio interno do MONAN-A (atm_state%domain%clock),
     ! independente do relógio ESMF do driver. Controla quantos passos
     ! internos (dt_atm) core_run integra por chamada a mpas_atm_run.
-    call mpas_advance_stop_time(g_domain%clock, dt_coupling)
+    call mpas_advance_stop_time(atm_state%domain%clock, dt_coupling)
 
     ! ------------------------------------------------------------------
     ! Ativa mpas_log_info → domain%logInfo antes de core_run.
     ! mpas_subdriver.F linha 414:
     ! Sem isso, mpas_log_write dentro de core_run derreferencia null → SIGSEGV.
     ! ------------------------------------------------------------------
-    if (associated(g_domain%logInfo)) mpas_log_info => g_domain%logInfo
+    if (associated(atm_state%domain%logInfo)) mpas_log_info => atm_state%domain%logInfo
 
     ! ------------------------------------------------------------------
     ! Avança o núcleo: integra passos internos de dt_atm, escreve I/O
     ! via SMIOL conforme streams.atmosphere.
     ! core_run é INTEGER FUNCTION.
     ! ------------------------------------------------------------------
-    ierr = g_domain%core%core_run(g_domain)
+    ierr = atm_state%domain%core%core_run(atm_state%domain)
     if (ierr /= 0) then
       write(msg,'(A,I0)') 'ERRO mpas_atm_run: core_run retornou ierr=', ierr
       write(*,'(A)') trim(msg)
@@ -1163,7 +1133,7 @@ contains
     ! compara com o valor injetado ANTES (diag_alb_before), na mesma celula
     ! de oceano (diag_alb_cell). Condicionado a cfg_write_fixdiag.
     if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
-        call mpas_pool_get_subpool(g_domain%blocklist%structs, 'diag_physics', &
+        call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', &
           diag_physicsPool_after)
         if (associated(diag_physicsPool_after)) then
           call mpas_pool_get_array(diag_physicsPool_after, 'sfc_albedo', &
@@ -1183,26 +1153,27 @@ contains
     ! ------------------------------------------------------------------
     ! Pós-processamento dos campos acumulados e stress superficial.
     !
-    ! Os arrays do pool (g_pool_*) foram atualizados por core_run.
+    ! Os arrays do pool (atm_state%pool_*) foram atualizados por core_run.
     ! Agora computamos os valores instantâneos para o intervalo de
-    ! acoplamento e armazenamos nos buffers g_*_inst / g_taux_buf / g_tauy_buf
+    ! acoplamento e armazenamos nos buffers g_*_inst / atm_state%taux_buf / atm_state%tauy_buf
     ! que são apontados por atm_public%swdn_sfc, lwdn_sfc, prec_total,
     ! taux_sfc, tauy_sfc (configurado em mpas_atm_init).
     !
     ! IMPORTANTE: usar real(dt_coupling, MPAS_RKIND) para evitar perda de
     ! precisão quando MPAS_RKIND = kind(1.0) (single precision).
     ! ------------------------------------------------------------------
-    call compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_bnd)
+    call compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_state, atm_bnd)
 
     atm_state%running = .true.
 
     nullify(sfcInputPool, sst_field, ice_field, zorl_field)
   end subroutine mpas_atm_run
 
-  subroutine compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_bnd)
+  subroutine compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_state, atm_bnd)
     integer, intent(in) :: dt_coupling
     integer, intent(in) :: n
     type(mpas_atm_public_type), intent(in) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     type(atm_ocean_boundary_type), intent(in) :: atm_bnd
     real(MPAS_RKIND) :: dt_r, precip_now  ! spd removido (usado agora no bloco have_currents)
     integer          :: k
@@ -1230,20 +1201,20 @@ contains
     dt_r = real(dt_coupling, MPAS_RKIND)
 
     ! ── SW e LW descendentes: incremento ÷ dt → W/m² ─────────────
-    if (associated(g_pool_acswdnb)) then
+    if (associated(atm_state%pool_acswdnb)) then
       do k = 1, n
-        g_swdn_inst(k) = max((g_pool_acswdnb(k) - g_prev_acswdnb(k)) / dt_r, &
+        atm_state%swdn_inst(k) = max((atm_state%pool_acswdnb(k) - atm_state%prev_acswdnb(k)) / dt_r, &
                              0.0_MPAS_RKIND)
       end do
-      g_prev_acswdnb(1:n) = g_pool_acswdnb(1:n)
+      atm_state%prev_acswdnb(1:n) = atm_state%pool_acswdnb(1:n)
     end if
 
-    if (associated(g_pool_aclwdnb)) then
+    if (associated(atm_state%pool_aclwdnb)) then
       do k = 1, n
-        g_lwdn_inst(k) = max((g_pool_aclwdnb(k) - g_prev_aclwdnb(k)) / dt_r, &
+        atm_state%lwdn_inst(k) = max((atm_state%pool_aclwdnb(k) - atm_state%prev_aclwdnb(k)) / dt_r, &
                              0.0_MPAS_RKIND)
       end do
-      g_prev_aclwdnb(1:n) = g_pool_aclwdnb(1:n)
+      atm_state%prev_aclwdnb(1:n) = atm_state%pool_aclwdnb(1:n)
     end if
 
     ! ── Precipitação total: (rainnc + rainc) incremento ÷ dt ──────
@@ -1252,16 +1223,16 @@ contains
     ! 1 mm = 1 kg/m² → taxa = Δmm / dt [kg/m²/s]
     do k = 1, n
       precip_now = 0.0_MPAS_RKIND
-      if (associated(g_pool_rainnc)) precip_now = precip_now + g_pool_rainnc(k)
-      if (associated(g_pool_rainc))  precip_now = precip_now + g_pool_rainc(k)
-      g_prec_inst(k) = max((precip_now - g_prev_precip(k)) / dt_r, &
+      if (associated(atm_state%pool_rainnc)) precip_now = precip_now + atm_state%pool_rainnc(k)
+      if (associated(atm_state%pool_rainc))  precip_now = precip_now + atm_state%pool_rainc(k)
+      atm_state%prec_inst(k) = max((precip_now - atm_state%prev_precip(k)) / dt_r, &
                             0.0_MPAS_RKIND)
     end do
     ! Atualizar acumulado anterior
     do k = 1, n
-      g_prev_precip(k) = 0.0_MPAS_RKIND
-      if (associated(g_pool_rainnc)) g_prev_precip(k) = g_prev_precip(k) + g_pool_rainnc(k)
-      if (associated(g_pool_rainc))  g_prev_precip(k) = g_prev_precip(k) + g_pool_rainc(k)
+      atm_state%prev_precip(k) = 0.0_MPAS_RKIND
+      if (associated(atm_state%pool_rainnc)) atm_state%prev_precip(k) = atm_state%prev_precip(k) + atm_state%pool_rainnc(k)
+      if (associated(atm_state%pool_rainc))  atm_state%prev_precip(k) = atm_state%prev_precip(k) + atm_state%pool_rainc(k)
     end do
 
     ! ── Precipitação sólida (neve): snownc incremento ÷ dt ────────
@@ -1269,60 +1240,60 @@ contains
     ! Se snownc não estiver disponível, usa partição por temperatura:
     !   T < T_FREEZE → tudo neve; caso contrário → tudo chuva
       do k = 1, n
-        delta_total = g_prec_inst(k)
-        if (associated(g_pool_snownc)) then
-          snow_now = g_pool_snownc(k)
-          delta_snow = max((snow_now - g_prev_snow(k)) / dt_r, 0.0_MPAS_RKIND)
-          g_prec_snow_buf(k) = min(delta_snow, delta_total)
-          g_prec_rain_buf(k) = max(delta_total - g_prec_snow_buf(k), 0.0_MPAS_RKIND)
+        delta_total = atm_state%prec_inst(k)
+        if (associated(atm_state%pool_snownc)) then
+          snow_now = atm_state%pool_snownc(k)
+          delta_snow = max((snow_now - atm_state%prev_snow(k)) / dt_r, 0.0_MPAS_RKIND)
+          atm_state%prec_snow_buf(k) = min(delta_snow, delta_total)
+          atm_state%prec_rain_buf(k) = max(delta_total - atm_state%prec_snow_buf(k), 0.0_MPAS_RKIND)
         else if (associated(atm_public%t2m)) then
           ! Fallback: partição por temperatura
           if (atm_public%t2m(k) < T_FREEZE) then
-            g_prec_snow_buf(k) = delta_total
-            g_prec_rain_buf(k) = 0.0_MPAS_RKIND
+            atm_state%prec_snow_buf(k) = delta_total
+            atm_state%prec_rain_buf(k) = 0.0_MPAS_RKIND
           else
-            g_prec_snow_buf(k) = 0.0_MPAS_RKIND
-            g_prec_rain_buf(k) = delta_total
+            atm_state%prec_snow_buf(k) = 0.0_MPAS_RKIND
+            atm_state%prec_rain_buf(k) = delta_total
           end if
         else
-          g_prec_rain_buf(k) = delta_total
-          g_prec_snow_buf(k) = 0.0_MPAS_RKIND
+          atm_state%prec_rain_buf(k) = delta_total
+          atm_state%prec_snow_buf(k) = 0.0_MPAS_RKIND
         end if
       end do
       ! Atualizar acumulado anterior de neve
-      if (associated(g_pool_snownc)) then
-        g_prev_snow(1:n) = g_pool_snownc(1:n)
+      if (associated(atm_state%pool_snownc)) then
+        atm_state%prev_snow(1:n) = atm_state%pool_snownc(1:n)
       end if
 
     ! ── Umidade específica a 2m: q2 [kg/kg] ───────────────────────
-    ! g_pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
+    ! atm_state%pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
     ! Valor instantâneo → válido para o instante corrente.
-    if (associated(g_pool_q2)) then
-      g_q2m_buf(1:n) = g_pool_q2(1:n)
+    if (associated(atm_state%pool_q2)) then
+      atm_state%q2m_buf(1:n) = atm_state%pool_q2(1:n)
     else if (associated(atm_public%t2m)) then
       ! Fallback: umidade de saturação em T2m (Tetens) × RH=0.8
         do k = 1, n
           es = es0 * exp(a*(atm_public%t2m(k)-273.15_MPAS_RKIND) / &
                          (b + atm_public%t2m(k)-273.15_MPAS_RKIND))
           qs = eps * es / (p0 - es)
-          g_q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
+          atm_state%q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
         end do
     end if
 
     ! ── fallback: calcular u10/v10 por perfil log. neutro ────
     ! Ativo quando u10/v10 nao estao no pool (bl_mynn_in/bl_ysu_in=F).
-    ! g_u10_buf/g_v10_buf sao alocados em mpas_atm_init se g_pool_uZonal disponivel.
+    ! atm_state%u10_buf/atm_state%v10_buf sao alocados em mpas_atm_init se atm_state%pool_uZonal disponivel.
     ! u10 = u_sfc × ln(10/z0) / ln(z_sfc/z0)
     ! z_sfc: altura do centro do nivel 1 obtida de zgrid(1,:) - zgrid(0,:)/2
     ! z0 = 0.001 m (rugosidade oceano aberto, neutro)
-    if (allocated(g_u10_buf) .and. allocated(g_v10_buf) .and. &
-        associated(g_pool_uZonal) .and. associated(g_pool_vMerid)) then
-        nv = size(g_pool_uZonal, 1)  ! número de níveis verticais
+    if (allocated(atm_state%u10_buf) .and. allocated(atm_state%v10_buf) .and. &
+        associated(atm_state%pool_uZonal) .and. associated(atm_state%pool_vMerid)) then
+        nv = size(atm_state%pool_uZonal, 1)  ! número de níveis verticais
         do k = 1, n
           ! Altura do centro do nível 1 a partir de zgrid (se disponível)
-          if (associated(g_pool_zgrid) .and. size(g_pool_zgrid,1) > 1) then
+          if (associated(atm_state%pool_zgrid) .and. size(atm_state%pool_zgrid,1) > 1) then
             ! zgrid(1,k) = base do nível 1; (1,k)+(2,k))/2 = centro
-            z_sfc = 0.5_MPAS_RKIND * (g_pool_zgrid(1,k) + g_pool_zgrid(2,k))
+            z_sfc = 0.5_MPAS_RKIND * (atm_state%pool_zgrid(1,k) + atm_state%pool_zgrid(2,k))
           else
             z_sfc = Z_SFC_DEFAULT
           end if
@@ -1331,8 +1302,8 @@ contains
           scale_fac = log(Z10 / Z0) / log(z_sfc / Z0)
           ! u10 = u_sfc × fator (nível 1 do MPAS = índice nv — top-down storage)
           ! O MPAS armazena nVertLevels de cima para baixo: nível 1 = topo, nv = superfície
-          g_u10_buf(k) = g_pool_uZonal(nv, k) * scale_fac
-          g_v10_buf(k) = g_pool_vMerid(nv, k) * scale_fac
+          atm_state%u10_buf(k) = atm_state%pool_uZonal(nv, k) * scale_fac
+          atm_state%v10_buf(k) = atm_state%pool_vMerid(nv, k) * scale_fac
         end do
     end if
 
@@ -1351,7 +1322,7 @@ contains
     !
     ! Direcao positiva: eastward (taux>0 quando V_rel vai para leste).
     ! Fórmula de Monin-Obukhov: CD = (ust/|V_rel|)²
-    if (associated(g_pool_ust) .and. &
+    if (associated(atm_state%pool_ust) .and. &
         associated(atm_public%u10) .and. associated(atm_public%v10)) then
         have_currents = allocated(atm_bnd%uocn) .and. allocated(atm_bnd%vocn)
         do k = 1, n
@@ -1364,8 +1335,8 @@ contains
           end if
           spd_rel = sqrt(u_rel**2 + v_rel**2)
           spd_rel = max(spd_rel, VMIN)
-          g_taux_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * u_rel / spd_rel
-          g_tauy_buf(k) = RHO_AIR_SFC * g_pool_ust(k)**2 * v_rel / spd_rel
+          atm_state%taux_buf(k) = RHO_AIR_SFC * atm_state%pool_ust(k)**2 * u_rel / spd_rel
+          atm_state%tauy_buf(k) = RHO_AIR_SFC * atm_state%pool_ust(k)**2 * v_rel / spd_rel
         end do
     end if
 
@@ -1427,7 +1398,7 @@ contains
   subroutine mpas_atm_final(atm_public, atm_state, atm_bnd, rc)
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
-    type(mpas_atm_state_type),     intent(inout) :: atm_state
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(out)   :: rc
 
@@ -1439,7 +1410,7 @@ contains
       return
     end if
 
-    if (associated(g_domain)) then
+    if (associated(atm_state%domain)) then
 
       ! IMPORTANTE: core_finalize e mpas_framework_finalize sao OMITIDAS.
       !
@@ -1463,9 +1434,9 @@ contains
       nullify(atm_public%swdn_sfc,   atm_public%lwdn_sfc, atm_public%prec_total)
       nullify(atm_public%taux_sfc,   atm_public%tauy_sfc)
       nullify(atm_public%q2m,        atm_public%prec_rain, atm_public%prec_snow)
-      nullify(g_pool_acswdnb, g_pool_aclwdnb, g_pool_rainnc, g_pool_rainc)
-      nullify(g_pool_snownc,  g_pool_q2,       g_pool_ust)
-      g_domain => null()
+      nullify(atm_state%pool_acswdnb, atm_state%pool_aclwdnb, atm_state%pool_rainnc, atm_state%pool_rainc)
+      nullify(atm_state%pool_snownc,  atm_state%pool_q2,       atm_state%pool_ust)
+      atm_state%domain => null()
 
       write(*,'(A)') 'mpas_atm_final: ponteiros nulificados (ESMF preservado)'
     end if
@@ -1479,22 +1450,22 @@ contains
     if (allocated(atm_bnd%alb))           deallocate(atm_bnd%alb)
     if (allocated(atm_bnd%omask))         deallocate(atm_bnd%omask)
     ! Buffers de saída computados (propriedade deste módulo)
-    if (allocated(g_prev_acswdnb)) deallocate(g_prev_acswdnb)
-    if (allocated(g_prev_aclwdnb)) deallocate(g_prev_aclwdnb)
-    if (allocated(g_prev_precip))  deallocate(g_prev_precip)
-    if (allocated(g_prev_snow))    deallocate(g_prev_snow)
-    if (allocated(g_swdn_inst))    deallocate(g_swdn_inst)
-    if (allocated(g_lwdn_inst))    deallocate(g_lwdn_inst)
-    if (allocated(g_prec_inst))    deallocate(g_prec_inst)
-    if (allocated(g_taux_buf))     deallocate(g_taux_buf)
-    if (allocated(g_tauy_buf))     deallocate(g_tauy_buf)
-    if (allocated(g_q2m_buf))      deallocate(g_q2m_buf)
-    if (allocated(g_prec_rain_buf))deallocate(g_prec_rain_buf)
-    if (allocated(g_prec_snow_buf))deallocate(g_prec_snow_buf)
+    if (allocated(atm_state%prev_acswdnb)) deallocate(atm_state%prev_acswdnb)
+    if (allocated(atm_state%prev_aclwdnb)) deallocate(atm_state%prev_aclwdnb)
+    if (allocated(atm_state%prev_precip))  deallocate(atm_state%prev_precip)
+    if (allocated(atm_state%prev_snow))    deallocate(atm_state%prev_snow)
+    if (allocated(atm_state%swdn_inst))    deallocate(atm_state%swdn_inst)
+    if (allocated(atm_state%lwdn_inst))    deallocate(atm_state%lwdn_inst)
+    if (allocated(atm_state%prec_inst))    deallocate(atm_state%prec_inst)
+    if (allocated(atm_state%taux_buf))     deallocate(atm_state%taux_buf)
+    if (allocated(atm_state%tauy_buf))     deallocate(atm_state%tauy_buf)
+    if (allocated(atm_state%q2m_buf))      deallocate(atm_state%q2m_buf)
+    if (allocated(atm_state%prec_rain_buf))deallocate(atm_state%prec_rain_buf)
+    if (allocated(atm_state%prec_snow_buf))deallocate(atm_state%prec_snow_buf)
     ! deallocate buffers de fallback de vento (se alocados)
-    if (allocated(g_u10_buf))      deallocate(g_u10_buf)
-    if (allocated(g_v10_buf))      deallocate(g_v10_buf)
-    nullify(g_pool_uZonal, g_pool_vMerid, g_pool_zgrid)
+    if (allocated(atm_state%u10_buf))      deallocate(atm_state%u10_buf)
+    if (allocated(atm_state%v10_buf))      deallocate(atm_state%v10_buf)
+    nullify(atm_state%pool_uZonal, atm_state%pool_vMerid, atm_state%pool_zgrid)
 
     atm_state%initialized = .false.
     atm_state%running     = .false.

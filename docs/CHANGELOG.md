@@ -9,6 +9,16 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Modelo atmosférico: estado do MPAS no `mpas_atm_state_type` (R-FASE7-04).** Quarta etapa da fase 7. Nenhum cálculo muda.
+  - As 26 variáveis de módulo de `mpas_atm_model.F90` passam a ser componentes de `mpas_atm_state_type` (`mpas_atm_types.F90`), o estado que o cap já guardava e passava a `mpas_atm_init`, `mpas_atm_run` e `mpas_atm_final`: o domínio MPAS (`g_domain` vira `atm_state%domain`), os ponteiros para os campos dos pools (`pool_*`), os acumulados do passo anterior (`prev_*`) e os buffers em unidades instantâneas apontados por `mpas_atm_public_type` (`*_inst`, `*_buf`). Os nomes perdem só o prefixo `g_`.
+  - `g_mpi_comm` era uma cópia de `atm_state%mpi_comm`, gravada na mesma linha; saiu, e `mpas_framework_init_phase1` recebe `atm_state%mpi_comm`.
+  - As rotinas internas que usavam o estado passam a recebê-lo por argumento: `setup_mpas_streams`, `parse_streams_xml`, `bind_diag_fields`, `setup_wind_fallback`, `init_flux_buffers` e `compute_instantaneous_fluxes`.
+  - Os buffers eram variáveis com atributo `TARGET`, porque `mpas_atm_public_type` aponta para eles. Agora são componentes do estado, que o cap aloca por ponteiro; o argumento `atm_state` tem `target` nas rotinas que associam esses ponteiros ou que leem e escrevem os buffers (`mpas_atm_init`, `setup_wind_fallback`, `init_flux_buffers`, `mpas_atm_run`, `compute_instantaneous_fluxes`, `mpas_atm_final`). Assim o compilador continua sabendo que os buffers podem ser alterados pelos ponteiros, como antes.
+  - `mpas_atm_types.F90` passa a usar `domain_type` de `mpas_derived_types`.
+  - As constantes de texto não mudam (a mensagem `buffers g_u10_buf/g_v10_buf alocados` fica como está).
+  - Conferências locais: `confere-tudo.bash HEAD` sem falhas. `mpas_atm_model.F90` compila aqui com as interfaces mínimas do MPAS, mas nenhum teste local o executa; a conferência dele é a rodada na Jaci.
+  - Indicadores: variáveis de módulo privadas de 48 para 22.
+
 - **Cap atmosférico: gravador `monan_export_*.nc` com estado próprio (R-FASE7-03).** Terceira etapa da fase 7. Nenhum cálculo muda.
   - As 18 variáveis de módulo do gravador em `mpas_cap_netcdf.F90` (grade de saída `NLON`, `NLAT`, `GRID_RES`, `DLON`, `DLAT` e `OUTPUT_DIR`; coordenadas globais; decomposição MPI salva; campos MPAS guardados) passam a ser componentes do tipo público `mpas_diag_export_t`, com os mesmos valores iniciais.
   - O objeto é criado pelo cap (`g_diag_export`, em `mpas_cap_MONAN.F90`) e passado como primeiro argumento a `netcdf_config_set`, `netcdf_init_coords`, `netcdf_push_raw_field` e `export_write_netcdf`, e a `mpas_export`, que guarda os campos. As rotinas internas `write_export_fields` e `voronoi_accum_local` o recebem como `intent(in)`.
@@ -18,6 +28,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `test_mpas_export.F90` passa um `mpas_diag_export_t` sem coordenadas a `mpas_export` (nada é guardado, como antes).
   - Conferências locais: compilação, avisos, regrid, física bulk, grade atmosférica e testes com valor esperado sem falhas; constantes de texto iguais em todos os fontes de `src/` (só o programa de teste ganhou constantes); gravadores iguais byte a byte na comparação acima.
   - Indicadores: variáveis de módulo privadas de 65 para 48.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-03-validada`).
 
 - **Mediador: estado interno agrupado por assunto (R-FASE7-02).** Segunda etapa da fase 7. Nenhum cálculo muda.
   - `MED_InternalState` deixa de ser uma lista de 49 componentes soltos e passa a ter seis subtipos, declarados e públicos em `med_cap_types.F90`. A tabela mostra onde foi parar cada componente.

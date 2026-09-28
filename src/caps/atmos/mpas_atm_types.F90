@@ -22,6 +22,7 @@
 module mpas_atm_types_mod
 
   use mpas_kind_types, only : RKIND
+  use mpas_derived_types, only : domain_type
 
   implicit none
   private
@@ -88,6 +89,48 @@ module mpas_atm_types_mod
     integer            :: nCells         = 0
     integer            :: nVertLevels    = 55
     integer            :: mpi_comm       = -1
+
+    ! ── Estado do modelo, preenchido por mpas_atm_init ────────────────────
+    type(domain_type), pointer :: domain => null()   !< domínio MPAS
+
+    !> Ponteiros para arrays dos pools do MPAS (lidos em mpas_atm_run), para
+    !! calcular incrementos de acumulados e a tensão superficial. Apontam
+    !! para memória do MPAS: não devem ser desalocados aqui.
+    real(MPAS_RKIND), pointer :: pool_acswdnb(:) => null()   !< J/m² acumulado
+    real(MPAS_RKIND), pointer :: pool_aclwdnb(:) => null()   !< J/m² acumulado
+    real(MPAS_RKIND), pointer :: pool_rainnc(:)  => null()   !< mm acumulado (estratiforme)
+    real(MPAS_RKIND), pointer :: pool_rainc(:)   => null()   !< mm acumulado (convectiva)
+    real(MPAS_RKIND), pointer :: pool_ust(:)     => null()   !< vel. de atrito [m/s]
+    real(MPAS_RKIND), pointer :: pool_snownc(:)  => null()   !< mm acum. neve estratiforme
+    real(MPAS_RKIND), pointer :: pool_q2(:)      => null()   !< umidade específica a 2 m [kg/kg]
+    !> uReconstructZonal/Meridional e zgrid do pool 'diag' (nVertLevels x
+    !! nCells; nível 1 = camada mais próxima da superfície), usados pelo
+    !! cálculo de u10/v10 por perfil logarítmico.
+    real(MPAS_RKIND), pointer :: pool_uZonal(:,:) => null()  !< [m/s]
+    real(MPAS_RKIND), pointer :: pool_vMerid(:,:) => null()  !< [m/s]
+    real(MPAS_RKIND), pointer :: pool_zgrid(:,:)  => null()  !< altura geopotencial [m]
+
+    !> Acumulados do passo anterior, para os incrementos.
+    real(MPAS_RKIND), allocatable :: prev_acswdnb(:)   !< J/m²
+    real(MPAS_RKIND), allocatable :: prev_aclwdnb(:)   !< J/m²
+    real(MPAS_RKIND), allocatable :: prev_precip(:)    !< mm (rainnc + rainc)
+    real(MPAS_RKIND), allocatable :: prev_snow(:)      !< mm acumulado
+
+    !> Buffers em unidades instantâneas, apontados por mpas_atm_public_type
+    !! (swdn_sfc, lwdn_sfc, prec_total, taux_sfc, tauy_sfc, q2m, prec_rain,
+    !! prec_snow e, no cálculo por perfil logarítmico, u10 e v10). Para
+    !! esses ponteiros valerem, o objeto tem de ser alvo (TARGET) ou ter sido
+    !! alocado por ponteiro, como faz o cap.
+    real(MPAS_RKIND), allocatable :: swdn_inst(:)       !< W/m²
+    real(MPAS_RKIND), allocatable :: lwdn_inst(:)       !< W/m²
+    real(MPAS_RKIND), allocatable :: prec_inst(:)       !< kg/m²/s
+    real(MPAS_RKIND), allocatable :: taux_buf(:)        !< N/m²
+    real(MPAS_RKIND), allocatable :: tauy_buf(:)        !< N/m²
+    real(MPAS_RKIND), allocatable :: q2m_buf(:)         !< kg/kg
+    real(MPAS_RKIND), allocatable :: prec_rain_buf(:)   !< kg/m²/s
+    real(MPAS_RKIND), allocatable :: prec_snow_buf(:)   !< kg/m²/s
+    real(MPAS_RKIND), allocatable :: u10_buf(:)         !< m/s
+    real(MPAS_RKIND), allocatable :: v10_buf(:)         !< m/s
   end type mpas_atm_state_type
 
   ! ── Condições de contorno vindas do oceano (via mediador) ─────────────────
