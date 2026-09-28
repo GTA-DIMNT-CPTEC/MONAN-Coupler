@@ -9,6 +9,15 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Física bulk: geometria solar e fluxos de água aberta em rotinas próprias (R-FASE8-04).** Segunda revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `calc_bulk_ncar` (`med_bulk_ncar.F90`, 124 linhas de código) misturava o cálculo da hora UTC e da declinação solar a partir do relógio com as fórmulas de fluxo. Os dois trechos saem sem mudança:
+    - `solar_time_and_declination(clock, utc_hour, decl, rc)`: dia do ano e hora pelo relógio, com o mesmo recurso ao meio-dia do equinócio se o relógio falhar, e a declinação de Spencer (1971). A constante `PI_ZEN` vai junto.
+    - `compute_ocean_fluxes`: os cinco laços de água aberta (`taux`, `tauy`, calor sensível, evaporação, balanço de onda longa), com a SST recebida como ponteiro, para manter o teste `associated(sst)`.
+  - `calc_bulk_ncar` fica como sequência de etapas: geometria solar, leitura de SST e correntes, fluxos de água aberta, onda curta (`blend_albedo_with_ice`), fluxos do gelo (`compute_ice_fluxes`), campos repassados, rugosidade, `duu10n` e fração de gelo sem SIS2 dinâmico.
+  - Saiu da declaração de `PI_ZEN` um comentário sobre o albedo de Briegleb que não tinha relação com ela; o assunto já está documentado em `ocean_direct_albedo`.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 22 diferenças são só declarações, cabeçalhos e chamadas das duas rotinas novas. A física bulk saiu idêntica byte a byte; o teste chama `calc_bulk_ncar` três vezes com um relógio que avança, e passa pelas duas rotinas novas. Literais iguais (35).
+  - Indicadores: rotinas de 296 para 298; rotinas com mais de 100 linhas de código de 9 para 8.
+
 - **Gravador `monan_export_*.nc` dividido em etapas; último `BLOCK` retirado (R-FASE8-03).** Terceira etapa da fase 8 e primeira das revisões de rotinas longas. Nenhum cálculo muda.
   - `export_write_netcdf` (`mpas_cap_netcdf.F90`, 148 linhas de código) misturava três assuntos: a coordenação do passo, a definição do arquivo NetCDF e a interpolação dos campos. Fica só com a coordenação (inventário do `exportState`, chamadas às etapas, fechamento do arquivo), e a criação e a definição do arquivo (atributos globais, lat, lon, time, uma variável por campo, eixos) vão, sem mudança, para a nova rotina `define_export_file`, que só o PET 0 chama. As mensagens de erro usam o mesmo prefixo, recebido por argumento.
   - `write_export_fields` passa a alocar os seus próprios buffers (`sendBuf` em todos os PETs, `grid_2d` no PET 0) e perde os argumentos que só serviam de variável de trabalho (`sendBuf`, `grid_2d`, `ncstat`, `varid`); `nLocal` e `mpiComm` passam a `intent(in)` e `fldnames` a vetor comum com `intent(in)`.
@@ -16,6 +25,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Código morto retirado: `allCounts`, `displs` e `recvBuf` eram alocados e copiados a cada passo, mas nunca lidos (a interpolação usa só as coordenadas locais guardadas por `netcdf_init_coords`). O comentário da etapa foi ajustado a isso.
   - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos, literais (273, iguais), regrid, física bulk, grade atmosférica e testes com valor esperado sem falhas; gravadores iguais byte a byte, inclusive os `monan_export_*.nc`, cujo caso de teste passa pelo caminho de reserva com campos de posto 2 (o antigo `BLOCK`). As diferenças de instruções são só declarações, cabeçalhos e chamadas das rotinas novas, os argumentos retirados e o código morto acima.
   - Indicadores: rotinas de 294 para 296; rotinas com mais de 100 linhas de código de 10 para 9; `mpas_cap_netcdf.F90` passa a ser o maior arquivo (1 440 linhas).
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-03-validada`).
 
 - **Modelo atmosférico dividido em inicialização, passo e fluxos (R-FASE8-02).** Segunda etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
   - `mpas_atm_model.F90` passa de 1 589 para 605 linhas e fica com os pontos de entrada chamados pelo cap (`mpas_atm_init`, `mpas_atm_init_sfc`, `mpas_atm_run`, `mpas_atm_final`) e com a troca de halos do passo (`exchange_surface_halos`).

@@ -111,56 +111,21 @@ contains
     type(ESMF_Clock),        intent(in)    :: clock
     integer,                 intent(out)   :: rc
 
-    ! angulo zenital solar, calculado uma vez por
-    ! chamada (nao depende de i,j) e reaproveitado por todas as celulas.
-    real(ESMF_KIND_R8) :: decl, gamma_doy
+    ! Declinacao solar e hora UTC, calculadas uma vez por chamada (nao
+    ! dependem de i,j) e reaproveitadas por todas as celulas.
+    real(ESMF_KIND_R8) :: decl
     real(ESMF_KIND_R8) :: utc_hour
-    integer :: doy, yy, mm, dd, hh, mn, ss
-    type(ESMF_Time) :: currT
-    real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
-    ! Briegleb et al. (1986) — albedo direto de agua aberta em funcao do
-    ! angulo zenital solar; usado em CESM/CAM. Faixa fisica tipica: ~0.03
-    ! (sol a pino) a >0.3 (sol raso). Substitui albedo_ocn constante nas
-    ! bandas DIRETAS (vis_dir, nir_dir); as bandas DIFUSAS mantêm
-    ! albedo_ocn constante (a formula de Briegleb e' so' para feixe direto —
-    ! luz difusa nao tem um unico angulo de incidencia).
 
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
     real(ESMF_KIND_R8), pointer :: sst(:,:)
     real(ESMF_KIND_R8), pointer :: uocn(:,:), vocn(:,:)
-    real(ESMF_KIND_R8) :: wspd, qsat, sst_eff
     integer :: i, j
 
     rc = ESMF_SUCCESS
     nullify(fptr, sst, uocn, vocn)
 
-    !==========================================================================
-    ! dia-do-ano e hora UTC decimal, uma vez por
-    ! chamada (o angulo zenital muda por celula via lat/lon, mas doy/hora
-    ! sao os mesmos para toda a grade neste instante de acoplamento).
-    !==========================================================================
-    call ESMF_ClockGet(clock, currTime=currT, rc=rc)
-    if (rc == ESMF_SUCCESS) then
-      call ESMF_TimeGet(currT, yy=yy, mm=mm, dd=dd, h=hh, m=mn, s=ss, &
-        dayOfYear=doy, rc=rc)
-    end if
-    if (rc /= ESMF_SUCCESS) then
-      ! Fallback seguro: meio-dia do equinocio (decl~0, zenite so' por
-      ! latitude) — nunca deixa a formula indefinida se o clock falhar.
-      doy = 80; utc_hour = 12.0_ESMF_KIND_R8
-      rc = ESMF_SUCCESS
-    else
-      utc_hour = real(hh, ESMF_KIND_R8) + real(mn, ESMF_KIND_R8)/60.0_ESMF_KIND_R8 &
-                 + real(ss, ESMF_KIND_R8)/3600.0_ESMF_KIND_R8
-    end if
-
-    ! Declinacao solar — aproximacao de Spencer (1971), erro tipico < 0,1
-    ! grau. gamma = angulo fracionario do ano [rad].
-    gamma_doy = 2.0_ESMF_KIND_R8 * PI_ZEN * real(doy-1, ESMF_KIND_R8) / 365.0_ESMF_KIND_R8
-    decl = 0.006918_ESMF_KIND_R8 &
-         - 0.399912_ESMF_KIND_R8 * cos(gamma_doy)   + 0.070257_ESMF_KIND_R8 * sin(gamma_doy) &
-         - 0.006758_ESMF_KIND_R8 * cos(2.0_ESMF_KIND_R8*gamma_doy) + 0.000907_ESMF_KIND_R8 * sin(2.0_ESMF_KIND_R8*gamma_doy) &
-         - 0.002697_ESMF_KIND_R8 * cos(3.0_ESMF_KIND_R8*gamma_doy) + 0.001480_ESMF_KIND_R8 * sin(3.0_ESMF_KIND_R8*gamma_doy)
+    ! Hora UTC e declinacao solar do instante de acoplamento
+    call solar_time_and_declination(clock, utc_hour, decl, rc)
 
     ! Obter SST da grade ATM interna (preenchida na seção 3 por regrid OCN→ATM)
     call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
@@ -173,89 +138,9 @@ contains
     if (rc /= ESMF_SUCCESS) nullify(vocn)
     rc = ESMF_SUCCESS
 
-    !==========================================================================
-    ! Taux = rho * Cd * |V| * u10
-    !==========================================================================
-    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=fptr, rc=rc)
-    do j=j1,j2; do i=i1,i2
-      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
-      fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
-        rho_air * Cd_neut * wspd * uas(i,j)))
-    end do; end do
-
-    !==========================================================================
-    ! Tauy = rho * Cd * |V| * v10
-    !==========================================================================
-    call ESMF_FieldGet(is%ocn_flx%tauy, farrayPtr=fptr, rc=rc)
-    do j=j1,j2; do i=i1,i2
-      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
-        rho_air * Cd_neut * wspd * vas(i,j)))
-    end do; end do
-
-    !==========================================================================
-    ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
-    !==========================================================================
-    call ESMF_FieldGet(is%ocn_flx%sen, farrayPtr=fptr, rc=rc)
-    do j=j1,j2; do i=i1,i2
-      ! pular células sem tas físico (tas < 100 K = sem dado)
-      if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
-      ! clamp ±500 W/m²
-      fptr(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, &
-        rho_air * Cp_air * Ch_neut * wspd * (tas(i,j) - sst_eff)))
-    end do; end do
-
-    !==========================================================================
-    ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
-    !==========================================================================
-    call ESMF_FieldGet(is%ocn_flx%evap, farrayPtr=fptr, rc=rc)
-    do j=j1,j2; do i=i1,i2
-      if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-      ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
-      !
-      ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
-      ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
-      ! pular a celula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
-      ! qsat sai cinco ordens de grandeza alto. A evaporacao entao satura no
-      ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro — e esse fluxo
-      ! saturado e' entregue ao oceano, nao fica so' no diagnostico.
-      !
-      ! Isso aparecia no passo 1 de coupling_mode='sequential': ali o mediador
-      ! roda ANTES do primeiro avanco do MPAS, e os diagnosticos de fisica da
-      ! atmosfera (radiacao, precipitacao, pressao ao nivel do mar) ainda estao
-      ! zerados. As demais guardas ja' tratavam lwdn e swdn; psl nao tinha.
-      ! Pressao ao nivel do mar nunca desce de ~870 hPa na natureza, entao
-      ! 500 hPa e' um limiar seguro para "ausencia de dado".
-      if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
-      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
-      qsat = eps_q * es_coef_a * &
-        exp(es_coef_b*(sst_eff-T_freeze)/(sst_eff-T_freeze+es_coef_c)) / &
-        max(psl(i,j), 1.0_ESMF_KIND_R8)
-      ! Convenção CMEPS: E > 0 = oceano → atmosfera
-      ! clamp ±1e-4 kg/m²/s (~±8.6 mm/d)
-      fptr(i,j) = max(-1.0e-4_ESMF_KIND_R8, min(1.0e-4_ESMF_KIND_R8, &
-        rho_air * Ce_neut * wspd * (qsat - shum(i,j))))
-    end do; end do
-
-    !==========================================================================
-    ! Balanço LW = lwdn − emissividade·σ·SST⁴
-    !==========================================================================
-    call ESMF_FieldGet(is%ocn_flx%lwnet, farrayPtr=fptr, rc=rc)
-    do j=j1,j2; do i=i1,i2
-      ! pular células sem lwdn real (lwdn=0 indica ausência)
-      if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
-      fptr(i,j) = max( &
-        max(lwdn(i,j), 0.0_ESMF_KIND_R8) - 0.97_ESMF_KIND_R8 * sigma_sb * sst_eff**4, &
-        -300.0_ESMF_KIND_R8)
-    end do; end do
+    ! Tensao, calor sensivel, evaporacao e balanco LW sobre agua aberta
+    call compute_ocean_fluxes(is, sst, uas, vas, tas, psl, lwdn, shum, &
+                              i1, i2, j1, j2, rc)
 
     !==========================================================================
     ! Componentes SW: 4 bandas (vis-dir, vis-dif, nir-dir, nir-dif)
@@ -374,6 +259,167 @@ contains
 
     rc = ESMF_SUCCESS
   end subroutine calc_bulk_ncar
+
+  !> Hora UTC decimal e declinacao solar do instante corrente do relogio.
+  !!
+  !! O dia do ano e a hora sao os mesmos para toda a grade neste instante de
+  !! acoplamento; o angulo zenital, que muda por celula, e' calculado em
+  !! ocean_direct_albedo a partir destes dois valores. Se o relogio falhar,
+  !! usa o meio-dia do equinocio (rc volta com ESMF_SUCCESS).
+  !!
+  !! @param[in]  clock     relogio do mediador
+  !! @param[out] utc_hour  hora UTC decimal [h]
+  !! @param[out] decl      declinacao solar [rad]
+  !! @param[out] rc        sempre ESMF_SUCCESS
+  subroutine solar_time_and_declination(clock, utc_hour, decl, rc)
+    type(ESMF_Clock),   intent(in)  :: clock
+    real(ESMF_KIND_R8), intent(out) :: utc_hour
+    real(ESMF_KIND_R8), intent(out) :: decl
+    integer,            intent(out) :: rc
+
+    real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
+    real(ESMF_KIND_R8) :: gamma_doy
+    integer :: doy, yy, mm, dd, hh, mn, ss
+    type(ESMF_Time) :: currT
+
+    !==========================================================================
+    ! dia-do-ano e hora UTC decimal, uma vez por
+    ! chamada (o angulo zenital muda por celula via lat/lon, mas doy/hora
+    ! sao os mesmos para toda a grade neste instante de acoplamento).
+    !==========================================================================
+    call ESMF_ClockGet(clock, currTime=currT, rc=rc)
+    if (rc == ESMF_SUCCESS) then
+      call ESMF_TimeGet(currT, yy=yy, mm=mm, dd=dd, h=hh, m=mn, s=ss, &
+        dayOfYear=doy, rc=rc)
+    end if
+    if (rc /= ESMF_SUCCESS) then
+      ! Fallback seguro: meio-dia do equinocio (decl~0, zenite so' por
+      ! latitude) — nunca deixa a formula indefinida se o clock falhar.
+      doy = 80; utc_hour = 12.0_ESMF_KIND_R8
+      rc = ESMF_SUCCESS
+    else
+      utc_hour = real(hh, ESMF_KIND_R8) + real(mn, ESMF_KIND_R8)/60.0_ESMF_KIND_R8 &
+                 + real(ss, ESMF_KIND_R8)/3600.0_ESMF_KIND_R8
+    end if
+
+    ! Declinacao solar — aproximacao de Spencer (1971), erro tipico < 0,1
+    ! grau. gamma = angulo fracionario do ano [rad].
+    gamma_doy = 2.0_ESMF_KIND_R8 * PI_ZEN * real(doy-1, ESMF_KIND_R8) / 365.0_ESMF_KIND_R8
+    decl = 0.006918_ESMF_KIND_R8 &
+         - 0.399912_ESMF_KIND_R8 * cos(gamma_doy)   + 0.070257_ESMF_KIND_R8 * sin(gamma_doy) &
+         - 0.006758_ESMF_KIND_R8 * cos(2.0_ESMF_KIND_R8*gamma_doy) + 0.000907_ESMF_KIND_R8 * sin(2.0_ESMF_KIND_R8*gamma_doy) &
+         - 0.002697_ESMF_KIND_R8 * cos(3.0_ESMF_KIND_R8*gamma_doy) + 0.001480_ESMF_KIND_R8 * sin(3.0_ESMF_KIND_R8*gamma_doy)
+  end subroutine solar_time_and_declination
+
+  !> Fluxos sobre agua aberta pelas formulas bulk NCAR, com coeficientes
+  !! neutros: tensao do vento (taux, tauy), calor sensivel, evaporacao e
+  !! balanco de onda longa, escritos em is%ocn_flx. A SST e' a da grade ATM
+  !! interna; fora de (271, 308) K, ou sem SST, usa SST_BULK_FALLBACK.
+  !!
+  !! @param[inout] is      estado interno do mediador
+  !! @param[in]    sst     SST na grade ATM (pode estar desassociado)
+  !! @param[in]    uas..shum  campos atmosfericos na grade ATM
+  !! @param[in]    i1,i2,j1,j2  limites locais da DE
+  !! @param[inout] rc      codigo de retorno das leituras dos campos
+  subroutine compute_ocean_fluxes(is, sst, uas, vas, tas, psl, lwdn, shum, &
+                                  i1, i2, j1, j2, rc)
+    type(MED_InternalState), intent(inout) :: is
+    real(ESMF_KIND_R8), pointer, intent(in) :: sst(:,:)
+    real(ESMF_KIND_R8), intent(in)    :: uas(:,:), vas(:,:), tas(:,:)
+    real(ESMF_KIND_R8), intent(in)    :: psl(:,:), lwdn(:,:), shum(:,:)
+    integer,            intent(in)    :: i1, i2, j1, j2
+    integer,            intent(inout) :: rc
+
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8) :: wspd, qsat, sst_eff
+    integer :: i, j
+
+    nullify(fptr)
+
+    !==========================================================================
+    ! Taux = rho * Cd * |V| * u10
+    !==========================================================================
+    call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
+      fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
+        rho_air * Cd_neut * wspd * uas(i,j)))
+    end do; end do
+
+    !==========================================================================
+    ! Tauy = rho * Cd * |V| * v10
+    !==========================================================================
+    call ESMF_FieldGet(is%ocn_flx%tauy, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
+        rho_air * Cd_neut * wspd * vas(i,j)))
+    end do; end do
+
+    !==========================================================================
+    ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
+    !==========================================================================
+    call ESMF_FieldGet(is%ocn_flx%sen, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      ! pular células sem tas físico (tas < 100 K = sem dado)
+      if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
+        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      ! clamp ±500 W/m²
+      fptr(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, &
+        rho_air * Cp_air * Ch_neut * wspd * (tas(i,j) - sst_eff)))
+    end do; end do
+
+    !==========================================================================
+    ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
+    !==========================================================================
+    call ESMF_FieldGet(is%ocn_flx%evap, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
+      ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
+      !
+      ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
+      ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
+      ! pular a celula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
+      ! qsat sai cinco ordens de grandeza alto. A evaporacao entao satura no
+      ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro — e esse fluxo
+      ! saturado e' entregue ao oceano, nao fica so' no diagnostico.
+      !
+      ! Isso aparecia no passo 1 de coupling_mode='sequential': ali o mediador
+      ! roda ANTES do primeiro avanco do MPAS, e os diagnosticos de fisica da
+      ! atmosfera (radiacao, precipitacao, pressao ao nivel do mar) ainda estao
+      ! zerados. As demais guardas ja' tratavam lwdn e swdn; psl nao tinha.
+      ! Pressao ao nivel do mar nunca desce de ~870 hPa na natureza, entao
+      ! 500 hPa e' um limiar seguro para "ausencia de dado".
+      if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
+      wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
+      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
+        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      qsat = eps_q * es_coef_a * &
+        exp(es_coef_b*(sst_eff-T_freeze)/(sst_eff-T_freeze+es_coef_c)) / &
+        max(psl(i,j), 1.0_ESMF_KIND_R8)
+      ! Convenção CMEPS: E > 0 = oceano → atmosfera
+      ! clamp ±1e-4 kg/m²/s (~±8.6 mm/d)
+      fptr(i,j) = max(-1.0e-4_ESMF_KIND_R8, min(1.0e-4_ESMF_KIND_R8, &
+        rho_air * Ce_neut * wspd * (qsat - shum(i,j))))
+    end do; end do
+
+    !==========================================================================
+    ! Balanço LW = lwdn − emissividade·σ·SST⁴
+    !==========================================================================
+    call ESMF_FieldGet(is%ocn_flx%lwnet, farrayPtr=fptr, rc=rc)
+    do j=j1,j2; do i=i1,i2
+      ! pular células sem lwdn real (lwdn=0 indica ausência)
+      if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
+      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
+        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      fptr(i,j) = max( &
+        max(lwdn(i,j), 0.0_ESMF_KIND_R8) - 0.97_ESMF_KIND_R8 * sigma_sb * sst_eff**4, &
+        -300.0_ESMF_KIND_R8)
+    end do; end do
+  end subroutine compute_ocean_fluxes
 
   subroutine legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
     type(MED_InternalState), intent(inout) :: is
