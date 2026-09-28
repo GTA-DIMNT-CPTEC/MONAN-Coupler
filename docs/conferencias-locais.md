@@ -9,7 +9,7 @@ Uma etapa de refatoração só é aprovada pela rodada completa na Jaci, compara
 | gfortran e MPI (MPICH ou Open MPI) | com `mpif90` no PATH; outro compilador pela variável `FC` |
 | NetCDF-Fortran | com `nf-config` no PATH |
 | ESMF 8.9.1 compilado | a variável `ESMFMKFILE` aponta para o `esmf.mk` da instalação |
-| Python 3 e git | para os scripts de conferência |
+| Python 3.6 ou mais novo, e git | para os scripts de conferência; os de `tools/dev/` rodam também com o `python3` do sistema na Jaci (3.6) |
 
 Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são compilados contra as interfaces mínimas de `tests/interfaces/` (seção 3).
 

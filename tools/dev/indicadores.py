@@ -35,9 +35,30 @@ Como se mede:
                      v2.5 ou datas.
 """
 import collections
+import io
 import re
 import subprocess
 import sys
+
+
+def git(*args):
+    """Executa o git e devolve (código de saída, saída em texto UTF-8).
+
+    Usa só recursos do Python 3.6 (o python3 do sistema na Jaci): sem
+    capture_output nem text, e com a decodificação feita aqui, porque com o
+    locale C o Python 3.6 decodificaria a saída como ASCII."""
+    r = subprocess.run(['git'] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return r.returncode, r.stdout.decode('utf-8', 'replace')
+
+
+def saida_utf8():
+    """Garante saídas em UTF-8 (no Python 3.6 com locale C elas são ASCII)."""
+    if (sys.stdout.encoding or '').lower().replace('-', '') != 'utf8':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8',
+                                      errors='replace', line_buffering=True)
+    if (sys.stderr.encoding or '').lower().replace('-', '') != 'utf8':
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8',
+                                      errors='replace', line_buffering=True)
 
 LIMITE_ARQUIVO = 1000
 JANELA = 6
@@ -72,14 +93,11 @@ def separa(linha):
 def fontes(versao):
     """Lista de (caminho, texto) dos fontes próprios da versão pedida."""
     if versao == '.':
-        nomes = subprocess.run(['git', 'ls-files', '--cached', '--others', '--exclude-standard',
-                                'src'], capture_output=True, text=True).stdout.split()
+        nomes = git('ls-files', '--cached', '--others', '--exclude-standard', 'src')[1].split()
         ler = lambda f: open(f, encoding='utf-8', errors='replace').read()
     else:
-        nomes = subprocess.run(['git', 'ls-tree', '-r', '--name-only', versao, 'src'],
-                               capture_output=True, text=True).stdout.split()
-        ler = lambda f: subprocess.run(['git', 'show', f'{versao}:{f}'],
-                                       capture_output=True, text=True).stdout
+        nomes = git('ls-tree', '-r', '--name-only', versao, 'src')[1].split()
+        ler = lambda f: git('show', f'{versao}:{f}')[1]
     saida = []
     for f in sorted(set(nomes)):
         if f.endswith('.F90') and '/upstream/' not in f:
@@ -296,14 +314,14 @@ def lista(r):
 
 
 def main():
+    saida_utf8()
     args = [a for a in sys.argv[1:] if a != '-l']
     if any(a in ('-h', '--help') for a in args):
         print(__doc__)
         return 0
     versoes = args or ['.']
     for v in versoes:
-        if v != '.' and subprocess.run(['git', 'rev-parse', '--verify', '--quiet', v + '^{commit}'],
-                                       capture_output=True).returncode != 0:
+        if v != '.' and git('rev-parse', '--verify', '--quiet', v + '^{commit}')[0] != 0:
             print(f'ERRO: versão {v!r} não encontrada', file=sys.stderr)
             return 2
     medidas = [mede(v) for v in versoes]

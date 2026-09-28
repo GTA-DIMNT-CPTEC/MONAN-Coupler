@@ -16,8 +16,29 @@ Diferenças esperadas (literal de código morto removido, por exemplo) devem
 ser conferidas uma a uma e anunciadas no CHANGELOG.
 """
 import collections
+import io
 import subprocess
 import sys
+
+
+def git(*args):
+    """Executa o git e devolve (código de saída, saída em texto UTF-8).
+
+    Usa só recursos do Python 3.6 (o python3 do sistema na Jaci): sem
+    capture_output nem text, e com a decodificação feita aqui, porque com o
+    locale C o Python 3.6 decodificaria a saída como ASCII."""
+    r = subprocess.run(['git'] + list(args), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return r.returncode, r.stdout.decode('utf-8', 'replace')
+
+
+def saida_utf8():
+    """Garante saídas em UTF-8 (no Python 3.6 com locale C elas são ASCII)."""
+    if (sys.stdout.encoding or '').lower().replace('-', '') != 'utf8':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8',
+                                      errors='replace', line_buffering=True)
+    if (sys.stderr.encoding or '').lower().replace('-', '') != 'utf8':
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8',
+                                      errors='replace', line_buffering=True)
 
 
 def literais(texto):
@@ -48,22 +69,20 @@ def literais(texto):
 
 
 def no_commit(rev, caminho):
-    r = subprocess.run(['git', 'show', f'{rev}:{caminho}'], capture_output=True, text=True)
-    return r.stdout if r.returncode == 0 else ''
+    codigo, texto = git('show', f'{rev}:{caminho}')
+    return texto if codigo == 0 else ''
 
 
 def main():
+    saida_utf8()
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
         print(__doc__)
         return 2
     rev = sys.argv[1]
-    if subprocess.run(['git', 'rev-parse', '--verify', '--quiet', rev + '^{commit}'],
-                      capture_output=True).returncode != 0:
+    if git('rev-parse', '--verify', '--quiet', rev + '^{commit}')[0] != 0:
         print(f'ERRO: commit {rev!r} não encontrado', file=sys.stderr)
         return 2
-    arquivos = sys.argv[2:] or subprocess.run(
-        ['git', 'diff', '--name-only', rev, '--', '*.F90'],
-        capture_output=True, text=True).stdout.split()
+    arquivos = sys.argv[2:] or git('diff', '--name-only', rev, '--', '*.F90')[1].split()
     iguais = True
     for f in arquivos:
         antes = collections.Counter(literais(no_commit(rev, f)))

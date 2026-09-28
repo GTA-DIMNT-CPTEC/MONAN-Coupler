@@ -55,7 +55,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE6-01 | `confere-tudo.bash` e `indicadores.py`; roteiro de código limpo e levantamento do DTN-01 (validação pendente) |
+| R-FASE6-01 e FIX01 | `confere-tudo.bash` e `indicadores.py`; roteiro de código limpo e levantamento do DTN-01; scripts de `tools/dev/` compatíveis com o Python 3.6 da Jaci (validação pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 5, que cobre todas as etapas até a R-FASE5-07).
 
@@ -95,6 +95,7 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | Colar blocos longos no terminal | comandos misturados com saída anterior; diretórios preparados pela metade | usar o `valida_rodada.bash`, um comando por vez |
 | MANIFEST da linha de base editado à mão | `compara` para antes de comparar, com `MANIFEST.txt: FAILED` | anotar com `anota-linha-base.bash`; se já foi editado, `anota-linha-base.bash -r` |
 | Mudança de atributos NetCDF | "difere só nos METADADOS" | não reprova; conferir com `ncdump -h` que é a mudança esperada |
+| `python3` do sistema na Jaci é o 3.6 | script Python pára com `TypeError: ... unexpected keyword argument 'capture_output'` (recurso do 3.7) ou com `UnicodeEncodeError` ao imprimir acentos com o locale C | scripts de `tools/dev/` escritos para o Python 3.6: `subprocess.run` com `stdout=subprocess.PIPE` e decodificação UTF-8 explícita; conferir com `vermin -t=3.6-` |
 | Arquivos que não compilam fora da Jaci com as bibliotecas reais | `mpas_atm_model.F90`, `sis_cap_MONAN.F90` e `mom_cap_MONAN.F90` dependem de bibliotecas do MPAS, MOM6, FMS e SIS2 | fora da Jaci, compilam só contra as interfaces mínimas de `tests/interfaces/`, que conferem tipos e assinaturas; a compilação na Jaci continua sendo a conferência final |
 
 ## 7. Ferramentas de apoio
