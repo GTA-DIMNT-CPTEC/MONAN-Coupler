@@ -152,7 +152,8 @@ SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
         regrid_base regrid_esmf regrid_weights regrid_mpassit             \
         regrid_registry regrid_manager                                    \
         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
-        mpas_atm_types mpas_atm_model mpas_cap_netcdf mpas_cap_methods    \
+        mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model      \
+        mpas_cap_netcdf mpas_cap_methods                                  \
         mpas_cap_MONAN DATM_cap                                           \
         docn_cap_netcdf DOCN_cap                                          \
         mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods   \
@@ -202,7 +203,9 @@ $(OBJDIR)/med_ocean.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o 
 $(OBJDIR)/mom_cap_methods.o: $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o
 $(OBJDIR)/mom_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/docn_cap_netcdf.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/mom_ocean_model_nuopc.o: $(OBJDIR)/mom_surface_forcing_nuopc.o
-$(OBJDIR)/mpas_atm_model.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/mpas_atm_types.o
+$(OBJDIR)/mpas_atm_fluxes.o: $(OBJDIR)/mpas_atm_types.o
+$(OBJDIR)/mpas_atm_model.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/mpas_atm_fluxes.o $(OBJDIR)/mpas_atm_setup.o $(OBJDIR)/mpas_atm_types.o
+$(OBJDIR)/mpas_atm_setup.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o
 $(OBJDIR)/mpas_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mpas_atm_model.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_methods.o $(OBJDIR)/mpas_cap_netcdf.o
 $(OBJDIR)/mpas_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpi_allreduce_wrappers.o $(OBJDIR)/nc_writer.o

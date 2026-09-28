@@ -9,6 +9,16 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Modelo atmosférico dividido em inicialização, passo e fluxos (R-FASE8-02).** Segunda etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
+  - `mpas_atm_model.F90` passa de 1 589 para 605 linhas e fica com os pontos de entrada chamados pelo cap (`mpas_atm_init`, `mpas_atm_init_sfc`, `mpas_atm_run`, `mpas_atm_final`) e com a troca de halos do passo (`exchange_surface_halos`).
+  - `mpas_atm_setup.F90` (novo, módulo `mpas_atm_setup_mod`) recebe as onze etapas da inicialização: `setup_mpas_domain`, `setup_mpas_streams` (com `mesh_filename_for_bootstrap`, `parse_streams_xml` e `atm_add_stream_attributes`), `bind_mesh_fields`, `bind_diag_fields` (com `warn_if_null`), `setup_wind_fallback`, `init_flux_buffers` e `init_boundary_arrays`. São públicas só as sete que `mpas_atm_init` chama.
+  - `mpas_atm_fluxes.F90` (novo, módulo `mpas_atm_fluxes_mod`) recebe `compute_instantaneous_fluxes` e as duas constantes que só ela usa (`RHO_AIR_SFC` e `VMIN`, com os mesmos valores).
+  - O cabeçalho de `mpas_atm_model.F90` fica só com os nomes que as rotinas restantes usam; cada módulo novo importa só os seus.
+  - `Makefile` e `tools/dev/compila-local.bash` com os dois fontes novos; `docs/conferencias-locais.md` os cita entre os fontes que compilam aqui com as interfaces mínimas do MPAS.
+  - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos (nenhum nos fontes novos), literais (182, iguais no total), regrid, gravadores, física bulk, grade atmosférica e testes com valor esperado sem falhas. As 32 diferenças de instruções são só de estrutura de módulo (`module`, `use`, `public`, `private`, `implicit none`, `contains`). Nenhum teste local executa estes fontes; a conferência deles é a rodada na Jaci.
+  - Indicadores: arquivos com mais de 1 000 linhas de 7 para 6; maior arquivo de 1 589 para 1 404 linhas (`mom_cap_MONAN.F90`).
+  - Registrado no roteiro: ainda passam de 1 200 linhas `mom_cap_MONAN.F90`, `mpas_cap_netcdf.F90`, `sis_cap_MONAN.F90` e `mpas_cap_methods.F90`, que a fase 8 não previa dividir.
+
 - **Mediador dividido em módulos por assunto (R-FASE8-01).** Primeira etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
   - `MED_cap.F90` passa de 3 379 para 1 001 linhas e fica com o ciclo de vida NUOPC: `SetServices`, as fases de inicialização (com as etapas de `InitializeDataComplete` que esperam e publicam a SST) e `MediatorAdvance`. As demais 38 rotinas vão para seis módulos novos em `src/mediator/`:
 
@@ -29,6 +39,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
     - `compila-local.bash -a`: um fonte da lista ausente na versão compilada não conta como falha. Os testes de comparação (`gravadores`, `bulk`, `grade`) e a conferência de avisos usam essa opção para a versão de referência, que não tem os fontes novos.
   - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos (nenhum nos fontes novos), literais (433, iguais no total), regrid, gravadores, física bulk, grade atmosférica e testes com valor esperado sem falhas. As 73 diferenças de instruções são só de estrutura de módulo (`module`, `use`, `public`, `private`, `implicit none`, `contains`), conferidas uma a uma; nenhuma instrução executável mudou.
   - Indicadores: maior arquivo de 3 381 para 1 589 linhas (`mpas_atm_model.F90`, próxima etapa); rotinas continuam 294.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-01-validada`).
 
 - **Marcas de primeira vez e contadores no estado interno (R-FASE7-06).** Última etapa da fase 7. Nenhum cálculo muda.
   - Oito variáveis que guardavam valor entre chamadas passam para o estado interno do componente a que pertencem, com os mesmos valores iniciais e alteradas nos mesmos pontos:

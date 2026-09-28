@@ -82,6 +82,8 @@ Com o estado explícito, dá para separar os arquivos grandes por assunto sem cr
 | R-FASE8-02 | `mpas_atm_model.F90` (1 619 linhas) dividido em inicialização, passo e fluxos instantâneos | B |
 | R-FASE8-03 | as nove rotinas entre 100 e 150 linhas de código revistas; dividir apenas as que misturam responsabilidades (candidatas: `export_write_netcdf`, `mpas_atm_run`, `calc_bulk_ncar`, `compute_instantaneous_fluxes`, `get_atm_forcing`) | B |
 
+Depois da R-FASE8-02, ainda passam de 1 200 linhas quatro arquivos que o roteiro não dividia: `mom_cap_MONAN.F90` (1 404), `mpas_cap_netcdf.F90` (1 392), `sis_cap_MONAN.F90` (1 391) e `mpas_cap_methods.F90` (1 271). Fica a decidir se entram na fase 8 como etapas novas de divisão ou se o limite do critério abaixo é revisto.
+
 **Pronto quando:** nenhum arquivo próprio passa de 1 200 linhas, e cada módulo novo tem um cabeçalho que diz de que assunto trata. O `config_read` fica como está, conforme decidido em 27/09/2026 (quase todo declaração de namelist).
 
 ### Fase 9: duplicação e consistência

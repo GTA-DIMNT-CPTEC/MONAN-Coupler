@@ -92,7 +92,7 @@ tools/dev/confere-instrucoes.py HEAD src/mediator/*.F90
 
 Junta as linhas de continuação, retira comentários, espaços e diferença de maiúsculas, e compara o conjunto de instruções do arquivo no commit e na árvore de trabalho. Com vários arquivos, compara a soma de todos (um arquivo novo conta como vazio no commit): é a forma de conferir um trecho que mudou de arquivo. Numa etapa que divide uma rotina em procedimentos, as únicas instruções acrescentadas devem ser as chamadas, as declarações, os cabeçalhos e os retornos das etapas novas; as removidas devem ser só as que viraram chamada e o código morto anunciado. A comparação ignora a ordem: a ordem das operações, em especial das coletivas do MPI, que precisam acontecer na mesma sequência em todos os processos, é conferida lendo o diff.
 
-É a principal conferência dos fontes que só compilam de verdade na Jaci, como `mpas_atm_model.F90` e `mom_cap_MONAN.F90`.
+É a principal conferência dos fontes que só compilam de verdade na Jaci, como `mpas_atm_model.F90` (com `mpas_atm_setup.F90` e `mpas_atm_fluxes.F90`) e `mom_cap_MONAN.F90`.
 
 ### 2.4 Teste dos gravadores de diagnóstico
 
@@ -168,7 +168,7 @@ Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo for
 
 ## 3. Interfaces mínimas
 
-Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
+Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_setup.F90`, `mpas_atm_fluxes.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
 
 Uma interface mínima pode estar errada; por isso, antes de confiar nela para uma mudança, compile com ela a versão anterior do arquivo. Se a versão anterior não compilar, a interface é que precisa de ajuste, seguindo a assinatura real no código do modelo. Um erro de compilação só é atribuído à mudança se a versão anterior compilar com as mesmas interfaces.
 
