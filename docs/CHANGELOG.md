@@ -9,6 +9,14 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Gravador `monan_export_*.nc` dividido em etapas; último `BLOCK` retirado (R-FASE8-03).** Terceira etapa da fase 8 e primeira das revisões de rotinas longas. Nenhum cálculo muda.
+  - `export_write_netcdf` (`mpas_cap_netcdf.F90`, 148 linhas de código) misturava três assuntos: a coordenação do passo, a definição do arquivo NetCDF e a interpolação dos campos. Fica só com a coordenação (inventário do `exportState`, chamadas às etapas, fechamento do arquivo), e a criação e a definição do arquivo (atributos globais, lat, lon, time, uma variável por campo, eixos) vão, sem mudança, para a nova rotina `define_export_file`, que só o PET 0 chama. As mensagens de erro usam o mesmo prefixo, recebido por argumento.
+  - `write_export_fields` passa a alocar os seus próprios buffers (`sendBuf` em todos os PETs, `grid_2d` no PET 0) e perde os argumentos que só serviam de variável de trabalho (`sendBuf`, `grid_2d`, `ncstat`, `varid`); `nLocal` e `mpiComm` passam a `intent(in)` e `fldnames` a vetor comum com `intent(in)`.
+  - A leitura de reserva de um campo do `exportState` (posto 1 ou 2) vira a rotina `read_export_field_local`. Com isso sai o `BLOCK` que declarava o vetor auxiliar `flat`, registrado na R-FASE7-03: não resta nenhum `BLOCK` em `src/`, como pede a convenção do README.
+  - Código morto retirado: `allCounts`, `displs` e `recvBuf` eram alocados e copiados a cada passo, mas nunca lidos (a interpolação usa só as coordenadas locais guardadas por `netcdf_init_coords`). O comentário da etapa foi ajustado a isso.
+  - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos, literais (273, iguais), regrid, física bulk, grade atmosférica e testes com valor esperado sem falhas; gravadores iguais byte a byte, inclusive os `monan_export_*.nc`, cujo caso de teste passa pelo caminho de reserva com campos de posto 2 (o antigo `BLOCK`). As diferenças de instruções são só declarações, cabeçalhos e chamadas das rotinas novas, os argumentos retirados e o código morto acima.
+  - Indicadores: rotinas de 294 para 296; rotinas com mais de 100 linhas de código de 10 para 9; `mpas_cap_netcdf.F90` passa a ser o maior arquivo (1 440 linhas).
+
 - **Modelo atmosférico dividido em inicialização, passo e fluxos (R-FASE8-02).** Segunda etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
   - `mpas_atm_model.F90` passa de 1 589 para 605 linhas e fica com os pontos de entrada chamados pelo cap (`mpas_atm_init`, `mpas_atm_init_sfc`, `mpas_atm_run`, `mpas_atm_final`) e com a troca de halos do passo (`exchange_surface_halos`).
   - `mpas_atm_setup.F90` (novo, módulo `mpas_atm_setup_mod`) recebe as onze etapas da inicialização: `setup_mpas_domain`, `setup_mpas_streams` (com `mesh_filename_for_bootstrap`, `parse_streams_xml` e `atm_add_stream_attributes`), `bind_mesh_fields`, `bind_diag_fields` (com `warn_if_null`), `setup_wind_fallback`, `init_flux_buffers` e `init_boundary_arrays`. São públicas só as sete que `mpas_atm_init` chama.
@@ -18,6 +26,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Conferências locais: `confere-tudo.bash -i HEAD` com compilação, avisos (nenhum nos fontes novos), literais (182, iguais no total), regrid, gravadores, física bulk, grade atmosférica e testes com valor esperado sem falhas. As 32 diferenças de instruções são só de estrutura de módulo (`module`, `use`, `public`, `private`, `implicit none`, `contains`). Nenhum teste local executa estes fontes; a conferência deles é a rodada na Jaci.
   - Indicadores: arquivos com mais de 1 000 linhas de 7 para 6; maior arquivo de 1 589 para 1 404 linhas (`mom_cap_MONAN.F90`).
   - Registrado no roteiro: ainda passam de 1 200 linhas `mom_cap_MONAN.F90`, `mpas_cap_netcdf.F90`, `sis_cap_MONAN.F90` e `mpas_cap_methods.F90`, que a fase 8 não previa dividir.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-02-validada`).
 
 - **Mediador dividido em módulos por assunto (R-FASE8-01).** Primeira etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem.
   - `MED_cap.F90` passa de 3 379 para 1 001 linhas e fica com o ciclo de vida NUOPC: `SetServices`, as fases de inicialização (com as etapas de `InitializeDataComplete` que esperam e publicam a SST) e `MediatorAdvance`. As demais 38 rotinas vão para seis módulos novos em `src/mediator/`:

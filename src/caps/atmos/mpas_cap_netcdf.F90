@@ -295,6 +295,10 @@ contains
   !!
   !! Todos os PETs participam das chamadas MPI coletivas; os campos chegam
   !! em unidades instantâneas de mpas_atm_model.F90 (sem conversão aqui).
+  !!
+  !! Etapas: inventário do exportState; no PET 0, criação e definição do
+  !! arquivo (define_export_file); interpolação e escrita de cada campo, com
+  !! todos os PETs (write_export_fields); no PET 0, fechamento do arquivo.
   subroutine export_write_netcdf(diag, exportState,         &
                                   elapsed_s,                &
                                   s_yr, s_mo, s_dy,         &
@@ -309,25 +313,14 @@ contains
 
     ! Locais
     integer :: localPet, petCount, mpiComm
-    integer :: i, itemCount, nLocal, nGlobal
-    integer :: ncid, varid, ncstat
-    integer :: dimid_lat, dimid_lon, dimid_t
-    integer :: varid_lat, varid_lon, varid_t
+    integer :: itemCount, nLocal, nGlobal
+    integer :: ncid, ncstat
     integer :: c_yr, c_mo, c_dy, c_hr, c_mn, c_sc
-    integer :: st_yr, st_mo, st_dy, st_hr, st_mn, st_sc
 
     character(len=64),  allocatable :: fldnames(:)
-    integer,            allocatable :: allCounts(:), displs(:)
-    real(ESMF_KIND_R8), allocatable :: sendBuf(:), recvBuf(:)
 
-    real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
-    real(ESMF_KIND_R8) :: lat_axis(diag%nlat), lon_axis(diag%nlon)
-    real(ESMF_KIND_R8) :: time_val
-
-    character(len=36) :: fname_base
     character(len=64) :: fname
-    character(len=19) :: valid_time_iso, time_units_str
-    integer :: cmd_stat
+    character(len=19) :: valid_time_iso
     character(len=*), parameter :: subname = '(export_write_netcdf)'
 
     rc = ESMF_SUCCESS
@@ -360,29 +353,83 @@ contains
     call ESMF_StateGet(exportState, itemNameList=fldnames, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 2-3. Decomposição MPI reutilizada de netcdf_init_coords
+    ! ── 2. Decomposição MPI reutilizada de netcdf_init_coords
     ! nLocal = size(fptr) [localCells_ESMF] pode diferir do nLocal usado em
-    ! netcdf_init_coords [min(localCells_ESMF, nCells_MPAS)]; com allCounts
-    ! distintos, o mapeamento geográfico no NetCDF sairia errado. Reutilizar
-    ! os mesmos allCounts/displs do init_coords garante que recvBuf(i)
-    ! corresponde a g_lon/lat_global(i).
+    ! netcdf_init_coords [min(localCells_ESMF, nCells_MPAS)]; com contagens
+    ! distintas, o mapeamento geográfico no NetCDF sairia errado. Usar o
+    ! nLocal guardado por netcdf_init_coords garante que cada valor local
+    ! corresponde às coordenadas diag%lon_local/diag%lat_local.
     nLocal  = diag%nlocal
     nGlobal = diag%nglobal
-    allocate(allCounts(petCount), displs(petCount))
-    allCounts = diag%all_counts
-    displs    = diag%displs
-    rc = ESMF_SUCCESS
 
-    ! ── 4. Buffers ────────────────────────────────────────────────────────
-    allocate(sendBuf(max(nLocal, 1)))
+    ! ── 3. PET0: criar e definir estrutura do arquivo NetCDF ──────────────
     if (localPet == 0) then
-      allocate(recvBuf(max(nGlobal, 1)))
-    else
-      allocate(recvBuf(1))
+      call define_export_file(diag, itemCount, fldnames, elapsed_s,      &
+                              s_yr, s_mo, s_dy, s_hr, s_mn, s_sc,        &
+                              c_yr, c_mo, c_dy, c_hr, c_mn, c_sc,        &
+                              nGlobal, petCount, subname,                &
+                              fname, valid_time_iso, ncid, rc)
+      if (rc /= ESMF_SUCCESS) return
+    end if   ! localPet == 0
+
+    ! ── 4. Loop por campo: per-PET voronoi + MPI_Allreduce ───────────
+    call write_export_fields(diag, exportState, itemCount, fldnames, nLocal, mpiComm, localPet, &
+        ncid, rc)
+
+    ! ── 5. PET0: fechar arquivo ───────────────────────────────────────────
+    if (localPet == 0) then
+      ncstat = nf90_close(ncid)
+      if (ncstat == NF90_NOERR) then
+        write(*,'(A,4A)') '[NetCDF] Escrito (', trim(valid_time_iso), ') → ', trim(fname), ''
+        call ESMF_LogWrite(subname//': '//trim(fname)//' escrito', &
+                           ESMF_LOGMSG_INFO)
+      else
+        write(*,'(A)') '[NetCDF] AVISO nf90_close: '//trim(nf90_strerror(ncstat))
+      end if
     end if
 
-    ! ── 5. PET0: criar e definir estrutura do arquivo NetCDF ──────────────
-    if (localPet == 0) then
+    deallocate(fldnames)
+  end subroutine export_write_netcdf
+
+  !> Cria o arquivo monan_export_*.nc do passo e define a sua estrutura
+  !! (atributos globais CF-1.8, lat, lon, time e uma variável por campo do
+  !! exportState), escrevendo os eixos e o tempo. Só o PET 0 chama.
+  !!
+  !! @param[in]  s_yr..s_sc  instante corrente (atributo start_time e base do
+  !!                         tempo CF, junto com elapsed_s)
+  !! @param[in]  c_yr..c_sc  instante do nome do arquivo e de valid_time
+  !! @param[in]  subname     prefixo das mensagens (o de export_write_netcdf)
+  !! @param[out] fname, valid_time_iso  nome do arquivo e instante, para o log
+  !! @param[out] ncid        arquivo aberto, fora do modo de definição
+  !! @param[inout] rc        ESMF_SUCCESS, ou falha já registrada no log
+  subroutine define_export_file(diag, itemCount, fldnames, elapsed_s,      &
+                                s_yr, s_mo, s_dy, s_hr, s_mn, s_sc,        &
+                                c_yr, c_mo, c_dy, c_hr, c_mn, c_sc,        &
+                                nGlobal, petCount, subname,                &
+                                fname, valid_time_iso, ncid, rc)
+    type(mpas_diag_export_t), intent(in) :: diag
+    integer,           intent(in)    :: itemCount
+    character(len=64), intent(in)    :: fldnames(:)
+    integer,           intent(in)    :: elapsed_s
+    integer,           intent(in)    :: s_yr, s_mo, s_dy, s_hr, s_mn, s_sc
+    integer,           intent(in)    :: c_yr, c_mo, c_dy, c_hr, c_mn, c_sc
+    integer,           intent(in)    :: nGlobal, petCount
+    character(len=*),  intent(in)    :: subname
+    character(len=64), intent(out)   :: fname
+    character(len=19), intent(out)   :: valid_time_iso
+    integer,           intent(out)   :: ncid
+    integer,           intent(inout) :: rc
+
+    integer :: i, varid, ncstat
+    integer :: dimid_lat, dimid_lon, dimid_t
+    integer :: varid_lat, varid_lon, varid_t
+    integer :: st_yr, st_mo, st_dy, st_hr, st_mn, st_sc
+    integer :: cmd_stat
+    real(ESMF_KIND_R8) :: lat_axis(diag%nlat), lon_axis(diag%nlon)
+    real(ESMF_KIND_R8) :: time_val
+    character(len=36) :: fname_base
+    character(len=19) :: time_units_str
+
       fname_base     = datetime_to_fname(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
       fname          = trim(diag%output_dir)//'/'//trim(fname_base)
       valid_time_iso = datetime_to_iso(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
@@ -394,8 +441,6 @@ contains
       time_val       = real(elapsed_s, ESMF_KIND_R8)
 
       call execute_command_line('mkdir -p '//trim(diag%output_dir), exitstat=cmd_stat)
-
-      allocate(grid_2d(diag%nlon, diag%nlat))
 
       ! ── Atributos globais CF-1.8 ────────────────────────────────────────
       if (.not. nc_create(fname, ncid, subname)) then
@@ -458,7 +503,6 @@ contains
         write(*,'(A)') '[NetCDF] ERRO nf90_enddef: '//trim(nf90_strerror(ncstat))
         call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': nf90_enddef falhou', &
              line=__LINE__, file=u_FILE_u, rcToReturn=rc)
-        if (allocated(grid_2d)) deallocate(grid_2d)
         ncstat = nf90_close(ncid); return
       end if
 
@@ -473,52 +517,38 @@ contains
       ncstat = nf90_put_var(ncid, varid_lon, lon_axis)
       ncstat = nf90_put_var(ncid, varid_t,   time_val)
 
-    end if   ! localPet == 0
+  end subroutine define_export_file
 
-    ! ── 6. Loop por campo: per-PET voronoi + MPI_Allreduce ───────────
-    call write_export_fields(diag, exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, localPet, &
-        grid_2d, ncstat, ncid, varid, rc)
-
-        ! ── 7. PET0: fechar arquivo ───────────────────────────────────────────
-    if (localPet == 0) then
-      if (allocated(grid_2d)) deallocate(grid_2d)
-      ncstat = nf90_close(ncid)
-      if (ncstat == NF90_NOERR) then
-        write(*,'(A,4A)') '[NetCDF] Escrito (', trim(valid_time_iso), ') → ', trim(fname), ''
-        call ESMF_LogWrite(subname//': '//trim(fname)//' escrito', &
-                           ESMF_LOGMSG_INFO)
-      else
-        write(*,'(A)') '[NetCDF] AVISO nf90_close: '//trim(nf90_strerror(ncstat))
-      end if
-    end if
-
-    deallocate(fldnames, allCounts, displs, sendBuf, recvBuf)
-  end subroutine export_write_netcdf
-
-  subroutine write_export_fields(diag, exportState, itemCount, fldnames, sendBuf, nLocal, mpiComm, &
-      localPet, grid_2d, ncstat, ncid, varid, rc)
+  !> Interpola cada campo do exportState para a grade lat/lon e, no PET 0,
+  !! grava-o no arquivo aberto por define_export_file. Todos os PETs chamam
+  !! (duas reduções MPI por campo).
+  !!
+  !! A fonte de cada campo é o dado MPAS guardado por netcdf_push_raw_field,
+  !! quando existe; senão, o próprio campo do exportState
+  !! (read_export_field_local), com cobertura parcial.
+  subroutine write_export_fields(diag, exportState, itemCount, fldnames, nLocal, mpiComm, &
+      localPet, ncid, rc)
     type(mpas_diag_export_t), intent(in) :: diag
     type(ESMF_State), intent(in) :: exportState
     integer, intent(in) :: itemCount
-    integer, intent(inout) :: nLocal
-    integer, intent(inout) :: mpiComm
+    character(len=64), intent(in) :: fldnames(:)
+    integer, intent(in) :: nLocal
+    integer, intent(in) :: mpiComm
     integer, intent(in) :: localPet
-    integer, intent(inout) :: ncstat
     integer, intent(in) :: ncid
-    integer, intent(inout) :: varid
     integer, intent(inout) :: rc
-    character(len=64), allocatable, intent(inout) :: fldnames(:)
-    real(ESMF_KIND_R8), allocatable, intent(inout) :: sendBuf(:)
-    real(ESMF_KIND_R8), allocatable, intent(inout) :: grid_2d(:,:)
-    type(ESMF_Field) :: field
     integer :: i
     integer :: mpi_ierr
+    integer :: ncstat, varid
     real(ESMF_KIND_R8) :: othr
     real(ESMF_KIND_R8) :: acc_local(diag%nlon,diag%nlat), acc_global(diag%nlon,diag%nlat)
     integer            :: cnt_local(diag%nlon,diag%nlat), cnt_global(diag%nlon,diag%nlat)
     integer :: raw_idx, jr
-    real(ESMF_KIND_R8), pointer :: fp1(:)
-    real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
+    real(ESMF_KIND_R8), allocatable :: sendBuf(:)
+    real(ESMF_KIND_R8), allocatable :: grid_2d(:,:)
+
+    allocate(sendBuf(max(nLocal, 1)))
+    if (localPet == 0) allocate(grid_2d(diag%nlon, diag%nlat))
 
     do i = 1, itemCount
       raw_idx = 0
@@ -540,29 +570,7 @@ contains
           diag%nlocal, acc_local, cnt_local, othr)
       else
         ! Fallback ESMF field — cobertura parcial
-        sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
-        call ESMF_StateGet(exportState, itemName=trim(fldnames(i)), field=field, rc=rc)
-        if (rc == ESMF_SUCCESS) then
-            nullify(fp1,fp2)
-            call ESMF_FieldGet(field, dimCount=rk, rc=rc)
-            if (rc==ESMF_SUCCESS) then
-              if (rk==1) then
-                call ESMF_FieldGet(field, farrayPtr=fp1, rc=rc)
-                if (rc==ESMF_SUCCESS .and. associated(fp1) .and. size(fp1)>=nLocal) &
-                  sendBuf(1:nLocal)=fp1(1:nLocal)
-                if (associated(fp1)) nullify(fp1)
-              else
-                call ESMF_FieldGet(field, farrayPtr=fp2, rc=rc)
-                if (rc==ESMF_SUCCESS .and. associated(fp2)) then
-                  block; real(ESMF_KIND_R8), allocatable :: flat(:)
-                  flat=pack(fp2,.true.)
-                  if (size(flat)>=nLocal) sendBuf(1:nLocal)=flat(1:nLocal); end block
-                end if
-                if (associated(fp2)) nullify(fp2)
-              end if
-            end if
-        end if
-        rc = ESMF_SUCCESS
+        call read_export_field_local(exportState, fldnames(i), nLocal, sendBuf, rc)
         if (allocated(diag%lon_local) .and. nLocal>0) &
           call voronoi_accum_local(diag, sendBuf(1:nLocal), diag%lon_local(1:nLocal), &
             diag%lat_local(1:nLocal), nLocal, acc_local, cnt_local, othr)
@@ -584,7 +592,47 @@ contains
         end if
       end if
     end do ! campos
+    deallocate(sendBuf)
   end subroutine write_export_fields
+
+  !> Copia para sendBuf(1:nLocal) os valores locais de um campo do
+  !! exportState (de posto 1 ou 2, este lido em ordem de coluna); sem campo,
+  !! ou com menos de nLocal valores, sendBuf fica com zeros. Falhas de
+  !! leitura não interrompem a escrita: rc volta sempre com ESMF_SUCCESS.
+  subroutine read_export_field_local(exportState, fldname, nLocal, sendBuf, rc)
+    type(ESMF_State),   intent(in)    :: exportState
+    character(len=*),   intent(in)    :: fldname
+    integer,            intent(in)    :: nLocal
+    real(ESMF_KIND_R8), intent(inout) :: sendBuf(:)
+    integer,            intent(inout) :: rc
+    type(ESMF_Field) :: field
+    real(ESMF_KIND_R8), pointer :: fp1(:)
+    real(ESMF_KIND_R8), pointer :: fp2(:,:); integer :: rk
+    real(ESMF_KIND_R8), allocatable :: flat(:)
+
+        sendBuf(1:max(nLocal,1)) = 0.0_ESMF_KIND_R8
+        call ESMF_StateGet(exportState, itemName=trim(fldname), field=field, rc=rc)
+        if (rc == ESMF_SUCCESS) then
+            nullify(fp1,fp2)
+            call ESMF_FieldGet(field, dimCount=rk, rc=rc)
+            if (rc==ESMF_SUCCESS) then
+              if (rk==1) then
+                call ESMF_FieldGet(field, farrayPtr=fp1, rc=rc)
+                if (rc==ESMF_SUCCESS .and. associated(fp1) .and. size(fp1)>=nLocal) &
+                  sendBuf(1:nLocal)=fp1(1:nLocal)
+                if (associated(fp1)) nullify(fp1)
+              else
+                call ESMF_FieldGet(field, farrayPtr=fp2, rc=rc)
+                if (rc==ESMF_SUCCESS .and. associated(fp2)) then
+                  flat=pack(fp2,.true.)
+                  if (size(flat)>=nLocal) sendBuf(1:nLocal)=flat(1:nLocal)
+                end if
+                if (associated(fp2)) nullify(fp2)
+              end if
+            end if
+        end if
+        rc = ESMF_SUCCESS
+  end subroutine read_export_field_local
 
   ! ============================================================================
   !> Acumulação per-PET, por vizinho mais próximo, das células Voronoi na
