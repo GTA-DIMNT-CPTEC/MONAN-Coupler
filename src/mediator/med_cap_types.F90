@@ -26,7 +26,7 @@ module med_cap_types_mod
 
   public :: MED_InternalState, MED_InternalStateWrapper
   public :: med_ocn_flux_fields_t, med_ocn_fields_t, med_ice_fields_t, med_sfc_fields_t
-  public :: med_par_t, med_diag_config_t
+  public :: med_par_t, med_diag_config_t, med_run_flags_t
   ! Constantes físicas de coupler_constants_mod, re-exportadas
   public :: rho_air, Cp_air, L_evap, T_freeze, eps_q
   public :: es_coef_a, es_coef_b, es_coef_c, sigma_sb
@@ -160,6 +160,21 @@ module med_cap_types_mod
     character(len=256) :: import_dir   = 'diag_import'
   end type med_diag_config_t
 
+  !> Marcas de "primeira vez" e contadores que mudam durante a rodada.
+  !! Eram variáveis com save; os valores iniciais são os mesmos.
+  type :: med_run_flags_t
+    !> tentativas do gate da SST em InitializeDataComplete (idc_wait_for_sst)
+    integer :: n_gate_tries = 0
+    !> diagnóstico da SST bruta do MOM6 já registrado (primeiro Advance)
+    logical :: raw_sst_diag_done = .false.
+    !> resumo dos forçantes ainda não registrado (log_atm_forcing_summary)
+    logical :: first_forcing_summary = .true.
+    !> Si_ifrac já preenchido do OISST (fill_ifrac_from_oisst, modo init_only)
+    logical :: ifrac_init_done = .false.
+    !> primeira gravação de mom6_import_*.nc (registro da fatia de cada PET)
+    logical :: first_import_write = .true.
+  end type med_run_flags_t
+
   type :: MED_InternalState
 
     type(ESMF_Grid) :: atm_grid   !< Grade ATM regular 360×180 para cálculo do bulk
@@ -185,6 +200,7 @@ module med_cap_types_mod
 
     type(med_par_t)         :: par    !< comunicador e PETs
     type(med_diag_config_t) :: diag   !< diagnóstico de importação
+    type(med_run_flags_t)   :: run    !< marcas de primeira vez e contadores
 
   end type MED_InternalState
 

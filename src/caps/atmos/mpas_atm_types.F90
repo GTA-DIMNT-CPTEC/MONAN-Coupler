@@ -89,6 +89,9 @@ module mpas_atm_types_mod
     integer            :: nCells         = 0
     integer            :: nVertLevels    = 55
     integer            :: mpi_comm       = -1
+    !> .true. até o fim do primeiro mpas_atm_run: em partida a frio, o primeiro
+    !! passo de acoplamento trata a superfície de forma especial.
+    logical            :: first_coupling_call = .true.
 
     ! ── Estado do modelo, preenchido por mpas_atm_init ────────────────────
     type(domain_type), pointer :: domain => null()   !< domínio MPAS

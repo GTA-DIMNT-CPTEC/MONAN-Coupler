@@ -26,10 +26,6 @@ module med_cap_netcdf_mod
   public :: med_read_import_config    !< lê mom6_output.nml
   public :: med_write_import_fields   !< escreve campos importados em NetCDF
 
-  ! garante que o diagnostico de fatia
-  ! global por PET so' imprima uma vez (1a chamada de med_write_import_fields),
-  ! nao a cada passo de acoplamento.
-  logical, save :: first_write_diag = .true.
 
   ! Prefixo das mensagens de med_write_import_fields e das suas etapas.
   character(len=*), parameter :: subname = 'MED:med_write_import_fields'
@@ -206,7 +202,7 @@ contains
       end if
 
       call gather_field_global(fptr2d, fieldNameList(n), nx_global, ny_global, &
-                               is%par%comm, grid_local, grid_global)
+                               is%par%comm, is%run%first_import_write, grid_local, grid_global)
 
       ! guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
@@ -226,7 +222,7 @@ contains
       end if
       rc = ESMF_SUCCESS
     end do  ! campos
-    first_write_diag = .false.
+    is%run%first_import_write = .false.
 
     deallocate(grid_local, grid_global, fieldNameList)
     deallocate(mask_global)
@@ -533,14 +529,17 @@ contains
   !! @param[in]  nx_global    número de longitudes
   !! @param[in]  ny_global    número de latitudes
   !! @param[in]  comm         comunicador MPI do mediador
+  !! @param[in]  first_write  .true. na primeira gravação (registra a fatia do PET)
   !! @param[out] grid_local   buffer de trabalho (fatia local + preenchimento)
   !! @param[out] grid_global  campo global combinado
   !============================================================================
-  subroutine gather_field_global(fptr2d, name, nx_global, ny_global, comm, grid_local, grid_global)
+  subroutine gather_field_global(fptr2d, name, nx_global, ny_global, comm, first_write, &
+                                 grid_local, grid_global)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr2d(:,:)
     character(len=*),   intent(in)  :: name
     integer,            intent(in)  :: nx_global, ny_global
     integer,            intent(in)  :: comm
+    logical,            intent(in)  :: first_write
     real(ESMF_KIND_R8), intent(out) :: grid_local(nx_global, ny_global)
     real(ESMF_KIND_R8), intent(out) :: grid_global(nx_global, ny_global)
 
@@ -555,7 +554,7 @@ contains
     if (i2a >= i1a .and. j2a >= j1a) &
       grid_local(i1a:i2a, j1a:j2a) = fptr2d(i1a:i2a, j1a:j2a)
 
-    if (first_write_diag .and. trim(name) == "Si_ifrac") then
+    if (first_write .and. trim(name) == "Si_ifrac") then
       write(diag_msg_nc,'(A,I0,A,I0,A,I0,A,I0,A,I0)') &
         'FIX-DIAG-NCWRITE-01: PET declara fatia global i=[', i1a, ',', &
         i2a, '] j=[', j1a, ',', j2a, ']'

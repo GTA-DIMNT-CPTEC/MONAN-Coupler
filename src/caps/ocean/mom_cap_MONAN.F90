@@ -141,8 +141,9 @@ module MOM_cap_MONAN_mod
   !
   ! compute_si_ifrac_proxy calcula Si_ifrac do zero a cada passo; sem
   ! memória, o gelo lido do OISST em t=0 sumiria no passo seguinte. Por
-  ! isso si_ifrac_mem guarda o campo do passo anterior, e o novo Si_ifrac é
-  !   Si_ifrac(t) = max(proxy(t), si_ifrac_mem(t-1) × SI_IFRAC_DECAY)
+  ! isso a memória de Si_ifrac (ifrac_mem%field) guarda o campo do passo
+  ! anterior, e o novo Si_ifrac é
+  !   Si_ifrac(t) = max(proxy(t), ifrac_mem%field(t-1) × SI_IFRAC_DECAY)
   ! de modo que o gelo inicial persista e decaia gradualmente.
   !
   ! SI_IFRAC_DECAY = exp(-dt_coupling / tau_melt)
@@ -150,11 +151,16 @@ module MOM_cap_MONAN_mod
   !   decay = exp(-1/24) ≈ 0.9592 por passo de 1 hora.
   !   Após 24 h: ≈ 37% do valor inicial; após 48 h: ≈ 14%; após 7 dias: < 1%.
   !
-  ! si_ifrac_mem  : campo Si_ifrac do passo anterior (grade local do ESMF)
-  ! si_ifrac_mem_valid : .true. depois que si_ifrac_mem foi preenchido
-  real(ESMF_KIND_R8), allocatable, save :: si_ifrac_mem(:,:)
-  logical,                         save :: si_ifrac_mem_valid = .false.
   ! SI_IFRAC_DECAY vem de coupler_constants_mod (≈ exp(-1/24)).
+
+  !> Memória de Si_ifrac entre passos de acoplamento, guardada no estado
+  !! interno do componente (ocn_internal_state_type%ifrac_mem).
+  type :: si_ifrac_memory_t
+    !> campo Si_ifrac do passo anterior (grade local do ESMF)
+    real(ESMF_KIND_R8), allocatable :: field(:,:)
+    !> .true. depois que field foi preenchido
+    logical :: valid = .false.
+  end type si_ifrac_memory_t
 
   ! ── Estado interno do componente oceânico ─────────────────────────────────
   !> Agrega os três tipos MOM6 que precisam sobreviver entre chamadas NUOPC.
@@ -162,6 +168,7 @@ module MOM_cap_MONAN_mod
     type(ocean_public_type), pointer :: ocean_public => null()
     type(ocean_state_type),  pointer :: ocean_state  => null()
     type(ice_ocean_boundary_type), pointer :: ice_ocn_bnd => null()
+    type(si_ifrac_memory_t) :: ifrac_mem   !< persistência de Si_ifrac
   end type ocn_internal_state_type
 
   !> Wrapper obrigatório para associar o estado interno ao ESMF_GridComp.
@@ -777,12 +784,12 @@ contains
     !   sem o bootstrap zero no primeiro passo de acoplamento.
     ! cfg_use_docn_ice=.false.: derivada da SST e do frazil.
     if (cfg_use_docn_ice) then
-      call set_si_ifrac_from_file(gcomp, ocean_grid, exportState, rc)
+      call set_si_ifrac_from_file(gcomp, ocean_grid, exportState, is%ifrac_mem, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='OCN: falha set_si_ifrac_from_file IDC', &
         line=__LINE__, file=__FILE__)) return
     else
-      call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, rc)
+      call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, is%ifrac_mem, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='OCN: falha compute_si_ifrac_proxy IDC', &
         line=__LINE__, file=__FILE__)) return
@@ -920,14 +927,14 @@ contains
     !
     if (cfg_use_docn_ice .and. .not. cfg_docn_ice_init_only) then
       ! OISST prescrito a cada passo de acoplamento
-      call set_si_ifrac_from_file(gcomp, ocean_grid, exportState, rc)
+      call set_si_ifrac_from_file(gcomp, ocean_grid, exportState, is%ifrac_mem, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='OCN: falha set_si_ifrac_from_file', &
         line=__LINE__, file=__FILE__)) return
     else
       ! init_only=T ou use_docn_ice=F:
       ! Si_ifrac derivado da SST dinâmica do MOM6 — campo evolui.
-      call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, rc)
+      call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, is%ifrac_mem, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='OCN: falha compute_si_ifrac_proxy', &
         line=__LINE__, file=__FILE__)) return
@@ -1067,17 +1074,19 @@ contains
   !!      geolatT) em índices OISST por nearest-neighbor.
   !!   3. Copia diretamente para ptr_ifrac(:,:) do campo Si_ifrac no exportState.
   !!   4. Aplica máscara terra (mask2dT == 0 → 0) e clamping [0,1].
-  !!   5. Guarda o campo em si_ifrac_mem, para a persistência nos passos
+  !!   5. Guarda o campo em ifrac_mem%field, para a persistência nos passos
   !!      seguintes (compute_si_ifrac_proxy).
   !!
   !! @param[in]    gcomp        Componente ESMF OCN
   !! @param[in]    ocean_grid   Grade MOM6 (mask2dT, geolonT, geolatT)
   !! @param[inout] exportState  Campo Si_ifrac (2D, GRID) a preencher
+  !! @param[inout] ifrac_mem    memória de Si_ifrac do estado interno
   !! @param[out]   rc           Código de retorno ESMF
-  subroutine set_si_ifrac_from_file(gcomp, ocean_grid, exportState, rc)
+  subroutine set_si_ifrac_from_file(gcomp, ocean_grid, exportState, ifrac_mem, rc)
     type(ESMF_GridComp),            intent(in)    :: gcomp
     type(ocean_grid_type), pointer, intent(in)    :: ocean_grid
     type(ESMF_State),               intent(inout) :: exportState
+    type(si_ifrac_memory_t),        intent(inout) :: ifrac_mem
     integer,                        intent(out)   :: rc
 
     type(ESMF_Clock)            :: clock
@@ -1189,15 +1198,15 @@ contains
 
     deallocate(ice_global)
 
-    ! ── Salvar o campo OISST em si_ifrac_mem (persistência) ──────────────
+    ! ── Salvar o campo OISST em ifrac_mem%field (persistência) ──────────────
     ! O salvamento fica APÓS o preenchimento do campo e fora de qualquer
     ! guarda de PET: todos os PETs com DE local chegam aqui.
-    if (.not. allocated(si_ifrac_mem)) then
-      allocate(si_ifrac_mem(lb1:ub1, lb2:ub2))
-      si_ifrac_mem = 0.0_ESMF_KIND_R8
+    if (.not. allocated(ifrac_mem%field)) then
+      allocate(ifrac_mem%field(lb1:ub1, lb2:ub2))
+      ifrac_mem%field = 0.0_ESMF_KIND_R8
     end if
-    si_ifrac_mem = ptr_ifrac
-    si_ifrac_mem_valid = .true.
+    ifrac_mem%field = ptr_ifrac
+    ifrac_mem%valid = .true.
 
     write(logmsg,'(A,I0,A,I0,A,I0,A,I0,A)') &
       'OCN(Alt1): si_ifrac_mem salvo — bounds=[', lb1, ':', ub1, ',', lb2, ':', ub2, ']'
@@ -1220,7 +1229,7 @@ contains
   !!   F_frazil = min(1, frazil / FRAZIL_SCALE), FRAZIL_SCALE = 100 W/m²
   !!   F_temp   = 1 / (1 + exp((T_surf - T_c) / DT_TRANS))
   !!     com T_c = 271.35 K (congelamento da água do mar) e DT_TRANS = 2.0 K.
-  !! Em seguida, a persistência: max(Si_ifrac, si_ifrac_mem × SI_IFRAC_DECAY).
+  !! Em seguida, a persistência: max(Si_ifrac, ifrac_mem%field × SI_IFRAC_DECAY).
   !!
   !! AMOSTRAS DE F_temp:
   !!   T_surf = 270.0 K  → 0.66
@@ -1232,10 +1241,11 @@ contains
   !! A transição contínua na zona marginal de gelo evita artefatos de
   !! "tudo ou nada" no regrid OCN→ATM e captura gelo estável onde frazil = 0.
   !============================================================================
-  subroutine compute_si_ifrac_proxy(ocean_public, ocean_grid, exportState, rc)
+  subroutine compute_si_ifrac_proxy(ocean_public, ocean_grid, exportState, ifrac_mem, rc)
     type(ocean_public_type),       intent(in)    :: ocean_public
     type(ocean_grid_type), pointer, intent(in)   :: ocean_grid
     type(ESMF_State),              intent(inout) :: exportState
+    type(si_ifrac_memory_t),       intent(inout) :: ifrac_mem
     integer,                       intent(out)   :: rc
 
     type(ESMF_Field)            :: f_ifrac
@@ -1358,16 +1368,16 @@ contains
 
     ! ── Persistência: combinar proxy com o estado anterior ───────────
     !
-    ! O log ESMF registra se si_ifrac_mem_valid chegou .true. neste PET:
+    ! O log ESMF registra se ifrac_mem%valid chegou .true. neste PET:
     !   'OCN(proxy): si_ifrac_mem_valid=T' → persistência ativa
     !   'OCN(proxy): si_ifrac_mem_valid=F' → sem campo anterior salvo
-    if (si_ifrac_mem_valid) then
+    if (ifrac_mem%valid) then
       call ESMF_LogWrite('OCN(proxy): si_ifrac_mem_valid=T — aplicando persistencia', &
                          ESMF_LOGMSG_INFO)
       do jj = lb2, ub2
         do ii = lb1, ub1
           ptr_ifrac(ii, jj) = max(ptr_ifrac(ii, jj), &
-                                   si_ifrac_mem(ii, jj) * SI_IFRAC_DECAY)
+                                   ifrac_mem%field(ii, jj) * SI_IFRAC_DECAY)
         end do
       end do
       ! Clamp pós-persistência
@@ -1378,12 +1388,12 @@ contains
     end if
 
     ! Salvar estado atual para o próximo passo de acoplamento
-    if (.not. allocated(si_ifrac_mem)) then
-      allocate(si_ifrac_mem(lb1:ub1, lb2:ub2))
-      si_ifrac_mem = 0.0_ESMF_KIND_R8
+    if (.not. allocated(ifrac_mem%field)) then
+      allocate(ifrac_mem%field(lb1:ub1, lb2:ub2))
+      ifrac_mem%field = 0.0_ESMF_KIND_R8
     end if
-    si_ifrac_mem = ptr_ifrac
-    si_ifrac_mem_valid = .true.
+    ifrac_mem%field = ptr_ifrac
+    ifrac_mem%valid = .true.
 
     call ESMF_LogWrite( &
       'OCN(MOM6): Si_ifrac via sigmoide DT_TRANS=2K + frazil contínuo (v2.3)', &

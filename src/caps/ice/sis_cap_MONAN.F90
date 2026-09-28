@@ -74,6 +74,8 @@ module sis_cap_MONAN_mod
     type(atmos_ice_boundary_type)   :: aib   !< Forçante vinda do ATM (via MED)
     type(ESMF_Grid)                 :: ice_grid
     integer                         :: isc, iec, jsc, jec  !< domínio computacional local
+    !> CheckImportTolerant já registrou no log que está ativo
+    logical                         :: check_import_logged = .false.
   end type ice_internal_state_type
 
   type :: ice_internal_state_wrapper
@@ -88,7 +90,7 @@ module sis_cap_MONAN_mod
   ! connected". lprec/fprec/p vêm de Faxa_rain/Faxa_snow/Sa_pslv.
   integer, parameter :: n_import_atm = 13  ! forçante atmosférica (ver AIB)
   integer, parameter :: n_import_ocn = 3   ! So_t, So_u, So_v (ver OIB)
-  character(len=32), dimension(n_import_atm) :: import_names_atm = (/ &
+  character(len=32), dimension(n_import_atm), parameter :: import_names_atm = (/ &
     "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! fluxos turbulentos do gelo
     "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! onda longa e onda curta do gelo
     "Fioi_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
@@ -100,10 +102,10 @@ module sis_cap_MONAN_mod
   ! gelo por banda PURO; Foxx_swnet_* usa o albedo MISTURADO por Si_ifrac
   ! (o enviado ao MOM6), e o gelo absorveria SW calculada com um albedo mais
   ! baixo que o seu proprio.
-  character(len=32), dimension(n_import_ocn) :: import_names_ocn = (/ &
+  character(len=32), dimension(n_import_ocn), parameter :: import_names_ocn = (/ &
     "So_t       ", "So_u       ", "So_v       " /)
   integer, parameter :: n_export = 6
-  character(len=32), dimension(n_export) :: export_names = (/ &
+  character(len=32), dimension(n_export), parameter :: export_names = (/ &
     character(len=32) ::                &
     "Si_ifrac_sis2", &
     "Si_avsdr_sis2", &  ! albedo visivel direto (Ice%albedo_vis_dir)
@@ -794,13 +796,15 @@ contains
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
 
-    logical, save :: logged_once = .false.
+    type(ice_internal_state_wrapper) :: wrap
 
     rc = ESMF_SUCCESS
-    if (logged_once) return
+    call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (wrap%ptr%check_import_logged) return
     call ESMF_LogWrite('ICE(SIS2): CheckImportTolerant ativo, validacao de ' // &
       'carimbo de tempo desativada', ESMF_LOGMSG_INFO)
-    logged_once = .true.
+    wrap%ptr%check_import_logged = .true.
   end subroutine CheckImportTolerant
 
   ! ============================================================================

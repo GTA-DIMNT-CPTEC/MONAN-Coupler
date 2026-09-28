@@ -74,17 +74,14 @@ module MED_cap_MONAN_mod
   private
   public :: SetServices
 
-  ! ── Variáveis de estado de módulo (Si_ifrac do OISST) ───────────────────
+  ! ── Si_ifrac do OISST ──────────────────────────────────────────────────
   !
-  ! med_ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado na
-  !   primeira MediatorAdvance.  Com save, retém o valor entre chamadas.
-  !   DEVE estar no escopo do módulo para ser acessível tanto de
-  !   InitializeAdvertise quanto de MediatorAdvance.
+  ! is%run%ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado
+  !   na primeira MediatorAdvance (estado interno, med_cap_types).
   !
   ! SI_IFRAC_DECAY_MED  : fator de decaimento de Si_ifrac por passo de
   !   acoplamento (dt=3600 s, τ=86400 s):  exp(-dt/τ) = exp(-1/24) ≈ 0.9592.
   !   Sincronizado com SI_IFRAC_DECAY em mom_cap_MONAN.F90.
-  logical,                         save :: med_ifrac_init_done = .false.
 
 
 
@@ -1112,7 +1109,7 @@ contains
     end if
 
     if (.not. sst_ready) then
-      call idc_wait_for_sst(gcomp, rc)
+      call idc_wait_for_sst(gcomp, is, rc)
       return
     end if
 
@@ -1286,14 +1283,14 @@ contains
   !! Falhar alto em vez de seguir com SST nula: era exatamente esse
   !! prosseguimento silencioso que produzia mapas de fluxo em branco no
   !! passo 1, com a causa escondida a tres camadas de distancia.
-  subroutine idc_wait_for_sst(gcomp, rc)
+  subroutine idc_wait_for_sst(gcomp, is, rc)
     type(ESMF_GridComp) :: gcomp
+    type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
     integer, parameter :: MAX_GATE_TRIES = 5
-    integer, save :: n_gate_tries = 0
 
-    n_gate_tries = n_gate_tries + 1
-    if (n_gate_tries >= MAX_GATE_TRIES) then
+    is%run%n_gate_tries = is%run%n_gate_tries + 1
+    if (is%run%n_gate_tries >= MAX_GATE_TRIES) then
       ! AVISO, nao aborto. O modelo de como o driver NUOPC percorre a
       ! RunSequence durante a resolucao de dependencia de dados ainda nao
       ! esta plenamente verificado: o gate ja' foi observado fechando uma
@@ -1423,7 +1420,6 @@ contains
     real(ESMF_KIND_R8), allocatable :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
     real(ESMF_KIND_R8), allocatable :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
     real(ESMF_KIND_R8), allocatable :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
-    logical, save :: raw_sst_diag_done = .false.
     real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
 
     rc = ESMF_SUCCESS
@@ -1486,7 +1482,7 @@ contains
     call gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                             i1, i2, j1, j2, is%par%comm,                       &
                             uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
-                            rain_g, shum_g, snow_g, rc)
+                            rain_g, shum_g, snow_g, is%run%first_forcing_summary, rc)
 
     ! Os arrays globais cobrem 1..ATM_NX, 1..ATM_NY; os campos internos
     ! (is%ocn_flx%*, is%ice%* etc.) tem os limites LOCAIS da DE do PET. O
@@ -1506,7 +1502,7 @@ contains
     ! OCEANICAS VALIDAS como fonte da interpolacao. O residuo nao mapeado na
     ! costa (sem vizinho valido) e' tratado pela extrapolacao por vizinhanca.
     !==========================================================================
-    call update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
+    call update_ocean_fields_on_atm_grid(is, importState, field, is%run%raw_sst_diag_done, rc)
 
     !==========================================================================
     ! 3b. Si_ifrac do OISST (use_docn_ice)
@@ -1515,7 +1511,7 @@ contains
     !   use_docn_ice=T  init_only=F  → fill_ifrac_from_oisst a cada passo
     !     (campo congelado em OISST).
     !   use_docn_ice=T  init_only=T  → fill_ifrac_from_oisst apenas na 1ª
-    !     MediatorAdvance (flag med_ifrac_init_done); nas demais, o campo
+    !     MediatorAdvance (flag is%run%ifrac_init_done); nas demais, o campo
     !     decai exponencialmente (SI_IFRAC_DECAY_MED).
     !   use_docn_ice=F               → nada a fazer aqui; com SIS2 dinamico,
     !     Si_ifrac ja' veio do gelo na secao 3.
@@ -1866,12 +1862,13 @@ contains
   !! @param[in]  i1, i2, j1, j2   limites locais dos forcantes
   !! @param[in]  comm             comunicador MPI do mediador
   !! @param[out] uas_g..snow_g    forcantes na grade ATM global
+  !! @param[inout] first_summary  .true. até o resumo dos forçantes ser registrado
   !! @param[inout] rc             codigo de retorno (log_atm_forcing_summary)
   !============================================================================
   subroutine gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                                 i1, i2, j1, j2, comm,                              &
                                 uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
-                                rain_g, shum_g, snow_g, rc)
+                                rain_g, shum_g, snow_g, first_summary, rc)
     real(ESMF_KIND_R8), pointer, intent(in) :: uas(:,:), vas(:,:), tas(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: rain(:,:), shum(:,:), snow(:,:)
@@ -1880,6 +1877,7 @@ contains
     real(ESMF_KIND_R8), allocatable, intent(out) :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
     real(ESMF_KIND_R8), allocatable, intent(out) :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
     real(ESMF_KIND_R8), allocatable, intent(out) :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
+    logical,            intent(inout) :: first_summary
     integer,            intent(inout) :: rc
 
     real(ESMF_KIND_R8), allocatable :: tmp_local(:,:)
@@ -1903,7 +1901,8 @@ contains
 
     ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
     ! Espera-se n_nz_uas > 30000 de 64800 celulas (cobertura global).
-    call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
+    call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, &
+                                 first_summary, rc)
 
     deallocate(tmp_local)
   end subroutine gather_atm_forcing
@@ -2221,13 +2220,13 @@ contains
     real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:)
     integer :: ldec
     if (cfg_use_docn_ice .and. &
-        (.not. cfg_docn_ice_init_only .or. .not. med_ifrac_init_done)) then
+        (.not. cfg_docn_ice_init_only .or. .not. is%run%ifrac_init_done)) then
       call fill_ifrac_from_oisst(is, clock, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! não fatal
-      med_ifrac_init_done = .true.               ! inicializado em t=0
+      is%run%ifrac_init_done = .true.               ! inicializado em t=0
 
     else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
-             med_ifrac_init_done) then
+             is%run%ifrac_init_done) then
       ! init_only: decaimento exponencial do campo OISST retido em
       ! is%ice%ifrac (zero_med_fluxes nao o zera neste modo).
       ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
@@ -2363,13 +2362,13 @@ contains
     call ZeroInternalField(is%ocn_flx%snow,   rc)
     call ZeroInternalField(is%ocn_flx%pslv,   rc)
     ! NÃO zerar is%ice%ifrac incondicionalmente.
-    ! Com use_docn_ice=T, init_only=T e med_ifrac_init_done=T,
+    ! Com use_docn_ice=T, init_only=T e is%run%ifrac_init_done=T,
     ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o
     ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
     ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
     ! No modo init_only, o decaimento é aplicado no bloco 3b.
     if (.not. (cfg_use_docn_ice .and. &
-               cfg_docn_ice_init_only .and. med_ifrac_init_done)) then
+               cfg_docn_ice_init_only .and. is%run%ifrac_init_done)) then
       call ZeroInternalField(is%ice%ifrac, rc)
     end if
     call ZeroInternalField(is%ocn_flx%duu10n, rc)
@@ -3131,7 +3130,9 @@ contains
     end if
   end subroutine set_ocean_mask_for_sst
 
-  subroutine log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, rc)
+  subroutine log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, &
+                                     first_call_diag, rc)
+    logical, intent(inout) :: first_call_diag   !< .true. até o PET 0 registrar o resumo
     integer, intent(inout) :: rc
     real(ESMF_KIND_R8), allocatable, target, intent(in) :: uas_g(:,:)
     real(ESMF_KIND_R8), allocatable, target, intent(in) :: tas_g(:,:)
@@ -3143,7 +3144,6 @@ contains
     real(ESMF_KIND_R8), allocatable, target, intent(in) :: lwdn_g(:,:)
     integer :: my_pet, n_nz_uas, n_nz_psl, n_nz_swdn, n_nz_tas
     type(ESMF_VM) :: diag_vm
-    logical, save :: first_call_diag = .true.
 
     call ESMF_VMGetCurrent(diag_vm, rc=rc)
     call ESMF_VMGet(diag_vm, localPet=my_pet, rc=rc)

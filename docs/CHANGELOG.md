@@ -9,12 +9,35 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Marcas de primeira vez e contadores no estado interno (R-FASE7-06).** Última etapa da fase 7. Nenhum cálculo muda.
+  - Oito variáveis que guardavam valor entre chamadas passam para o estado interno do componente a que pertencem, com os mesmos valores iniciais e alteradas nos mesmos pontos:
+
+    | Antes | Onde | Agora |
+    | --- | --- | --- |
+    | `n_gate_tries` (local com `save`) | `idc_wait_for_sst`, `MED_cap.F90` | `is%run%n_gate_tries` |
+    | `raw_sst_diag_done` (local com `save`) | `MediatorAdvance`, `MED_cap.F90` | `is%run%raw_sst_diag_done` |
+    | `first_call_diag` (local com `save`) | `log_atm_forcing_summary`, `MED_cap.F90` | `is%run%first_forcing_summary`, passado por `gather_atm_forcing` |
+    | `med_ifrac_init_done` (de módulo) | `MED_cap.F90` | `is%run%ifrac_init_done` |
+    | `first_write_diag` (de módulo) | `med_cap_netcdf.F90` | `is%run%first_import_write`, passado a `gather_field_global` |
+    | `first_coupling_call` (local com `save`) | `mpas_atm_run`, `mpas_atm_model.F90` | `atm_state%first_coupling_call` |
+    | `si_ifrac_mem` e `si_ifrac_mem_valid` (de módulo) | `mom_cap_MONAN.F90` | `is%ifrac_mem%field` e `is%ifrac_mem%valid` (novo tipo `si_ifrac_memory_t`), passados a `set_si_ifrac_from_file` e `compute_si_ifrac_proxy` |
+    | `logged_once` (local com `save`) | `CheckImportTolerant`, `sis_cap_MONAN.F90` | `check_import_logged` no estado interno do cap do gelo |
+
+  - O mediador ganha o subtipo `med_run_flags_t` (`is%run`) para essas marcas. `idc_wait_for_sst` passa a receber também `is`.
+  - Fica de fora, de propósito, a marca `done` de `register_builtins` (`regrid_registry.F90`), com a tabela de esquemas do mesmo módulo: é o registro de esquemas de interpolação da biblioteca, compartilhado por todos os componentes, e não estado de um componente.
+  - Cap do gelo: as três listas de nomes de campos (`import_names_atm`, `import_names_ocn`, `export_names`) eram variáveis de módulo inicializadas e nunca alteradas; passam a ser constantes (`parameter`), com os mesmos valores.
+  - As constantes de texto não mudam (as mensagens `si_ifrac_mem_valid=T/F` e `si_ifrac_mem salvo` do log continuam iguais).
+  - Conferências locais: `confere-tudo.bash HEAD` sem falhas. `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam aqui com as interfaces mínimas, mas nenhum teste local os executa.
+  - Indicadores: variáveis locais com `save` explícito de 6 para 1; variáveis de módulo privadas de 9 para 2 (a tabela de esquemas de `regrid_registry` e o seu contador).
+  - Com esta etapa, a fase 7 fica completa: nenhum módulo próprio guarda em variável de módulo o estado de um componente.
+
 - **Cap atmosférico: estado interno ESMF (R-FASE7-05).** Quinta etapa da fase 7, acrescentada na R-FASE7-03. Nenhum cálculo muda.
   - `mpas_cap_MONAN.F90` ganha o tipo `mpas_cap_state_t`, guardado no próprio componente com `ESMF_GridCompSetInternalState` (como já faz o mediador) e recuperado em cada fase pela nova rotina `get_cap_state`. Ele reúne o que eram variáveis de módulo: `atm_public`, `atm_state` e `atm_bnd` (ponteiros, alocados em `InitializeRealize` como antes), a grade do cap, o gravador `diag_export` e o contador `step_count`, com o mesmo valor inicial (0).
   - O relógio do diagnóstico de importação, que eram sete variáveis de módulo de `mpas_cap_netcdf.F90` (`g_diag_yr` a `g_diag_sc` e o contador `g_diag_step`), vira o tipo público `mpas_import_diag_clock_t`, guardado no estado do cap (`diag_clock`). `set_mpas_diag_clock`, `write_mpas_import_diag` e `mpas_import` o recebem como primeiro argumento, e `define_import_diag_file` recebe o contador para o atributo `step`.
   - `test_writers.F90` passa um `mpas_import_diag_clock_t` às duas chamadas de `write_mpas_import_diag`.
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas (gravadores, com os `monan2_import_*.nc`, iguais byte a byte; constantes de texto iguais).
   - Indicadores: variáveis de módulo privadas de 22 para 9 (restam, entre outras, a memória de `Si_ifrac` do cap do oceano, as marcas de primeira chamada `med_ifrac_init_done` e `first_write_diag` e a tabela de esquemas de `regrid_registry`; as de estado de componente vão, com as seis variáveis locais com `save`, na próxima etapa); rotinas de 293 para 294 (`get_cap_state`).
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-05-validada`).
 
 - **Modelo atmosférico: estado do MPAS no `mpas_atm_state_type` (R-FASE7-04).** Quarta etapa da fase 7. Nenhum cálculo muda.
   - As 26 variáveis de módulo de `mpas_atm_model.F90` passam a ser componentes de `mpas_atm_state_type` (`mpas_atm_types.F90`), o estado que o cap já guardava e passava a `mpas_atm_init`, `mpas_atm_run` e `mpas_atm_final`: o domínio MPAS (`g_domain` vira `atm_state%domain`), os ponteiros para os campos dos pools (`pool_*`), os acumulados do passo anterior (`prev_*`) e os buffers em unidades instantâneas apontados por `mpas_atm_public_type` (`*_inst`, `*_buf`). Os nomes perdem só o prefixo `g_`.

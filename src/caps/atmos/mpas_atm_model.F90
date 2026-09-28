@@ -939,7 +939,6 @@ contains
     ! restart) - a atm_bnd%sst da 1a chamada ja e valida, entao NAO se deve
     ! pular a atribuicao nesse caso. Usamos config_do_restart (namelist do
     ! MONAN-A) pra distinguir os dois casos.
-    logical, save :: first_coupling_call = .true.
     logical, pointer :: config_do_restart => null()
     logical :: is_cold_start
         real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
@@ -1002,7 +1001,7 @@ contains
       call mpas_pool_get_array(diag_physicsPool, 'sfc_albedo', albedo_field)
 
       if (associated(xland_field)  .and. allocated(atm_bnd%sst))then
-         if (first_coupling_call .and. is_cold_start) then
+         if (atm_state%first_coupling_call .and. is_cold_start) then
             call mpas_log_write( &
               'mpas_atm_run: B-COLDSTART-01 - 1a chamada de acoplamento em ' // &
               'COLD START, OCN ainda nao avancou nenhum passo - mantendo ' // &
@@ -1016,7 +1015,7 @@ contains
             ! halo logo apos o fim do laco para o motivo.
             DO iCell =1, nSolve_inj
                if( xland_field(iCell) .gt. 1.5) then
-                  if (.not. (first_coupling_call .and. is_cold_start)) then
+                  if (.not. (atm_state%first_coupling_call .and. is_cold_start)) then
                      if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
                         sst_field(iCell)  = atm_bnd%sst(iCell)
                         skintemp_field(iCell) = atm_bnd%sst(iCell)
@@ -1028,7 +1027,7 @@ contains
                           zorl_field(iCell) = atm_bnd%zorl(iCell)
                      endif
                      ! mesma guarda de
-                     ! xland>1.5 (oceano) e first_coupling_call/cold-start
+                     ! xland>1.5 (oceano) e atm_state%first_coupling_call/cold-start
                      ! ja usada para sst/ice/zorl acima.
                      if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
                        if (diag_alb_cell < 0) then
@@ -1088,12 +1087,12 @@ contains
             ! persistir depois desta correcao, esse e' o alvo seguinte, e o
             ! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
             !--------------------------------------------------------------
-            if (.not. (first_coupling_call .and. is_cold_start)) then
+            if (.not. (atm_state%first_coupling_call .and. is_cold_start)) then
               call exchange_surface_halos(sfcInputPool, diag_physicsPool)
             end if
          endif
       end if
-      first_coupling_call = .false.
+      atm_state%first_coupling_call = .false.
     else
       write(*,'(A)') 'AVISO mpas_atm_run: subpool sfc_input nao encontrado em structs'
     end if
