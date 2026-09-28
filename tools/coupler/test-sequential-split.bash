@@ -5,21 +5,18 @@
 #                        supercomputador Jaci (Cray XD2000), no mesmo padrão do
 #                        run_esmApp.jaci e do test-concurrent.bash.
 #
-# INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v14.20
+# INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 # Sistema acoplado MONAN-A 2.0 x MOM6+SIS2 / NUOPC-ESMF 8.9.1
 #
 # POR QUE ESTE TESTE EXISTE
-#   Até a v14.19 o grupo &nuopc_petlayout colapsava dois eixos ortogonais num
-#   único parâmetro: o split de comunicador só existia dentro do ramo
-#   concurrent, e atm_pet_count/ocn_pet_count eram DESCARTADOS EM SILÊNCIO
-#   quando coupling_mode='sequential'. Quem pedia 2048 PETs para o MPAS e 128
-#   para o MOM6 em modo sequencial recebia os DOIS componentes em todos os
-#   PETs, sem qualquer aviso, e o MOM6 abortava bem depois, no
-#   mpp_define_domains, com uma mensagem que não mencionava PET algum.
-#
-#   A v14.20 separou os eixos (coupling_mode × pet_layout) e tornou
-#   sequential+split uma configuração de primeira classe. Este teste é a
-#   verificação de que ela realmente funciona.
+#   O grupo &nuopc_petlayout tem dois eixos ortogonais (coupling_mode ×
+#   pet_layout), e sequential+split é uma configuração de primeira classe:
+#   atm_pet_count/ocn_pet_count valem também em coupling_mode='sequential'.
+#   Se as contagens fossem descartadas em silêncio, quem pedisse 2048 PETs
+#   para o MPAS e 128 para o MOM6 receberia os DOIS componentes em todos os
+#   PETs, e o MOM6 abortaria bem depois, no mpp_define_domains, com uma
+#   mensagem que não menciona PET algum. Este teste é a verificação de que
+#   a configuração realmente funciona.
 #
 # OBJETIVO
 #   Verificar que, com coupling_mode='sequential' e pet_layout='split':
@@ -141,12 +138,11 @@ export COUPLER_ROOT
 # ── Padrões (a maioria sobrescrevível por env ou flag) ───────────────────────
 NP=8; ATM=0; OCN=0
 # ── Componente ICE (SIS2 dinâmico) ───────────────────────────────────────────
-# BUG-SEQ-TEST-ICE-01 (Set/2026): até esta versão o teste não conhecia o gelo.
-# gen_config removia o grupo &nuopc_petlayout inteiro da nuopc.input base e
-# reinjetava um grupo SEM use_sis2_dynamic, de modo que uma configuração com
-# gelo ligado era testada sem gelo — silenciosamente, e com o veredito PASSOU.
-# Agora o valor é herdado da nuopc.input base e pode ser forçado nos dois
-# sentidos por --ice / --no-ice.
+# gen_config remove o grupo &nuopc_petlayout inteiro da nuopc.input base e
+# reinjeta um grupo novo. O valor de use_sis2_dynamic é herdado da nuopc.input
+# base e pode ser forçado nos dois sentidos por --ice / --no-ice; sem isso, uma
+# configuração com gelo ligado seria testada sem gelo, em silêncio e com o
+# veredito PASSOU.
 #   ICE_REQ = -1 herdar da base | 0 forçar sem gelo | >0 nº de PETs do ICE
 ICE_REQ=-1
 ICE=0
@@ -415,11 +411,10 @@ detect_launcher() {
 #   $1 = coupling_mode (sequential|concurrent)   $2 = arquivo de saída
 #   $3 = pet_layout    (shared|split)            — padrão: split
 #
-# v14.20: o grupo &nuopc_petlayout tem DOIS eixos, e as contagens de PET só
-# são aceitas com pet_layout=split. Emitir sequential + atm/ocn_pet_count sem
-# pet_layout (como fazia o baseline até a v14.19) passou a ser ERRO de
-# configuração, e não mais descarte silencioso — por isso o baseline abaixo
-# zera as contagens explicitamente.
+# O grupo &nuopc_petlayout tem DOIS eixos, e as contagens de PET só são
+# aceitas com pet_layout=split. Emitir sequential + atm/ocn_pet_count sem
+# pet_layout é ERRO de configuração (e não descarte silencioso); por isso o
+# baseline abaixo zera as contagens explicitamente.
 gen_config() {
   local mode="$1" out="$2" layout="${3:-split}"
   awk '
@@ -448,10 +443,10 @@ gen_config() {
       echo "  atm_pet_count = 0"
       echo "  ocn_pet_count = 0"
     fi
-    # BUG-SEQ-TEST-ICE-01: sem estas duas linhas o grupo reinjetado ficava sem
-    # use_sis2_dynamic, o default Fortran .false. valia, e uma configuração com
-    # gelo era testada sem gelo. Em layout 'shared' o ICE fica em todos os PETs
-    # e ice_pet_count DEVE ser 0 (config_read rejeita contagem com shared).
+    # Sem estas duas linhas o grupo reinjetado ficaria sem use_sis2_dynamic, o
+    # default Fortran .false. valeria, e uma configuração com gelo seria
+    # testada sem gelo. Em layout 'shared' o ICE fica em todos os PETs e
+    # ice_pet_count DEVE ser 0 (config_read rejeita contagem com shared).
     if [[ "$USE_ICE" -eq 1 ]]; then
       echo "  use_sis2_dynamic = .true."
       if [[ "$layout" == "split" ]]; then
@@ -551,7 +546,7 @@ _diag_tail() {
 # A união é necessária porque os PETs irmãos de um mesmo componente rodam ao
 # mesmo tempo (isso é esperado e não é sobreposição ATM×OCN); o que interessa
 # é a interseção entre a união do bloco ATM e a união do bloco OCN.
-# BUG-SEQ-TEST-ICE-01: passou a medir os TRÊS blocos. Devolve, no stdout, seis
+# Mede os TRÊS blocos. Devolve, no stdout, seis
 # campos:
 #   <ov_atm_ocn> <ov_atm_ice> <ov_ocn_ice> <span_atm> <span_ocn> <span_ice>
 # Campos do ICE saem 0 quando o componente não está ativo.
@@ -706,9 +701,10 @@ analyze() {
     ok "inicialização concluída (MPAS + MED + OCN)"
   else bad "inicialização NÃO concluída"; NFAIL=$((NFAIL+1)); fi
 
-  # (3c) Valor físico de So_t (fix B-SEQINIT-02, v14.21). O carimbo de tempo
-  #      não prova conteúdo: o mom_cap carimba todos os campos exportados em
-  #      laço cego. Sem ocean_model_init_sfc, So_t chega zerado E carimbado.
+  # (3c) Valor físico de So_t (ver B-SEQINIT-02 em
+  #      docs/analise-sequential-split-sis2.md). O carimbo de tempo não prova
+  #      conteúdo: o mom_cap carimba todos os campos exportados em laço cego.
+  #      Sem ocean_model_init_sfc, So_t chega zerado E carimbado.
   if grep_any "ocean_model_init_sfc — t_surf de t=0"; then
     ok "OCN extraiu t_surf antes do mom_export de t=0"
   else
@@ -722,7 +718,7 @@ analyze() {
     ok "So_t com valores físicos no mediador em t=0"
   fi
 
-  # (3b) Resolução da dependência de dados de So_t (fix B-SEQINIT-01, v14.21).
+  # (3b) Resolução da dependência de dados de So_t (ver B-SEQINIT-01 no CHANGELOG).
   #      Na RunSequence sequencial o conector "OCN -> MED" vem ANTES do
   #      elemento "OCN", então o mediador PRECISA pedir uma segunda iteração
   #      do laço de dependência de dados do driver. Se ele declarar

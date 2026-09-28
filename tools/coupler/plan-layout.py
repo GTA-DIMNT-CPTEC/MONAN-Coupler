@@ -29,7 +29,7 @@
 #   em nós inteiros e nenhum nó fica MISTO (ATM+OCN+ICE) — melhor localidade e
 #   binding. NÃO há modelo de memória por PET: nada de 'mem' por padrão.
 #
-# COMPONENTE DE GELO (Set/2026)
+# COMPONENTE DE GELO
 #   Com use_sis2_dynamic = .true. e ice_pet_count > 0, o layout tem TRÊS blocos
 #   disjuntos, e o run_esmApp.jaci gera um 'select' com três chunks. Até esta
 #   revisão o planejador conhecia apenas dois, e imprimia um 'select' diferente
@@ -53,7 +53,7 @@
 #   python3 plan-layout.py --suggest --atm 250 --ocn 130
 #   python3 plan-layout.py --shared --npes 512 --ppn 128
 #
-# NOTA (v14.20): o grupo &nuopc_petlayout tem dois eixos independentes. Este
+# NOTA: o grupo &nuopc_petlayout tem dois eixos independentes. Este
 # planejador trata do eixo ESPACIAL (pet_layout): '--atm/--ocn/--ice' planejam
 # um layout 'split', e '--shared' um layout 'shared'. O eixo TEMPORAL
 # (coupling_mode) não altera a topologia de nós — sequential+split e

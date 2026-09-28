@@ -53,7 +53,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-03 | comentários dos caps do oceano e do gelo sem marcas de histórico; histórico do `mom_cap_MONAN` resumido no CHANGELOG |
 | R-FASE5-04 | comentários do cap atmosférico e de `src/shared` sem marcas de histórico; históricos de `mpas_cap_MONAN` e `mpas_cap_netcdf` resumidos no CHANGELOG |
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
-| R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas (validação pendente) |
+| R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
+| R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` (validação pendente) |
 
 O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 4, que cobre todas as etapas até a R-FASE4-07).
 
@@ -152,8 +153,8 @@ Levantamento de 27/09/2026, depois da fase 4. Os números de marcas contam só l
 | 3 | R-FASE5-03 | idem nos caps do oceano e do gelo (`mom_cap_MONAN` 23, `sis_cap_MONAN` 23, `DOCN_cap` 6, `docn_cap_netcdf` 1); também documentação desatualizada da fração de gelo do oceano | concluída (PASS, 73 iguais, tag `fase5-03-validada`) |
 | 4 | R-FASE5-04 | idem no cap atmosférico e em `src/shared` (`mpas_cap_methods` 14, `mpas_cap_MONAN` 13, `mpas_cap_netcdf` 11, `mpas_atm_model` 3, `mpas_atm_types` 2, `DATM_cap` 2, `shared` 6); também documentação desatualizada e texto corrompido | concluída (PASS, 73 iguais, tag `fase5-04-validada`) |
 | 5 | R-FASE5-05 | dividir `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) | concluída (PASS, 73 iguais, tag `fase5-05-validada`; 40 linhas de código, sete etapas) |
-| 6 | R-FASE5-06 | dividir `InitializeDataComplete` (`MED_cap`, 160) e `blend_albedo_with_ice` (`med_bulk_ncar`, 153; coberta pelo teste da física bulk) | entregue, a validar (48 e 45 linhas de código) |
-| 7 | R-FASE5-07 | scripts de pós-processamento com marcas de histórico nos comentários (`postproc_mom6_import.py` 89, `postproc_monan2_import.py` 63, `mede-taxa-repro.sh` 30 e outros) | a fazer |
+| 6 | R-FASE5-06 | dividir `InitializeDataComplete` (`MED_cap`, 160) e `blend_albedo_with_ice` (`med_bulk_ncar`, 153; coberta pelo teste da física bulk) | concluída (PASS, 73 iguais, tag `fase5-06-validada`; 48 e 45 linhas de código) |
+| 7 | R-FASE5-07 | scripts de pós-processamento com marcas de histórico nos comentários (`postproc_mom6_import.py` 89, `postproc_monan2_import.py` 63, `mede-taxa-repro.sh` 30 e outros) | entregue (validação pendente); marcas de 268 para 9 nos scripts Python e de 37 para 7 nos bash, as restantes são formatos de log e nomes de diagnóstico |
 
 Para decidir (questão científica, não de refatoração): no cap do gelo, `is%aib%u_star` (velocidade de fricção sobre o gelo) é sempre zero, porque o mediador não a envia; o comentário no código aponta para esta nota.
 

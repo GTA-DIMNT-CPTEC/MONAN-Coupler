@@ -4,19 +4,12 @@ anim_monan2_import.py  —  Animação da evolução dos campos importados pelo 
                            (OCN→ATM via conector MED→MPAS: So_t, Si_ifrac, Sf_zorl)
                            a partir dos mapas PNG gerados por postproc_monan2_import.py
 
-Versão 1.1 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-CORREÇÕES v1.1
-  • BUG-ANIM-SIZE: quadros de tamanhos diferentes (PNGs com bbox_inches='tight')
-    faziam o GIF "tremer" e quebravam o MP4. Todos os quadros passam a ser
-    normalizados à MESMA dimensão (compostos sobre tela branca) antes de montar.
-  • BUG-ANIM-MP4: o MP4 usava o concat demuxer com os PNGs originais (falhava
-    com quadros de dimensão variável). Agora normaliza e codifica uma sequência
-    numerada via image2 — dimensão constante e ordem determinística.
-  • Novos parâmetros: --max-width (reduz o tamanho do arquivo) e --no-optimize.
-    optimize=True passou a ser o padrão do GIF (arquivos bem menores).
-  Observação: a ESCALA de cor consistente entre quadros é responsabilidade do
-  postproc (v2.4); rode postproc_monan2_import.py --plot antes deste script.
+O histórico das versões deste script está em docs/historico-scripts.md.
+
+A escala de cor consistente entre quadros é definida pelo
+postproc_monan2_import.py; rode-o com --plot antes deste script.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Contexto
@@ -25,7 +18,7 @@ O script postproc_monan2_import.py gera, para cada passo de acoplamento,
 um mapa multi-painel com os campos OCN→ATM importados pelo MONAN-A 2.0
 (So_t, Si_ifrac, Sf_zorl) lidos de:
 
-  FONTE 1 — monan2_import_YYYYMMDD_HHMMSS.nc  (escrita direta, v4.19+)
+  FONTE 1 — monan2_import_YYYYMMDD_HHMMSS.nc  (escrita direta pelo cap)
   FONTE 2 — mom6_import_YYYYMMDD_HHMMSS.nc    (inferência dos fluxos MED→OCN)
 
 Os mapas são gravados em dois sub-formatos, dependendo da disponibilidade
@@ -221,10 +214,10 @@ def select_frames(all_frames, step_list, every_n):
 def _load_frames_normalized(frames, max_width=0):
     """Carrega os PNGs e devolve imagens PIL TODAS do mesmo tamanho.
 
-    BUG-ANIM-SIZE (correção): quadros de dimensões diferentes (ex.: PNGs
-    antigos gerados com bbox_inches='tight') faziam o GIF "tremer" — Pillow
-    fixa o tamanho da tela pelo 1º quadro e reposiciona os demais no canto — e
-    QUEBRAVAM a codificação MP4 (libx264 exige dimensão constante). Aqui todos
+    Quadros de dimensões diferentes (ex.: PNGs gerados com
+    bbox_inches='tight') fariam o GIF "tremer" (o Pillow fixa o tamanho da tela
+    pelo 1º quadro e reposiciona os demais no canto) e QUEBRARIAM a codificação
+    MP4 (libx264 exige dimensão constante). Por isso todos
     os quadros são compostos sobre uma tela branca do MAIOR tamanho encontrado.
     Opcionalmente reduz a largura para max_width (mantém proporção), o que
     diminui bastante o tamanho do arquivo final."""
@@ -331,12 +324,11 @@ def check_ffmpeg():
 def make_mp4(frames, outfile, fps, max_width=0):
     """Gera vídeo MP4 (H.264) a partir dos quadros PNG usando ffmpeg.
 
-    BUG-ANIM-MP4 (correção): a versão anterior usava o concat demuxer com os
-    PNGs originais. Quando os quadros tinham tamanhos diferentes (o caso com
-    bbox_inches='tight'), o libx264 falhava ou gerava vídeo corrompido. Agora
-    os quadros são NORMALIZADOS ao mesmo tamanho (via Pillow) e gravados em uma
-    sequência temporária numerada, codificada com o demuxer image2 — garantindo
-    dimensão constante e ordem determinística.
+    Os quadros são NORMALIZADOS ao mesmo tamanho (via Pillow) e gravados em
+    uma sequência temporária numerada, codificada com o demuxer image2, o que
+    garante dimensão constante e ordem determinística. Com os PNGs originais
+    de tamanhos diferentes (o caso com bbox_inches='tight'), o libx264
+    falharia ou geraria vídeo corrompido.
 
     Parâmetros
     ----------

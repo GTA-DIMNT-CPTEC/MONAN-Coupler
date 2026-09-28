@@ -3,115 +3,9 @@
 analisa_sst_ifrac.py  —  Diagnóstico de evolução temporal de SST e fração de gelo
                           marinho (Si_ifrac) ao longo da integração do modelo.
 
-Versão 1.5 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-═══════════════════════════════════════════════════════════════════════════════
-Correções v1.5 (revisão diagnóstico/animação)
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-COLORBAR (colorbar desconectada dos mapas — viridis 0–1)
-    A colorbar era obtida raspando ax.collections (_get_scalar_mappable). Em
-    algumas versões de matplotlib/cartopy isso devolvia a coleção da FEIÇÃO de
-    terra/costa (adicionada após o pcolormesh) em vez do dado, produzindo uma
-    barra "viridis 0–1" que NÃO correspondia às cores RdBu_r/BrBG plotadas —
-    o leitor não conseguia interpretar os valores de δ/Δ. Agora _plot_field
-    RETORNA o mappable (QuadMesh) e a colorbar é feita a partir dele.
-
-  BUG-SCALE (escala de cor incoerente entre quadros da animação)
-    Cada mapa de δ/Δ usava o percentil 99,5 DAQUELE passo como limite de cor,
-    então a escala mudava a cada quadro do GIF e a evolução ficava incomparável.
-    Agora o limite é GLOBAL: calculado uma vez sobre todos os passos e reutilizado
-    em todos os quadros (o máx|δ| de cada passo continua anotado no título).
-
-  BUG-OFFLINE (--anomaly/--diff abortavam em nó HPC sem internet)
-    cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth no desenho; em nó
-    de computação sem internet o script abortava com URLError (só funcionava no
-    nó de login). Agora testa a disponibilidade uma vez e, se offline, gera os
-    mapas sem contornos em vez de abortar.
-
-  BUG-RAWSTATS (linha "SST bruta" contaminada pelo _FillValue)
-    min/média saíam como -9,99e20 porque o valor de preenchimento entrava na
-    conta. Agora descarta preenchimento/NaN (|v|>1e19, máscara netCDF) e reporta
-    quantas células foram descartadas.
-
-  BUG-FRAME-SIZE (quadros de tamanhos diferentes tremiam na animação)
-    savefig(bbox_inches='tight') nos mapas de δ/Δ gerava PNGs de tamanhos
-    distintos. Removido (figsize fixo → quadros idênticos).
-
-═══════════════════════════════════════════════════════════════════════════════
-Correções v1.4
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-6 (mapas de anomalia e diff_consec brancos — outlier domina colorscale)
-    O limite do colormap era calculado como np.ma.abs(campo).max().  Basta
-    uma célula outlier com Δ ≈ 8–10 K para que TwoSlopeNorm mapeie todo o
-    oceano (bulk < 0,5 K) para branco, tornando os mapas dos passos 3–6
-    visualmente vazios.
-    Solução: _robust_limit() usa np.percentile(|campo|, ROBUST_PERCENTILE=99.5)
-    como limite visual; o máximo absoluto ainda é reportado no título com o
-    prefixo "⚠ outlier:" quando lim_abs > 2× lim_robusto.
-
-  BUG-7 (série temporal com escala Y comprimida — analise_timeseries sem idx0)
-    analise_timeseries não recebia idx0, então o passo 1 (SST = 271 K,
-    sst_default) dominava o eixo Y e comprimia a variação real (292–293 K)
-    numa faixa invisível.  O mesmo ocorria no painel de desvio-padrão.
-    Solução: idx0 adicionado como parâmetro; ajuste de ylim aplicado ao
-    intervalo dos passos reais (idx0 em diante), com margem relativa.
-
-  BUG-8 (spike do passo 0 visível no gráfico de métricas — piso 1.0 km²)
-    Em analise_metricas, a margem Y tinha piso fixo de 1.0 km².  Quando a
-    área real de gelo é ≈ 0 km², esse piso expandia ylim até 1 km², incluindo
-    o spike do passo sst_default (step 1) na janela visível.
-    Solução: margem agora é relativa ao intervalo real dos dados (max(intervalo
-    × 0.15, |vmax| × 0.05, 0.01)); o piso fixo de 1.0 foi removido.
-
-═══════════════════════════════════════════════════════════════════════════════
-Correções v1.2
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-5 (mapas em branco — campo congelado)
-    O DOCN envia o mesmo valor OISST diário em todos os passos
-    horários. δ = 0 K é mapeado para branco no colormap RdBu_r,
-    produzindo mapas visualmente vazios sem indicação ao usuário.
-    Solução: _is_frozen() detecta campos sem variação e
-    _annotate_frozen() escreve aviso legível sobre o mapa;
-    _plot_field() usa fundo azul-claro (#d0e8f5) para o oceano.
-
-  BUG-3 (referência de anomalia degenerada)
-    O passo 1 contém SST = sst_default = 271.35 K (campo não preenchido).
-    Usar passo 1 como t₀ produzia Δ ≈ 21 K uniforme em todo o oceano,
-    saturando a escala de cores e tornando os mapas visualmente brancos.
-    Solução: _find_first_real_step() detecta automaticamente o primeiro
-    passo com std espacial > 0.1 K e usa-o como referência t₀.
-
-  BUG-4 (diferença consecutiva no par sst_default → real)
-    O par passo 1→2 capturava a transição sst_default → OISST real,
-    produzindo δ ≈ 21 K (artefato, não sinal físico). Solução: loop
-    analise_diff_consecutiva inicia em max(1, idx0+1).
-
-  MELHORIA: escala Y dos gráficos de métricas
-    O outlier do passo 1 (sst_default) comprimia a variação real para
-    uma faixa invisível. Os eixos Y agora são ajustados ao intervalo
-    dos passos reais (idx0 em diante), com margem de 15 %.
-
-═══════════════════════════════════════════════════════════════════════════════
-Correções v1.1
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-1 (mascaramento catastrófico)
-    Na grade Voronoi do MPAS, o diagnóstico monan2_import_*.nc é escrito
-    ANTES de o conector OCN→ATM preencher o campo So_t.  Todas as células
-    (terra E oceano) têm So_t = sst_default = 271.35 K.  A detecção de
-    terra por limiar  |v − 271.35| < 1e−3  mascarava TUDO.
-
-    Solução: detecção por variância temporal.  Células constantes ao longo
-    de TODOS os passos E próximas do valor-padrão são classificadas como
-    terra/default.  Se após isso > 99 % do campo ainda estiver mascarado
-    (campo genuinamente não preenchido), o mascaramento de terra é desabilitado
-    e o script emite um aviso.
-
-  BUG-2 (coordenadas MPAS)
-    A grade Voronoi do MPAS usa 'latCell'/'lonCell', não 'lat'/'lon'.
-    Adicionado suporte a esses nomes.
-
-  MELHORIA: avisos UserWarning de conversão masked→nan suprimidos via
-    warnings.catch_warnings; verificação de np.ma.count() antes de float().
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Estratégias implementadas
@@ -433,11 +327,11 @@ def load_data(diagdir, debug=False):
         print(f'  Último             : {ts_list[-1].strftime("%Y-%m-%d %H:%M")}')
 
     # Informações sobre o campo bruto (antes do mascaramento de terra).
-    # BUG-RAWSTATS (correção): descartar o valor de preenchimento antes das
-    # estatísticas. Antes, min/média saíam como -9,99e20 (o _FillValue do
-    # Fortran vazava para a linha "SST bruta"), o que parecia um erro grave e
-    # escondia o intervalo físico real. Consideramos "preenchimento" a máscara
-    # do netCDF, |v| > 1e19 e NaN/Inf.
+    # Descartar o valor de preenchimento antes das estatísticas; sem isso,
+    # min/média sairiam como -9,99e20 (o _FillValue do Fortran vazaria para a
+    # linha "SST bruta"), o que pareceria um erro grave e esconderia o
+    # intervalo físico real. Consideramos "preenchimento" a máscara do netCDF,
+    # |v| > 1e19 e NaN/Inf.
     raw0_full = np.ma.getdata(sst_list[0]).ravel()
     nc_mask0  = np.ma.getmaskarray(sst_list[0]).ravel()
     finite    = np.isfinite(raw0_full) & (np.abs(raw0_full) < 1e19) & (~nc_mask0)
@@ -520,10 +414,9 @@ def _robust_limit(field, percentile=None):
 def _global_robust_limit(fields, lim_min, percentile=None):
     """Limite de colormap GLOBAL (mesmo em todos os quadros de uma animação).
 
-    BUG-SCALE (correção): antes, cada mapa de diferença/anomalia calculava seu
-    próprio limite (percentil 99,5 DAQUELE passo). Ao montar o GIF, a escala de
-    cor mudava a cada quadro e a evolução ficava incomparável ("pulsava"). Aqui
-    o percentil é calculado UMA vez sobre TODOS os passos juntos e reutilizado.
+    O percentil é calculado UMA vez sobre TODOS os passos juntos e reutilizado.
+    Um limite por passo (percentil 99,5 DAQUELE passo) faria a escala de cor
+    mudar a cada quadro do GIF, e a evolução ficaria incomparável ("pulsaria").
 
     Retorna (limite_global, lim_abs_global)."""
     if percentile is None:
@@ -687,7 +580,7 @@ def analise_anomalia(sst_list, ice_list, ts_list, lat, lon, outdir, idx0=0):
         HAS_CARTOPY = False
         use_cartopy = False
 
-    # BUG-SCALE: limite de cor GLOBAL para toda a série de anomalias, para que
+    # Limite de cor GLOBAL para toda a série de anomalias, para que
     # os quadros da animação sejam comparáveis (mesma escala em todos).
     passos = list(range(idx0 + 1, len(sst_list)))
     d_sst_all = [sst_list[i] - sst0 for i in passos]
@@ -743,7 +636,7 @@ def analise_anomalia(sst_list, ice_list, ts_list, lat, lon, outdir, idx0=0):
         )
         tag = ts_list[i].strftime('%Y%m%d_%H%M%S') if ts_list[i] else f'step{i+1:04d}'
         outfile = os.path.join(outdir, f'anomalia_{tag}.png')
-        # BUG-FRAME-SIZE: sem bbox_inches='tight' (quadros de tamanho uniforme).
+        # Sem bbox_inches='tight' (quadros de tamanho uniforme).
         fig.savefig(outfile, dpi=120, facecolor='white')
         plt.close(fig)
         print(f'  Anomalia passo {i+1:>3}: {outfile}')
@@ -789,7 +682,7 @@ def analise_diff_consecutiva(sst_list, ice_list, ts_list, lat, lon, outdir, idx0
     # Ignorar pares que envolvam passos com sst_default (i-1 < idx0)
     primeiro_par = max(1, idx0 + 1)
 
-    # BUG-SCALE: pré-calcular os campos de diferença e o LIMITE GLOBAL de cor,
+    # pré-calcular os campos de diferença e o LIMITE GLOBAL de cor,
     # para que TODOS os quadros da animação compartilhem a mesma escala.
     pares = list(range(primeiro_par, len(sst_list)))
     d_sst_all = [sst_list[i] - sst_list[i - 1] for i in pares]
@@ -850,7 +743,7 @@ def analise_diff_consecutiva(sst_list, ice_list, ts_list, lat, lon, outdir, idx0
         )
         tag = ts_list[i].strftime('%Y%m%d_%H%M%S') if ts_list[i] else f'step{i+1:04d}'
         outfile = os.path.join(outdir, f'diff_consec_{tag}.png')
-        # BUG-FRAME-SIZE: sem bbox_inches='tight' — quadros de tamanhos
+        # Sem bbox_inches='tight' — quadros de tamanhos
         # diferentes fazem a animação "tremer". figsize fixo → quadros idênticos.
         fig.savefig(outfile, dpi=120, facecolor='white')
         plt.close(fig)
@@ -1003,7 +896,7 @@ def _prep_grid(lat, lon):
     return None, None, False
 
 
-# BUG-OFFLINE (correção): em nó HPC sem internet (nós de computação do Jaci),
+# Em nó HPC sem internet (nós de computação do Jaci),
 # cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth de forma
 # preguiçosa (no desenho) e o script ABORTAVA com URLError — só funcionava no
 # nó de login (ian05), que tem internet. Testa-se a disponibilidade uma vez;
@@ -1029,12 +922,10 @@ def _geo_features_available(cfeature):
 def _plot_field(ax, field, lon2d, lat2d, norm, cmap, use_cartopy):
     """Plota campo 2D no eixo ax com ou sem projeção Cartopy.
 
-    BUG-COLORBAR (correção): agora RETORNA o mappable (QuadMesh/AxesImage). Antes,
-    a colorbar era obtida raspando ax.collections (_get_scalar_mappable), que em
-    algumas versões de matplotlib/cartopy devolvia a coleção da FEIÇÃO de terra/
-    costa (adicionada depois do pcolormesh) em vez do dado — gerando uma colorbar
-    'viridis 0–1' desconectada dos mapas RdBu_r/BrBG. Usar o mappable retornado
-    elimina essa ambiguidade."""
+    RETORNA o mappable (QuadMesh/AxesImage), usado para a colorbar. Raspar
+    ax.collections, em algumas versões de matplotlib/cartopy, devolve a coleção
+    da FEIÇÃO de terra/costa (adicionada depois do pcolormesh) em vez do dado,
+    gerando uma colorbar 'viridis 0–1' desconectada dos mapas RdBu_r/BrBG."""
     try:
         import cartopy.crs as ccrs
         import cartopy.feature as cfeature

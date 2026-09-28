@@ -90,8 +90,7 @@ fi
 echo "---------------------------------------------------------------"
 
 #-----------------------------------------------------------------------------
-# B-CMP-INTEG-01 (Set/2026): conferir a integridade da linha de base ANTES de
-# comparar.
+# Conferir a integridade da linha de base ANTES de comparar.
 #
 # O cria-linha-base.bash grava um SHA256SUMS e aplica chmod -R a-w, mas nada
 # impede que alguem desfaca a protecao e altere um arquivo, ou que uma copia
@@ -119,7 +118,7 @@ else
 fi
 
 #-----------------------------------------------------------------------------
-# B-CMP-CFG-01 (Set/2026): conferir a configuracao automaticamente.
+# Conferir a configuracao automaticamente.
 #
 # A triagem de FAIL sempre mandou o usuario comparar o nuopc.input a mao. O
 # arquivo esta' ali, entao o script faz isso sozinho e AVISA ANTES da
@@ -142,14 +141,15 @@ fi
 
 
 #-----------------------------------------------------------------------------
-# B-BASE-ENTRADA-01: conferência das entradas (opção -e).
+# Conferência das entradas (opção -e).
 # O CHECKSUMS.txt tem três colunas (soma, tamanho, arquivo); o sha256sum -c
 # espera duas. Entradas que não existem aqui são ignoradas: a lista de bases
 # antigas pode incluir saídas de rodadas anteriores gravadas na raiz.
 #-----------------------------------------------------------------------------
 if [[ ${CONFERE_ENTRADAS} -eq 1 && -f "${BASE_RAIZ}/entrada/CHECKSUMS.txt" ]]; then
-  # Saídas que a própria rodada grava na raiz. Linhas de base criadas antes
-  # da B-BASE-ENTRADA-01 as registravam como entradas; aqui são ignoradas.
+  # Saídas que a própria rodada grava na raiz. Linhas de base antigas (ver
+  # B-BASE-ENTRADA-01 no CHANGELOG) as registravam como entradas; aqui são
+  # ignoradas.
   # Manter igual à lista _PADROES_SAIDA_MODELOS do cria-linha-base.bash.
   _SAIDAS_RAIZ=( 'MONAN_DIAG_*.nc' 'ice.nc' 'ocean_month.nc' 'sea_ice_geometry.nc' \
                  'ocean.stats.nc' 'reprodiag.nc' 'reprodiag_*.nc' )
@@ -199,7 +199,7 @@ for ref_file in "${REF}"/*.nc; do
     continue
   fi
 
-  # B-CMP-MEM-01: a saida do nccmp -f pode ter milhoes de linhas quando o
+  # A saida do nccmp -f pode ter milhoes de linhas quando o
   # arquivo inteiro difere; guardada numa variavel, estourava a memoria do
   # bash (xrealloc). Vai para um arquivo temporario e so' o inicio e' lido.
   nccmp "${NCCMP_OPTS[@]}" "${ref_file}" "${atual}" > "${TMP_CMP}" 2>&1
@@ -209,12 +209,12 @@ for ref_file in "${REF}"/*.nc; do
     printf '  %-42s  %s\n' "${nome}" "igual"
     n_ok=$(( n_ok + 1 ))
   else
-    # B-CMP-META-01 (Set/2026): separar diferenca de DADOS de diferenca so de
-    # METADADOS. O NCCMP_OPTS inclui -m, que compara atributos de variavel, e
-    # uma mudanca de long_name ou standard_name faz o arquivo inteiro aparecer
-    # como DIFERE mesmo com os dados identicos.
+    # Separar diferenca de DADOS de diferenca so de METADADOS. O NCCMP_OPTS
+    # inclui -m, que compara atributos de variavel, e uma mudanca de long_name
+    # ou standard_name faz o arquivo inteiro aparecer como DIFERE mesmo com os
+    # dados identicos.
     #
-    # Isso deixou de ser hipotetico: a correcao B-DIAG-SOT-ROTULO-01 alterou o
+    # Exemplo (docs/uso-linha-base.md): a correcao B-DIAG-SOT-ROTULO-01 alterou o
     # long_name e o standard_name da variavel So_t nos monan2_import_*.nc, sem
     # tocar em nenhum valor. Comparado contra uma linha de base anterior a ela,
     # TODO monan2_import sai como DIFERE, e sem esta distincao a leitura
@@ -254,7 +254,7 @@ printf ' iguais: %d   so metadados: %d   diferentes: %d   ausentes: %d   extras:
   "${n_ok}" "${n_meta}" "${n_dif}" "${n_faltando}" "${n_extra}"
 echo "==============================================================="
 
-# B-CMP-META-01: diferenca so' de metadados NAO reprova. O criterio das etapas
+# Diferenca so' de metadados NAO reprova. O criterio das etapas
 # de refatoracao e' identidade dos DADOS; renomear um long_name nao muda
 # resultado. Mas e' anunciada, porque tambem nao deve passar despercebida.
 if [[ "${n_dif}" -eq 0 && "${n_faltando}" -eq 0 && "${n_extra}" -eq 0 && "${n_ok}" -gt 0 ]] \
@@ -273,17 +273,17 @@ fi
 
 echo " FAIL — a rodada atual NÃO reproduz a linha de base ${ROTULO}"
 echo ""
-# B-CMP-RENAME-01 (Set/2026): a assinatura de RENOMEACAO em massa.
+# A assinatura de RENOMEACAO em massa.
 #
 # Muitos AUSENTE e muitos EXTRA com ZERO diferencas de dados nao significa que
 # o resultado mudou: significa que os NOMES dos arquivos mudaram. Sem esta
 # nota, a leitura natural e' que a rodada divergiu, e a investigacao comeca no
 # lugar errado.
 #
-# Caso concreto: a correcao BUG-SEQ-STAMP-01 acertou o carimbo de tempo dos
-# diagnosticos em coupling_mode='sequential', que antes saiam adiantados em um
-# dt_coupling. Toda linha de base sequencial anterior a essa correcao e'
-# incomparavel por construcao, e precisa ser refeita.
+# Caso concreto (docs/uso-linha-base.md): a correcao BUG-SEQ-STAMP-01 acertou o
+# carimbo de tempo dos diagnosticos em coupling_mode='sequential', que antes
+# saiam adiantados em um dt_coupling. Toda linha de base sequencial anterior a
+# essa correcao e' incomparavel por construcao, e precisa ser refeita.
 if [[ "${n_dif}" -eq 0 && "${n_faltando}" -gt 0 && "${n_extra}" -gt 0 ]]; then
   echo " ATENCAO: ${n_faltando} ausente(s) e ${n_extra} extra(s), com ZERO"
   echo "          diferenca de dados. Essa e' a assinatura de RENOMEACAO dos"

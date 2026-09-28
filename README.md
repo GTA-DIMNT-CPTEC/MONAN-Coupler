@@ -93,7 +93,7 @@ Convenções para código novo:
 | Texto | `int_to_str`, `real_to_str` e `str_lower` de `coupler_utils_mod`; não criar cópias locais |
 | Configuração | nova chave em `coupler_config.F90`, com validação em `valid_config`; não usar atributos NUOPC para repassar configuração |
 | Componentes e conectores | registrar pelo `add_model` e `add_connector` de `esm.F90` |
-| Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` |
+| Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` (scripts de `tools/`: `docs/historico-scripts.md`) |
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
@@ -158,6 +158,7 @@ Guias de uso das ferramentas:
 | [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash`, `anota-linha-base.bash` |
 | [`validacao-refatoracao.md`](docs/validacao-refatoracao.md) | `valida_rodada.bash` |
 | [`conferencias-locais.md`](docs/conferencias-locais.md) | `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash` |
+| [`historico-scripts.md`](docs/historico-scripts.md) | histórico das versões dos scripts Python de `tools/` |
 
 ## Créditos
 

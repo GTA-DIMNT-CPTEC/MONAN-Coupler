@@ -8,14 +8,12 @@ Gera um GIF animado a partir das figuras produzidas por analisa_sst_ifrac.py:
   • diff_consec_*.png  — Diferença entre passos consecutivos δ(t) = campo(t) − campo(t−1)
   • anomalia_*.png     — Anomalia em relação ao instante inicial Δ(t) = campo(t) − campo(t₀)
 
-INPE / CGCT / DIMNT — GT Acoplamento MONAN — Set 2026 (v1.1)
+INPE / CGCT / DIMNT — GT Acoplamento MONAN.
 
-Correções v1.1
-  • BUG-ANIM-SIZE: quadros de tamanhos diferentes faziam o GIF "tremer".
-    Agora todos os quadros são normalizados à mesma dimensão antes de montar.
-  Observação: a ESCALA de cor consistente entre quadros (colorbar) e a correção
-  da colorbar desconectada são responsabilidade do analisa_sst_ifrac.py (v1.5);
-  rode-o antes deste script.
+O histórico das versões deste script está em docs/historico-scripts.md.
+
+A escala de cor consistente entre quadros é definida pelo
+analisa_sst_ifrac.py; rode-o antes deste script.
 
 Dependências:
   pip install Pillow          (leitura/escrita de GIF — obrigatório)
@@ -160,7 +158,7 @@ def gerar_gif(
     duracao_ms = int(1000.0 / fps)  # Pillow usa milissegundos por frame
 
     print(f'  Carregando {len(caminhos)} frame(s)...', end='', flush=True)
-    # BUG-ANIM-SIZE (correção): normalizar TODOS os quadros ao mesmo tamanho.
+    # Normalizar TODOS os quadros ao mesmo tamanho.
     # Quadros de dimensões diferentes (ex.: PNGs antigos com bbox_inches='tight')
     # fazem o GIF "tremer" — o Pillow fixa a tela pelo 1º quadro e reposiciona os
     # demais no canto. Compomos cada quadro sobre uma tela branca do maior tamanho.

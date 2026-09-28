@@ -12,9 +12,10 @@
 # passo de tempo do modelo, num único arquivo na RAIZ do experimento, e é esse
 # arquivo que este script preserva das duas rodadas e compara.
 #
-# (O cria-linha-base.bash também passou a congelar NetCDF da raiz — ver
-#  B-BASE-RAIZ-NC-01. Este script continua útil porque não depende de linha de
-#  base, roda mais rápido e responde diretamente com o índice do registro.)
+# (O cria-linha-base.bash também congela NetCDF da raiz; ver B-BASE-RAIZ-NC-01
+#  em docs/status-reprodutibilidade-24set2026.md. Este script continua útil
+#  porque não depende de linha de base, roda mais rápido e responde diretamente
+#  com o índice do registro.)
 #
 # O QUE O RESULTADO SIGNIFICA
 #   primeiro registro divergente = 1  -> o estado do MPAS já difere no PRIMEIRO

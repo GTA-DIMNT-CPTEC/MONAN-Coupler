@@ -8,62 +8,9 @@ ESMF (`logs/PET*.esmApp.log`) do sistema acoplado MONAN-A 2.0 x MOM6+SIS2, e
 sugere uma partição de PETs balanceada para o layout com split de comunicador
 (`&nuopc_petlayout`: `atm_pet_count` / `ocn_pet_count` / `ice_pet_count`).
 
-INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos - v14.22
+INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos.
 
---------------------------------------------------------------------------
-ALTERAÇÕES (23/09/2026) - v14.22
---------------------------------------------------------------------------
-Revisão depois da primeira análise com três componentes (144 PETs, 128 +
-8 + 8), que expôs três limitações:
-
-  - A métrica "Desbalanceamento" comparava o componente mais lento com o
-    mais rápido. Com dois componentes (atmosfera e oceano) isso media o
-    desequilíbrio que interessa; com o gelo presente, que é sempre muito
-    mais leve, o número explodia ("razão 55,71x", "5470,8% ocioso") e não
-    dizia nada. Foi substituída pelo tempo que CADA componente passa
-    esperando o gargalo (execução concorrente) ou pela participação de cada
-    um no tempo total (execução sequencial ou layout compartilhado).
-
-  - A divisão proporcional podia propor contagens que o modelo não
-    aproveita, como 17 ou 31 PETs para o oceano (números primos obrigam o
-    MOM6 a cortar o domínio em faixas finas). O relatório agora avalia cada
-    contagem, atual e sugerida, pelo tamanho dos blocos do oceano e do gelo
-    e pelo número de células MPAS por PET, e mostra um "ajuste prático" com
-    a contagem viável mais próxima. As grades são lidas de
-    MOM_parameter_doc.all, MOM_input ou MOM_override (NIGLOBAL, NJGLOBAL) e
-    do nome dos arquivos 'x1.<N>.*' do MPAS, ou informadas por --ocn-grid e
-    --atm-cells. Os limites são ajustáveis por --min-block e
-    --min-cells-per-pet.
-
-  - A coluna "Chamadas Run" somava todos os PETs (3072 = 128 PETs x 24
-    trocas, para a atmosfera). Passou a mostrar as chamadas por PET.
-
-O JSON ganhou os campos '<comp>_idle_frac' e
-'suggested_practical_<comp>_pet_count'; os campos anteriores não mudaram, e
-referências gravadas por versões anteriores continuam comparáveis.
-
---------------------------------------------------------------------------
-ALTERAÇÕES (Set/2026) - COMPONENTE DE GELO
---------------------------------------------------------------------------
-Até a v14.20 o script conhecia apenas MPAS, OCN e MED. Com `use_sis2_dynamic`
-ligado, o SIS2 recebe um terceiro bloco de PETs, e o tempo dele não entrava na
-tabela, nem no desbalanceamento, nem na divisão sugerida; os PETs do gelo
-apenas não apareciam. Passaram a ser tratados:
-
-  - a faixa `ICE=PET[a..b]`, que o `esm.F90` acrescenta na MESMA linha de
-    layout depois do bloco de oceano, quando o gelo está ativo;
-  - o rótulo `ICE` nos pares `Run intro.`/`Run extro.`;
-  - a inclusão do componente na tabela, no cálculo do mais lento e do mais
-    rápido, no ganho contra a soma serial, no CSV, no JSON e no gráfico;
-  - a divisão de PETs entre TRÊS componentes.
-
-Um componente sem PETs atribuídos é tratado como AUSENTE, e não como presente
-com tempo zero: some da tabela e da divisão. A distinção importa porque tempo
-zero num componente presente é sintoma de log truncado, e merece aparecer.
-
-A divisão de PETs passou a usar o método do maior resto sobre a quota cheia,
-com piso de 1 PET por componente ativo. Com dois componentes o resultado é
-idêntico ao da fórmula anterior; verificado contra o caso de referência.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 --------------------------------------------------------------------------
 POR QUE "TEMPO TOTAL", E NÃO "TEMPO POR CHAMADA x NÚMERO DE PASSOS"
@@ -563,7 +510,7 @@ def suggest_partition(
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Viabilidade das contagens de PETs (v14.22)
+# Viabilidade das contagens de PETs
 # ──────────────────────────────────────────────────────────────────────────
 #
 # A divisão proporcional (suggest_partition) só olha o trabalho medido. Ela
@@ -933,9 +880,8 @@ def write_csv(path: Path, result: ParseResult, pets: Dict[str, Set[int]]) -> Non
     """Exporta o detalhe de cada chamada Run (passo interno) por PET/componente."""
     import csv
 
-    # Mapa PET -> bloco, montado uma vez. A versão anterior deduzia o bloco
-    # dentro do laço com uma cadeia de condicionais que não tinha como
-    # representar um terceiro bloco.
+    # Mapa PET -> bloco, montado uma vez; comporta os três blocos
+    # (ATM, OCN e ICE).
     bloco: Dict[int, str] = {}
     for comp, rotulo in (("MPAS", "ATM"), ("OCN", "OCN"), ("ICE", "ICE")):
         for pet in pets.get(comp, set()):

@@ -3,7 +3,7 @@
 # gen-metis.bash — Gera as partições METIS do MPAS (x1.NNNNN.graph.info.part.N)
 #                  necessárias para uma rodada, lendo malha e modo da nuopc.input.
 #
-# INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v13.0
+# INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 # Sistema acoplado MONAN-A 2.0 x MOM6+SIS2 / NUOPC-ESMF 8.9.1
 #
 # POR QUE ISTO É NECESSÁRIO

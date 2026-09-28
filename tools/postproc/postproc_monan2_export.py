@@ -3,45 +3,22 @@
 postproc_monan2_export.py  —  Pós-processamento dos campos CMEPS exportados
                               pelo cap NUOPC do MONAN-A 2.0 (MPAS-A 8.3)
 
-Versão 2.5 — compatível com mpas_cap_netcdf_mod v2.9 (campos instantâneos).
-             GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-Correções v2.5 (13/05/2026):
-  [E5] load_all_steps — import redundante de Dataset removido (já importado no
-       nível do módulo). A instrução 'from netCDF4 import Dataset as _DS' dentro
-       da função criava um segundo vínculo desnecessário ao mesmo objeto.
-  [E6] _default_fields em main() — construção simplificada com list comprehension
-       única; comentário de contagem atualizado para refletir os campos presentes.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
-Correções v2.4 (20/04/2026):
-  [E4] main() — step_indices padrão gerava apenas 3 mapas (primeiro, meio,
-       último). Corrigido: novo argumento --all-steps para mapas de TODOS os
-       passos; padrão sem flag: ~8 passos uniformemente espaçados + último.
-       --stats e --csv sempre processavam todos os passos (sem alteração).
-
-Correções v2.3 (20/04/2026):
-  [E1] plot_maps — ramos if/else idênticos (código morto) → simplificado.
-  [E2] fill_latlon_gaps — comentários de direção do np.roll incorretos → corrigidos.
-  [E3] _get_plot_norm — extend logic expandida: distingue neither/max/both
-       com base em vmin_fixed, vmax_fixed e symmetric.
-  [B-28] field_outlier_threshold — Sa_u10m/v10m: 10 m/s → 150 m/s.
-       Ventos > 10 m/s são fisicamente normais (alísios, jatos, ciclones);
-       o limiar anterior filtrava 2.6% dos bins, subestimando σ_cap em 7%.
-       (mpas_cap_netcdf.F90 v2.9 já inclui essa correção)
-             GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Abril 2026
-
-Todos os campos no NetCDF v2.5 já estão em unidades instantâneas:
+Todos os campos no NetCDF já estão em unidades instantâneas:
   Faxa_swdn/lwdn : W/m²       (média do intervalo de acoplamento)
   Faxa_prec      : kg/m²/s    (média do intervalo de acoplamento)
   Faxa_taux/tauy : N/m²       (ρ·ust²·(u,v)/|V10|, instantâneo)
   Sa_*           : unidades nativas MPAS, instantâneos
 
-O mpas_cap_netcdf_mod v2.5 corrige quatro bugs em relação à v2.4:
-  [1] XADREZ: interpola Voronoi→1° no PET0 (inalterado).
-  [2] ACUMULADOS: Faxa_swdn/lwdn/prec convertidos em mpas_atm_model.F90
-      como incrementos do intervalo (÷dt_coupling), não médias desde t=0 (÷elapsed_s).
-  [3] PRECIPITAÇÃO: rainnc + rainc (convectiva) — antes apenas rainnc.
-  [4] STRESS: Faxa_taux/tauy calculados de ust (diag_physics), antes nulos.
+Características dos campos gravados pelo mpas_cap_netcdf_mod:
+  XADREZ: interpolação Voronoi→1° no PET0.
+  ACUMULADOS: Faxa_swdn/lwdn/prec convertidos em mpas_atm_model.F90
+      como incrementos do intervalo (÷dt_coupling), não médias desde t=0.
+  PRECIPITAÇÃO: rainnc + rainc (convectiva).
+  STRESS: Faxa_taux/tauy calculados de ust (diag_physics).
 
 Estrutura do arquivo NetCDF lido:
   dimensions: lat(181), lon(360)
@@ -189,8 +166,8 @@ def parse_timestamp(path):
 
 def load_grid_coords(ncfile):
     """
-    Lê lon(360,) e lat(181,) do arquivo gerado pelo módulo v2.4.
-    Falha com mensagem clara se o arquivo for de versão anterior.
+    Lê lon(360,) e lat(181,) do arquivo gerado pelo mpas_cap_netcdf_mod.
+    Falha com mensagem clara se o arquivo não tiver as coordenadas.
     """
     with Dataset(ncfile) as nc:
         if 'lon' not in nc.variables or 'lat' not in nc.variables:
@@ -435,11 +412,11 @@ def fill_latlon_gaps(arr, passes=30):
       Cada par de passes preenche ±1 célula de cada lado do gap.
       30 passes preenchem gaps de até 60 colunas → cobre até lat=89°.
 
-    Correções em relação à versão anterior (4 passes):
-      1. Passes: 4 → 30 (cobre gaps polares de até 60° de longitude)
-      2. Wrap polar: np.roll(axis=0) conectava polo Sul ao polo Norte.
-         Agora as linhas extremas de latitude são mascaradas antes de
-         usar como vizinhos (polos não têm vizinhos além de si mesmos).
+    Detalhes:
+      1. Até 30 passes (cobre gaps polares de até 60° de longitude).
+      2. Sem wrap polar: as linhas extremas de latitude são mascaradas antes
+         de usar como vizinhos (np.roll(axis=0) ligaria o polo Sul ao polo
+         Norte; os polos não têm vizinhos além de si mesmos).
       3. Parada antecipada: encerra assim que não há mais NaN.
 
     Parâmetros:
@@ -579,7 +556,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir):
     """
     Mapas globais com ax.pcolormesh(lon_2d, lat_2d, data) — sem interpolação.
 
-    O NetCDF v2.4 já contém dados na grade regular 1°×1°:
+    O NetCDF já contém dados na grade regular 1°×1°:
       campos[fname][step] → shape (181, 360) = (nlat, nlon)
     Leitura direta: sem scipy, sem meshfile externo.
 
@@ -714,7 +691,6 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir):
             # Estatísticas do título — calculadas APÓS a máscara de vmin_fixed,
             # portanto refletem apenas precipitação acima do limiar físico.
             valid = data_plot[np.isfinite(data_plot)]
-            # FIX E1: ramos if/else eram idênticos (código morto).
             # A filtragem por [vmin, vmax] é correta para ambos os tipos de norma.
             in_range = valid[(valid >= vmin) & (valid <= vmax)]
 

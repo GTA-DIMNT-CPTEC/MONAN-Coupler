@@ -3,20 +3,14 @@
 anim_mom6_import.py  —  Animação da evolução dos passos de acoplamento ATM→OCN
                          a partir dos mapas PNG gerados por postproc_mom6_import.py
 
-Versão 1.2 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-CORREÇÕES v1.2
-  • BUG-ANIM-SIZE: quadros de tamanhos diferentes (PNGs com bbox_inches='tight')
-    faziam o GIF "tremer" e quebravam o MP4. Todos os quadros passam a ser
-    normalizados à MESMA dimensão (compostos sobre tela branca) antes de montar.
-  • BUG-ANIM-MP4: o MP4 usava o concat demuxer com os PNGs originais (falhava
-    com quadros de dimensão variável). Agora normaliza e codifica uma sequência
-    numerada via image2 — dimensão constante e ordem determinística.
-  • Novos parâmetros: --max-width (reduz o tamanho do arquivo) e --no-optimize.
-  Observação 1: a ESCALA de cor consistente entre quadros é responsabilidade do
-  postproc (v8.4). Observação 2: para uma animação COMPLETA, rode antes
-  postproc_mom6_import.py --plot --all-steps (sem isso, o postproc plota apenas
-  ~8 passos amostrados e a animação fica com poucos quadros e "saltos").
+O histórico das versões deste script está em docs/historico-scripts.md.
+
+A escala de cor consistente entre quadros é definida pelo
+postproc_mom6_import.py. Para uma animação completa, rode antes
+postproc_mom6_import.py --plot --all-steps (sem isso, o postproc plota
+apenas ~8 passos amostrados e a animação fica com poucos quadros).
 
 ═══════════════════════════════════════════════════════════════════════════════
 Contexto
@@ -74,7 +68,7 @@ from datetime import datetime
 
 PROG_VERSION = '1.2'
 
-# Padrão de nome dos PNGs gerados por postproc_mom6_import.py (v8.1+):
+# Padrão de nome dos PNGs gerados por postproc_mom6_import.py:
 #   mom6_import_YYYYMMDD_HHMMSS.png
 PNG_PATTERN  = 'mom6_import_????????_??????.png'
 
@@ -194,10 +188,10 @@ def select_frames(all_frames, step_list, every_n):
 def _load_frames_normalized(frames, max_width=0):
     """Carrega os PNGs e devolve imagens PIL TODAS do mesmo tamanho.
 
-    BUG-ANIM-SIZE (correção): quadros de dimensões diferentes (ex.: PNGs
-    antigos gerados com bbox_inches='tight') faziam o GIF "tremer" — Pillow
-    fixa o tamanho da tela pelo 1º quadro e reposiciona os demais no canto — e
-    QUEBRAVAM a codificação MP4 (libx264 exige dimensão constante). Aqui todos
+    Quadros de dimensões diferentes (ex.: PNGs gerados com
+    bbox_inches='tight') fariam o GIF "tremer" (o Pillow fixa o tamanho da tela
+    pelo 1º quadro e reposiciona os demais no canto) e QUEBRARIAM a codificação
+    MP4 (libx264 exige dimensão constante). Por isso todos
     os quadros são compostos sobre uma tela branca do MAIOR tamanho encontrado.
     Opcionalmente reduz a largura para max_width (mantém proporção)."""
     from PIL import Image
@@ -308,12 +302,11 @@ def make_mp4(frames, outfile, fps, max_width=0):
     """
     Gera um vídeo MP4 (H.264) a partir dos quadros PNG usando ffmpeg.
 
-    BUG-ANIM-MP4 (correção): a versão anterior usava o concat demuxer com os
-    PNGs originais. Quando os quadros tinham tamanhos diferentes (o caso com
-    bbox_inches='tight'), o libx264 falhava ou gerava vídeo corrompido. Agora
-    os quadros são NORMALIZADOS ao mesmo tamanho (via Pillow) e gravados em uma
-    sequência temporária numerada, codificada com o demuxer image2 — garantindo
-    dimensão constante e ordem determinística.
+    Os quadros são NORMALIZADOS ao mesmo tamanho (via Pillow) e gravados em
+    uma sequência temporária numerada, codificada com o demuxer image2, o que
+    garante dimensão constante e ordem determinística. Com os PNGs originais
+    de tamanhos diferentes (o caso com bbox_inches='tight'), o libx264
+    falharia ou geraria vídeo corrompido.
 
     Parâmetros
     ----------
