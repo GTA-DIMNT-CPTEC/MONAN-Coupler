@@ -45,6 +45,7 @@ module mpas_cap_MONAN_mod
                                     mpas_diag_export_t,  &
                                     netcdf_init_coords,  &
                                     netcdf_config_set,   &
+                                    mpas_import_diag_clock_t, &
                                     set_mpas_diag_clock   ! timestamp do diag import (mpas_cap_netcdf)
 
   use coupler_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
@@ -64,13 +65,25 @@ module mpas_cap_MONAN_mod
   public :: SetServices
   public :: SetVM
 
-  type(mpas_atm_public_type),    pointer, save :: g_atm_public => null()
-  type(mpas_atm_state_type),     pointer, save :: g_atm_state  => null()
-  type(atm_ocean_boundary_type), pointer, save :: g_atm_bnd    => null()
-  type(ESMF_Grid),                        save :: g_grid
-  !> Gravador monan_export_*.nc: grade de saída, coordenadas e campos MPAS
-  !! guardados. Configurado em InitializeRealize.
-  type(mpas_diag_export_t),               save :: g_diag_export
+  !> Estado interno do cap, guardado no componente ESMF
+  !! (ESMF_GridCompSetInternalState) e recuperado em cada fase por
+  !! get_cap_state. Criado em InitializeRealize.
+  type :: mpas_cap_state_t
+    type(mpas_atm_public_type),    pointer :: atm_public => null()
+    type(mpas_atm_state_type),     pointer :: atm_state  => null()
+    type(atm_ocean_boundary_type), pointer :: atm_bnd    => null()
+    type(ESMF_Grid) :: grid   !< grade regular 360x180 do cap
+    !> Gravador monan_export_*.nc: grade de saída, coordenadas e campos
+    !! MPAS guardados. Configurado em InitializeRealize.
+    type(mpas_diag_export_t) :: diag_export
+    !> Relógio do diagnóstico de importação monan2_import_*.nc.
+    type(mpas_import_diag_clock_t) :: diag_clock
+    integer :: step_count = 0   !< passos de acoplamento já executados
+  end type mpas_cap_state_t
+
+  type :: mpas_cap_state_wrapper_t
+    type(mpas_cap_state_t), pointer :: ptr => null()
+  end type mpas_cap_state_wrapper_t
 
   ! ── Campos importados do mediador (MED→MPAS) ───────────────────────────────
   !
@@ -120,8 +133,6 @@ module mpas_cap_MONAN_mod
     'Faxa_lat_mpas ',               &  ! calor latente nativo do PBL (lh)
     'Faxa_taux_mpas',               &  ! tensao zonal nativa (de ust)
     'Faxa_tauy_mpas' ]  ! tensao meridional nativa (de ust)
-
-  integer, save      :: step_count    = 0
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -215,6 +226,8 @@ contains
     type(ESMF_Field)   :: field
     type(ESMF_VM)      :: vm
     integer            :: i, localMpiComm, localPet
+    type(mpas_cap_state_wrapper_t) :: wrap
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:InitializeRealize)'
       real(ESMF_KIND_R8), allocatable :: lon_local_nc(:)
       real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)
@@ -228,17 +241,23 @@ contains
     call ESMF_VMGet(vm, localPet=localPet, mpiCommunicator=localMpiComm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
+    ! Estado interno do cap, guardado no componente
+    allocate(wrap%ptr)
+    st => wrap%ptr
+    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
     ! ── 1. ESMF_Grid 360x180 (ANTES de mpas_atm_init) ────────────────────
     ! SOLUCAO DEFINITIVA: ESMF_Grid nao usa MOAB. Zero deadlocks possiveis.
     ! Criado ANTES do SMIOL (mpas_atm_init) para MPI completamente limpo.
-    call mpas_create_grid(g_grid, rc)
+    call mpas_create_grid(st%grid, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
     ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
     ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
     do i = 1, N_IMP
-      field = ESMF_FieldCreate(g_grid, ESMF_TYPEKIND_R8, &
+      field = ESMF_FieldCreate(st%grid, ESMF_TYPEKIND_R8, &
                                staggerloc=ESMF_STAGGERLOC_CENTER, &
                                name=trim(IMP_NAMES(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -246,7 +265,7 @@ contains
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end do
     do i = 1, N_EXP
-      field = ESMF_FieldCreate(g_grid, ESMF_TYPEKIND_R8, &
+      field = ESMF_FieldCreate(st%grid, ESMF_TYPEKIND_R8, &
                                staggerloc=ESMF_STAGGERLOC_CENTER, &
                                name=trim(EXP_NAMES(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -255,10 +274,10 @@ contains
     end do
 
     ! ── 3. Inicializar MPAS-A (SMIOL começa aqui) ────────────────────────
-    allocate(g_atm_public)
-    allocate(g_atm_state)
-    allocate(g_atm_bnd)
-    call mpas_atm_init(g_atm_public, g_atm_state, g_atm_bnd, &
+    allocate(st%atm_public)
+    allocate(st%atm_state)
+    allocate(st%atm_bnd)
+    call mpas_atm_init(st%atm_public, st%atm_state, st%atm_bnd, &
                        cfg_dt_atm, trim(cfg_config_dir), localMpiComm, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_init falhou', &
@@ -269,15 +288,15 @@ contains
     ! ── 4. Coordenadas NetCDF (MPI_Allgather apos SMIOL — seguro) ────────
       ! usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
-      n_local = g_atm_public%nCellsSolve
-      if (n_local == 0) n_local = g_atm_public%nCells   ! fallback se não disponível
+      n_local = st%atm_public%nCellsSolve
+      if (n_local == 0) n_local = st%atm_public%nCells   ! fallback se não disponível
       allocate(lon_local_nc(n_local), lat_local_nc(n_local))
       do k = 1, n_local
-        lon_local_nc(k) = real(g_atm_public%lonCell(k), ESMF_KIND_R8) * RAD2DEG
-        lat_local_nc(k) = real(g_atm_public%latCell(k), ESMF_KIND_R8) * RAD2DEG
+        lon_local_nc(k) = real(st%atm_public%lonCell(k), ESMF_KIND_R8) * RAD2DEG
+        lat_local_nc(k) = real(st%atm_public%latCell(k), ESMF_KIND_R8) * RAD2DEG
       end do
-      call netcdf_config_set(g_diag_export, cfg_grid_res_deg, cfg_output_dir, localPet)
-      call netcdf_init_coords(g_diag_export, lon_local_nc, lat_local_nc, n_local, vm, rc)
+      call netcdf_config_set(st%diag_export, cfg_grid_res_deg, cfg_output_dir, localPet)
+      call netcdf_init_coords(st%diag_export, lon_local_nc, lat_local_nc, n_local, vm, rc)
       deallocate(lon_local_nc, lat_local_nc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (allocated(lon_local_nc)) deallocate(lon_local_nc)
@@ -291,8 +310,11 @@ contains
     integer,             intent(out) :: rc
     type(ESMF_State)  :: importState, exportState
     type(ESMF_Clock)  :: clock
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:InitializeDataComplete)'
     rc = ESMF_SUCCESS
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_ModelGet(gcomp, &
          importState=importState, exportState=exportState, &
          modelClock=clock, rc=rc)
@@ -305,13 +327,13 @@ contains
 
     call init_import_defaults(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call mpas_atm_init_sfc(g_atm_public, g_atm_state, rc)
+    call mpas_atm_init_sfc(st%atm_public, st%atm_state, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_init_sfc falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_diag_export, g_atm_public, exportState, rc)
+    call mpas_export(st%diag_export, st%atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_CompAttributeSet(gcomp, &
          name='InitializeDataProgress', value='true', rc=rc)
@@ -330,13 +352,16 @@ contains
     type(ESMF_VM)       :: vm
     type(ESMF_Time)     :: currTimeLoc
     integer             :: yr, mo, dy, hr, mn, sc
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:ModelAdvance)'
     rc = ESMF_SUCCESS
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_ModelGet(gcomp, &
          importState=importState, exportState=exportState, &
          modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    step_count = step_count + 1
+    st%step_count = st%step_count + 1
 
     ! ── Timestamp para o diagnóstico de importação ────────────────────────────
     ! Lê o tempo corrente do clock ANTES de mpas_import para que
@@ -349,27 +374,27 @@ contains
     call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                       h=hr, m=mn, s=sc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call set_mpas_diag_clock(yr, mo, dy, hr, mn, sc)
+    call set_mpas_diag_clock(st%diag_clock, yr, mo, dy, hr, mn, sc)
 
     ! usar nCellsSolve (células próprias sem halos) em vez de nCells.
     ! nCells inclui células halo de PETs vizinhos, que podem conter valores não
     ! inicializados ou de outra região geográfica, corrompendo os campos importados.
-    call mpas_import(importState, g_atm_bnd, &
-         merge(g_atm_public%nCellsSolve, g_atm_public%nCells, &
-               g_atm_public%nCellsSolve > 0), rc, &
-         g_atm_public%lonCell, g_atm_public%latCell)
+    call mpas_import(st%diag_clock, importState, st%atm_bnd, &
+         merge(st%atm_public%nCellsSolve, st%atm_public%nCells, &
+               st%atm_public%nCellsSolve > 0), rc, &
+         st%atm_public%lonCell, st%atm_public%latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (cfg_write_diag) then
       call state_diagnose(importState, 'importState@Advance', rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    call mpas_atm_run(g_atm_public, g_atm_state, g_atm_bnd, cfg_dt_coupling, rc)
+    call mpas_atm_run(st%atm_public, st%atm_state, st%atm_bnd, cfg_dt_coupling, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_run falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_diag_export, g_atm_public, exportState, rc)
+    call mpas_export(st%diag_export, st%atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (cfg_write_diag) then
       call state_diagnose(exportState, 'exportState@Advance', rc)
@@ -383,32 +408,52 @@ contains
       call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                         h=hr, m=mn, s=sc, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call export_write_netcdf(g_diag_export, exportState, step_count * cfg_dt_coupling, &
+      call export_write_netcdf(st%diag_export, exportState, st%step_count * cfg_dt_coupling, &
                                 yr, mo, dy, hr, mn, sc, vm, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
     call ESMF_LogWrite(subname//': ModelAdvance concluido', ESMF_LOGMSG_INFO)
   end subroutine ModelAdvance
 
+  !> Recupera o estado interno do cap, criado em InitializeRealize.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   st     estado interno
+  !! @param[out]   rc     código de retorno ESMF
+  subroutine get_cap_state(gcomp, st, rc)
+    type(ESMF_GridComp),             intent(inout) :: gcomp
+    type(mpas_cap_state_t), pointer, intent(out)   :: st
+    integer,                         intent(out)   :: rc
+
+    type(mpas_cap_state_wrapper_t) :: wrap
+
+    nullify(st)
+    call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    st => wrap%ptr
+  end subroutine get_cap_state
+
   subroutine ModelFinalize(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:ModelFinalize)'
     rc = ESMF_SUCCESS
-    call mpas_atm_final(g_atm_public, g_atm_state, g_atm_bnd, rc)
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call mpas_atm_final(st%atm_public, st%atm_state, st%atm_bnd, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_final falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
     ! ESMF_GridDestroy removido: os campos do importState/exportState
-    ! ainda referenciam g_grid quando ModelFinalize e chamado.
+    ! ainda referenciam st%grid quando ModelFinalize e chamado.
     ! Destruir o grid aqui causa SIGSEGV no cleanup posterior do framework.
     ! O ESMF finaliza o grid automaticamente em ESMF_Finalize.
-    deallocate(g_atm_public, g_atm_state, g_atm_bnd)
-    g_atm_public => null()
-    g_atm_state  => null()
-    g_atm_bnd    => null()
+    deallocate(st%atm_public, st%atm_state, st%atm_bnd)
+    st%atm_public => null()
+    st%atm_state  => null()
+    st%atm_bnd    => null()
     call ESMF_LogWrite(subname//': ModelFinalize concluido', ESMF_LOGMSG_INFO)
   end subroutine ModelFinalize
 

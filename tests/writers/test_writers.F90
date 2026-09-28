@@ -11,6 +11,7 @@ program test_writers
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
   use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
+                                  mpas_import_diag_clock_t, &
                                   mpas_diag_export_t, netcdf_config_set, &
                                   netcdf_init_coords, netcdf_push_raw_field, &
                                   export_write_netcdf
@@ -26,6 +27,7 @@ program test_writers
   type(MED_InternalState) :: is
   type(ESMF_Field) :: fld
   type(atm_ocean_boundary_type) :: bnd
+  type(mpas_import_diag_clock_t) :: clk
   real(MPAS_RKIND), allocatable :: lonc(:), latc(:)
   integer :: rc, localPet, petCount, comm, k, n, nloc, i0
   character(len=32) :: nm
@@ -94,11 +96,11 @@ program test_writers
     bnd%alb(n)          = 0.06_MPAS_RKIND + 0.01_MPAS_RKIND * mod(k, 90)
     bnd%omask(n)        = merge(1.0_MPAS_RKIND, 0.0_MPAS_RKIND, mod(k, 5) /= 0)
   end do
-  call set_mpas_diag_clock(2026, 3, 29, 1, 0, 0)
-  call write_mpas_import_diag(bnd, nloc, lonc, latc, rc)
+  call set_mpas_diag_clock(clk, 2026, 3, 29, 1, 0, 0)
+  call write_mpas_import_diag(clk, bnd, nloc, lonc, latc, rc)
   deallocate(bnd%alb, bnd%omask)
-  call set_mpas_diag_clock(2026, 3, 29, 2, 0, 0)
-  call write_mpas_import_diag(bnd, nloc, lonc, latc, rc)
+  call set_mpas_diag_clock(clk, 2026, 3, 29, 2, 0, 0)
+  call write_mpas_import_diag(clk, bnd, nloc, lonc, latc, rc)
   call export_cases(nloc, lonc, latc, i0)
 
   ! ── oceano de dados (DOCN) ───────────────────────────────────────────

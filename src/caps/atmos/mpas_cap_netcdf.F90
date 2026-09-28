@@ -102,14 +102,16 @@ module mpas_cap_netcdf_mod
 
   character(len=*), parameter :: u_FILE_u   = __FILE__
 
-  ! ── Estado do diagnóstico de importação MED→MPAS (migrado de mpas_cap_methods) ──
-  !
-  ! g_diag_yr == 0 → clock ainda não configurado (bootstrap ou teste unitário):
-  !   write_mpas_import_diag usa fallback por contador de passos.
-  ! set_mpas_diag_clock deve ser chamada em ModelAdvance ANTES de mpas_import.
-  integer, private, save :: g_diag_yr   = 0, g_diag_mo = 0, g_diag_dy = 0
-  integer, private, save :: g_diag_hr   = 0, g_diag_mn = 0, g_diag_sc = 0
-  integer, private, save :: g_diag_step = 0   ! contador incremental de chamadas
+  !> Relógio do diagnóstico de importação MED→MPAS (monan2_import_*.nc).
+  !! O cap guarda um objeto deste tipo, o atualiza com set_mpas_diag_clock
+  !! em ModelAdvance, ANTES de mpas_import, e o passa a
+  !! write_mpas_import_diag. Com yr == 0 (relógio ainda não configurado,
+  !! como num teste), o arquivo é nomeado pelo contador de chamadas.
+  type, public :: mpas_import_diag_clock_t
+    integer :: yr = 0, mo = 0, dy = 0
+    integer :: hr = 0, mn = 0, sc = 0
+    integer :: step = 0   !< contador de chamadas de write_mpas_import_diag
+  end type mpas_import_diag_clock_t
 
   ! Colunas do buffer de campos reunidos em write_mpas_import_diag: uma por
   ! membro de atm_ocean_boundary_type, na ordem em que sao reunidos.
@@ -830,11 +832,13 @@ contains
   !! @param[in] dy  Dia   (ESMF_TimeGet dd)
   !! @param[in] hr  Hora  (ESMF_TimeGet h)
   !! @param[in] mn  Minuto (ESMF_TimeGet m)
+  !! @param[inout] clk  relógio do diagnóstico, guardado pelo cap
   !! @param[in] sc  Segundo (ESMF_TimeGet s)
-  subroutine set_mpas_diag_clock(yr, mo, dy, hr, mn, sc)
+  subroutine set_mpas_diag_clock(clk, yr, mo, dy, hr, mn, sc)
+    type(mpas_import_diag_clock_t), intent(inout) :: clk
     integer, intent(in) :: yr, mo, dy, hr, mn, sc
-    g_diag_yr = yr;  g_diag_mo = mo;  g_diag_dy = dy
-    g_diag_hr = hr;  g_diag_mn = mn;  g_diag_sc = sc
+    clk%yr = yr;  clk%mo = mo;  clk%dy = dy
+    clk%hr = hr;  clk%mn = mn;  clk%sc = sc
   end subroutine set_mpas_diag_clock
 
   !> @brief Escreve diagnóstico dos campos importados do mediador MED→MPAS.
@@ -894,7 +898,10 @@ contains
   !!
   !! Requer que set_mpas_diag_clock seja chamada em ModelAdvance antes de
   !! mpas_import, e que netcdf_init_coords tenha sido chamado em InitializeRealize.
-  subroutine write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
+  !!
+  !! @param[inout] clk  relógio do diagnóstico (data do arquivo e contador)
+  subroutine write_mpas_import_diag(clk, atm_bnd, nCells, lonCell, latCell, rc)
+    type(mpas_import_diag_clock_t), intent(inout) :: clk
     type(atm_ocean_boundary_type), intent(in)  :: atm_bnd
     integer,                       intent(in)  :: nCells
     real(MPAS_RKIND), optional,    intent(in)  :: lonCell(:)
@@ -1004,17 +1011,17 @@ contains
     ! diagnostico (MED->MPAS e MED->OCN) coincidem.
     nlat    = nint(180.0_ESMF_KIND_R8 / dlat)
 
-    g_diag_step = g_diag_step + 1
+    clk%step = clk%step + 1
 
     ! Nome do arquivo: monan2_import_YYYYMMDD_HHMMSS.nc
-    !   Fallback por contador quando g_diag_yr == 0 (clock não configurado).
+    !   Fallback por contador quando clk%yr == 0 (clock não configurado).
     call execute_command_line('mkdir -p '//trim(outdir), wait=.true.)
-    if (g_diag_yr == 0) then
-      write(fname,'(A,"/monan2_import_",I4.4,".nc")') trim(outdir), g_diag_step
+    if (clk%yr == 0) then
+      write(fname,'(A,"/monan2_import_",I4.4,".nc")') trim(outdir), clk%step
     else
       write(fname,'(A,"/monan2_import_",I4.4,2I2.2,"_",3I2.2,".nc")') &
-        trim(outdir), g_diag_yr, g_diag_mo, g_diag_dy, &
-                      g_diag_hr, g_diag_mn, g_diag_sc
+        trim(outdir), clk%yr, clk%mo, clk%dy, &
+                      clk%hr, clk%mn, clk%sc
     end if
 
     ! Eixos da grade lat/lon do binning
@@ -1026,7 +1033,7 @@ contains
       lon_axis(i) = (i - 0.5_ESMF_KIND_R8) * dlon - 180.0_ESMF_KIND_R8
     end do
 
-    call define_import_diag_file(fname, nlon, nlat, ncid, varid_lon, varid_lat, varids, ok)
+    call define_import_diag_file(fname, nlon, nlat, clk%step, ncid, varid_lon, varid_lat, varids, ok)
     if (ok) then
       ios = nf90_put_var(ncid, varid_lat, lat_axis)
       ios = nf90_put_var(ncid, varid_lon, lon_axis)
@@ -1085,14 +1092,16 @@ contains
   !! @param[in]  fname      caminho do arquivo
   !! @param[in]  nlon       número de longitudes
   !! @param[in]  nlat       número de latitudes
+  !! @param[in]  step       número da chamada (atributo global 'step')
   !! @param[out] ncid       identificador do arquivo
   !! @param[out] varid_lon  variável do eixo de longitude
   !! @param[out] varid_lat  variável do eixo de latitude
   !! @param[out] varids     variáveis dos campos, na ordem dos índices IMP_*
   !! @param[out] ok         .false. se a criação do arquivo ou dos eixos falhou
-  subroutine define_import_diag_file(fname, nlon, nlat, ncid, varid_lon, varid_lat, varids, ok)
+  subroutine define_import_diag_file(fname, nlon, nlat, step, ncid, varid_lon, varid_lat, varids, ok)
     character(len=*), intent(in)  :: fname
     integer,          intent(in)  :: nlon, nlat
+    integer,          intent(in)  :: step
     integer,          intent(out) :: ncid, varid_lon, varid_lat
     integer,          intent(out) :: varids(N_IMP_DIAG)
     logical,          intent(out) :: ok
@@ -1151,7 +1160,7 @@ contains
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'land_mask_source', &
       'MOM6 ocean_grid%mask2dT (So_omask -> Sx_omask, regridada MED->MPAS); '// &
       'celulas de terra gravadas como _FillValue; mascara na variavel Sx_omask')
-    ios = nf90_put_att(ncid, NF90_GLOBAL, 'step',         g_diag_step)
+    ios = nf90_put_att(ncid, NF90_GLOBAL, 'step',         step)
     ios = nf90_enddef(ncid)
     ok = .true.
   end subroutine define_import_diag_file

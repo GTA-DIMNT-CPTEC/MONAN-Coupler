@@ -26,8 +26,8 @@ module mpas_cap_methods_mod
   ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d
   use mpas_cap_netcdf_mod, only: netcdf_push_raw_field,     &
                                   mpas_diag_export_t,        &
-                                  write_mpas_import_diag,    &  ! migrado de mpas_cap_methods
-                                  set_mpas_diag_clock           ! migrado de mpas_cap_methods
+                                  write_mpas_import_diag,    &
+                                  mpas_import_diag_clock_t
   implicit none
   private
 
@@ -66,7 +66,8 @@ contains
   !! esta presente (apenas registra info no log ESMF). Isso permite usar
   !! este cap tanto com o acoplamento completo quanto em modos de teste com
   !! subconjunto de campos.
-  subroutine mpas_import(importState, atm_bnd, nCells, rc, lonCell, latCell)
+  subroutine mpas_import(diag_clock, importState, atm_bnd, nCells, rc, lonCell, latCell)
+    type(mpas_import_diag_clock_t), intent(inout) :: diag_clock !< relógio do diagnóstico de importação
     type(ESMF_State),              intent(in)    :: importState
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(in)    :: nCells
@@ -258,7 +259,7 @@ contains
     !   Sf_zorl  (rugosidade [m])     — atm_bnd%zorl
     ! Arquivo: <cfg_import_diag_dir>/monan2_import_YYYYMMDD_HHMMSS.nc
     if (cfg_write_import_diag) then
-      call write_mpas_import_diag(atm_bnd, nCells, lonCell, latCell, rc)
+      call write_mpas_import_diag(diag_clock, atm_bnd, nCells, lonCell, latCell, rc)
       if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! diagnóstico não-fatal
     end if
   end subroutine mpas_import

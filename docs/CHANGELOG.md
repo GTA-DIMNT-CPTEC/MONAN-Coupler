@@ -9,6 +9,13 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Cap atmosférico: estado interno ESMF (R-FASE7-05).** Quinta etapa da fase 7, acrescentada na R-FASE7-03. Nenhum cálculo muda.
+  - `mpas_cap_MONAN.F90` ganha o tipo `mpas_cap_state_t`, guardado no próprio componente com `ESMF_GridCompSetInternalState` (como já faz o mediador) e recuperado em cada fase pela nova rotina `get_cap_state`. Ele reúne o que eram variáveis de módulo: `atm_public`, `atm_state` e `atm_bnd` (ponteiros, alocados em `InitializeRealize` como antes), a grade do cap, o gravador `diag_export` e o contador `step_count`, com o mesmo valor inicial (0).
+  - O relógio do diagnóstico de importação, que eram sete variáveis de módulo de `mpas_cap_netcdf.F90` (`g_diag_yr` a `g_diag_sc` e o contador `g_diag_step`), vira o tipo público `mpas_import_diag_clock_t`, guardado no estado do cap (`diag_clock`). `set_mpas_diag_clock`, `write_mpas_import_diag` e `mpas_import` o recebem como primeiro argumento, e `define_import_diag_file` recebe o contador para o atributo `step`.
+  - `test_writers.F90` passa um `mpas_import_diag_clock_t` às duas chamadas de `write_mpas_import_diag`.
+  - Conferências locais: `confere-tudo.bash HEAD` sem falhas (gravadores, com os `monan2_import_*.nc`, iguais byte a byte; constantes de texto iguais).
+  - Indicadores: variáveis de módulo privadas de 22 para 9 (restam, entre outras, a memória de `Si_ifrac` do cap do oceano, as marcas de primeira chamada `med_ifrac_init_done` e `first_write_diag` e a tabela de esquemas de `regrid_registry`; as de estado de componente vão, com as seis variáveis locais com `save`, na próxima etapa); rotinas de 293 para 294 (`get_cap_state`).
+
 - **Modelo atmosférico: estado do MPAS no `mpas_atm_state_type` (R-FASE7-04).** Quarta etapa da fase 7. Nenhum cálculo muda.
   - As 26 variáveis de módulo de `mpas_atm_model.F90` passam a ser componentes de `mpas_atm_state_type` (`mpas_atm_types.F90`), o estado que o cap já guardava e passava a `mpas_atm_init`, `mpas_atm_run` e `mpas_atm_final`: o domínio MPAS (`g_domain` vira `atm_state%domain`), os ponteiros para os campos dos pools (`pool_*`), os acumulados do passo anterior (`prev_*`) e os buffers em unidades instantâneas apontados por `mpas_atm_public_type` (`*_inst`, `*_buf`). Os nomes perdem só o prefixo `g_`.
   - `g_mpi_comm` era uma cópia de `atm_state%mpi_comm`, gravada na mesma linha; saiu, e `mpas_framework_init_phase1` recebe `atm_state%mpi_comm`.
@@ -18,6 +25,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - As constantes de texto não mudam (a mensagem `buffers g_u10_buf/g_v10_buf alocados` fica como está).
   - Conferências locais: `confere-tudo.bash HEAD` sem falhas. `mpas_atm_model.F90` compila aqui com as interfaces mínimas do MPAS, mas nenhum teste local o executa; a conferência dele é a rodada na Jaci.
   - Indicadores: variáveis de módulo privadas de 48 para 22.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase7-04-validada`).
 
 - **Cap atmosférico: gravador `monan_export_*.nc` com estado próprio (R-FASE7-03).** Terceira etapa da fase 7. Nenhum cálculo muda.
   - As 18 variáveis de módulo do gravador em `mpas_cap_netcdf.F90` (grade de saída `NLON`, `NLAT`, `GRID_RES`, `DLON`, `DLAT` e `OUTPUT_DIR`; coordenadas globais; decomposição MPI salva; campos MPAS guardados) passam a ser componentes do tipo público `mpas_diag_export_t`, com os mesmos valores iniciais.
