@@ -957,22 +957,14 @@ contains
     integer,                       intent(out) :: rc
 
     character(len=*), parameter :: subname = '(write_mpas_import_diag)'
-    character(len=256) :: fname
-    integer :: ncid, ios
-    logical :: ok
-    integer :: varid_lat, varid_lon
-    integer :: varids(N_IMP_DIAG)
-    integer :: nlat, nlon, i, nRecv
-    real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)
+    integer :: i, nRecv
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
     integer, allocatable  :: allCounts(:), displs(:)
-    real(ESMF_KIND_R8), allocatable :: sendBuf(:)
     ! Valores reunidos no PET 0, um campo por coluna (indices IMP_*)
     real(ESMF_KIND_R8), allocatable :: recvBuf(:,:)
     real(ESMF_KIND_R8), allocatable :: lon_global(:), lat_global(:)
     integer :: nGlobal, nLocal
-    real(ESMF_KIND_R8) :: res_deg, dlon, dlat
     character(len=256) :: outdir
 
     rc = ESMF_SUCCESS
@@ -1005,18 +997,8 @@ contains
     allocate(lon_global(nRecv), lat_global(nRecv))
     allocate(recvBuf(nRecv, N_IMP_DIAG))
 
-    if (present(lonCell) .and. present(latCell)) then
-      allocate(sendBuf(nLocal))
-      sendBuf(1:nLocal) = real(lonCell(1:nLocal) * 180.0_MPAS_RKIND / acos(-1.0_MPAS_RKIND), ESMF_KIND_R8)
-      call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
-                       lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
-                       0, mpiComm, mpi_ierr)
-      sendBuf(1:nLocal) = real(latCell(1:nLocal) * 180.0_MPAS_RKIND / acos(-1.0_MPAS_RKIND), ESMF_KIND_R8)
-      call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
-                       lat_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
-                       0, mpiComm, mpi_ierr)
-      deallocate(sendBuf)
-    end if
+    call gather_cell_coords(nLocal, allCounts, displs, mpiComm, lon_global, lat_global, &
+                            lonCell, latCell)
 
     ! ── 2. Gather dos campos ──────────────────────────────────────────────
     ! Valor usado quando o membro de atm_bnd nao esta alocado:
@@ -1047,6 +1029,64 @@ contains
       deallocate(lon_global, lat_global, recvBuf)
       return
     end if
+
+    call write_import_diag_file(clk, recvBuf, lon_global, lat_global, nGlobal, outdir, subname)
+
+    deallocate(lon_global, lat_global, recvBuf)
+
+  end subroutine write_mpas_import_diag
+
+  !> Reúne no PET 0 as coordenadas (em graus) das células MPAS de todos os
+  !! PETs, na ordem de allCounts/displs. Sem lonCell e latCell, nada é
+  !! reunido e lon_global/lat_global ficam como estão. Coletiva quando as
+  !! coordenadas estão presentes: todos os PETs chamam.
+  subroutine gather_cell_coords(nLocal, allCounts, displs, mpiComm, lon_global, lat_global, &
+                                lonCell, latCell)
+    integer,                    intent(in)    :: nLocal
+    integer,                    intent(in)    :: allCounts(:), displs(:)
+    integer,                    intent(in)    :: mpiComm
+    real(ESMF_KIND_R8), contiguous, intent(inout) :: lon_global(:), lat_global(:)
+    real(MPAS_RKIND), optional, intent(in)    :: lonCell(:)
+    real(MPAS_RKIND), optional, intent(in)    :: latCell(:)
+    real(ESMF_KIND_R8), allocatable :: sendBuf(:)
+    integer :: mpi_ierr
+
+    if (present(lonCell) .and. present(latCell)) then
+      allocate(sendBuf(nLocal))
+      sendBuf(1:nLocal) = real(lonCell(1:nLocal) * 180.0_MPAS_RKIND / acos(-1.0_MPAS_RKIND), ESMF_KIND_R8)
+      call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                       lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                       0, mpiComm, mpi_ierr)
+      sendBuf(1:nLocal) = real(latCell(1:nLocal) * 180.0_MPAS_RKIND / acos(-1.0_MPAS_RKIND), ESMF_KIND_R8)
+      call MPI_Gatherv(sendBuf, nLocal, MPI_DOUBLE_PRECISION, &
+                       lat_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
+                       0, mpiComm, mpi_ierr)
+      deallocate(sendBuf)
+    end if
+  end subroutine gather_cell_coords
+
+  !> Grava, no PET 0, o arquivo monan2_import_*.nc do passo: nome pela data
+  !! do relógio do diagnóstico (ou pelo contador, sem relógio), eixos da
+  !! grade lat/lon centrada em células e campos já reunidos em recvBuf.
+  !! Incrementa o contador clk%step.
+  !!
+  !! @param[in] subname  prefixo das mensagens (o de write_mpas_import_diag)
+  subroutine write_import_diag_file(clk, recvBuf, lon_global, lat_global, nGlobal, outdir, subname)
+    type(mpas_import_diag_clock_t), intent(inout) :: clk
+    real(ESMF_KIND_R8), intent(in) :: recvBuf(:,:)
+    real(ESMF_KIND_R8), intent(in) :: lon_global(:), lat_global(:)
+    integer,            intent(in) :: nGlobal
+    character(len=*),   intent(in) :: outdir
+    character(len=*),   intent(in) :: subname
+
+    character(len=256) :: fname
+    integer :: ncid, ios
+    logical :: ok
+    integer :: varid_lat, varid_lon
+    integer :: varids(N_IMP_DIAG)
+    integer :: nlat, nlon, i
+    real(ESMF_KIND_R8), allocatable :: lat_axis(:), lon_axis(:)
+    real(ESMF_KIND_R8) :: res_deg, dlon, dlat
 
     res_deg = real(cfg_grid_res_deg, ESMF_KIND_R8)
     dlon    = res_deg
@@ -1092,9 +1132,7 @@ contains
     end if
 
     deallocate(lat_axis, lon_axis)
-    deallocate(lon_global, lat_global, recvBuf)
-
-  end subroutine write_mpas_import_diag
+  end subroutine write_import_diag_file
 
   !> @brief Reúne no PET 0 um membro de atm_ocean_boundary_type.
   !!

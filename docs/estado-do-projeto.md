@@ -55,7 +55,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE8-04 | `calc_bulk_ncar`: geometria solar (`solar_time_and_declination`) e fluxos de água aberta (`compute_ocean_fluxes`) em rotinas próprias (validação pendente) |
+| R-FASE8-05 | `write_mpas_import_diag`: reunião das coordenadas (`gather_cell_coords`) e gravação no PET 0 (`write_import_diag_file`) em rotinas próprias (validação pendente) |
+| R-FASE8-04 | `calc_bulk_ncar`: geometria solar (`solar_time_and_declination`) e fluxos de água aberta (`compute_ocean_fluxes`) em rotinas próprias |
 | R-FASE8-03 | `export_write_netcdf` dividida (`define_export_file`, `read_export_field_local`); último `BLOCK` e buffers mortos retirados |
 | R-FASE8-02 | `mpas_atm_model.F90` dividido: pontos de entrada no arquivo principal, etapas da inicialização em `mpas_atm_setup` e fluxos instantâneos em `mpas_atm_fluxes` |
 | R-FASE8-01 | `MED_cap.F90` dividido por assunto: pontos de entrada NUOPC no arquivo principal e seis módulos novos (`med_init`, `med_flux`, `med_ocean`, `med_ice`, `med_export`, `med_diag`) |
@@ -187,7 +188,7 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | --- | --- | --- | --- |
 | 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 concluída (PASS, 73 iguais, tag `fase6-02-validada`); R-FASE6-03 concluída (PASS, 73 iguais, tag `fase6-03-validada`); fase concluída |
 | 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-06 | R-FASE7-01 concluída (PASS, 73 iguais, tag `fase7-01-validada`); R-FASE7-02 concluída (PASS, 73 iguais, tag `fase7-02-validada`); R-FASE7-03 concluída (PASS, 73 iguais, tag `fase7-03-validada`); R-FASE7-04 concluída (PASS, 73 iguais, tag `fase7-04-validada`); R-FASE7-05 concluída (PASS, 73 iguais, tag `fase7-05-validada`); R-FASE7-06 concluída (PASS, 73 iguais, tag `fase7-06-validada`); fase 7 concluída |
-| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 entregue (validação pendente) |
+| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 entregue (validação pendente) |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-03 | a fazer |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
 

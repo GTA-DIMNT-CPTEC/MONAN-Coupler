@@ -9,6 +9,13 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Diagnóstico `monan2_import_*.nc`: reunião e gravação em etapas (R-FASE8-05).** Terceira revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `write_mpas_import_diag` (`mpas_cap_netcdf.F90`, 111 linhas de código) juntava as coletivas MPI de todos os PETs com a montagem e a gravação do arquivo no PET 0. Fica com a decomposição (contagens e deslocamentos) e com as coletivas, e dois trechos saem sem mudança:
+    - `gather_cell_coords`: reunião das coordenadas das células no PET 0, com `lonCell` e `latCell` opcionais, como antes; os vetores de destino são `contiguous`, como em `gather_boundary_member`, para que o `MPI_Gatherv` escreva direto neles.
+    - `write_import_diag_file`: no PET 0, grade lat/lon centrada em células, nome do arquivo pela data do relógio (ou pelo contador), eixos, campos e fechamento; incrementa `clk%step`, como antes. Recebe o mesmo prefixo de mensagens.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 22 diferenças são só declarações, cabeçalhos e chamadas das rotinas novas. Gravadores iguais byte a byte, inclusive os `monan2_import_*.nc` (com e sem correntes). Literais iguais (273).
+  - Indicadores: rotinas de 298 para 300; rotinas com mais de 100 linhas de código de 8 para 7.
+
 - **Física bulk: geometria solar e fluxos de água aberta em rotinas próprias (R-FASE8-04).** Segunda revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `calc_bulk_ncar` (`med_bulk_ncar.F90`, 124 linhas de código) misturava o cálculo da hora UTC e da declinação solar a partir do relógio com as fórmulas de fluxo. Os dois trechos saem sem mudança:
     - `solar_time_and_declination(clock, utc_hour, decl, rc)`: dia do ano e hora pelo relógio, com o mesmo recurso ao meio-dia do equinócio se o relógio falhar, e a declinação de Spencer (1971). A constante `PI_ZEN` vai junto.
@@ -17,6 +24,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Saiu da declaração de `PI_ZEN` um comentário sobre o albedo de Briegleb que não tinha relação com ela; o assunto já está documentado em `ocean_direct_albedo`.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 22 diferenças são só declarações, cabeçalhos e chamadas das duas rotinas novas. A física bulk saiu idêntica byte a byte; o teste chama `calc_bulk_ncar` três vezes com um relógio que avança, e passa pelas duas rotinas novas. Literais iguais (35).
   - Indicadores: rotinas de 296 para 298; rotinas com mais de 100 linhas de código de 9 para 8.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-04-validada`).
 
 - **Gravador `monan_export_*.nc` dividido em etapas; último `BLOCK` retirado (R-FASE8-03).** Terceira etapa da fase 8 e primeira das revisões de rotinas longas. Nenhum cálculo muda.
   - `export_write_netcdf` (`mpas_cap_netcdf.F90`, 148 linhas de código) misturava três assuntos: a coordenação do passo, a definição do arquivo NetCDF e a interpolação dos campos. Fica só com a coordenação (inventário do `exportState`, chamadas às etapas, fechamento do arquivo), e a criação e a definição do arquivo (atributos globais, lat, lon, time, uma variável por campo, eixos) vão, sem mudança, para a nova rotina `define_export_file`, que só o PET 0 chama. As mensagens de erro usam o mesmo prefixo, recebido por argumento.
