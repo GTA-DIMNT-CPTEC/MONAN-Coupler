@@ -114,7 +114,7 @@ make clean      # remove build/ e bin/; distclean remove também lib/ e mod/
 make help       # lista os alvos
 ```
 
-Fora da Jaci, sem as bibliotecas dos modelos, `tools/dev/compila-local.bash` compila os fontes do acoplador contra um ESMF local e as interfaces mínimas de `tests/interfaces/`. Com `confere-literais.py`, `confere-instrucoes.py` e o teste dos gravadores (`tests/writers/`), forma o conjunto de conferências feitas antes de levar uma mudança à Jaci; ver [`docs/conferencias-locais.md`](docs/conferencias-locais.md).
+Fora da Jaci, sem as bibliotecas dos modelos, `tools/dev/compila-local.bash` compila os fontes do acoplador contra um ESMF local e as interfaces mínimas de `tests/interfaces/`. Com `confere-literais.py`, `confere-instrucoes.py` e os testes de regressão de `tests/`, forma o conjunto de conferências feitas antes de levar uma mudança à Jaci; `tools/dev/confere-tudo.bash` executa todas de uma vez e mostra os indicadores de código limpo (`tools/dev/indicadores.py`). Ver [`docs/conferencias-locais.md`](docs/conferencias-locais.md).
 
 O código do acoplador é compilado sem fusão de multiplicação e soma (`-ffp-contract=off`, variável `FP_CONTRACT` do Makefile). Com a fusão ligada, o compilador escolhe onde usar a instrução FMA conforme a organização do código, e uma refatoração que não muda nenhum cálculo altera o último bit do resultado. O custo medido foi nulo (rodada de 1 dia com 152 PETs: 142,5 s sem FMA, 144,4 s com). Para ligar a fusão, `make FP_CONTRACT=fast`; isso exige uma linha de base própria.
 
@@ -157,8 +157,10 @@ Guias de uso das ferramentas:
 | [`uso-duplas-rodadas-repro.md`](docs/uso-duplas-rodadas-repro.md) | `roda-repro-reprodiag.sh`, `roda_repro_producao.sh`, `roda_repro_datm_mom6.sh`, `roda-repro-mpas-standalone.sh`, `set-nccmp-jaci.bash` |
 | [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash`, `anota-linha-base.bash` |
 | [`validacao-refatoracao.md`](docs/validacao-refatoracao.md) | `valida_rodada.bash` |
-| [`conferencias-locais.md`](docs/conferencias-locais.md) | `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash` |
+| [`conferencias-locais.md`](docs/conferencias-locais.md) | `confere-tudo.bash`, `indicadores.py`, `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash` |
 | [`historico-scripts.md`](docs/historico-scripts.md) | histórico das versões dos scripts Python de `tools/` |
+| [`roteiro-codigo-limpo.md`](docs/roteiro-codigo-limpo.md) | roteiro das fases 6 a 10 (código limpo), com indicadores e metas |
+| [`conformidade-dtn01.md`](docs/conformidade-dtn01.md) | levantamento de conformidade com o padrão de codificação DTN-01 |
 
 ## Créditos
 

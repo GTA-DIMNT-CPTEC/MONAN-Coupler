@@ -54,9 +54,10 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-04 | comentários do cap atmosférico e de `src/shared` sem marcas de histórico; históricos de `mpas_cap_MONAN` e `mpas_cap_netcdf` resumidos no CHANGELOG |
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
-| R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` (validação pendente) |
+| R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
+| R-FASE6-01 | `confere-tudo.bash` e `indicadores.py`; roteiro de código limpo e levantamento do DTN-01 (validação pendente) |
 
-O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 4, que cobre todas as etapas até a R-FASE4-07).
+O detalhe de cada etapa está em `docs/CHANGELOG.md` e no relatório técnico (RPQ, versão 5, que cobre todas as etapas até a R-FASE5-07).
 
 ## 4. Linhas de base
 
@@ -105,6 +106,8 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | `tools/dev/compara-linha-base.bash` | compara dados (`nccmp -d`) e metadados; opção `-e` confere entradas |
 | `tools/dev/anota-linha-base.bash` | anota o MANIFEST de uma base congelada e atualiza a soma dele (`-r` registra uma edição já feita) |
 | `tests/regrid/` | testes MPI do framework de interpolação (`make test NP=4`) |
+| `tools/dev/confere-tudo.bash` | todas as conferências locais de uma vez, com resumo e indicadores |
+| `tools/dev/indicadores.py` | indicadores de código limpo de uma ou mais versões |
 | `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci (ESMF local e interfaces mínimas de `tests/interfaces/`) |
 | `tools/dev/confere-literais.py` | compara as constantes de texto com as de um commit |
 | `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit |
@@ -154,13 +157,25 @@ Levantamento de 27/09/2026, depois da fase 4. Os números de marcas contam só l
 | 4 | R-FASE5-04 | idem no cap atmosférico e em `src/shared` (`mpas_cap_methods` 14, `mpas_cap_MONAN` 13, `mpas_cap_netcdf` 11, `mpas_atm_model` 3, `mpas_atm_types` 2, `DATM_cap` 2, `shared` 6); também documentação desatualizada e texto corrompido | concluída (PASS, 73 iguais, tag `fase5-04-validada`) |
 | 5 | R-FASE5-05 | dividir `map_cells_to_regular_grid` (`mpas_cap_methods`, 192 linhas de código) | concluída (PASS, 73 iguais, tag `fase5-05-validada`; 40 linhas de código, sete etapas) |
 | 6 | R-FASE5-06 | dividir `InitializeDataComplete` (`MED_cap`, 160) e `blend_albedo_with_ice` (`med_bulk_ncar`, 153; coberta pelo teste da física bulk) | concluída (PASS, 73 iguais, tag `fase5-06-validada`; 48 e 45 linhas de código) |
-| 7 | R-FASE5-07 | scripts de pós-processamento com marcas de histórico nos comentários (`postproc_mom6_import.py` 89, `postproc_monan2_import.py` 63, `mede-taxa-repro.sh` 30 e outros) | entregue (validação pendente); marcas de 268 para 9 nos scripts Python e de 37 para 7 nos bash, as restantes são formatos de log e nomes de diagnóstico |
+| 7 | R-FASE5-07 | scripts de pós-processamento com marcas de histórico nos comentários (`postproc_mom6_import.py` 89, `postproc_monan2_import.py` 63, `mede-taxa-repro.sh` 30 e outros) | concluída (PASS, 73 iguais, tag `fase5-07-validada`); marcas de 268 para 9 nos scripts Python e de 37 para 7 nos bash, as restantes são formatos de log e nomes de diagnóstico |
 
 Para decidir (questão científica, não de refatoração): no cap do gelo, `is%aib%u_star` (velocidade de fricção sobre o gelo) é sempre zero, porque o mediador não a envia; o comentário no código aponta para esta nota.
 
 Para decidir (DATM, fora da configuração de validação): em `DATM_cap.F90`, `ReadJRAFieldInterp` usa a época 2016-01-01 01:30:00 para o arquivo JRA55, enquanto comentários antigos diziam que ela fora trocada para 00:00. Com um arquivo que começa em 00:00, o instante inicial fica antes da época. Mudar a época altera resultados do modo DATM, então é uma decisão separada da limpeza.
 
 Numeração provisória, na ordem da tabela. As etapas 2 a 4 só mudam comentários: a conferência das instruções tem de mostrar zero diferenças.
+
+### Fases 6 a 10: roteiro para código limpo
+
+Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento está em `docs/conformidade-dtn01.md`); a integração de `refactor/principal` ao `develop` só acontece ao fim da limpeza. O roteiro completo, com os indicadores de partida e as metas, está em `docs/roteiro-codigo-limpo.md`.
+
+| Fase | Objetivo | Etapas previstas | Situação |
+| --- | --- | --- | --- |
+| 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 entregue (validação pendente) |
+| 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-04 | a fazer |
+| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 a R-FASE8-03 | a fazer |
+| 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-03 | a fazer |
+| 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
 
 ## 9. Convenções
 

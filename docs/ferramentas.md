@@ -101,6 +101,8 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | `tools/dev/compara-linha-base.bash` | compara a execução atual com uma linha de base, com `nccmp -d` | `docs/uso-linha-base.md` |
 | `tools/dev/anota-linha-base.bash` | acrescenta uma observação ao MANIFEST de uma base congelada e atualiza a soma dele no `SHA256SUMS` | `docs/uso-linha-base.md` |
 | `tools/dev/valida_rodada.bash` | prepara, submete e compara uma rodada de validação na Jaci | `docs/validacao-refatoracao.md` |
+| `tools/dev/confere-tudo.bash` | executa todas as conferências locais (compilação, avisos, literais, testes) e mostra um resumo e os indicadores | `docs/conferencias-locais.md` |
+| `tools/dev/indicadores.py` | mede os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos) de uma ou mais versões | `docs/conferencias-locais.md` |
 | `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
 | `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
 | `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit (etapas que só movem código) | `docs/conferencias-locais.md` |
@@ -143,7 +145,8 @@ Os comandos sugeridos ao fim de cada job pelo `run_esmApp.jaci` usam estes scrip
 **Uma alteração de código que não deveria mudar o resultado.**
 
 1. Antes da alteração, `cria-linha-base.bash`.
-2. Depois, uma execução e `compara-linha-base.bash`.
+2. Fora da Jaci, `confere-tudo.bash`.
+3. Depois, uma execução e `compara-linha-base.bash`.
 
 **Uma alteração que deveria mudar o resultado (correção física, novo campo).**
 

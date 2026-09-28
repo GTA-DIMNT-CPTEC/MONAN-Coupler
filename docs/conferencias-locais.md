@@ -17,12 +17,49 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 
 | Ferramenta | Pergunta que responde |
 | --- | --- |
+| `tools/dev/confere-tudo.bash [REV]` | todas as conferências abaixo, de uma vez: alguma falhou? |
+| `tools/dev/indicadores.py [REV ...]` | como estão os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos)? |
 | `tools/dev/compila-local.bash` | o código compila, com as opções de aviso e de ponto flutuante do Makefile? |
 | `tools/dev/confere-literais.py REV` | alguma mensagem de log, nome de campo, atributo ou formato mudou desde o commit `REV`? |
 | `tools/dev/confere-instrucoes.py REV arquivo` | numa etapa que só move código, alguma instrução foi alterada? |
 | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
+
+### 2.0 Todas as conferências de uma vez
+
+```bash
+export ESMFMKFILE=/caminho/para/esmf.mk
+tools/dev/confere-tudo.bash HEAD
+```
+
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+
+```
+Resumo (referência: HEAD)
+  compilacao   OK                              35 s
+  avisos       OK                              33 s
+  literais     OK                               0 s
+  regrid       OK                              27 s
+  gravadores   OK                              86 s
+  bulk         OK                              82 s
+  grade        OK                              83 s
+```
+
+O que cada linha confere:
+
+| Conferência | Falha quando |
+| --- | --- |
+| `compilacao` | algum fonte não compila (seção 2.1) |
+| `avisos` | algum fonte tem mais avisos do que na versão `REV`, compilada com as mesmas interfaces mínimas |
+| `literais` | alguma constante de texto mudou (seção 2.2) |
+| `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
+| `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
+| `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
+
+A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de seis minutos numa máquina de 4 núcleos e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
+
+Foi conferido ao contrário: uma variável sem uso acrescentada a `nc_writer.F90` faz falhar `avisos` e, com `-i`, `instrucoes`.
 
 ### 2.1 Compilação
 
@@ -85,6 +122,15 @@ Funciona como os dois anteriores. O programa `tests/atmgrid/test_mpas_export.F90
 
 As células seguem uma sequência quase aleatória (razão áurea) própria de cada processo, em faixas de longitude que se sobrepõem: há caixas com células de até três processos, e a ordem da soma entre eles muda o último bit. O teste foi conferido ao contrário: inverter a ordem da soma entre processos ou a ordem das linhas no preenchimento faz o resultado diferir.
 
+### 2.7 Indicadores de código limpo
+
+```bash
+tools/dev/indicadores.py fase5-07-validada .
+tools/dev/indicadores.py -l .
+```
+
+Mede, nos fontes próprios de `src/` (sem `upstream/`), os indicadores do roteiro de código limpo (`docs/roteiro-codigo-limpo.md`): arquivos com mais de 1 000 linhas, rotinas com mais de 100 e de 150 linhas de código, variáveis de módulo (públicas, protegidas e privadas), variáveis locais que conservam o valor entre chamadas (`save` explícito, ou implícito por valor na declaração), trechos de 6 linhas repetidos e comentários com marcas de histórico. Cada versão pedida vira uma coluna (`.` é a árvore de trabalho); com `-l`, lista os itens da última versão. A tabela sai em Markdown, pronta para o CHANGELOG. Os indicadores acompanham a evolução do código; não decidem se uma etapa está certa.
+
 ## 3. Interfaces mínimas
 
 Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
@@ -93,10 +139,7 @@ Uma interface mínima pode estar errada; por isso, antes de confiar nela para um
 
 ## 4. Ordem sugerida antes de entregar uma etapa
 
-1. `tools/dev/compila-local.bash`: nenhum fonte com falha e nenhum aviso novo.
-2. `tools/dev/confere-literais.py HEAD`: nenhuma diferença, ou só as anunciadas.
-3. Em etapas que só movem código: `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado.
-4. Se a etapa mexe em `med_cap_netcdf.F90`, `mpas_cap_netcdf.F90` ou `docn_cap_netcdf.F90`: `tests/writers/compara-gravadores.bash HEAD`.
-5. Se a etapa mexe em `med_bulk_ncar.F90`: `tests/bulk/compara-bulk.bash HEAD`.
-6. Se a etapa mexe em `mpas_cap_methods.F90`: `tests/atmgrid/compara-grade-atm.bash HEAD`.
-7. Rodada na Jaci com `tools/dev/valida_rodada.bash`.
+1. `tools/dev/confere-tudo.bash HEAD` (com `-i` se a etapa só muda comentários ou espaços): resumo sem nenhuma conferência FALHOU; diferenças de literais só as anunciadas.
+2. Em etapas que só movem código: ler a saída de `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado. As instruções acrescentadas devem ser só chamadas, declarações e cabeçalhos das etapas novas; essa leitura não se automatiza.
+3. Copiar para o CHANGELOG as linhas dos indicadores que mudaram.
+4. Rodada na Jaci com `tools/dev/valida_rodada.bash`.
