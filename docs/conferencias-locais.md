@@ -22,6 +22,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tools/dev/confere-instrucoes.py REV arquivo` | numa etapa que só move código, alguma instrução foi alterada? |
 | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
+| `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
 
 ### 2.1 Compilação
 
@@ -74,6 +75,16 @@ Os dados cobrem os casos que mudam o caminho do cálculo: vento nulo, ar mais qu
 
 Ficam de fora o caminho do DOCN e o caminho com `cfg_use_sis2_dynamic = .true.`, porque o teste usa os valores padrão da configuração. Com o padrão, `calc_bulk_ncar` também calcula a fração de gelo pelo limiar de SST (`legacy_ice_fraction`), que fica coberta.
 
+### 2.6 Teste da grade do cap atmosférico
+
+```bash
+tests/atmgrid/compara-grade-atm.bash HEAD
+```
+
+Funciona como os dois anteriores. O programa `tests/atmgrid/test_mpas_export.F90` cria a grade 360 x 180 do cap atmosférico (`mpas_create_grid`) e três campos de exportação, monta em cada processo células MPAS sintéticas e chama `mpas_export` duas vezes. Cada chamada passa por `state_set_field_1d` e `map_cells_to_regular_grid`: soma e contagem por caixa de 1 grau, soma entre processos em ordem de rank, média, preenchimento das caixas vazias e cópia para a porção local da grade. Os campos são reunidos no processo 0 e gravados; o script compara os arquivos byte a byte, a linha `MPAS-DIAG` da saída padrão e as mensagens do log do ESMF (entre elas a marca `BUG-SPARSE-02`, com o número de caixas vazias antes e depois do preenchimento).
+
+As células seguem uma sequência quase aleatória (razão áurea) própria de cada processo, em faixas de longitude que se sobrepõem: há caixas com células de até três processos, e a ordem da soma entre eles muda o último bit. O teste foi conferido ao contrário: inverter a ordem da soma entre processos ou a ordem das linhas no preenchimento faz o resultado diferir.
+
 ## 3. Interfaces mínimas
 
 Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
@@ -87,4 +98,5 @@ Uma interface mínima pode estar errada; por isso, antes de confiar nela para um
 3. Em etapas que só movem código: `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado.
 4. Se a etapa mexe em `med_cap_netcdf.F90`, `mpas_cap_netcdf.F90` ou `docn_cap_netcdf.F90`: `tests/writers/compara-gravadores.bash HEAD`.
 5. Se a etapa mexe em `med_bulk_ncar.F90`: `tests/bulk/compara-bulk.bash HEAD`.
-6. Rodada na Jaci com `tools/dev/valida_rodada.bash`.
+6. Se a etapa mexe em `mpas_cap_methods.F90`: `tests/atmgrid/compara-grade-atm.bash HEAD`.
+7. Rodada na Jaci com `tools/dev/valida_rodada.bash`.

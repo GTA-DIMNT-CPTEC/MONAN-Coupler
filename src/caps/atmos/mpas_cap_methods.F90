@@ -891,306 +891,375 @@ contains
     rc = ESMF_SUCCESS
   end subroutine state_set_field_1d
 
+  !> @brief Leva os valores das células MPAS à grade regular 360x180 (média).
+  !!
+  !! Etapas: bin_cells_local (soma e contagem locais por caixa de 1 grau),
+  !! mpas_mpi_comm (comunicador do componente), ordered_sum_bcast (soma
+  !! reprodutível entre PETs), média soma/contagem, fill_empty_bins
+  !! (preenchimento das caixas sem célula), diagnósticos no log e
+  !! copy_to_local_grid (porção local de fptr2d, na convenção [-180,180)).
   subroutine map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
-    real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
     integer, parameter :: N_FILL_ITER = 12
-    real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
     character(len=*), parameter :: subname = '(state_set_field_1d)'
     integer, intent(in) :: n
     character(len=*), intent(in) :: fldname
     integer, intent(inout) :: rc
-    real(MPAS_RKIND), optional, intent(in) :: lon_rad(:)
-    real(MPAS_RKIND), optional, intent(in) :: lat_rad(:)
+    real(MPAS_RKIND), intent(in) :: lon_rad(:)
+    real(MPAS_RKIND), intent(in) :: lat_rad(:)
     real(MPAS_RKIND), intent(in) :: data(n)
     real(ESMF_KIND_R8), pointer :: fptr2d(:,:)
-    real(ESMF_KIND_R8) :: avg_dup_val
     real(ESMF_KIND_R8), allocatable :: buf_global(:,:)
-    real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
     real(ESMF_KIND_R8), allocatable :: count_global(:,:)
     real(ESMF_KIND_R8), allocatable :: count_local(:,:)
-    integer :: di_f
-    integer :: dj_f
-    integer :: ia_f
-    integer :: icell
-    integer :: ierr_red
-    integer :: ig
-    integer :: ig_buf
-    integer :: ii
-    integer :: ii_f
-    integer :: iPet_red
-    integer :: ja_f
-    integer :: jg
-    integer :: jj
-    integer :: jj_f
-    real(ESMF_KIND_R8) :: lat_d
-    real(ESMF_KIND_R8) :: lon_0360_d
-    real(ESMF_KIND_R8) :: lon_d
-    real(ESMF_KIND_R8) :: lon_ii_d
-    integer :: mpi_comm_use
-    integer :: my_pet
-    integer :: myRank_red
-    integer :: n_cov
-    integer :: n_holes_post
-    integer :: n_holes_pre
-    integer :: n_it
-    integer :: n_max_dup
-    integer :: n_nbr_f
-    integer :: nPets_red
-    real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
     real(ESMF_KIND_R8), allocatable :: sum_global(:,:)
     real(ESMF_KIND_R8), allocatable :: sum_local(:,:)
-    real(ESMF_KIND_R8) :: sum_nbr_f
+    integer :: mpi_comm_use
+    integer :: n_holes_post
+    integer :: n_holes_pre
     type(ESMF_VM) :: vm_local
-    type(ESMF_VM) :: vm_v
-    character(len=240) :: vmsg
-          allocate(sum_local(ATM_NX, ATM_NY),   sum_global(ATM_NX, ATM_NY))
-          allocate(count_local(ATM_NX, ATM_NY), count_global(ATM_NX, ATM_NY))
-          allocate(buf_global(ATM_NX, ATM_NY))
-          sum_local    = 0.0_ESMF_KIND_R8
-          count_local  = 0.0_ESMF_KIND_R8
 
-          ! 1. Acumular valor + contagem por célula regular (várias Voronoi → 1 célula)
-          do icell = 1, min(n, size(lon_rad))
-            lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
-            lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
-            lon_d = lon_d - floor(lon_d / 360.0_ESMF_KIND_R8) * 360.0_ESMF_KIND_R8
-            ig = int(lon_d / DLON) + 1
-            jg = int((lat_d + 90.0_ESMF_KIND_R8) / DLAT) + 1
-            ig = max(1, min(ig, ATM_NX))
-            jg = max(1, min(jg, ATM_NY))
-            sum_local(ig, jg)   = sum_local(ig, jg) + real(data(icell), ESMF_KIND_R8)
-            count_local(ig, jg) = count_local(ig, jg) + 1.0_ESMF_KIND_R8
-          end do
+    allocate(sum_local(ATM_NX, ATM_NY),   sum_global(ATM_NX, ATM_NY))
+    allocate(count_local(ATM_NX, ATM_NY), count_global(ATM_NX, ATM_NY))
+    allocate(buf_global(ATM_NX, ATM_NY))
 
-          ! 2. Obter comunicador MPI do VM ESMF (mesmo do MPAS-A)
-          !
-          ! Não cair para MPI_COMM_WORLD.
-          ! No modo concurrent o MPAS roda em subconjunto próprio de PETs; os
-          ! dois MPI_Allreduce abaixo gatheram os tiles Voronoi disjuntos SOBRE
-          ! esse subconjunto. Usar MPI_COMM_WORLD (todos os ranks, inclusive os
-          ! PETs do OCN, que NÃO executam este código) travaria o coletivo —
-          ! deadlock. Um erro de VM é excepcional; abortar limpo (rc de saída)
-          ! é preferível a mascarar com um comunicador errado.
-          call ESMF_VMGetCurrent(vm_local, rc=rc)
-          if (rc /= ESMF_SUCCESS) then
-            call ESMF_LogWrite(subname//': falha ESMF_VMGetCurrent no gather '// &
-              'Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
-            return
-          end if
-          call ESMF_VMGet(vm_local, mpiCommunicator=mpi_comm_use, rc=rc)
-          if (rc /= ESMF_SUCCESS) then
-            call ESMF_LogWrite(subname//': falha ESMF_VMGet mpiCommunicator no '// &
-              'gather Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
-            return
-          end if
+    ! 1. Acumular valor + contagem por célula regular (várias Voronoi → 1 célula)
+    call bin_cells_local(n, lon_rad, lat_rad, data, sum_local, count_local)
 
-          !--------------------------------------------------------------------
-          ! 3. Reducao das somas e contagens (tiles Voronoi disjuntos por PET)
-          !
-          ! Gather em ordem de rank mais
-          ! soma local, em lugar de MPI_Allreduce(MPI_SUM).
-          !
-          ! O PROBLEMA. Com avg_dup = 1,35 e max_dup = 2 (ver o diagnostico
-          ! MPAS-DIAG abaixo), e' comum que duas celulas Voronoi caiam na mesma
-          ! caixa de 1 grau da grade regular. Quando as duas estao em PETs
-          ! diferentes, a soma daquela caixa e' feita PELA coletiva. Soma de
-          ! ponto flutuante nao e' associativa, e o padrao MPI nao exige que a
-          ! arvore de reducao seja identica entre execucoes: o MPICH pode
-          ! escolher arvores diferentes conforme o momento. O resultado varia
-          ! no ultimo bit de uma execucao para outra.
-          !
-          ! POR QUE O REPRO_MPI NAO RESOLVEU. MPICH_ALLREDUCE_NO_SMP=1 desliga
-          ! a soma parcial por no, e MPICH_SHARED_MEM_COLL_OPT=0 desliga a
-          ! coletiva otimizada em memoria compartilhada, mas nenhuma das duas
-          ! promete reprodutibilidade bit a bit entre execucoes, porque o
-          ! padrao MPI nao a exige. O teste com REPRO_MPI=1 foi executado e
-          ! verificado (despejo do MPICH_ENV_DISPLAY em logs/esmApp_run.log) e
-          ! a divergencia persistiu: isso e' consistente com este mecanismo,
-          ! nao contra ele.
-          !
-          ! O CONSERTO. MPI_Gather traz os arranjos locais de TODOS os PETs a
-          ! um unico PET, que soma em ordem CRESCENTE DE RANK, ordem fixa e
-          ! independente de topologia e de tempo de chegada. O MPI_Bcast
-          ! devolve o resultado, de modo que todos os PETs ficam com o MESMO
-          ! valor, que era a garantia dada pelo Allreduce anterior.
-          !
-          ! CUSTO. Os arranjos sao NX_G*NY_G = 64800 dobros, cerca de 520 kB
-          ! cada. Com 64 PETs o buffer do gather chega a 33 MB por arranjo no
-          ! PET raiz, alocado e liberado a cada chamada. A soma no raiz e'
-          ! O(nPets * 64800). Tudo isso acontece uma vez por campo por janela
-          ! de acoplamento, nao por passo de tempo do modelo.
-          !
-          ! ALTERNATIVA DESCARTADA. MPI_Reduce mais MPI_Bcast seria mais
-          ! economico em memoria, mas o MPI_Reduce tem exatamente o mesmo
-          ! problema: a ordem da soma fica a cargo da implementacao. Trocar
-          ! Allreduce por Reduce nao consertaria nada.
-          !--------------------------------------------------------------------
+    ! 2. Comunicador MPI do VM ESMF (mesmo do MPAS-A)
+    call mpas_mpi_comm(subname, vm_local, mpi_comm_use, rc)
+    if (rc /= ESMF_SUCCESS) return
 
-            call MPI_Comm_size(mpi_comm_use, nPets_red,  ierr_red)
-            call MPI_Comm_rank(mpi_comm_use, myRank_red, ierr_red)
+    ! 3. Reducao das somas e contagens (tiles Voronoi disjuntos por PET)
+    call ordered_sum_bcast(sum_local, count_local, sum_global, count_global, &
+                           mpi_comm_use)
 
-            if (myRank_red == 0) then
-              allocate(sum_gath(ATM_NX, ATM_NY, nPets_red))
-              allocate(cnt_gath(ATM_NX, ATM_NY, nPets_red))
-            else
-              ! Alocacao minima: o buffer de recepcao so' e' lido no raiz, mas
-              ! precisa existir como argumento valido em todos os ranks.
-              allocate(sum_gath(1,1,1), cnt_gath(1,1,1))
-            end if
+    ! 4. Média: dividir soma por contagem (preserva 0 onde contagem=0)
+    where (count_global > 0.5_ESMF_KIND_R8)
+      buf_global = sum_global / count_global
+    elsewhere
+      buf_global = 0.0_ESMF_KIND_R8
+    end where
 
-            call MPI_Gather(sum_local,  ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                            sum_gath,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                            0, mpi_comm_use, ierr_red)
-            call MPI_Gather(count_local, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                            cnt_gath,    ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                            0, mpi_comm_use, ierr_red)
+    ! Preenchimento espacial das caixas sem célula Voronoi
+    call fill_empty_bins(N_FILL_ITER, buf_global, count_global, &
+                         n_holes_pre, n_holes_post)
+    call log_fill_marker(fldname, N_FILL_ITER, n_holes_pre, n_holes_post, rc)
+    call log_dup_diag(vm_local, fldname, n, count_global, rc)
 
-            if (myRank_red == 0) then
-              ! Soma em ordem crescente de rank: ordem fixa, reprodutivel.
-              sum_global   = 0.0_ESMF_KIND_R8
-              count_global = 0.0_ESMF_KIND_R8
-              do iPet_red = 1, nPets_red
-                sum_global   = sum_global   + sum_gath(:,:,iPet_red)
-                count_global = count_global + cnt_gath(:,:,iPet_red)
-              end do
-            end if
+    ! 5. Copiar do buffer global para a porção LOCAL da fptr2d.
+    call copy_to_local_grid(buf_global, fptr2d)
 
-            call MPI_Bcast(sum_global,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                           0, mpi_comm_use, ierr_red)
-            call MPI_Bcast(count_global, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
-                           0, mpi_comm_use, ierr_red)
-
-            deallocate(sum_gath, cnt_gath)
-          if (allocated(sum_gath)) deallocate(sum_gath)
-          if (allocated(cnt_gath)) deallocate(cnt_gath)
-
-          ! 4. Média: dividir soma por contagem (preserva 0 onde contagem=0)
-          where (count_global > 0.5_ESMF_KIND_R8)
-            buf_global = sum_global / count_global
-          elsewhere
-            buf_global = 0.0_ESMF_KIND_R8
-          end where
-
-          ! Preenchimento espacial para células com count=0.
-          ! Quando a malha MPAS é mais esparsa que 1°×1°, alguns bins da grade
-          ! regular ficam sem nenhum centro Voronoi → count_global=0 → buf=0, com
-          ! listras verticais nos campos de fluxo. 12 iterações cobrem lacunas de
-          ! até ~12° de largura (a faixa em i_nativo=172..177, no Pacífico, tem ~6°).
-          !
-          ! Verificação do build: para Sa_u10m_mpas, o PET 0 escreve no log a marca
-          ! '##### v7.6 ATIVO #####' (texto mantido como está no código).
-
-            ! Diagnóstico pré-fill
-            n_holes_pre = count(count_global < 0.5_ESMF_KIND_R8)
-
-            do n_it = 1, N_FILL_ITER
-              do jj_f = 1, ATM_NY
-                do ii_f = 1, ATM_NX
-                  if (count_global(ii_f, jj_f) < 0.5_ESMF_KIND_R8) then
-                    n_nbr_f   = 0
-                    sum_nbr_f = 0.0_ESMF_KIND_R8
-                    do dj_f = -1, 1
-                      do di_f = -1, 1
-                        if (di_f == 0 .and. dj_f == 0) cycle
-                        ia_f = mod(ii_f + di_f - 1 + ATM_NX, ATM_NX) + 1
-                        ja_f = max(1, min(jj_f + dj_f, ATM_NY))
-                        if (count_global(ia_f, ja_f) >= 0.5_ESMF_KIND_R8) then
-                          sum_nbr_f = sum_nbr_f + buf_global(ia_f, ja_f)
-                          n_nbr_f   = n_nbr_f + 1
-                        end if
-                      end do
-                    end do
-                    if (n_nbr_f > 0) then
-                      buf_global(ii_f, jj_f)   = sum_nbr_f / real(n_nbr_f, ESMF_KIND_R8)
-                      count_global(ii_f, jj_f) = 0.5_ESMF_KIND_R8
-                    end if
-                  end if
-                end do
-              end do
-            end do
-
-            n_holes_post = count(count_global < 0.5_ESMF_KIND_R8)
-
-            ! VERIFICAÇÃO DE BUILD + DIAGNÓSTICO (PET 0, campo de referência)
-              call ESMF_VMGetCurrent(vm_v, rc=rc)
-              if (rc == ESMF_SUCCESS) then
-                call ESMF_VMGet(vm_v, localPet=my_pet, rc=rc)
-                rc = ESMF_SUCCESS
-                if (my_pet == 0 .and. trim(fldname) == 'Sa_u10m_mpas') then
-                    write(vmsg, '(A,A,A,I0,A,I0,A,I0,A)') &
-                      '##### BUG-SPARSE-02 v7.6 ATIVO ##### campo=', &
-                      trim(fldname), ' buracos_pre_fill=', n_holes_pre, &
-                      ' buracos_pos_fill=', n_holes_post, &
-                      ' (N_FILL_ITER=', N_FILL_ITER, ')'
-                    call ESMF_LogWrite(trim(vmsg), ESMF_LOGMSG_INFO)
-                end if
-              end if
-              rc = ESMF_SUCCESS
-
-          ! Diagnóstico (apenas para Sa_pslv_mpas, no PET 0)
-          ! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 ! (Fortran é estrito).
-            call ESMF_VMGet(vm_local, localPet=my_pet, rc=rc)
-            if (my_pet == 0 .and. trim(fldname) == 'Sa_pslv_mpas') then
-              n_cov     = int(sum(count_global))
-              n_max_dup = int(maxval(count_global))
-              avg_dup_val = sum(count_global) / &
-                max(1.0_ESMF_KIND_R8, real(count(count_global > 0.5_ESMF_KIND_R8), ESMF_KIND_R8))
-              write(*,'(3A,I0,A,I0,A,I0,A,F8.4)') &
-                '[MPAS-DIAG] ', trim(fldname), ': n_local=', n, &
-                '  cells_cov=',  n_cov, &
-                '  max_dup=',    n_max_dup, &
-                '  avg_dup=',    avg_dup_val
-              flush(6)
-            end if
-
-          ! 5. Copiar do buffer global para a porção LOCAL da fptr2d.
-          !
-          ! a grade MPAS (mpas_create_grid) usa a
-          ! convenção [-180°,180°] para longitude: coordX(ii) = -180+(ii-0.5)°.
-          ! O buf_global usa a convenção [0°,360°): bin ig corresponde à faixa
-          ! [(ig-1)°, ig°), centro ≈ ig-0.5°. A cópia direta fptr2d(ii)=buf_global(ii)
-          ! coloca dados do bin 0°-1° na posição geográfica -179.5° — deslocamento de
-          ! 180°, gerando caixa retangular e padrões geograficamente errados.
-          !
-          ! Correção: para cada índice global ii da grade [-180,180], calcular
-          ! a longitude geográfica correspondente, converter para [0,360) e usar
-          ! o bin correto de buf_global.
-          !   lon_ii  = -180 + (ii - 0.5) * DLON       [graus, pode ser negativo]
-          !   lon_0360 = lon_ii + 360  se lon_ii < 0   [graus, em [0,360)]
-          !   ig_buf   = int(lon_0360 / DLON) + 1       [índice em buf_global]
-          !
-          !   Exemplos:
-          !   ii=1   → lon=-179.5° → lon_0360=180.5° → ig_buf=181 ✓
-          !   ii=181 → lon=  0.5°  → lon_0360=  0.5° → ig_buf=  1 ✓
-          !   ii=360 → lon=179.5°  → lon_0360=179.5° → ig_buf=180 ✓
-          fptr2d = 0.0_ESMF_KIND_R8
-          do jj = lbound(fptr2d,2), ubound(fptr2d,2)
-            do ii = lbound(fptr2d,1), ubound(fptr2d,1)
-              if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
-                  lon_ii_d   = -180.0_ESMF_KIND_R8 + &
-                               (real(ii, ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * DLON
-                  lon_0360_d = lon_ii_d
-                  if (lon_0360_d < 0.0_ESMF_KIND_R8) lon_0360_d = lon_0360_d + 360.0_ESMF_KIND_R8
-                  ig_buf = int(lon_0360_d / DLON) + 1
-                  ig_buf = max(1, min(ig_buf, ATM_NX))
-                  fptr2d(ii, jj) = buf_global(ig_buf, jj)
-              end if
-            end do
-          end do
-
-          deallocate(sum_local, sum_global, count_local, count_global, buf_global)
-        if (allocated(sum_local)) deallocate(sum_local)
-        if (allocated(sum_global)) deallocate(sum_global)
-        if (allocated(count_local)) deallocate(count_local)
-        if (allocated(count_global)) deallocate(count_global)
-        if (allocated(buf_global)) deallocate(buf_global)
-        if (allocated(sum_gath)) deallocate(sum_gath)
-        if (allocated(cnt_gath)) deallocate(cnt_gath)
+    deallocate(sum_local, sum_global, count_local, count_global, buf_global)
 
     ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
     ! tolerado acima não interrompe quem chamou a etapa).
     rc = ESMF_SUCCESS
   end subroutine map_cells_to_regular_grid
+
+  !> Soma e contagem, por caixa de 1 grau da grade regular em [0°,360°),
+  !! das células MPAS locais deste PET.
+  subroutine bin_cells_local(n, lon_rad, lat_rad, data, sum_local, count_local)
+    real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
+    real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
+    integer, intent(in) :: n
+    real(MPAS_RKIND), intent(in) :: lon_rad(:)
+    real(MPAS_RKIND), intent(in) :: lat_rad(:)
+    real(MPAS_RKIND), intent(in) :: data(n)
+    real(ESMF_KIND_R8), intent(out) :: sum_local(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(out) :: count_local(ATM_NX, ATM_NY)
+    integer :: icell
+    integer :: ig
+    integer :: jg
+    real(ESMF_KIND_R8) :: lat_d
+    real(ESMF_KIND_R8) :: lon_d
+
+    sum_local    = 0.0_ESMF_KIND_R8
+    count_local  = 0.0_ESMF_KIND_R8
+    do icell = 1, min(n, size(lon_rad))
+      lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
+      lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
+      lon_d = lon_d - floor(lon_d / 360.0_ESMF_KIND_R8) * 360.0_ESMF_KIND_R8
+      ig = int(lon_d / DLON) + 1
+      jg = int((lat_d + 90.0_ESMF_KIND_R8) / DLAT) + 1
+      ig = max(1, min(ig, ATM_NX))
+      jg = max(1, min(jg, ATM_NY))
+      sum_local(ig, jg)   = sum_local(ig, jg) + real(data(icell), ESMF_KIND_R8)
+      count_local(ig, jg) = count_local(ig, jg) + 1.0_ESMF_KIND_R8
+    end do
+  end subroutine bin_cells_local
+
+  !> Comunicador MPI do componente em execução (o do MPAS-A).
+  !!
+  !! Não cair para MPI_COMM_WORLD. No modo concurrent o MPAS roda em
+  !! subconjunto próprio de PETs, e as coletivas de ordered_sum_bcast
+  !! reúnem os tiles Voronoi disjuntos SOBRE esse subconjunto. Usar
+  !! MPI_COMM_WORLD (todos os ranks, inclusive os PETs do OCN, que NÃO
+  !! executam este código) travaria o coletivo: deadlock. Um erro de VM é
+  !! excepcional; abortar limpo (rc de saída) é preferível a mascarar com um
+  !! comunicador errado.
+  subroutine mpas_mpi_comm(subname, vm_local, mpi_comm_use, rc)
+    character(len=*), intent(in) :: subname
+    type(ESMF_VM), intent(out) :: vm_local
+    integer, intent(out) :: mpi_comm_use
+    integer, intent(inout) :: rc
+
+    call ESMF_VMGetCurrent(vm_local, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': falha ESMF_VMGetCurrent no gather '// &
+        'Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+      return
+    end if
+    call ESMF_VMGet(vm_local, mpiCommunicator=mpi_comm_use, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': falha ESMF_VMGet mpiCommunicator no '// &
+        'gather Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+      return
+    end if
+  end subroutine mpas_mpi_comm
+
+  !> Soma entre PETs, reprodutível, das somas e contagens locais.
+  !!
+  !! Gather em ordem de rank mais soma local, em lugar de
+  !! MPI_Allreduce(MPI_SUM).
+  !!
+  !! O PROBLEMA. Com avg_dup = 1,35 e max_dup = 2 (ver o diagnostico
+  !! MPAS-DIAG em log_dup_diag), e' comum que duas celulas Voronoi caiam na
+  !! mesma caixa de 1 grau da grade regular. Quando as duas estao em PETs
+  !! diferentes, a soma daquela caixa e' feita PELA coletiva. Soma de ponto
+  !! flutuante nao e' associativa, e o padrao MPI nao exige que a arvore de
+  !! reducao seja identica entre execucoes: o MPICH pode escolher arvores
+  !! diferentes conforme o momento. O resultado varia no ultimo bit de uma
+  !! execucao para outra.
+  !!
+  !! POR QUE O REPRO_MPI NAO RESOLVEU. MPICH_ALLREDUCE_NO_SMP=1 desliga a
+  !! soma parcial por no, e MPICH_SHARED_MEM_COLL_OPT=0 desliga a coletiva
+  !! otimizada em memoria compartilhada, mas nenhuma das duas promete
+  !! reprodutibilidade bit a bit entre execucoes, porque o padrao MPI nao a
+  !! exige. O teste com REPRO_MPI=1 foi executado e verificado (despejo do
+  !! MPICH_ENV_DISPLAY em logs/esmApp_run.log) e a divergencia persistiu:
+  !! isso e' consistente com este mecanismo, nao contra ele.
+  !!
+  !! A SOLUCAO. MPI_Gather traz os arranjos locais de TODOS os PETs a um
+  !! unico PET, que soma em ordem CRESCENTE DE RANK, ordem fixa e
+  !! independente de topologia e de tempo de chegada. O MPI_Bcast devolve o
+  !! resultado, de modo que todos os PETs ficam com o MESMO valor, a mesma
+  !! garantia do Allreduce.
+  !!
+  !! CUSTO. Os arranjos sao NX_G*NY_G = 64800 dobros, cerca de 520 kB cada.
+  !! Com 64 PETs o buffer do gather chega a 33 MB por arranjo no PET raiz,
+  !! alocado e liberado a cada chamada. A soma no raiz e' O(nPets * 64800).
+  !! Tudo isso acontece uma vez por campo por janela de acoplamento, nao por
+  !! passo de tempo do modelo.
+  !!
+  !! ALTERNATIVA DESCARTADA. MPI_Reduce mais MPI_Bcast seria mais economico
+  !! em memoria, mas o MPI_Reduce tem exatamente o mesmo problema: a ordem
+  !! da soma fica a cargo da implementacao.
+  subroutine ordered_sum_bcast(sum_local, count_local, sum_global, count_global, &
+                               mpi_comm_use)
+    real(ESMF_KIND_R8), intent(in)  :: sum_local(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(in)  :: count_local(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(out) :: sum_global(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(out) :: count_global(ATM_NX, ATM_NY)
+    integer, intent(in) :: mpi_comm_use
+    real(ESMF_KIND_R8), allocatable :: cnt_gath(:,:,:)
+    real(ESMF_KIND_R8), allocatable :: sum_gath(:,:,:)
+    integer :: ierr_red
+    integer :: iPet_red
+    integer :: myRank_red
+    integer :: nPets_red
+
+    call MPI_Comm_size(mpi_comm_use, nPets_red,  ierr_red)
+    call MPI_Comm_rank(mpi_comm_use, myRank_red, ierr_red)
+
+    if (myRank_red == 0) then
+      allocate(sum_gath(ATM_NX, ATM_NY, nPets_red))
+      allocate(cnt_gath(ATM_NX, ATM_NY, nPets_red))
+    else
+      ! Alocacao minima: o buffer de recepcao so' e' lido no raiz, mas
+      ! precisa existir como argumento valido em todos os ranks.
+      allocate(sum_gath(1,1,1), cnt_gath(1,1,1))
+    end if
+
+    call MPI_Gather(sum_local,  ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                    sum_gath,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                    0, mpi_comm_use, ierr_red)
+    call MPI_Gather(count_local, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                    cnt_gath,    ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                    0, mpi_comm_use, ierr_red)
+
+    if (myRank_red == 0) then
+      ! Soma em ordem crescente de rank: ordem fixa, reprodutivel.
+      sum_global   = 0.0_ESMF_KIND_R8
+      count_global = 0.0_ESMF_KIND_R8
+      do iPet_red = 1, nPets_red
+        sum_global   = sum_global   + sum_gath(:,:,iPet_red)
+        count_global = count_global + cnt_gath(:,:,iPet_red)
+      end do
+    end if
+
+    call MPI_Bcast(sum_global,   ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                   0, mpi_comm_use, ierr_red)
+    call MPI_Bcast(count_global, ATM_NX*ATM_NY, MPI_DOUBLE_PRECISION, &
+                   0, mpi_comm_use, ierr_red)
+
+    deallocate(sum_gath, cnt_gath)
+  end subroutine ordered_sum_bcast
+
+  !> Preenche as caixas sem célula Voronoi (count_global < 0,5) com a média
+  !! dos vizinhos preenchidos, em n_iter passadas.
+  !!
+  !! Quando a malha MPAS é mais esparsa que 1°×1°, alguns bins da grade
+  !! regular ficam sem nenhum centro Voronoi → count_global=0 → buf=0, com
+  !! listras verticais nos campos de fluxo. 12 iterações cobrem lacunas de
+  !! até ~12° de largura (a faixa em i_nativo=172..177, no Pacífico, tem ~6°).
+  !! A caixa preenchida recebe contagem 0,5 e passa a servir de vizinha na
+  !! mesma passada (a ordem dos laços faz parte do resultado).
+  subroutine fill_empty_bins(n_iter, buf_global, count_global, n_holes_pre, n_holes_post)
+    integer, intent(in) :: n_iter
+    real(ESMF_KIND_R8), intent(inout) :: buf_global(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), intent(inout) :: count_global(ATM_NX, ATM_NY)
+    integer, intent(out) :: n_holes_pre
+    integer, intent(out) :: n_holes_post
+    integer :: di_f
+    integer :: dj_f
+    integer :: ia_f
+    integer :: ii_f
+    integer :: ja_f
+    integer :: jj_f
+    integer :: n_it
+    integer :: n_nbr_f
+    real(ESMF_KIND_R8) :: sum_nbr_f
+
+    n_holes_pre = count(count_global < 0.5_ESMF_KIND_R8)
+
+    do n_it = 1, n_iter
+      do jj_f = 1, ATM_NY
+        do ii_f = 1, ATM_NX
+          if (count_global(ii_f, jj_f) < 0.5_ESMF_KIND_R8) then
+            n_nbr_f   = 0
+            sum_nbr_f = 0.0_ESMF_KIND_R8
+            do dj_f = -1, 1
+              do di_f = -1, 1
+                if (di_f == 0 .and. dj_f == 0) cycle
+                ia_f = mod(ii_f + di_f - 1 + ATM_NX, ATM_NX) + 1
+                ja_f = max(1, min(jj_f + dj_f, ATM_NY))
+                if (count_global(ia_f, ja_f) >= 0.5_ESMF_KIND_R8) then
+                  sum_nbr_f = sum_nbr_f + buf_global(ia_f, ja_f)
+                  n_nbr_f   = n_nbr_f + 1
+                end if
+              end do
+            end do
+            if (n_nbr_f > 0) then
+              buf_global(ii_f, jj_f)   = sum_nbr_f / real(n_nbr_f, ESMF_KIND_R8)
+              count_global(ii_f, jj_f) = 0.5_ESMF_KIND_R8
+            end if
+          end if
+        end do
+      end do
+    end do
+
+    n_holes_post = count(count_global < 0.5_ESMF_KIND_R8)
+  end subroutine fill_empty_bins
+
+  !> Marca de verificação do build no log (PET 0, campo Sa_u10m_mpas), com
+  !! o número de caixas vazias antes e depois do preenchimento. O texto
+  !! '##### BUG-SPARSE-02 v7.6 ATIVO #####' é constante e fica como está.
+  subroutine log_fill_marker(fldname, n_iter, n_holes_pre, n_holes_post, rc)
+    character(len=*), intent(in) :: fldname
+    integer, intent(in) :: n_iter
+    integer, intent(in) :: n_holes_pre
+    integer, intent(in) :: n_holes_post
+    integer, intent(inout) :: rc
+    integer :: my_pet
+    type(ESMF_VM) :: vm_v
+    character(len=240) :: vmsg
+
+    call ESMF_VMGetCurrent(vm_v, rc=rc)
+    if (rc == ESMF_SUCCESS) then
+      call ESMF_VMGet(vm_v, localPet=my_pet, rc=rc)
+      rc = ESMF_SUCCESS
+      if (my_pet == 0 .and. trim(fldname) == 'Sa_u10m_mpas') then
+          write(vmsg, '(A,A,A,I0,A,I0,A,I0,A)') &
+            '##### BUG-SPARSE-02 v7.6 ATIVO ##### campo=', &
+            trim(fldname), ' buracos_pre_fill=', n_holes_pre, &
+            ' buracos_pos_fill=', n_holes_post, &
+            ' (N_FILL_ITER=', n_iter, ')'
+          call ESMF_LogWrite(trim(vmsg), ESMF_LOGMSG_INFO)
+      end if
+    end if
+    rc = ESMF_SUCCESS
+  end subroutine log_fill_marker
+
+  !> Diagnóstico de cobertura e duplicação (PET 0, campo Sa_pslv_mpas).
+  !! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 (Fortran é estrito).
+  subroutine log_dup_diag(vm_local, fldname, n, count_global, rc)
+    type(ESMF_VM), intent(in) :: vm_local
+    character(len=*), intent(in) :: fldname
+    integer, intent(in) :: n
+    real(ESMF_KIND_R8), intent(in) :: count_global(ATM_NX, ATM_NY)
+    integer, intent(inout) :: rc
+    real(ESMF_KIND_R8) :: avg_dup_val
+    integer :: my_pet
+    integer :: n_cov
+    integer :: n_max_dup
+
+    call ESMF_VMGet(vm_local, localPet=my_pet, rc=rc)
+    if (my_pet == 0 .and. trim(fldname) == 'Sa_pslv_mpas') then
+      n_cov     = int(sum(count_global))
+      n_max_dup = int(maxval(count_global))
+      avg_dup_val = sum(count_global) / &
+        max(1.0_ESMF_KIND_R8, real(count(count_global > 0.5_ESMF_KIND_R8), ESMF_KIND_R8))
+      write(*,'(3A,I0,A,I0,A,I0,A,F8.4)') &
+        '[MPAS-DIAG] ', trim(fldname), ': n_local=', n, &
+        '  cells_cov=',  n_cov, &
+        '  max_dup=',    n_max_dup, &
+        '  avg_dup=',    avg_dup_val
+      flush(6)
+    end if
+  end subroutine log_dup_diag
+
+  !> Copia do buffer global (convenção [0°,360°)) para a porção LOCAL de
+  !! fptr2d, cuja grade (mpas_create_grid) usa a convenção [-180°,180°):
+  !! coordX(ii) = -180+(ii-0.5)°. No buffer, o bin ig corresponde à faixa
+  !! [(ig-1)°, ig°), centro ≈ ig-0.5°. A cópia direta fptr2d(ii)=buf_global(ii)
+  !! poria o dado do bin 0°-1° na posição -179.5°, um deslocamento de 180°.
+  !!
+  !! Para cada índice global ii da grade [-180,180), calcula-se a longitude
+  !! geográfica correspondente, convertida para [0,360), e usa-se o bin
+  !! correto de buf_global:
+  !!   lon_ii  = -180 + (ii - 0.5) * DLON       [graus, pode ser negativo]
+  !!   lon_0360 = lon_ii + 360  se lon_ii < 0   [graus, em [0,360)]
+  !!   ig_buf   = int(lon_0360 / DLON) + 1       [índice em buf_global]
+  !!
+  !!   Exemplos:
+  !!   ii=1   → lon=-179.5° → lon_0360=180.5° → ig_buf=181
+  !!   ii=181 → lon=  0.5°  → lon_0360=  0.5° → ig_buf=  1
+  !!   ii=360 → lon=179.5°  → lon_0360=179.5° → ig_buf=180
+  subroutine copy_to_local_grid(buf_global, fptr2d)
+    real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
+    real(ESMF_KIND_R8), intent(in) :: buf_global(ATM_NX, ATM_NY)
+    real(ESMF_KIND_R8), pointer :: fptr2d(:,:)
+    integer :: ig_buf
+    integer :: ii
+    integer :: jj
+    real(ESMF_KIND_R8) :: lon_0360_d
+    real(ESMF_KIND_R8) :: lon_ii_d
+
+    fptr2d = 0.0_ESMF_KIND_R8
+    do jj = lbound(fptr2d,2), ubound(fptr2d,2)
+      do ii = lbound(fptr2d,1), ubound(fptr2d,1)
+        if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
+            lon_ii_d   = -180.0_ESMF_KIND_R8 + &
+                         (real(ii, ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * DLON
+            lon_0360_d = lon_ii_d
+            if (lon_0360_d < 0.0_ESMF_KIND_R8) lon_0360_d = lon_0360_d + 360.0_ESMF_KIND_R8
+            ig_buf = int(lon_0360_d / DLON) + 1
+            ig_buf = max(1, min(ig_buf, ATM_NX))
+            fptr2d(ii, jj) = buf_global(ig_buf, jj)
+        end if
+      end do
+    end do
+  end subroutine copy_to_local_grid
 
 
 end module mpas_cap_methods_mod
