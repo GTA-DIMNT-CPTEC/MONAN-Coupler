@@ -80,9 +80,18 @@ Com o estado explícito, dá para separar os arquivos grandes por assunto sem cr
 | --- | --- | --- |
 | R-FASE8-01 | `MED_cap.F90` (3 379 linhas) dividido: o arquivo principal fica com os pontos de entrada NUOPC; saem `med_init` (grades, campos, rotas, verificação de cantos), `med_ice` (gelo na grade da atmosfera, 9 rotinas), `med_ocean` (SST, máscara, correntes, fração de gelo do OISST) e `med_diag` (resumos e diagnósticos do log). Na execução, saíram também `med_flux` (forçante atmosférica e fluxos nativos) e `med_export` (exportação para os componentes), para que o arquivo principal ficasse só com o ciclo NUOPC | B |
 | R-FASE8-02 | `mpas_atm_model.F90` (1 619 linhas) dividido em inicialização, passo e fluxos instantâneos | B |
-| R-FASE8-03 | as nove rotinas entre 100 e 150 linhas de código revistas; dividir apenas as que misturam responsabilidades (candidatas: `export_write_netcdf`, `mpas_atm_run`, `calc_bulk_ncar`, `compute_instantaneous_fluxes`, `get_atm_forcing`). Na execução, uma rotina por patch: a R-FASE8-03 tratou `export_write_netcdf` (e retirou o último `BLOCK`), a R-FASE8-04 `calc_bulk_ncar`, a R-FASE8-05 `write_mpas_import_diag`, a R-FASE8-06 `mpas_export`, a R-FASE8-07 `get_atm_forcing`, a R-FASE8-08 `fill_ifrac_from_oisst`; as demais seguem em R-FASE8-09 em diante | B |
+| R-FASE8-03 | as nove rotinas entre 100 e 150 linhas de código revistas; dividir apenas as que misturam responsabilidades (candidatas: `export_write_netcdf`, `mpas_atm_run`, `calc_bulk_ncar`, `compute_instantaneous_fluxes`, `get_atm_forcing`). Na execução, uma rotina por patch: a R-FASE8-03 tratou `export_write_netcdf` (e retirou o último `BLOCK`), a R-FASE8-04 `calc_bulk_ncar`, a R-FASE8-05 `write_mpas_import_diag`, a R-FASE8-06 `mpas_export`, a R-FASE8-07 `get_atm_forcing`, a R-FASE8-08 `fill_ifrac_from_oisst`, a R-FASE8-09 `mpas_atm_run`; faltam `compute_instantaneous_fluxes` e o `ModelAdvance` do DOCN | B |
 
-Depois da R-FASE8-02, ainda passam de 1 200 linhas quatro arquivos que o roteiro não dividia: `mom_cap_MONAN.F90` (1 404), `mpas_cap_netcdf.F90` (1 392; 1 440 depois da R-FASE8-03), `sis_cap_MONAN.F90` (1 391) e `mpas_cap_methods.F90` (1 271). Fica a decidir se entram na fase 8 como etapas novas de divisão ou se o limite do critério abaixo é revisto.
+Depois da R-FASE8-02, ainda passavam de 1 200 linhas quatro arquivos que o roteiro não dividia. Decidido em 29/09/2026: o limite de 1 200 linhas fica, desde que cada divisão faça sentido prático e funcional (um assunto por arquivo, sem separar o que é lido e alterado junto). As divisões previstas, uma por patch, depois das revisões de rotinas longas:
+
+| Arquivo (linhas) | Assunto que sai | Arquivo novo | Tamanho aproximado depois |
+| --- | --- | --- | --- |
+| `mpas_cap_netcdf.F90` (1 478) | diagnóstico de importação `monan2_import_*.nc`: relógio do diagnóstico, reunião dos membros de `atm_bnd`, definição e gravação do arquivo, binagem com máscara (`voronoi_to_grid`) | `mpas_import_diag.F90` | 900 e 600 |
+| `mom_cap_MONAN.F90` (1 404) | fração de gelo `Si_ifrac` para o oceano (`set_si_ifrac_from_file`, `compute_si_ifrac_proxy` e o tipo `si_ifrac_memory_t`) | `mom_si_ifrac.F90` | 1 080 e 330 |
+| `sis_cap_MONAN.F90` (1 391) | troca de campos com o mediador: importação dos forçantes por categoria e exportação de `Si_ifrac`, albedos e temperatura de pele | `sis_cap_fields.F90` | 1 000 e 400 |
+| `mpas_cap_methods.F90` (1 232) | média das células MPAS na grade regular 360x180 (`state_set_field_1d`, `map_cells_to_regular_grid` e as suas sete etapas) | `mpas_cell_binning.F90` | 780 e 450 |
+
+Os dois arquivos novos do oceano e do gelo entram na lista `MOM6_SRCS` do `Makefile`, para serem compilados com as mesmas opções do MOM6 (`-fdefault-real-8`). Os testes que usam `mpas_cap_netcdf_mod` (`test_writers.F90`) passam a usar também o módulo novo.
 
 **Pronto quando:** nenhum arquivo próprio passa de 1 200 linhas, e cada módulo novo tem um cabeçalho que diz de que assunto trata. O `config_read` fica como está, conforme decidido em 27/09/2026 (quase todo declaração de namelist).
 

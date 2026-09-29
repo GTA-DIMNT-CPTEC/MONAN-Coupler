@@ -230,7 +230,7 @@ contains
     real(MPAS_RKIND), dimension(:), pointer :: albedo_field => null()
     integer :: diag_alb_cell
     real(MPAS_RKIND) :: diag_alb_before
-    integer :: n, ierr, iCell
+    integer :: n, ierr
     ! limite do laco de injecao. nCellsSolve vive em
     ! atm_public (mpas_atm_types.F90), nao em atm_state.
     integer :: nSolve_inj
@@ -245,10 +245,6 @@ contains
     ! MONAN-A) pra distinguir os dois casos.
     logical, pointer :: config_do_restart => null()
     logical :: is_cold_start
-        real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
-        type(mpas_pool_type), pointer :: diag_physicsPool_after
-        character(len=250) :: diag_msg_alb
-
 
     rc = 0
     n  = atm_state%nCells
@@ -291,7 +287,7 @@ contains
       is_cold_start = .true.
     end if
 
-    if (associated(sfcInputPool) .and. associated(sfcInputPool)) then
+    if (associated(sfcInputPool)) then
       call mpas_pool_get_array(sfcInputPool,'skintemp',skintemp_field)
       call mpas_pool_get_array(sfcInputPool,'xland',xland_field )
 
@@ -315,82 +311,13 @@ contains
          if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
            ! so entre se nao utilizar dados de sst preescritos 
             ! o laco vai ate nCellsSolve (celulas PROPRIAS),
-            ! nao ate nCells (que inclui os halos). Ver o bloco de troca de
-            ! halo logo apos o fim do laco para o motivo.
-            DO iCell =1, nSolve_inj
-               if( xland_field(iCell) .gt. 1.5) then
-                  if (.not. (atm_state%first_coupling_call .and. is_cold_start)) then
-                     if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
-                        sst_field(iCell)  = atm_bnd%sst(iCell)
-                        skintemp_field(iCell) = atm_bnd%sst(iCell)
-                     end if 
-                     if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) then 
-                        ice_field(iCell)  = atm_bnd%ice_fraction(iCell)
-                     end if 
-                     if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
-                          zorl_field(iCell) = atm_bnd%zorl(iCell)
-                     endif
-                     ! mesma guarda de
-                     ! xland>1.5 (oceano) e atm_state%first_coupling_call/cold-start
-                     ! ja usada para sst/ice/zorl acima.
-                     if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
-                       if (diag_alb_cell < 0) then
-                         ! guarda a 1a celula de
-                         ! oceano injetada nesta chamada, para comparar
-                         ! ANTES/DEPOIS de core_run logo abaixo — teste
-                         ! empirico de se o NOAH LSM preserva ou sobrescreve
-                         ! sfc_albedo em pontos de agua.
-                         diag_alb_cell   = iCell
-                         diag_alb_before = atm_bnd%alb(iCell)
-                       end if
-                       albedo_field(iCell) = atm_bnd%alb(iCell)
-                     endif
-                  end if
-               endif 
-            end do
-            !--------------------------------------------------------------
-            ! propaga aos halos os campos de
-            ! contorno que acabaram de ser injetados.
-            !
-            ! O PROBLEMA. Antes desta correcao o laco acima percorria
-            ! 1..nCells, que INCLUI as celulas de halo, e escrevia nelas
-            ! valores de atm_bnd. Nao havia troca de halo em seguida (a busca
-            ! por exch_halo em todo o src/caps nao retornava nada). Cada PET
-            ! ficava com uma copia de halo de sst/skintemp/xice/znt/sfc_albedo
-            ! inconsistente com o PET dono da celula, e o core_run integrava
-            ! sobre contorno inconsistente. No MPAS-A autonomo isso nao
-            ! ocorre, porque sst e xice chegam pelo stream manager, que faz a
-            ! troca de halo; a injecao do acoplador contornava esse caminho.
-            !
-            ! A EVIDENCIA. Numa medicao com dt_coupling=43200, ou
-            ! seja, duas janelas de acoplamento, das quais apenas a segunda
-            ! injeta (a primeira e' pulada pela guarda):
-            ! quatro execucoes identicas, seis pares comparados, SEIS
-            ! divergentes, TODOS a partir do registro 73 do reprodiag, que e'
-            ! exatamente 12:00, o instante da injecao. Os 72 registros
-            ! anteriores, doze horas de integracao, sao bit a bit identicos.
-            ! Com zero injecoes (dt_coupling=86400) foram seis pares sem
-            ! nenhuma diferenca. Uma unica injecao basta para quebrar a
-            ! reprodutibilidade, e a quebra aparece no passo em que ela
-            ! ocorre, nao antes.
-            !
-            ! O CONSERTO. Escrever apenas nas celulas proprias (nCellsSolve,
-            ! ver o laco acima) e chamar a troca de halo, que e' a mesma
-            ! rotina do framework que o stream manager usa. Assim a copia de
-            ! halo de cada PET passa a ser, por construcao, igual ao valor do
-            ! dono.
-            !
-            ! CUSTO. Uma troca de halo por campo por janela de acoplamento,
-            ! sobre campos 1D de nCells. Desprezivel ao lado de um passo de
-            ! fisica, e paga uma vez por dt_coupling, nao por dt_atm.
-            !
-            ! LIMITE CONHECIDO. Isto NAO trata a duplicacao de celulas na
-            ! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
-            ! do mpas_cap_methods), em que a mesma celula fisica recebe
-            ! contribuicao do regrid em mais de um PET. Se a divergencia
-            ! persistir depois desta correcao, esse e' o alvo seguinte, e o
-            ! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
-            !--------------------------------------------------------------
+            ! nao ate nCells (que inclui os halos). O motivo esta em
+            ! exchange_surface_halos.
+            call inject_ocean_cells(nSolve_inj,                              &
+              atm_state%first_coupling_call .and. is_cold_start, atm_bnd,    &
+              xland_field, sst_field, skintemp_field, ice_field, zorl_field, &
+              albedo_field, diag_alb_cell, diag_alb_before)
+            ! Propaga aos halos os campos injetados (ver exchange_surface_halos).
             if (.not. (atm_state%first_coupling_call .and. is_cold_start)) then
               call exchange_surface_halos(sfcInputPool, diag_physicsPool)
             end if
@@ -435,23 +362,7 @@ contains
     ! Diagnostico: reabre sfc_albedo (diag_physics) DEPOIS de core_run e
     ! compara com o valor injetado ANTES (diag_alb_before), na mesma celula
     ! de oceano (diag_alb_cell). Condicionado a cfg_write_fixdiag.
-    if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
-        call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', &
-          diag_physicsPool_after)
-        if (associated(diag_physicsPool_after)) then
-          call mpas_pool_get_array(diag_physicsPool_after, 'sfc_albedo', &
-            albedo_field_after)
-          if (associated(albedo_field_after)) then
-            write(diag_msg_alb, '(A,I0,A,F10.6,A,F10.6,A,L1)') &
-              'FIX-DIAG-ALBFEEDBACK-01: celula=', diag_alb_cell, &
-              ' albedo_injetado=', diag_alb_before, &
-              ' albedo_pos_core_run=', albedo_field_after(diag_alb_cell), &
-              ' preservado=', &
-              (abs(albedo_field_after(diag_alb_cell) - diag_alb_before) < 1.0e-6_MPAS_RKIND)
-            call mpas_log_write(trim(diag_msg_alb))
-          end if
-        end if
-    end if
+    call log_albedo_feedback(atm_state, diag_alb_cell, diag_alb_before)
 
     ! ------------------------------------------------------------------
     ! Pós-processamento dos campos acumulados e stress superficial.
@@ -472,6 +383,143 @@ contains
     nullify(sfcInputPool, sst_field, ice_field, zorl_field)
   end subroutine mpas_atm_run
 
+  ! ============================================================================
+  !> @brief Copia os campos de contorno do oceano (atm_bnd) para as células
+  !! próprias de oceano (xland > 1.5) dos pools do MONAN-A.
+  !!
+  !! Percorre só as nSolve primeiras células (as próprias); os halos são
+  !! trocados depois por exchange_surface_halos. Com skip_first (primeira
+  !! chamada de um cold start) nada é copiado. Guarda em diag_alb_cell e
+  !! diag_alb_before a primeira célula cujo albedo foi injetado, para o
+  !! diagnóstico de log_albedo_feedback.
+  ! ============================================================================
+  subroutine inject_ocean_cells(nSolve_inj, skip_first, atm_bnd,          &
+                                xland_field, sst_field, skintemp_field,  &
+                                ice_field, zorl_field, albedo_field,     &
+                                diag_alb_cell, diag_alb_before)
+    integer,                                intent(in)    :: nSolve_inj
+    logical,                                intent(in)    :: skip_first
+    type(atm_ocean_boundary_type),          intent(in)    :: atm_bnd
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: xland_field
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: sst_field
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: skintemp_field
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: ice_field
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: zorl_field
+    real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: albedo_field
+    integer,                                intent(inout) :: diag_alb_cell
+    real(MPAS_RKIND),                       intent(inout) :: diag_alb_before
+    integer :: iCell
+
+            DO iCell =1, nSolve_inj
+               if( xland_field(iCell) .gt. 1.5) then
+                  if (.not. skip_first) then
+                     if (associated(sst_field)  .and. allocated(atm_bnd%sst)) then
+                        sst_field(iCell)  = atm_bnd%sst(iCell)
+                        skintemp_field(iCell) = atm_bnd%sst(iCell)
+                     end if
+                     if (associated(ice_field)  .and. allocated(atm_bnd%ice_fraction)) then
+                        ice_field(iCell)  = atm_bnd%ice_fraction(iCell)
+                     end if
+                     if (associated(zorl_field) .and. allocated(atm_bnd%zorl))  then
+                          zorl_field(iCell) = atm_bnd%zorl(iCell)
+                     endif
+                     ! mesma guarda de
+                     ! xland>1.5 (oceano) e atm_state%first_coupling_call/cold-start
+                     ! ja usada para sst/ice/zorl acima.
+                     if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
+                       if (diag_alb_cell < 0) then
+                         ! guarda a 1a celula de
+                         ! oceano injetada nesta chamada, para comparar
+                         ! ANTES/DEPOIS de core_run logo abaixo — teste
+                         ! empirico de se o NOAH LSM preserva ou sobrescreve
+                         ! sfc_albedo em pontos de agua.
+                         diag_alb_cell   = iCell
+                         diag_alb_before = atm_bnd%alb(iCell)
+                       end if
+                       albedo_field(iCell) = atm_bnd%alb(iCell)
+                     endif
+                  end if
+               endif
+            end do
+  end subroutine inject_ocean_cells
+
+  ! ============================================================================
+  !> @brief Diagnóstico FIX-DIAG-ALBFEEDBACK-01: compara o sfc_albedo depois
+  !! de core_run com o valor injetado antes, na célula guardada por
+  !! inject_ocean_cells. Só atua com cfg_write_fixdiag.
+  ! ============================================================================
+  subroutine log_albedo_feedback(atm_state, diag_alb_cell, diag_alb_before)
+    type(mpas_atm_state_type), intent(in) :: atm_state
+    integer,                   intent(in) :: diag_alb_cell
+    real(MPAS_RKIND),          intent(in) :: diag_alb_before
+    real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
+    type(mpas_pool_type), pointer :: diag_physicsPool_after
+    character(len=250) :: diag_msg_alb
+
+    if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
+        call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', &
+          diag_physicsPool_after)
+        if (associated(diag_physicsPool_after)) then
+          call mpas_pool_get_array(diag_physicsPool_after, 'sfc_albedo', &
+            albedo_field_after)
+          if (associated(albedo_field_after)) then
+            write(diag_msg_alb, '(A,I0,A,F10.6,A,F10.6,A,L1)') &
+              'FIX-DIAG-ALBFEEDBACK-01: celula=', diag_alb_cell, &
+              ' albedo_injetado=', diag_alb_before, &
+              ' albedo_pos_core_run=', albedo_field_after(diag_alb_cell), &
+              ' preservado=', &
+              (abs(albedo_field_after(diag_alb_cell) - diag_alb_before) < 1.0e-6_MPAS_RKIND)
+            call mpas_log_write(trim(diag_msg_alb))
+          end if
+        end if
+    end if
+  end subroutine log_albedo_feedback
+
+  ! ============================================================================
+  !> @brief Troca de halo dos campos de contorno injetados pelo acoplador.
+  !!
+  !! Propaga aos halos os campos de
+  !! contorno que acabaram de ser injetados.
+  !!
+  !! O PROBLEMA. Antes desta correcao o laco de injecao percorria
+  !! 1..nCells, que INCLUI as celulas de halo, e escrevia nelas
+  !! valores de atm_bnd. Nao havia troca de halo em seguida (a busca
+  !! por exch_halo em todo o src/caps nao retornava nada). Cada PET
+  !! ficava com uma copia de halo de sst/skintemp/xice/znt/sfc_albedo
+  !! inconsistente com o PET dono da celula, e o core_run integrava
+  !! sobre contorno inconsistente. No MPAS-A autonomo isso nao
+  !! ocorre, porque sst e xice chegam pelo stream manager, que faz a
+  !! troca de halo; a injecao do acoplador contornava esse caminho.
+  !!
+  !! A EVIDENCIA. Numa medicao com dt_coupling=43200, ou
+  !! seja, duas janelas de acoplamento, das quais apenas a segunda
+  !! injeta (a primeira e' pulada pela guarda):
+  !! quatro execucoes identicas, seis pares comparados, SEIS
+  !! divergentes, TODOS a partir do registro 73 do reprodiag, que e'
+  !! exatamente 12:00, o instante da injecao. Os 72 registros
+  !! anteriores, doze horas de integracao, sao bit a bit identicos.
+  !! Com zero injecoes (dt_coupling=86400) foram seis pares sem
+  !! nenhuma diferenca. Uma unica injecao basta para quebrar a
+  !! reprodutibilidade, e a quebra aparece no passo em que ela
+  !! ocorre, nao antes.
+  !!
+  !! O CONSERTO. Escrever apenas nas celulas proprias (nCellsSolve,
+  !! ver inject_ocean_cells) e chamar a troca de halo, que e' a mesma
+  !! rotina do framework que o stream manager usa. Assim a copia de
+  !! halo de cada PET passa a ser, por construcao, igual ao valor do
+  !! dono.
+  !!
+  !! CUSTO. Uma troca de halo por campo por janela de acoplamento,
+  !! sobre campos 1D de nCells. Desprezivel ao lado de um passo de
+  !! fisica, e paga uma vez por dt_coupling, nao por dt_atm.
+  !!
+  !! LIMITE CONHECIDO. Isto NAO trata a duplicacao de celulas na
+  !! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
+  !! do mpas_cap_methods), em que a mesma celula fisica recebe
+  !! contribuicao do regrid em mais de um PET. Se a divergencia
+  !! persistir depois desta correcao, esse e' o alvo seguinte, e o
+  !! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
+  ! ============================================================================
   subroutine exchange_surface_halos(sfcInputPool, diag_physicsPool)
     type(mpas_pool_type), pointer :: sfcInputPool
     type(mpas_pool_type), pointer :: diag_physicsPool
