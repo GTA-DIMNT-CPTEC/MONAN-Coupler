@@ -6,7 +6,10 @@
 !! de ust e do vento relativo à corrente oceânica, nos buffers de
 !! mpas_atm_state_type apontados por mpas_atm_public_type.
 !!
-!! Separado de mpas_atm_model.F90 sem mudar instruções (R-FASE8-02).
+!! Separado de mpas_atm_model.F90 sem mudar instruções (R-FASE8-02) e
+!! dividido em uma rotina por grandeza (R-FASE8-10): radiação,
+!! precipitação e neve, umidade a 2 m, vento a 10 m de reserva e tensão
+!! do vento.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -28,37 +31,40 @@ module mpas_atm_fluxes_mod
   public :: compute_instantaneous_fluxes
 
 contains
-
+  ! ============================================================================
+  !> @brief Fluxos instantâneos de superfície de um intervalo de acoplamento.
+  !!
+  !! Chama, nesta ordem, as etapas abaixo. A ordem importa: a partição da
+  !! neve usa a precipitação total recém-calculada, e a tensão do vento usa
+  !! atm_public%%u10/v10, que podem apontar para os buffers preenchidos pelo
+  !! vento a 10 m de reserva.
+  ! ============================================================================
   subroutine compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_state, atm_bnd)
     integer, intent(in) :: dt_coupling
     integer, intent(in) :: n
     type(mpas_atm_public_type), intent(in) :: atm_public
     type(mpas_atm_state_type), target, intent(inout) :: atm_state
     type(atm_ocean_boundary_type), intent(in) :: atm_bnd
-    real(MPAS_RKIND) :: dt_r, precip_now  ! spd removido (usado agora no bloco have_currents)
-    integer          :: k
-    real(MPAS_RKIND) :: z_sfc
-    real(MPAS_RKIND) :: scale_fac
-    real(MPAS_RKIND), parameter :: Z10 = 10.0_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: Z0 = 0.001_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND
-    integer :: nv
-    real(MPAS_RKIND) :: u_rel
-    real(MPAS_RKIND) :: v_rel
-    real(MPAS_RKIND) :: spd_rel
-    logical :: have_currents
-    real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
-    real(MPAS_RKIND) :: snow_now
-    real(MPAS_RKIND) :: delta_snow
-    real(MPAS_RKIND) :: delta_total
-    real(MPAS_RKIND) :: es
-    real(MPAS_RKIND) :: qs
-    real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: a = 17.67_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: b = 243.5_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
-    real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
+    real(MPAS_RKIND) :: dt_r
     dt_r = real(dt_coupling, MPAS_RKIND)
+
+    call radiation_rates(dt_r, n, atm_state)
+    call precipitation_rates(dt_r, n, atm_public, atm_state)
+    call humidity_2m(n, atm_public, atm_state)
+    call wind_10m_fallback(n, atm_state)
+    call surface_stress(n, atm_public, atm_state, atm_bnd)
+
+  end subroutine compute_instantaneous_fluxes
+
+  ! ============================================================================
+  !> @brief Radiação de onda curta e longa descendente: incremento dos
+  !! acumulados do MPAS dividido pelo intervalo, em W/m2.
+  ! ============================================================================
+  subroutine radiation_rates(dt_r, n, atm_state)
+    real(MPAS_RKIND), intent(in) :: dt_r
+    integer, intent(in) :: n
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
+    integer          :: k
 
     ! ── SW e LW descendentes: incremento ÷ dt → W/m² ─────────────
     if (associated(atm_state%pool_acswdnb)) then
@@ -76,6 +82,24 @@ contains
       end do
       atm_state%prev_aclwdnb(1:n) = atm_state%pool_aclwdnb(1:n)
     end if
+
+  end subroutine radiation_rates
+
+  ! ============================================================================
+  !> @brief Precipitação total (rainnc + rainc) e sua partição em chuva e
+  !! neve, a partir dos acumulados do MPAS, em kg/m2/s.
+  ! ============================================================================
+  subroutine precipitation_rates(dt_r, n, atm_public, atm_state)
+    real(MPAS_RKIND), intent(in) :: dt_r
+    integer, intent(in) :: n
+    type(mpas_atm_public_type), intent(in) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
+    real(MPAS_RKIND) :: precip_now
+    integer          :: k
+    real(MPAS_RKIND), parameter :: T_FREEZE = 273.15_MPAS_RKIND
+    real(MPAS_RKIND) :: snow_now
+    real(MPAS_RKIND) :: delta_snow
+    real(MPAS_RKIND) :: delta_total
 
     ! ── Precipitação total: (rainnc + rainc) incremento ÷ dt ──────
     ! rainnc [mm] = precipitação estratiforme acumulada
@@ -125,6 +149,25 @@ contains
         atm_state%prev_snow(1:n) = atm_state%pool_snownc(1:n)
       end if
 
+  end subroutine precipitation_rates
+
+  ! ============================================================================
+  !> @brief Umidade específica a 2 m: q2 do MPAS ou, na falta dele, 80% da
+  !! umidade de saturação em T2m (Tetens).
+  ! ============================================================================
+  subroutine humidity_2m(n, atm_public, atm_state)
+    integer, intent(in) :: n
+    type(mpas_atm_public_type), intent(in) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
+    integer          :: k
+    real(MPAS_RKIND) :: es
+    real(MPAS_RKIND) :: qs
+    real(MPAS_RKIND), parameter :: es0 = 611.2_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: a = 17.67_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: b = 243.5_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: eps = 0.622_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
+
     ! ── Umidade específica a 2m: q2 [kg/kg] ───────────────────────
     ! atm_state%pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
     ! Valor instantâneo → válido para o instante corrente.
@@ -139,6 +182,23 @@ contains
           atm_state%q2m_buf(k) = 0.8_MPAS_RKIND * qs   ! RH=80% como fallback
         end do
     end if
+
+  end subroutine humidity_2m
+
+  ! ============================================================================
+  !> @brief Vento a 10 m de reserva, por perfil logarítmico neutro a partir
+  !! do nível mais baixo do modelo, quando u10/v10 não vêm do pool.
+  ! ============================================================================
+  subroutine wind_10m_fallback(n, atm_state)
+    integer, intent(in) :: n
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
+    integer          :: k
+    real(MPAS_RKIND) :: z_sfc
+    real(MPAS_RKIND) :: scale_fac
+    real(MPAS_RKIND), parameter :: Z10 = 10.0_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: Z0 = 0.001_MPAS_RKIND
+    real(MPAS_RKIND), parameter :: Z_SFC_DEFAULT = 30.0_MPAS_RKIND
+    integer :: nv
 
     ! ── fallback: calcular u10/v10 por perfil log. neutro ────
     ! Ativo quando u10/v10 nao estao no pool (bl_mynn_in/bl_ysu_in=F).
@@ -166,6 +226,23 @@ contains
           atm_state%v10_buf(k) = atm_state%pool_vMerid(nv, k) * scale_fac
         end do
     end if
+
+  end subroutine wind_10m_fallback
+
+  ! ============================================================================
+  !> @brief Tensão do vento na superfície a partir de ust e do vento a 10 m
+  !! relativo à corrente oceânica.
+  ! ============================================================================
+  subroutine surface_stress(n, atm_public, atm_state, atm_bnd)
+    integer, intent(in) :: n
+    type(mpas_atm_public_type), intent(in) :: atm_public
+    type(mpas_atm_state_type), target, intent(inout) :: atm_state
+    type(atm_ocean_boundary_type), intent(in) :: atm_bnd
+    integer          :: k
+    real(MPAS_RKIND) :: u_rel
+    real(MPAS_RKIND) :: v_rel
+    real(MPAS_RKIND) :: spd_rel
+    logical :: have_currents
 
     ! ── Stress superficial: τ = ρ · ust² · V_rel / |V_rel| ─────────────
     !
@@ -200,6 +277,6 @@ contains
         end do
     end if
 
-  end subroutine compute_instantaneous_fluxes
+  end subroutine surface_stress
 
 end module mpas_atm_fluxes_mod

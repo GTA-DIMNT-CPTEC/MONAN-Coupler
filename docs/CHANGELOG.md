@@ -9,6 +9,23 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Fluxos instantâneos do MONAN-A: uma rotina por grandeza (R-FASE8-10).** Oitava revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `compute_instantaneous_fluxes` (`mpas_atm_fluxes.F90`, 122 linhas de código) calculava cinco grandezas independentes, cada uma com as suas constantes locais. Cada trecho vira uma rotina, sem mudança, e leva junto as suas variáveis e constantes:
+
+    | Rotina nova | O que calcula |
+    | --- | --- |
+    | `radiation_rates` | onda curta e onda longa descendentes, pelo incremento dos acumulados |
+    | `precipitation_rates` | precipitação total e a partição em chuva e neve (pelo `snownc` do MPAS ou, na falta dele, pela temperatura a 2 m) |
+    | `humidity_2m` | umidade a 2 m (`q2` do MPAS ou, na falta dele, 80% da saturação em T2m) |
+    | `wind_10m_fallback` | vento a 10 m por perfil logarítmico, quando o MPAS não fornece `u10`/`v10` |
+    | `surface_stress` | tensão do vento a partir de `ust` e do vento relativo à corrente |
+
+  - `compute_instantaneous_fluxes` fica com a conversão do intervalo para real e as cinco chamadas, na ordem de antes. A ordem importa: a neve usa a precipitação total recém-calculada, e a tensão usa `atm_public%u10`/`v10`, que no caso de reserva apontam para os buffers preenchidos por `wind_10m_fallback`. Todas as rotinas recebem `atm_state` com `target`, como a original, para o compilador continuar sabendo desse compartilhamento.
+  - Conferência: nenhum teste local executava a rotina. Um programa de teste avulso (não incluído no repositório) chamou a versão anterior e a nova com os mesmos dados sintéticos: 997 células, seis cenários (todos os campos presentes; sem `snownc` nem `q2`; sem `snownc`, `t2m`, `rainc` nem correntes; vento de reserva com os ponteiros públicos apontando para os buffers; reserva com a altura do primeiro nível abaixo de 2 m; sem `ust`, sem vento do modelo e sem precipitação), três passos em cada. Os 14 vetores de saída e de acumulados saíram iguais byte a byte, compilados com as opções da Jaci.
+  - Defeito encontrado e mantido: em `wind_10m_fallback`, o teste `associated(atm_state%pool_zgrid) .and. size(atm_state%pool_zgrid,1) > 1` não garante que `size` deixe de ser avaliado quando o ponteiro não está associado. Com `-fcheck=all` (opção usada na Jaci), a execução aborta se o vento de reserva estiver ativo e `zgrid` faltar. Na rodada de validação `zgrid` existe e o caso não ocorre. A correção (dois `if` aninhados) fica registrada no estado do projeto para uma etapa própria.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas diferenças são só declarações, cabeçalhos e chamadas das cinco rotinas novas. O arquivo não tem constantes de texto.
+  - Indicadores: rotinas de 308 para 313; rotinas com mais de 100 linhas de código de 3 para 2.
+
 - **Passo do MONAN-A: injeção do contorno do oceano e diagnóstico do albedo em rotinas próprias (R-FASE8-09).** Sétima revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `mpas_atm_run` (`mpas_atm_model.F90`, 130 linhas de código) juntava a preparação do passo, o laço que copia o contorno do oceano para as células do MONAN-A, a chamada de `core_run` e um diagnóstico do albedo depois dela. Dois trechos saem sem mudança:
     - `inject_ocean_cells`: o laço sobre as células próprias de oceano (`xland > 1.5`) que copia `sst`, `skintemp`, `xice`, `z0` e `sfc_albedo` de `atm_bnd`, e guarda a primeira célula cujo albedo foi injetado. Os campos dos pools são recebidos como ponteiros, com os mesmos testes de associação. A guarda da primeira chamada de um cold start, antes repetida a cada célula, chega como o argumento lógico `skip_first`, calculado uma vez com a mesma expressão.
@@ -18,6 +35,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `mpas_atm_run` fica com a validação do estado, a busca dos campos nos pools, a decisão de cold start, a troca de halo, o avanço do relógio, `core_run` e os fluxos instantâneos: 92 linhas de código.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 27 diferenças são só declarações, cabeçalhos e chamadas das duas rotinas novas, a guarda de cold start trocada por `skip_first` e o teste duplicado. Literais iguais (63). Nenhum teste local executa `mpas_atm_run`; a conferência é a rodada na Jaci, que passa pelo laço de injeção a cada janela de acoplamento depois da primeira.
   - Indicadores: rotinas de 306 para 308; rotinas com mais de 100 linhas de código de 4 para 3.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-09-validada`).
 
 - **Fração de gelo do OISST: leitura, difusão e remapeamento em etapas (R-FASE8-08).** Sexta revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `fill_ifrac_from_oisst` (`med_ocean.F90`, 115 linhas de código) juntava o índice temporal, a leitura do arquivo no PET 0, a difusão entre os PETs e o remapeamento para a grade ATM. Três trechos saem sem mudança:

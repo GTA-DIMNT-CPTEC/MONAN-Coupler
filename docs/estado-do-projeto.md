@@ -55,7 +55,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE8-09 | `mpas_atm_run`: injeção do contorno do oceano (`inject_ocean_cells`) e diagnóstico do albedo (`log_albedo_feedback`) em rotinas próprias (validação pendente) |
+| R-FASE8-10 | `compute_instantaneous_fluxes`: uma rotina por grandeza (radiação, precipitação, umidade, vento de reserva, tensão); conferida localmente com teste avulso (validação pendente) |
+| R-FASE8-09 | `mpas_atm_run`: injeção do contorno do oceano (`inject_ocean_cells`) e diagnóstico do albedo (`log_albedo_feedback`) em rotinas próprias |
 | R-FASE8-08 | `fill_ifrac_from_oisst`: número de instantes, leitura no PET 0 e remapeamento em rotinas próprias; conferida localmente com teste avulso |
 | R-FASE8-07 | `get_atm_forcing`: leitura do DATM (`get_datm_forcing`) e umidade e neve opcionais do MPAS (`select_optional_mpas_forcing`) em rotinas próprias |
 | R-FASE8-06 | `mpas_export`: o bloco repetido para os 13 campos vira `export_mpas_member` |
@@ -182,6 +183,8 @@ Para decidir (questão científica, não de refatoração): no cap do gelo, `is%
 
 Para decidir (DATM, fora da configuração de validação): em `DATM_cap.F90`, `ReadJRAFieldInterp` usa a época 2016-01-01 01:30:00 para o arquivo JRA55, enquanto comentários antigos diziam que ela fora trocada para 00:00. Com um arquivo que começa em 00:00, o instante inicial fica antes da época. Mudar a época altera resultados do modo DATM, então é uma decisão separada da limpeza.
 
+Defeito conhecido (encontrado na R-FASE8-10, não corrigido): em `wind_10m_fallback` (`mpas_atm_fluxes.F90`), `associated(atm_state%pool_zgrid) .and. size(atm_state%pool_zgrid,1) > 1` pode avaliar `size` de um ponteiro não associado; com `-fcheck=all` a execução aborta se o vento de reserva estiver ativo e `zgrid` faltar. Não ocorre na configuração de validação. A correção é trocar o teste por dois `if` aninhados, sem efeito nos resultados quando `zgrid` existe; pode entrar numa etapa própria da fase 9.
+
 Numeração provisória, na ordem da tabela. As etapas 2 a 4 só mudam comentários: a conferência das instruções tem de mostrar zero diferenças.
 
 ### Fases 6 a 10: roteiro para código limpo
@@ -192,7 +195,7 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | --- | --- | --- | --- |
 | 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 concluída (PASS, 73 iguais, tag `fase6-02-validada`); R-FASE6-03 concluída (PASS, 73 iguais, tag `fase6-03-validada`); fase concluída |
 | 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-06 | R-FASE7-01 concluída (PASS, 73 iguais, tag `fase7-01-validada`); R-FASE7-02 concluída (PASS, 73 iguais, tag `fase7-02-validada`); R-FASE7-03 concluída (PASS, 73 iguais, tag `fase7-03-validada`); R-FASE7-04 concluída (PASS, 73 iguais, tag `fase7-04-validada`); R-FASE7-05 concluída (PASS, 73 iguais, tag `fase7-05-validada`); R-FASE7-06 concluída (PASS, 73 iguais, tag `fase7-06-validada`); fase 7 concluída |
-| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 entregue (validação pendente) |
+| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 entregue (validação pendente) |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-03 | a fazer |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
 
