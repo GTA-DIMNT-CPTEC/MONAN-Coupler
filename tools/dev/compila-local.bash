@@ -62,7 +62,7 @@ for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergr
          regrid_base regrid_esmf regrid_weights regrid_mpassit regrid_registry regrid_manager \
          mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
          mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cap_methods mpas_cap_MONAN DATM_cap \
-         docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_MONAN \
+         docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
          med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
          med_diag med_ice med_ocean med_init med_flux med_export MED_cap; do
   f=$(find "${RAIZ}/src" -name "${s}.F90" -not -path '*/upstream/*' | head -1)
@@ -73,7 +73,7 @@ for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergr
   fi
   extra=""
   # Como no Makefile: os fontes ligados ao MOM6 usam real de 8 bytes.
-  case "${s}" in mom_si_ifrac|mom_cap_MONAN|sis_cap_MONAN|time_utils) extra="-fdefault-real-8" ;; esac
+  case "${s}" in mom_si_ifrac|mom_cap_MONAN|sis_cap_fields|sis_cap_MONAN|time_utils) extra="-fdefault-real-8" ;; esac
   # shellcheck disable=SC2086
   if ${FC} ${FL} ${extra} -c "${f}" -o "${s}.o" > "${s}.log" 2>&1; then r=OK; else r=FALHOU; falhas=$((falhas + 1)); fi
   printf '%-24s %-7s avisos=%s\n' "${s}" "${r}" "$(grep -c 'Warning' "${s}.log")"

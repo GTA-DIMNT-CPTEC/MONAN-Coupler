@@ -55,7 +55,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE8-13 | fração de gelo do cap do oceano (`set_si_ifrac_from_file`, `compute_si_ifrac_proxy`) sai de `mom_cap_MONAN.F90` para `mom_si_ifrac.F90` (validação pendente) |
+| R-FASE8-14 | troca de campos do cap do gelo (`import_forcing`, `export_si_*`) e o seu estado interno saem de `sis_cap_MONAN.F90` para `sis_cap_fields.F90` (validação pendente) |
+| R-FASE8-13 | fração de gelo do cap do oceano (`set_si_ifrac_from_file`, `compute_si_ifrac_proxy`) sai de `mom_cap_MONAN.F90` para `mom_si_ifrac.F90` |
 | R-FASE8-12 | diagnóstico de importação do cap atmosférico (`monan2_import_*.nc`) sai de `mpas_cap_netcdf.F90` para `mpas_import_diag.F90` |
 | R-FASE8-11 | `ModelAdvance` do DOCN: leitura dos campos e das correntes e carimbo de tempo em rotinas próprias; conferida localmente com driver NUOPC avulso; nome do job PBS `GTA-COUPLER` |
 | R-FASE8-10 | `compute_instantaneous_fluxes`: uma rotina por grandeza (radiação, precipitação, umidade, vento de reserva, tensão); conferida localmente com teste avulso |
@@ -200,7 +201,7 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | --- | --- | --- | --- |
 | 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 concluída (PASS, 73 iguais, tag `fase6-02-validada`); R-FASE6-03 concluída (PASS, 73 iguais, tag `fase6-03-validada`); fase concluída |
 | 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-06 | R-FASE7-01 concluída (PASS, 73 iguais, tag `fase7-01-validada`); R-FASE7-02 concluída (PASS, 73 iguais, tag `fase7-02-validada`); R-FASE7-03 concluída (PASS, 73 iguais, tag `fase7-03-validada`); R-FASE7-04 concluída (PASS, 73 iguais, tag `fase7-04-validada`); R-FASE7-05 concluída (PASS, 73 iguais, tag `fase7-05-validada`); R-FASE7-06 concluída (PASS, 73 iguais, tag `fase7-06-validada`); fase 7 concluída |
-| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 concluída (PASS, 73 iguais, tag `fase8-10-validada`); R-FASE8-11 concluída (PASS, 73 iguais, tag `fase8-11-validada`), com ela terminam as revisões de rotinas longas; R-FASE8-12 concluída (PASS, 73 iguais, tag `fase8-12-validada`), primeira das quatro divisões de arquivo; R-FASE8-13 entregue (validação pendente) |
+| 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 concluída (PASS, 73 iguais, tag `fase8-10-validada`); R-FASE8-11 concluída (PASS, 73 iguais, tag `fase8-11-validada`), com ela terminam as revisões de rotinas longas; R-FASE8-12 concluída (PASS, 73 iguais, tag `fase8-12-validada`), primeira das quatro divisões de arquivo; R-FASE8-13 concluída (PASS, 73 iguais, tag `fase8-13-validada`); R-FASE8-14 entregue (validação pendente) |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-03 | a fazer |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
 
@@ -208,15 +209,17 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 
 As convenções de código estão no `README.md` (seção de convenções). Em resumo: sem BLOCK; procedimentos de módulo com `intent` em vez de procedimentos internos; interpolação só por rotas do `regrid_manager_t`; erros com `ChkErr`; constantes em `coupler_constants`; NetCDF por `nc_writer`; configuração só em `coupler_config.F90`; comentários explicam o que e por quê, o histórico fica no CHANGELOG; toda mudança validada contra a linha de base.
 
-## 10. Para retomar numa nova sessão do assistente
+Commits: autor Daniel Massaru <dmassaru@gmail.com>, sem linhas de coautoria nem outras marcas de ferramentas nas mensagens ou nos arquivos (decisão de 29/09/2026). As mensagens das etapas R-FASE4-01 a R-FASE8-13 foram limpas nessa data com `git filter-branch` (script avulso `remove-coautoria.bash`), sem mudar nenhum arquivo; por isso os códigos (hashes) dos commits e das tags `fase4-*` a `fase8-*` da `refactor/principal` mudaram, e o envio ao GitHub foi forçado. A cópia anterior ficou na branch local `backup/antes-sem-coautoria` da Jaci.
 
-Envie, no início da conversa:
+## 10. Para retomar o trabalho em outro ambiente
+
+Para retomar, reúna:
 
 - este arquivo;
 - o `docs/CHANGELOG.md`;
 - o relatório RPQ em PDF (e a fonte LaTeX, se for atualizá-lo);
-- o código atual: um arquivo `.tar.gz` do repositório no ramo `refactor/principal`, sem `build/`, `bin/` e `models/`, ou o link do ramo no GitHub, se o assistente tiver acesso.
+- o código atual: um arquivo `.tar.gz` do repositório no ramo `refactor/principal`, sem `build/`, `bin/` e `models/`, ou o link do ramo no GitHub, se houver acesso.
 
 E descreva o que quer fazer a seguir, por exemplo um dos itens da seção 8.
 
-Para as conferências locais (`docs/conferencias-locais.md`), o assistente precisa compilar o ESMF 8.9.1 no próprio ambiente, o que leva cerca de 40 minutos no início da sessão; depois disso, `compila-local.bash` leva menos de um minuto.
+Para as conferências locais (`docs/conferencias-locais.md`), é preciso compilar o ESMF 8.9.1 no próprio ambiente, o que leva cerca de 40 minutos na primeira vez; depois disso, `compila-local.bash` leva menos de um minuto.

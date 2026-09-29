@@ -119,7 +119,7 @@ F90FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) $(ESMF_F90COMPILEFREE
 # Fontes ligados ao MOM6/FMS: a biblioteca usa real de 8 bytes e os caps do
 # MOM6 declaram 'real' sem kind. Não aplicar aos demais (usam kind explícito).
 MOM6_SRCS    := mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods \
-                time_utils mom_si_ifrac mom_cap_MONAN sis_cap_MONAN
+                time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN
 MOM6_FCFLAGS := $(F90FLAGS) -fdefault-real-8 -fdefault-double-8 -Wno-unused-function \
                 -Wno-character-truncation -Wno-maybe-uninitialized -Wno-unused-variable
 
@@ -157,7 +157,7 @@ SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
         mpas_cap_MONAN DATM_cap                                           \
         docn_cap_netcdf DOCN_cap                                          \
         mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods   \
-        time_utils mom_si_ifrac mom_cap_MONAN sis_cap_MONAN               \
+        time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
         med_cap_types med_cap_netcdf med_cap_methods                      \
         med_bulk_ncar med_diag med_ice med_ocean med_init med_flux        \
         med_export MED_cap                                                \
@@ -217,7 +217,8 @@ $(OBJDIR)/regrid_manager.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/regrid_base.o $
 $(OBJDIR)/regrid_mpassit.o: $(OBJDIR)/regrid_esmf.o
 $(OBJDIR)/regrid_registry.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o $(OBJDIR)/regrid_mpassit.o $(OBJDIR)/regrid_weights.o
 $(OBJDIR)/regrid_weights.o: $(OBJDIR)/regrid_base.o
-$(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mom6_supergrid.o $(OBJDIR)/time_utils.o
+$(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mom6_supergrid.o $(OBJDIR)/sis_cap_fields.o $(OBJDIR)/time_utils.o
+$(OBJDIR)/sis_cap_fields.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/time_utils.o: $(OBJDIR)/mom_cap_methods.o
 
 # -----------------------------------------------------------------------------
