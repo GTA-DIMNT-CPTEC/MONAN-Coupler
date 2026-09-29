@@ -5,6 +5,7 @@
 !!
 !!   CreateInternalField      — cria campo ESMF na grade interna
 !!   ZeroInternalField        — zera campo com guard
+!!   ZeroOcnFluxFields        — zera os fluxos enviados ao oceano
 !!   FillInternalField        — preenche campo com valor constante
 !!   GetFieldPtr              — obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional      — obtém ponteiro sem erro de log para campos opcionais
@@ -17,7 +18,7 @@ module med_cap_methods_mod
   use regrid_manager_mod, only : regrid_spec
   use NUOPC, only: NUOPC_SetTimestamp
 
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
   use coupler_config_mod, only: cfg_use_sis2_dynamic
 
   use coupler_utils_mod, only : ChkErr
@@ -27,6 +28,7 @@ module med_cap_methods_mod
 
   public :: CreateInternalField
   public :: ZeroInternalField
+  public :: ZeroOcnFluxFields
   public :: FillInternalField
   public :: GetFieldPtr
   public :: GetFieldPtrOptional
@@ -67,19 +69,36 @@ contains
     type(ESMF_Field), intent(inout) :: field
     integer,          intent(out)   :: rc
 
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
-    integer :: localDeCount_f
-    rc = ESMF_SUCCESS
-
-    call ESMF_FieldGet(field, localDeCount=localDeCount_f, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    if (localDeCount_f == 0) return   ! PET sem dados locais — nada a zerar
-
-    call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    fptr = 0.0_ESMF_KIND_R8
+    call FillInternalField(field, 0.0_ESMF_KIND_R8, rc)
 
   end subroutine ZeroInternalField
+
+  !============================================================================
+  !> @brief Zera os doze fluxos enviados ao oceano, sempre na mesma ordem.
+  !!
+  !! Usada na criação dos campos internos (med_init) e no início de cada
+  !! passo (med_flux). O rc final é o do último campo, como antes.
+  !! @param[inout] flx  fluxos do mediador para o oceano
+  !! @param[out]   rc   código de retorno ESMF
+  !============================================================================
+  subroutine ZeroOcnFluxFields(flx, rc)
+    type(med_ocn_flux_fields_t), intent(inout) :: flx
+    integer,                     intent(out)   :: rc
+
+    call ZeroInternalField(flx%taux,   rc)
+    call ZeroInternalField(flx%tauy,   rc)
+    call ZeroInternalField(flx%sen,    rc)
+    call ZeroInternalField(flx%evap,   rc)
+    call ZeroInternalField(flx%lwnet,  rc)
+    call ZeroInternalField(flx%swvdr,  rc)
+    call ZeroInternalField(flx%swvdf,  rc)
+    call ZeroInternalField(flx%swidr,  rc)
+    call ZeroInternalField(flx%swidf,  rc)
+    call ZeroInternalField(flx%rain,   rc)
+    call ZeroInternalField(flx%snow,   rc)
+    call ZeroInternalField(flx%pslv,   rc)
+
+  end subroutine ZeroOcnFluxFields
 
   !============================================================================
   !> @brief Preenche campo ESMF com valor constante.
@@ -144,7 +163,6 @@ contains
     real(ESMF_KIND_R8), pointer, intent(inout) :: ptr(:,:)
     integer,                     intent(out)   :: rc
 
-    type(ESMF_Field)               :: field
     integer                        :: itemCount, i, localrc
     character(len=64), allocatable :: itemNames(:)
     logical                        :: found
@@ -179,17 +197,7 @@ contains
       rc = ESMF_FAILURE; return
     end if
 
-    call ESMF_StateGet(state, trim(name), field, rc=localrc)
-    if (localrc /= ESMF_SUCCESS) then
-      rc = ESMF_FAILURE; return
-    end if
-
-    call ESMF_FieldGet(field, farrayPtr=ptr, rc=localrc)
-    if (localrc /= ESMF_SUCCESS) then
-      rc = ESMF_FAILURE; return
-    end if
-
-    rc = ESMF_SUCCESS
+    call GetFieldPtr(state, name, ptr, rc)
 
   end subroutine GetFieldPtrOptional
 

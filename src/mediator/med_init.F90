@@ -21,7 +21,7 @@ module med_init_mod
                                n_import_datm, import_datm_names, n_export, &
                                export_names, SST_BULK_FALLBACK
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
-                                 FillInternalField
+                                 ZeroOcnFluxFields, FillInternalField
   use med_ocean_mod, only: regrid_ocean_currents
   use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
 
@@ -559,18 +559,7 @@ contains
     call CreateInternalField(is%ice%swidf,   atm_grid, "med_swidf_ice",  rc)
 
     ! Zerar campos internos
-    call ZeroInternalField(is%ocn_flx%taux,   rc)
-    call ZeroInternalField(is%ocn_flx%tauy,   rc)
-    call ZeroInternalField(is%ocn_flx%sen,    rc)
-    call ZeroInternalField(is%ocn_flx%evap,   rc)
-    call ZeroInternalField(is%ocn_flx%lwnet,  rc)
-    call ZeroInternalField(is%ocn_flx%swvdr,  rc)
-    call ZeroInternalField(is%ocn_flx%swvdf,  rc)
-    call ZeroInternalField(is%ocn_flx%swidr,  rc)
-    call ZeroInternalField(is%ocn_flx%swidf,  rc)
-    call ZeroInternalField(is%ocn_flx%rain,   rc)
-    call ZeroInternalField(is%ocn_flx%snow,   rc)
-    call ZeroInternalField(is%ocn_flx%pslv,   rc)
+    call ZeroOcnFluxFields(is%ocn_flx, rc)
     call ZeroInternalField(is%ice%ifrac,  rc)
     call ZeroInternalField(is%ocn_flx%duu10n, rc)
     ! fallback nao-zero (ALB_ICE_DEFAULT, o mesmo valor que o cap do gelo usa

@@ -7,6 +7,10 @@
 !! mpas_mpi_comm, ordered_sum_bcast, fill_empty_bins, diagnósticos no log e
 !! copy_to_local_grid).
 !!
+!! find_local_field faz a busca do campo no State e as verificações que
+!! state_set_field_1d e state_get_field_1d (mpas_cap_methods) fazem antes de
+!! acessar os dados.
+!!
 !! Separado de mpas_cap_methods.F90 sem mudar instruções (R-FASE8-15).
 
 module mpas_cell_binning_mod
@@ -19,12 +23,56 @@ module mpas_cell_binning_mod
   implicit none
   private
 
-  public :: state_set_field_1d
+  public :: state_set_field_1d, find_local_field
   ! Etapas de cálculo de map_cells_to_regular_grid, públicas para os testes
   ! com valor esperado (tests/unit).
   public :: bin_cells_local, fill_empty_bins
 
 contains
+
+  !> @brief Procura o campo fldname no State e informa se há dados locais.
+  !!
+  !! found fica .false., e nada mais é feito, quando o campo não existe (nota
+  !! INFO no log), quando este PET não tem DE do campo ou quando a consulta do
+  !! rank falha (aviso no log). Essas verificações vêm antes de farrayPtr para
+  !! não gerar erro no log do ESMF.
+  !!
+  !! @param[in]  state     State onde procurar
+  !! @param[in]  fldname   nome do campo
+  !! @param[in]  subname   nome da rotina chamadora, usado nas mensagens
+  !! @param[out] field     o campo, quando encontrado
+  !! @param[out] fld_rank  número de dimensões do campo
+  !! @param[out] found     .true. quando o campo pode ser acessado
+  subroutine find_local_field(state, fldname, subname, field, fld_rank, found)
+    type(ESMF_State), intent(in)  :: state
+    character(len=*), intent(in)  :: fldname
+    character(len=*), intent(in)  :: subname
+    type(ESMF_Field), intent(out) :: field
+    integer,          intent(out) :: fld_rank
+    logical,          intent(out) :: found
+
+    integer :: localDeCount, rc
+
+    found    = .false.
+    fld_rank = 0
+
+    call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
+      return
+    end if
+
+    call ESMF_FieldGet(field, localDeCount=localDeCount, rc=rc)
+    if (rc /= ESMF_SUCCESS .or. localDeCount == 0) return
+
+    call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
+      return
+    end if
+
+    found = .true.
+  end subroutine find_local_field
 
   !> @brief Copia array Fortran 1D (celulas MPAS) para campo do ESMF_State.
   !!
@@ -47,30 +95,13 @@ contains
     real(ESMF_KIND_R8), pointer  :: fptr2d(:,:)
     integer :: n_esmf, fld_rank, i, j, idx
     character(len=*), parameter  :: subname = '(state_set_field_1d)'
-      integer :: localDeCount_ss
+    logical :: found
 
     rc = ESMF_SUCCESS
     nullify(fptr1d, fptr2d)
 
-    call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
-      rc = ESMF_SUCCESS
-      return
-    end if
-
-    ! verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
-      call ESMF_FieldGet(field, localDeCount=localDeCount_ss, rc=rc)
-      if (rc /= ESMF_SUCCESS .or. localDeCount_ss == 0) then
-        rc = ESMF_SUCCESS; return
-      end if
-
-    ! Consultar rank do campo ANTES de chamar farrayPtr (evita erro ESMF)
-    call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
-      rc = ESMF_SUCCESS; return
-    end if
+    call find_local_field(state, fldname, subname, field, fld_rank, found)
+    if (.not. found) return
 
     if (fld_rank == 1) then
       ! Campo rank-1: ESMF_Mesh ou ESMF_Grid 1D

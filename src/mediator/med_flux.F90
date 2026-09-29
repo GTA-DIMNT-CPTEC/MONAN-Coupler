@@ -15,7 +15,7 @@ module med_flux_mod
   use coupler_constants_mod, only: ATM_NX, ATM_NY
   use coupler_config_mod, only: cfg_use_docn_ice, cfg_docn_ice_init_only
   use med_cap_types_mod, only: MED_InternalState, L_evap, SHUM_OCEAN_DEFAULT
-  use med_cap_methods_mod, only: ZeroInternalField, GetFieldPtr, GetFieldPtrOptional
+  use med_cap_methods_mod, only: ZeroInternalField, ZeroOcnFluxFields, GetFieldPtr, GetFieldPtrOptional
   use med_diag_mod, only: log_atm_forcing_summary
 
   implicit none
@@ -509,18 +509,7 @@ contains
   subroutine zero_med_fluxes(is, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
-    call ZeroInternalField(is%ocn_flx%taux,   rc)
-    call ZeroInternalField(is%ocn_flx%tauy,   rc)
-    call ZeroInternalField(is%ocn_flx%sen,    rc)
-    call ZeroInternalField(is%ocn_flx%evap,   rc)
-    call ZeroInternalField(is%ocn_flx%lwnet,  rc)
-    call ZeroInternalField(is%ocn_flx%swvdr,  rc)
-    call ZeroInternalField(is%ocn_flx%swvdf,  rc)
-    call ZeroInternalField(is%ocn_flx%swidr,  rc)
-    call ZeroInternalField(is%ocn_flx%swidf,  rc)
-    call ZeroInternalField(is%ocn_flx%rain,   rc)
-    call ZeroInternalField(is%ocn_flx%snow,   rc)
-    call ZeroInternalField(is%ocn_flx%pslv,   rc)
+    call ZeroOcnFluxFields(is%ocn_flx, rc)
     ! NÃO zerar is%ice%ifrac incondicionalmente.
     ! Com use_docn_ice=T, init_only=T e is%run%ifrac_init_done=T,
     ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o

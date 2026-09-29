@@ -9,12 +9,22 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Zeragem dos fluxos do oceano e busca de campos do MONAN-A sem cópias (R-FASE9-06).** Sexta etapa da fase 9. Nenhum cálculo muda.
+  - Mediador, em `src/mediator/med_cap_methods.F90`:
+    - `ZeroOcnFluxFields(flx, rc)` zera os doze fluxos enviados ao oceano (`taux`, `tauy`, `sen`, `evap`, `lwnet`, as quatro bandas de onda curta, `rain`, `snow`, `pslv`), na mesma ordem de antes. As doze chamadas estavam escritas duas vezes: na criação dos campos internos (`med_init`) e no início de cada passo (`zero_med_fluxes`, em `med_flux`).
+    - `ZeroInternalField` passa a chamar `FillInternalField` com zero, em vez de repetir a verificação de DE local e a obtenção do ponteiro.
+    - `GetFieldPtrOptional`, depois de confirmar que o nome está no State, chama `GetFieldPtr` em vez de repetir as duas buscas.
+  - Cap atmosférico, em `src/caps/atmos/mpas_cell_binning.F90`: `find_local_field` faz a busca do campo no State, a verificação de DE local e a consulta do rank, que `state_set_field_1d` e `state_get_field_1d` (`mpas_cap_methods`) faziam cada uma com a sua cópia. As mensagens de log são as mesmas e continuam com o nome da rotina chamadora; por isso a conferência das constantes de texto acusa `' nao encontrado'`, `' dimCount query falhou'` e `': '` saindo de `mpas_cap_methods` (continuam em `mpas_cell_binning`).
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as constantes de texto e as instruções, como esperado.
+  - Indicadores: trechos repetidos de 54 para 42; os que restam são quase todos a sequência de registro do NUOPC em `SetServices`, que o roteiro aceita.
+
 - **Leitura do supergrid do MOM6 numa rotina só (R-FASE9-05).** Quinta etapa da fase 9. Nenhum cálculo muda.
   - Em `src/shared/mom6_supergrid.F90`, `mom6_supergrid_tcoords` (centros T) e `mom6_supergrid_corners` (cantos) repetiam a mesma leitura do `ocean_hgrid.nc`: abrir o arquivo, achar `x` e `y`, ler com passo 2 a partir do ponto (2i, 2j) ou (2i-1, 2j-1), normalizar a longitude para [0, 360) e fechar. A leitura passa para a rotina privada `read_supergrid_points`, que recebe o deslocamento (0 para centros, 1 para cantos) e os trechos de texto que distinguem as mensagens de erro das duas. `mom6_supergrid_tcoords` mantém o seu diagnóstico no log, emitido nas mesmas condições de antes (depois de uma leitura, mesmo que ela falhe; não quando o arquivo não abre).
   - O comentário que descrevia `mom6_supergrid_dims` aparecia duas vezes; ficou uma.
   - As mensagens de log saem iguais: o texto de cada uma é montado com os mesmos pedaços, agora passados como argumentos. Por isso a conferência das constantes de texto acusa a troca de `': falha ao ler "x" (lon) de '` por `': falha ao ler '` + `'"x" (lon)'` + `' de '`, e assim por diante.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as constantes de texto e as instruções, como esperado. Teste avulso com um supergrid sintético (20 x 14 células, longitudes de -300 a 60): as duas rotinas, na versão anterior e na nova, deram coordenadas idênticas bit a bit, os mesmos códigos de retorno (inclusive com arquivo inexistente) e o mesmo log do ESMF. Na Jaci, o mediador e o cap do gelo usam as duas rotinas na inicialização, e a rodada de validação passa por elas.
   - Indicadores: trechos repetidos de 67 para 54.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase9-05-validada`).
 
 - **Inicialização de dados e carimbo de tempo dos caps de dados em `cap_common` (R-FASE9-04).** Quarta etapa da fase 9, pedida para reduzir os trechos repetidos entre `DATM_cap` e `DOCN_cap`. Nenhum cálculo muda.
   - Três procedimentos novos em `src/shared/cap_common.F90`:

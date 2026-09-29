@@ -27,7 +27,7 @@ module mpas_cap_methods_mod
                                   mpas_diag_export_t
   use mpas_import_diag_mod, only: write_mpas_import_diag,   &
                                   mpas_import_diag_clock_t
-  use mpas_cell_binning_mod, only: state_set_field_1d
+  use mpas_cell_binning_mod, only: state_set_field_1d, find_local_field
   implicit none
   private
 
@@ -613,7 +613,7 @@ contains
     real(ESMF_KIND_R8), pointer  :: fptr1d(:)
     integer :: n_esmf, fld_rank
     character(len=*), parameter  :: subname = '(state_get_field_1d)'
-      integer :: localDeCount_sg
+    logical :: found
         real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
         real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
         real(ESMF_KIND_R8), parameter :: FILL_THR = 1.0e19_ESMF_KIND_R8
@@ -631,25 +631,8 @@ contains
     rc = ESMF_SUCCESS
     nullify(fptr1d)
 
-    call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
-      rc = ESMF_SUCCESS
-      return
-    end if
-
-    ! verificar localDeCount ANTES de farrayPtr (evita erro ESMF log).
-      call ESMF_FieldGet(field, localDeCount=localDeCount_sg, rc=rc)
-      if (rc /= ESMF_SUCCESS .or. localDeCount_sg == 0) then
-        rc = ESMF_SUCCESS; return
-      end if
-
-    ! Consultar rank do campo ANTES de chamar farrayPtr (evita erro ESMF)
-    call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
-      rc = ESMF_SUCCESS; return
-    end if
+    call find_local_field(state, fldname, subname, field, fld_rank, found)
+    if (.not. found) return
 
     if (fld_rank == 1) then
       ! Campo rank-1: ESMF_Mesh ou ESMF_Grid 1D
