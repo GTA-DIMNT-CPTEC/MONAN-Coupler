@@ -9,6 +9,14 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Diagnóstico de importação do cap atmosférico em módulo próprio (R-FASE8-12).** Primeira das quatro divisões de arquivo da fase 8 (limite de 1 200 linhas, decisão de 29/09/2026). Nenhuma instrução muda.
+  - `mpas_cap_netcdf.F90` (1 478 linhas) juntava dois gravadores independentes: a forçante exportada pelo MONAN-A (`monan_export_*.nc`) e o diagnóstico dos campos importados do mediador (`monan2_import_*.nc`). Os dois não compartilham rotinas nem estado. O segundo sai, sem mudança, para `src/caps/atmos/mpas_import_diag.F90` (módulo `mpas_import_diag_mod`, 661 linhas): `set_mpas_diag_clock`, `write_mpas_import_diag` e as suas etapas (`gather_cell_coords`, `write_import_diag_file`, `gather_boundary_member`, `define_import_diag_file`, `write_import_diag_fields`, `bin_masked_field`, `binarize_ocean_mask`, `log_mask_coverage`, `voronoi_to_grid`), o tipo `mpas_import_diag_clock_t` e as constantes `IMP_*`, `N_IMP_DIAG` e `OMASK_MIN`.
+  - `mpas_cap_netcdf.F90` fica com 839 linhas e deixa de usar `mpas_atm_types_mod` e `coupler_config_mod`, que só o diagnóstico de importação usava.
+  - Quem usa o diagnóstico passa a importá-lo do módulo novo: `mpas_cap_MONAN.F90` (relógio), `mpas_cap_methods.F90` (gravação) e `tests/writers/test_writers.F90`.
+  - Compilação: `mpas_import_diag` entra em `SRCS` do `Makefile`, depois de `mpas_cap_netcdf`, com as suas dependências; `mpas_cap_methods.o` e `mpas_cap_MONAN.o` passam a depender dele. A lista de `tools/dev/compila-local.bash` e as listas de objetos de `tests/unit/roda-unitarios.bash`, `tests/atmgrid/compara-grade-atm.bash` e `tests/writers/compara-gravadores.bash` também. Os dois últimos compilam também a versão de referência, que pode não ter o objeto novo; por isso passam a ligar só os objetos que existem (`objs_presentes`).
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 19 diferenças são só as linhas de `module`, `use`, `private`, `implicit none` e `contains` do módulo novo e dos que o usam. Constantes de texto: as 60 do diagnóstico só mudaram de arquivo (503 no total dos cinco arquivos, iguais). O teste dos gravadores, que grava dois `monan2_import_*.nc`, saiu igual entre a versão anterior e a nova.
+  - Indicadores: arquivos Fortran de 41 para 42; arquivos com mais de 1 000 linhas de 6 para 5; maior arquivo de 1 478 para 1 404 linhas (`mom_cap_MONAN.F90`, a próxima divisão).
+
 - **Passo do DOCN: leitura dos campos e carimbo de tempo em rotinas próprias (R-FASE8-11).** Nona e última revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `ModelAdvance` (`DOCN_cap.F90`, 116 linhas de código) juntava o relógio, a alocação dos buffers, a leitura dos arquivos, a gravação no `exportState`, o diagnóstico e o carimbo de tempo. Saem sem mudança:
     - `read_docn_fields`: SST (com a conversão para kelvin), fração de gelo (com a conversão de porcentagem e o limite a [0,1]) e salinidade constante;
@@ -20,6 +28,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Fora do código: o nome do job no PBS gerado por `run/run_esmApp.jaci` passa de `GTA-MONAN2xMOM6` para `GTA-COUPLER`, como já estava na cópia da Jaci antes da R-FASE8-10.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas diferenças são só declarações, cabeçalhos e chamadas das rotinas novas e o laço de carimbo trocado pela chamada. Literais iguais (62).
   - Indicadores: rotinas de 313 para 316; rotinas com mais de 100 linhas de código de 2 para 1 (só o `config_read`, que fica como está).
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-11-validada`); o job já saiu com o nome `GTA-COUPLER`.
 
 - **Fluxos instantâneos do MONAN-A: uma rotina por grandeza (R-FASE8-10).** Oitava revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `compute_instantaneous_fluxes` (`mpas_atm_fluxes.F90`, 122 linhas de código) calculava cinco grandezas independentes, cada uma com as suas constantes locais. Cada trecho vira uma rotina, sem mudança, e leva junto as suas variáveis e constantes:

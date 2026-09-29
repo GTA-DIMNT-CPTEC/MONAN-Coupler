@@ -44,9 +44,9 @@ module mpas_cap_MONAN_mod
   use mpas_cap_netcdf_mod,  only : export_write_netcdf, &
                                     mpas_diag_export_t,  &
                                     netcdf_init_coords,  &
-                                    netcdf_config_set,   &
-                                    mpas_import_diag_clock_t, &
-                                    set_mpas_diag_clock   ! timestamp do diag import (mpas_cap_netcdf)
+                                    netcdf_config_set
+  use mpas_import_diag_mod, only : mpas_import_diag_clock_t, &
+                                    set_mpas_diag_clock   ! timestamp do diag import (mpas_import_diag)
 
   use coupler_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
                                     cfg_config_dir,                   &

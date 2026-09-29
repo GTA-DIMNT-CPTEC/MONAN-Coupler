@@ -10,9 +10,9 @@ program test_writers
   use med_cap_types_mod, only : MED_InternalState, n_export, export_names
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
-  use mpas_cap_netcdf_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
-                                  mpas_import_diag_clock_t, &
-                                  mpas_diag_export_t, netcdf_config_set, &
+  use mpas_import_diag_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
+                                  mpas_import_diag_clock_t
+  use mpas_cap_netcdf_mod, only : mpas_diag_export_t, netcdf_config_set, &
                                   netcdf_init_coords, netcdf_push_raw_field, &
                                   export_write_netcdf
   use docn_cap_netcdf_mod, only : WriteDOCNDiag

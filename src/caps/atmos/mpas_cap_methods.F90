@@ -25,8 +25,8 @@ module mpas_cap_methods_mod
                                    cfg_grid_res_deg
   ! netcdf_push_raw_field captura dado MPAS ANTES de state_set_field_1d
   use mpas_cap_netcdf_mod, only: netcdf_push_raw_field,     &
-                                  mpas_diag_export_t,        &
-                                  write_mpas_import_diag,    &
+                                  mpas_diag_export_t
+  use mpas_import_diag_mod, only: write_mpas_import_diag,   &
                                   mpas_import_diag_clock_t
   implicit none
   private

@@ -86,7 +86,7 @@ Depois da R-FASE8-02, ainda passavam de 1 200 linhas quatro arquivos que o rotei
 
 | Arquivo (linhas) | Assunto que sai | Arquivo novo | Tamanho aproximado depois |
 | --- | --- | --- | --- |
-| `mpas_cap_netcdf.F90` (1 478) | diagnóstico de importação `monan2_import_*.nc`: relógio do diagnóstico, reunião dos membros de `atm_bnd`, definição e gravação do arquivo, binagem com máscara (`voronoi_to_grid`) | `mpas_import_diag.F90` | 900 e 600 |
+| `mpas_cap_netcdf.F90` (1 478) | diagnóstico de importação `monan2_import_*.nc`: relógio do diagnóstico, reunião dos membros de `atm_bnd`, definição e gravação do arquivo, binagem com máscara (`voronoi_to_grid`) | `mpas_import_diag.F90` | feita na R-FASE8-12: 839 e 661 |
 | `mom_cap_MONAN.F90` (1 404) | fração de gelo `Si_ifrac` para o oceano (`set_si_ifrac_from_file`, `compute_si_ifrac_proxy` e o tipo `si_ifrac_memory_t`) | `mom_si_ifrac.F90` | 1 080 e 330 |
 | `sis_cap_MONAN.F90` (1 391) | troca de campos com o mediador: importação dos forçantes por categoria e exportação de `Si_ifrac`, albedos e temperatura de pele | `sis_cap_fields.F90` | 1 000 e 400 |
 | `mpas_cap_methods.F90` (1 232) | média das células MPAS na grade regular 360x180 (`state_set_field_1d`, `map_cells_to_regular_grid` e as suas sete etapas) | `mpas_cell_binning.F90` | 780 e 450 |
