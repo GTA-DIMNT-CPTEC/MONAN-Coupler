@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na fase 4 (setembro de 2026).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado ao fim da fase 9 (29/09/2026).
 
 ## 1. O que é o projeto
 
@@ -55,7 +55,8 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
-| R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 (validação pendente) |
+| R-FASE9-07 | encerramento da fase 9: indicadores finais, RPQ na sexta versão e procedimento de integração ao `develop`; só documentação |
+| R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 |
 | R-FASE9-05 | leitura do supergrid do MOM6 (`mom6_supergrid_tcoords` e `mom6_supergrid_corners`) numa rotina privada; trechos repetidos de 67 para 54; conferida com teste avulso |
 | R-FASE9-04 | inicialização de dados (valores iniciais por nome, atributos de conclusão) e carimbo de tempo dos caps de dados em `cap_common.F90`; trechos repetidos de 82 para 67; conferida localmente com o driver NUOPC avulso do DOCN |
 | R-FASE9-03 | revisão final dos comentários: arquivos e rotinas citados passam a ser os de depois das divisões, histórico de mudanças trocado pela descrição do comportamento atual, comentários errados corrigidos; zero diferenças de instruções |
@@ -209,8 +210,27 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | 6 | rede de segurança: `confere-tudo.bash`, script de indicadores, testes com valor esperado | R-FASE6-01 a R-FASE6-03 | R-FASE6-01 concluída (PASS, 73 iguais, tag `fase6-01-validada`); R-FASE6-02 concluída (PASS, 73 iguais, tag `fase6-02-validada`); R-FASE6-03 concluída (PASS, 73 iguais, tag `fase6-03-validada`); fase concluída |
 | 7 | estado explícito: variáveis de módulo com estado de componente levadas ao tipo interno de cada componente | R-FASE7-01 a R-FASE7-06 | R-FASE7-01 concluída (PASS, 73 iguais, tag `fase7-01-validada`); R-FASE7-02 concluída (PASS, 73 iguais, tag `fase7-02-validada`); R-FASE7-03 concluída (PASS, 73 iguais, tag `fase7-03-validada`); R-FASE7-04 concluída (PASS, 73 iguais, tag `fase7-04-validada`); R-FASE7-05 concluída (PASS, 73 iguais, tag `fase7-05-validada`); R-FASE7-06 concluída (PASS, 73 iguais, tag `fase7-06-validada`); fase 7 concluída |
 | 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 concluída (PASS, 73 iguais, tag `fase8-10-validada`); R-FASE8-11 concluída (PASS, 73 iguais, tag `fase8-11-validada`), com ela terminam as revisões de rotinas longas; R-FASE8-12 concluída (PASS, 73 iguais, tag `fase8-12-validada`), primeira das quatro divisões de arquivo; R-FASE8-13 concluída (PASS, 73 iguais, tag `fase8-13-validada`); R-FASE8-14 concluída (PASS, 73 iguais, tag `fase8-14-validada`); R-FASE8-15 concluída (PASS, 73 iguais, tag `fase8-15-validada`), última das quatro divisões de arquivo; fase concluída |
-| 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-06 | R-FASE9-01 concluída (PASS, 73 iguais, tag `fase9-01-validada`); R-FASE9-02 concluída (PASS, 73 iguais, tag `fase9-02-validada`); R-FASE9-03 concluída (PASS, 73 iguais, tag `fase9-03-validada`); R-FASE9-04 concluída (PASS, 73 iguais, tag `fase9-04-validada`), pedida em 29/09/2026 para reduzir os trechos repetidos; R-FASE9-05 concluída (PASS, 73 iguais, tag `fase9-05-validada`); R-FASE9-06 entregue (validação pendente) |
+| 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-07 | R-FASE9-01 concluída (PASS, 73 iguais, tag `fase9-01-validada`); R-FASE9-02 concluída (PASS, 73 iguais, tag `fase9-02-validada`); R-FASE9-03 concluída (PASS, 73 iguais, tag `fase9-03-validada`); R-FASE9-04 concluída (PASS, 73 iguais, tag `fase9-04-validada`), pedida em 29/09/2026 para reduzir os trechos repetidos; R-FASE9-05 concluída (PASS, 73 iguais, tag `fase9-05-validada`); R-FASE9-06 concluída (PASS, 73 iguais, tag `fase9-06-validada`); R-FASE9-07 encerra a fase (só documentação); fase concluída, RPQ na sexta versão, integração ao `develop` pelo procedimento abaixo |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
+
+### Integração de `refactor/principal` ao `develop`
+
+Autorizada em 29/09/2026, depois da R-FASE9-07. A refatoração partiu do commit `ea10fb6` do `develop`. Na Jaci, um comando por vez, na raiz do repositório:
+
+| Passo | Comando | O que conferir |
+| --- | --- | --- |
+| 1 | `git status` | árvore limpa, no ramo `refactor/principal`, com a R-FASE9-07 aplicada |
+| 2 | `git fetch origin` | traz o estado atual do GitHub |
+| 3 | `git merge-base --is-ancestor origin/develop refactor/principal && echo SEM-NOVIDADES` | `SEM-NOVIDADES`: o `develop` não recebeu commits desde `ea10fb6` |
+| 4 | `git checkout develop` | troca de ramo |
+| 5 | `git merge --ff-only origin/develop` | `develop` local igual ao do GitHub |
+| 6 | `git merge --no-ff refactor/principal -m "Integra a refatoracao (fases 1 a 9) ao develop"` | um commit de integração, sem conflitos |
+| 7 | `git diff refactor/principal develop --stat` | vazio: a árvore do `develop` é a mesma da refatoração validada |
+| 8 | `git tag refatoracao-integrada` | marca o ponto de integração |
+| 9 | `git push origin develop` | envia o `develop` |
+| 10 | `git push origin refatoracao-integrada` | envia a tag |
+
+Se o passo 3 não imprimir `SEM-NOVIDADES`, o `develop` recebeu commits depois de `ea10fb6`: o passo 6 pode ter conflitos, e o passo 7 não fica vazio. Nesse caso, resolver os conflitos, compilar e repetir a rodada de validação no `develop` integrado antes do passo 8. O `--no-ff` guarda um commit de integração mesmo quando o avanço direto seria possível, o que deixa claro no histórico onde a refatoração entrou. O ramo `refactor/principal` e as tags `faseN-NN-validada` continuam no GitHub como registro.
 
 ## 9. Convenções
 

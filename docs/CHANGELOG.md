@@ -9,6 +9,12 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Encerramento da fase 9 (R-FASE9-07).** Só documentação; nenhum fonte, script ou arquivo de configuração muda, e o executável é o mesmo da R-FASE9-06.
+  - A fase 9 e, com ela, a limpeza do roteiro (fases 6 a 9) ficam concluídas. Indicadores finais, medidos por `tools/dev/indicadores.py` em `src/` (sem `upstream/`): 46 arquivos Fortran, 19 057 linhas (11 581 de código); 2 arquivos com mais de 1 000 linhas e nenhum acima de 1 200 (o maior, `med_bulk_ncar.F90`, com 1 080); 315 rotinas, só o `config_read` com mais de 100 linhas de código; nenhuma variável de módulo pública, 2 privadas (o catálogo de esquemas de interpolação); 1 variável local com `save` explícito; 42 trechos repetidos, dos quais 31 são a sequência de registro do NUOPC em `SetServices`.
+  - Relatório técnico atualizado (RPQ, sexta versão): novos capítulos sobre o roteiro e as fases 6, 7, 8 e 9, resumo e abstract, conclusões, próximos passos (as decisões da fase 10) e a lista de etapas do apêndice.
+  - `docs/estado-do-projeto.md` ganha o procedimento de integração de `refactor/principal` ao `develop` (seção 8).
+  - Na entrada da R-FASE9-06, "quase todos" passa a "a maioria": 31 de 42 trechos.
+
 - **Zeragem dos fluxos do oceano e busca de campos do MONAN-A sem cópias (R-FASE9-06).** Sexta etapa da fase 9. Nenhum cálculo muda.
   - Mediador, em `src/mediator/med_cap_methods.F90`:
     - `ZeroOcnFluxFields(flx, rc)` zera os doze fluxos enviados ao oceano (`taux`, `tauy`, `sen`, `evap`, `lwnet`, as quatro bandas de onda curta, `rain`, `snow`, `pslv`), na mesma ordem de antes. As doze chamadas estavam escritas duas vezes: na criação dos campos internos (`med_init`) e no início de cada passo (`zero_med_fluxes`, em `med_flux`).
@@ -16,7 +22,8 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
     - `GetFieldPtrOptional`, depois de confirmar que o nome está no State, chama `GetFieldPtr` em vez de repetir as duas buscas.
   - Cap atmosférico, em `src/caps/atmos/mpas_cell_binning.F90`: `find_local_field` faz a busca do campo no State, a verificação de DE local e a consulta do rank, que `state_set_field_1d` e `state_get_field_1d` (`mpas_cap_methods`) faziam cada uma com a sua cópia. As mensagens de log são as mesmas e continuam com o nome da rotina chamadora; por isso a conferência das constantes de texto acusa `' nao encontrado'`, `' dimCount query falhou'` e `': '` saindo de `mpas_cap_methods` (continuam em `mpas_cell_binning`).
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as constantes de texto e as instruções, como esperado.
-  - Indicadores: trechos repetidos de 54 para 42; os que restam são quase todos a sequência de registro do NUOPC em `SetServices`, que o roteiro aceita.
+  - Indicadores: trechos repetidos de 54 para 42; a maioria dos que restam (31) é a sequência de registro do NUOPC em `SetServices`, que o roteiro aceita.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase9-06-validada`). Com ela termina a fase 9.
 
 - **Leitura do supergrid do MOM6 numa rotina só (R-FASE9-05).** Quinta etapa da fase 9. Nenhum cálculo muda.
   - Em `src/shared/mom6_supergrid.F90`, `mom6_supergrid_tcoords` (centros T) e `mom6_supergrid_corners` (cantos) repetiam a mesma leitura do `ocean_hgrid.nc`: abrir o arquivo, achar `x` e `y`, ler com passo 2 a partir do ponto (2i, 2j) ou (2i-1, 2j-1), normalizar a longitude para [0, 360) e fechar. A leitura passa para a rotina privada `read_supergrid_points`, que recebe o deslocamento (0 para centros, 1 para cantos) e os trechos de texto que distinguem as mensagens de erro das duas. `mom6_supergrid_tcoords` mantém o seu diagnóstico no log, emitido nas mesmas condições de antes (depois de uma leitura, mesmo que ela falhe; não quando o arquivo não abre).

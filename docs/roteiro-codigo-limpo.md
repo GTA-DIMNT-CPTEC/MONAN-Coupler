@@ -107,6 +107,20 @@ Situação depois da R-FASE9-03: todas as metas da seção 3 foram atingidas, me
 
 **Pronto quando:** os indicadores da seção 3 estão nas metas. Nesse ponto, a limpeza termina: atualizar o relatório técnico (RPQ) e abrir o pedido de integração de `refactor/principal` ao `develop`.
 
+**Fase 9 concluída em 29/09/2026** (R-FASE9-06 validada, tag `fase9-06-validada`; R-FASE9-07 só com documentação). Medição final, comparada com a de partida da seção 3:
+
+| Indicador | Partida (`fase5-07-validada`) | Fim da fase 9 | Meta |
+| --- | --- | --- | --- |
+| Arquivos com mais de 1 000 linhas | 7 (o maior com 3 379) | 2 (o maior com 1 080) | nenhum acima de 1 200: atingida |
+| Rotinas com mais de 100 linhas de código | 10 | 1 (`config_read`) | só `config_read`: atingida |
+| Variáveis de módulo públicas / privadas | 5 / 65 | 0 / 2 (catálogo de interpolação) | nenhuma com estado de componente: atingida |
+| Trechos repetidos | 87 | 42 (31 em `SetServices`) | só `SetServices`: atingida, com 11 trechos curtos de chamada ao ESMF e conferência do retorno |
+| Testes com valor esperado | nenhum | 46 casos (física bulk e grade do cap atmosférico) | funções de cálculo puro: atingida |
+| Configurações aceitas mas não executadas | `use_datm` | `use_datm` | depende da fase 10 |
+| Comentários desatualizados conhecidos | grade "640×320" | nenhum | atingida |
+
+O RPQ foi atualizado (sexta versão) e a integração ao `develop` foi autorizada; o procedimento está na seção 8 de `docs/estado-do-projeto.md`. Seguem a fase 10 e, depois dela, o DTN-01.
+
 ### Fase 10: trilha de decisões (pode mudar resultados)
 
 Estes itens não são limpeza no sentido estrito: removem remendos ou corrigem escolhas que afetam o que o modelo calcula. Cada um precisa de decisão registrada no estado do projeto, etapa exclusiva e, quando mudar resultados, uma nova linha de base. Podem ser tratados em paralelo com as fases 6 a 9, desde que nunca na mesma etapa.
