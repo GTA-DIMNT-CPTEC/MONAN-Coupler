@@ -347,13 +347,10 @@ contains
     real(ESMF_KIND_R8), pointer :: fptr(:,:) => null()
     real(ESMF_KIND_R8), allocatable :: buf(:)    ! buffer MPI broadcast
     real(ESMF_KIND_R8), allocatable :: f0(:,:), f1(:,:)
-    integer :: buf_n(1)       ! wrapper para broadcast de ntime (inteiro escalar)
     integer :: nx_o, ny_o, nx_a, ny_a
-    integer :: i, j, i_o, j_o
     integer :: tidx0, tidx1, ntime, localDeCount_f, localPet
-    integer :: ncid, varid, dimid, nc_rc
     integer(ESMF_KIND_I8) :: sec_epoch, dt_data_i8
-    real(ESMF_KIND_R8) :: alpha, dx_o, dy_o, dx_a, dy_a, lon_a, lat_a
+    real(ESMF_KIND_R8) :: alpha, dx_o, dy_o, dx_a, dy_a
     character(len=256) :: logmsg
 
     rc = ESMF_SUCCESS
@@ -398,27 +395,8 @@ contains
     end if
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
 
-    ntime = 365  ! default seguro
-
-    if (localPet == 0) then
-      ! Descobrir ntime no arquivo
-      nc_rc = nf90_open(trim(cfg_docn_ice_file), NF90_NOWRITE, ncid)
-      if (nc_rc == NF90_NOERR) then
-        nc_rc = nf90_inq_dimid(ncid, 'time', dimid)
-        if (nc_rc /= NF90_NOERR) nc_rc = nf90_inq_dimid(ncid, 'Time', dimid)
-        if (nc_rc == NF90_NOERR) then
-          nc_rc = nf90_inquire_dimension(ncid, dimid, len=ntime)
-        end if
-        nc_rc = nf90_close(ncid)
-      end if
-    end if
-
-    ! Broadcast ntime para todos os PETs.
-    ! ESMF_VMBroadcast(integer array): usar buf_n(1) como wrapper do escalar.
-    buf_n(1) = ntime
-    call ESMF_VMBroadcast(vm, bcstData=buf_n, count=1, rootPet=0, rc=rc)
-    if (rc /= ESMF_SUCCESS) buf_n(1) = 365
-    ntime = buf_n(1)
+    ! Numero de instantes do arquivo, lido no PET 0 e difundido
+    call oisst_ntime(vm, localPet, ntime)
 
     ! Calcular índices de interpolação
     tidx0 = mod(int(sec_epoch / real(dt_data_i8, ESMF_KIND_R8)), ntime) + 1
@@ -427,21 +405,7 @@ contains
     alpha = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, alpha))
 
     if (localPet == 0) then
-      nc_rc = nf90_open(trim(cfg_docn_ice_file), NF90_NOWRITE, ncid)
-      if (nc_rc == NF90_NOERR) then
-        nc_rc = nf90_inq_varid(ncid, trim(cfg_docn_ice_varname), varid)
-        if (nc_rc == NF90_NOERR) then
-          nc_rc = nf90_get_var(ncid, varid, f0, &
-            start=[1, 1, tidx0], count=[nx_o, ny_o, 1])
-          nc_rc = nf90_get_var(ncid, varid, f1, &
-            start=[1, 1, tidx1], count=[nx_o, ny_o, 1])
-          ! Interpolação temporal linear
-          f0 = f0 + alpha * (f1 - f0)
-          if (cfg_docn_ice_pct) f0 = f0 / 100.0_ESMF_KIND_R8
-          f0 = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, f0))
-        end if
-        nc_rc = nf90_close(ncid)
-      end if
+      call read_oisst_ifrac(nx_o, ny_o, tidx0, tidx1, alpha, f0, f1)
       buf = reshape(f0, [nx_o * ny_o])
     end if
 
@@ -465,6 +429,88 @@ contains
     end if
 
     ! Nearest-neighbor: grade ATM interna (lon centrado em (i-0.5)*dx)
+    call oisst_to_atm_nearest(f0, nx_o, ny_o, dx_o, dy_o, dx_a, dy_a, fptr)
+
+    deallocate(f0)
+
+    write(logmsg,'(A,A,A,F5.3)') &
+      'MED(Alt1): f_ifrac_atm preenchido de ', trim(cfg_docn_ice_file), &
+      '  alpha=', alpha
+    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+    rc = ESMF_SUCCESS
+
+  end subroutine fill_ifrac_from_oisst
+
+  !> Numero de instantes (dimensao time ou Time) do arquivo de gelo do
+  !! OISST, lido pelo PET 0 e difundido a todos os PETs da VM. Sem arquivo
+  !! ou sem a dimensao, e se a difusao falhar, vale 365.
+  subroutine oisst_ntime(vm, localPet, ntime)
+    type(ESMF_VM), intent(in)  :: vm
+    integer,       intent(in)  :: localPet
+    integer,       intent(out) :: ntime
+    integer :: buf_n(1)       ! wrapper para broadcast de ntime (inteiro escalar)
+    integer :: ncid, dimid, nc_rc, rc
+
+    ntime = 365  ! default seguro
+
+    if (localPet == 0) then
+      ! Descobrir ntime no arquivo
+      nc_rc = nf90_open(trim(cfg_docn_ice_file), NF90_NOWRITE, ncid)
+      if (nc_rc == NF90_NOERR) then
+        nc_rc = nf90_inq_dimid(ncid, 'time', dimid)
+        if (nc_rc /= NF90_NOERR) nc_rc = nf90_inq_dimid(ncid, 'Time', dimid)
+        if (nc_rc == NF90_NOERR) then
+          nc_rc = nf90_inquire_dimension(ncid, dimid, len=ntime)
+        end if
+        nc_rc = nf90_close(ncid)
+      end if
+    end if
+
+    ! Broadcast ntime para todos os PETs.
+    ! ESMF_VMBroadcast(integer array): usar buf_n(1) como wrapper do escalar.
+    buf_n(1) = ntime
+    call ESMF_VMBroadcast(vm, bcstData=buf_n, count=1, rootPet=0, rc=rc)
+    if (rc /= ESMF_SUCCESS) buf_n(1) = 365
+    ntime = buf_n(1)
+  end subroutine oisst_ntime
+
+  !> Le do arquivo de gelo do OISST os instantes tidx0 e tidx1, interpola
+  !! linearmente com peso alpha, converte de porcentagem se preciso e limita
+  !! a [0,1]; o resultado fica em f0. Chamada so' pelo PET 0. Sem arquivo ou
+  !! sem a variavel, f0 fica como estava.
+  subroutine read_oisst_ifrac(nx_o, ny_o, tidx0, tidx1, alpha, f0, f1)
+    integer,            intent(in)    :: nx_o, ny_o, tidx0, tidx1
+    real(ESMF_KIND_R8), intent(in)    :: alpha
+    real(ESMF_KIND_R8), intent(inout) :: f0(nx_o, ny_o), f1(nx_o, ny_o)
+    integer :: ncid, varid, nc_rc
+
+    nc_rc = nf90_open(trim(cfg_docn_ice_file), NF90_NOWRITE, ncid)
+    if (nc_rc == NF90_NOERR) then
+      nc_rc = nf90_inq_varid(ncid, trim(cfg_docn_ice_varname), varid)
+      if (nc_rc == NF90_NOERR) then
+        nc_rc = nf90_get_var(ncid, varid, f0, &
+          start=[1, 1, tidx0], count=[nx_o, ny_o, 1])
+        nc_rc = nf90_get_var(ncid, varid, f1, &
+          start=[1, 1, tidx1], count=[nx_o, ny_o, 1])
+        ! Interpolação temporal linear
+        f0 = f0 + alpha * (f1 - f0)
+        if (cfg_docn_ice_pct) f0 = f0 / 100.0_ESMF_KIND_R8
+        f0 = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, f0))
+      end if
+      nc_rc = nf90_close(ncid)
+    end if
+  end subroutine read_oisst_ifrac
+
+  !> Leva a fracao de gelo do OISST (f0, grade nx_o x ny_o) a porcao local
+  !! fptr da grade ATM interna, pelo ponto mais proximo, limitada a [0,1].
+  subroutine oisst_to_atm_nearest(f0, nx_o, ny_o, dx_o, dy_o, dx_a, dy_a, fptr)
+    integer,            intent(in) :: nx_o, ny_o
+    real(ESMF_KIND_R8), intent(in) :: f0(nx_o, ny_o)
+    real(ESMF_KIND_R8), intent(in) :: dx_o, dy_o, dx_a, dy_a
+    real(ESMF_KIND_R8), pointer, intent(in) :: fptr(:,:)
+    integer :: i, j, i_o, j_o
+    real(ESMF_KIND_R8) :: lon_a, lat_a
+
     do j = lbound(fptr,2), ubound(fptr,2)
       lat_a = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * dy_a
       j_o   = int((lat_a + 90.0_ESMF_KIND_R8) / dy_o) + 1
@@ -476,15 +522,6 @@ contains
         fptr(i,j) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, f0(i_o, j_o)))
       end do
     end do
-
-    deallocate(f0)
-
-    write(logmsg,'(A,A,A,F5.3)') &
-      'MED(Alt1): f_ifrac_atm preenchido de ', trim(cfg_docn_ice_file), &
-      '  alpha=', alpha
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
-    rc = ESMF_SUCCESS
-
-  end subroutine fill_ifrac_from_oisst
+  end subroutine oisst_to_atm_nearest
 
 end module med_ocean_mod

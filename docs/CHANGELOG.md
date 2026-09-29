@@ -9,6 +9,16 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Fração de gelo do OISST: leitura, difusão e remapeamento em etapas (R-FASE8-08).** Sexta revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `fill_ifrac_from_oisst` (`med_ocean.F90`, 115 linhas de código) juntava o índice temporal, a leitura do arquivo no PET 0, a difusão entre os PETs e o remapeamento para a grade ATM. Três trechos saem sem mudança:
+    - `oisst_ntime`: número de instantes do arquivo (dimensão `time` ou `Time`), lido no PET 0 e difundido, com 365 como valor de reserva, como antes.
+    - `read_oisst_ifrac`: no PET 0, leitura dos dois instantes, interpolação linear com peso `alpha`, conversão de porcentagem e limite a [0,1].
+    - `oisst_to_atm_nearest`: ponto mais próximo da grade do OISST para a porção local da grade ATM; o ponteiro de destino é recebido como ponteiro, para manter os seus limites.
+  - `fill_ifrac_from_oisst` fica com o relógio, o índice temporal, a difusão do campo e a gravação em `is%ice%ifrac`.
+  - Conferência: a rodada de validação não usa o gelo do OISST (`use_docn_ice` desligado), e nenhum teste local o executava. Por isso a comparação foi feita uma vez com um programa de teste avulso (não incluído no repositório): 4 PETs, grade ATM 360×180, arquivo OISST sintético 72×36 com 10 instantes em porcentagem, relógio que avança 9 h por passo e quatro chamadas a `update_ice_fraction_from_docn` (pesos 0,25, 0,625 e seguintes); os campos de saída dos 4 PETs nos 4 passos e os logs do ESMF saíram iguais byte a byte entre a versão anterior e a nova.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 25 diferenças são só declarações, cabeçalhos e chamadas das três rotinas novas. Literais iguais (42).
+  - Indicadores: rotinas de 303 para 306; rotinas com mais de 100 linhas de código de 5 para 4.
+
 - **Forçante atmosférica do mediador: DATM e campos opcionais do MPAS em rotinas próprias (R-FASE8-07).** Quinta revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `get_atm_forcing` (`med_flux.F90`, 116 linhas de código) juntava três caminhos: a leitura dos campos do MPAS, a leitura dos campos do DATM e o tratamento da umidade e da neve do MPAS quando ausentes. Os dois últimos saem sem mudança:
     - `get_datm_forcing`: os nove campos do DATM, obrigatórios, com as mesmas saídas antecipadas em caso de falta e a mesma mensagem no log. Os nove ponteiros locais `*_datm` vão junto.
@@ -16,6 +26,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `get_atm_forcing` fica com a detecção do MPAS (campos obrigatórios, opcionais e fluxos nativos) e com a escolha da fonte.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 16 diferenças são só declarações, cabeçalhos e chamadas das duas rotinas novas e o retorno após `get_datm_forcing`. Literais iguais (33). Nenhum teste local executa `get_atm_forcing`; a conferência é a rodada na Jaci (que usa o MPAS; o caminho do DATM não é exercitado nela).
   - Indicadores: rotinas de 301 para 303; rotinas com mais de 100 linhas de código de 6 para 5.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-07-validada`).
 
 - **Exportação do cap atmosférico sem o bloco repetido 13 vezes (R-FASE8-06).** Quarta revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `mpas_export` (`mpas_cap_methods.F90`, 104 linhas de código) repetia, para cada um dos 13 campos exportados, o mesmo bloco de sete linhas: testar se o membro de `atm_public` está associado, guardá-lo no gravador (`netcdf_push_raw_field`), ignorar o código de retorno, levá-lo ao `exportState` (`state_set_field_1d`) e sair em caso de falha. O bloco vira a rotina `export_mpas_member`, e `mpas_export` passa a ter uma chamada por campo, na mesma ordem, com o mesmo nome de campo e o mesmo membro.
