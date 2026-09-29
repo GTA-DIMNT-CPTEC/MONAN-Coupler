@@ -57,6 +57,7 @@ module mpas_cap_MONAN_mod
                                     cfg_zorl_default
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
+  use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
 
   implicit none
   private
@@ -184,8 +185,7 @@ contains
     integer            :: yr, mo, dy, hr, mn, sc
     character(len=*), parameter :: subname = '(mpas_cap:InitializeP0)'
     rc = ESMF_SUCCESS
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-         acceptStringList=(/'IPDv03p'/), rc=rc)
+    call cap_initialize_p0(gcomp, importState, exportState, clock, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_ClockGet(clock, startTime=startTimeLoc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -223,9 +223,8 @@ contains
     type(ESMF_State)    :: importState, exportState
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
-    type(ESMF_Field)   :: field
     type(ESMF_VM)      :: vm
-    integer            :: i, localMpiComm, localPet
+    integer            :: localMpiComm, localPet
     type(mpas_cap_state_wrapper_t) :: wrap
     type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:InitializeRealize)'
@@ -256,22 +255,10 @@ contains
     ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
     ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
     ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
-    do i = 1, N_IMP
-      field = ESMF_FieldCreate(st%grid, ESMF_TYPEKIND_R8, &
-                               staggerloc=ESMF_STAGGERLOC_CENTER, &
-                               name=trim(IMP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call NUOPC_Realize(importState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
-    do i = 1, N_EXP
-      field = ESMF_FieldCreate(st%grid, ESMF_TYPEKIND_R8, &
-                               staggerloc=ESMF_STAGGERLOC_CENTER, &
-                               name=trim(EXP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call NUOPC_Realize(exportState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
+    call cap_realize_fields(importState, st%grid, IMP_NAMES, N_IMP, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call cap_realize_fields(exportState, st%grid, EXP_NAMES, N_EXP, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     ! ── 3. Inicializar MPAS-A (SMIOL começa aqui) ────────────────────────
     allocate(st%atm_public)

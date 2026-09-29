@@ -61,6 +61,7 @@ module sis_cap_MONAN_mod
   use MOM_domains,     only : MOM_infra_init, AGRID
 
   use coupler_utils_mod, only : ChkErr
+  use cap_common_mod, only : cap_initialize_p0
 
   ! Estado interno do componente e troca de campos com o mediador
   ! (importação dos forçantes e exportação de fração, albedos e temperatura
@@ -122,8 +123,18 @@ contains
     call NUOPC_CompDerive(gcomp, model_routine_SS, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
+    ! Seleciona a versão das fases de inicialização (IPDv03), como em
+    ! mom_cap_MONAN.F90. Sem ela, a negociação de fases com o driver pode não
+    ! corresponder ao que InitializeAdvertise/InitializeRealize abaixo
+    ! registram (phaseLabelList=IPDv03p1/IPDv03p3).
+    !
+    ! SetClock NÃO é especializado. Uma especialização vazia bloquearia o
+    ! comportamento PADRÃO do NUOPC_Model de sincronizar o relógio deste
+    ! componente com o do driver, causando "NUOPC INCOMPATIBILITY: Import
+    ! Fields not at current time" (o relógio do ICE nunca ficaria alinhado).
+    ! Mesmo padrão de mom_cap_MONAN.F90, que também não especializa SetClock.
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
-      userRoutine=InitializeP0, phase=0, rc=rc)
+      userRoutine=cap_initialize_p0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
@@ -159,28 +170,6 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine SetServices
-
-  ! ============================================================================
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-    type(ESMF_GridComp)  :: gcomp
-    type(ESMF_State)     :: importState, exportState
-    type(ESMF_Clock)     :: clock
-    integer, intent(out) :: rc
-
-    rc = ESMF_SUCCESS
-    ! Seleciona a versão das fases de inicialização (IPDv03), como em
-    ! mom_cap_MONAN.F90. Sem ela, a negociação de fases com o driver pode não
-    ! corresponder ao que InitializeAdvertise/InitializeRealize abaixo
-    ! registram (phaseLabelList=IPDv03p1/IPDv03p3).
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-      acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    ! SetClock NÃO é especializado. Uma especialização vazia bloquearia o
-    ! comportamento PADRÃO do NUOPC_Model de sincronizar o relógio deste
-    ! componente com o do driver, causando "NUOPC INCOMPATIBILITY: Import
-    ! Fields not at current time" (o relógio do ICE nunca ficaria alinhado).
-    ! Mesmo padrão de mom_cap_MONAN.F90, que também não especializa SetClock.
-  end subroutine InitializeP0
 
   ! ============================================================================
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)

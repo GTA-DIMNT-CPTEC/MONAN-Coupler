@@ -71,6 +71,7 @@ module MOM_cap_MONAN_mod
   use MOM_cap_methods, only : mom_import, mom_export, mom_set_geomtype,   &
                                mod2med_areacor, med2mod_areacor,          &
                                state_diagnose, ChkErr
+  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields
 
   ! esmf2fms_time/fms2esmf_time nao existem em MOM_cap_time.
   ! Conversao ESMF->FMS via ESMF_TimeGet(yy,mm,...) + set_date.
@@ -169,7 +170,7 @@ contains
 
     ! seleciona versão IPDv03
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
-      userRoutine=InitializeP0, phase=0, rc=rc)
+      userRoutine=cap_initialize_p0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Fase IPDv03p1: anuncia campos
@@ -207,20 +208,6 @@ contains
     call ESMF_LogWrite('OCN(MOM6): SetServices concluido', ESMF_LOGMSG_INFO)
 
   end subroutine SetServices
-
-  ! ============================================================================
-  !> @brief Seleciona IPDv03 como versão do protocolo de inicialização NUOPC.
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-    type(ESMF_GridComp)  :: gcomp
-    type(ESMF_State)     :: importState, exportState
-    type(ESMF_Clock)     :: clock
-    integer, intent(out) :: rc
-
-    rc = ESMF_SUCCESS
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-      acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine InitializeP0
 
   ! ============================================================================
   !> @brief Anuncia os campos importados e exportados do componente oceânico.
@@ -657,28 +644,13 @@ contains
     type(ESMF_State), intent(inout) :: importState, exportState
     integer,          intent(out)   :: rc
 
-    type(ESMF_Field) :: field
-    integer :: n_2
-
     rc = ESMF_SUCCESS
 
     ! ── 8. Realizar campos de importação e exportação ─────────────────────
-    do n_2 = 1, n_import
-      field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-              staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-              name=trim(import_names(n_2)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    do n_2 = 1, n_export
-      field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-              staggerLoc=ESMF_STAGGERLOC_CENTER,                          &
-              name=trim(export_names(n_2)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(exportState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_realize_fields(importState, ocn_grid, import_names, n_import, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call cap_realize_fields(exportState, ocn_grid, export_names, n_export, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
   end subroutine realize_ocean_fields
 

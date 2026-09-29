@@ -24,6 +24,7 @@ module MED_cap_MONAN_mod
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use coupler_utils_mod, only: ChkErr
+  use cap_common_mod, only: cap_initialize_p0
   use mom6_supergrid_mod, only : mom6_supergrid_dims
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_write_fixdiag,                &
@@ -82,7 +83,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
-      userRoutine=InitializeP0, phase=0, rc=rc)
+      userRoutine=cap_initialize_p0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
@@ -116,21 +117,6 @@ contains
     rc = ESMF_SUCCESS
     call ESMF_LogWrite('MED: CheckImport desabilitado (no-op)', ESMF_LOGMSG_INFO)
   end subroutine CheckImportNoop
-
-  !============================================================================
-  ! InitializeP0
-  !============================================================================
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-    type(ESMF_GridComp)  :: gcomp
-    type(ESMF_State)     :: importState, exportState
-    type(ESMF_Clock)     :: clock
-    integer, intent(out) :: rc
-
-    rc = ESMF_SUCCESS
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-      acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine InitializeP0
 
   !============================================================================
   ! InitializeAdvertise

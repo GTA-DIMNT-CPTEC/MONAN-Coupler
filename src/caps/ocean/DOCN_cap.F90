@@ -61,6 +61,7 @@ module DOCN_cap_mod
 
   use docn_cap_netcdf_mod, only: ReadOcnFieldInterp, WriteDOCNDiag
   use coupler_utils_mod,   only: ChkErr, int_to_str
+  use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -95,6 +96,9 @@ module DOCN_cap_mod
 
   implicit none
   private
+
+  ! Início da mensagem de erro de cap_put_field quando o campo não existe.
+  character(len=*), parameter :: PUT_TAG = "PutField DOCN: "
 
   public :: SetServices
   public :: SetVM
@@ -156,7 +160,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
-      userRoutine=InitializeP0, phase=0, rc=rc)
+      userRoutine=cap_initialize_p0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
@@ -180,22 +184,6 @@ contains
     call ESMF_LogWrite('DOCN: SetServices concluido', ESMF_LOGMSG_INFO)
 
   end subroutine SetServices
-
-  !=============================================================================
-  ! InitializeP0 — filtra protocolo para IPDv03
-  !=============================================================================
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-    type(ESMF_GridComp)  :: gcomp
-    type(ESMF_State)     :: importState, exportState
-    type(ESMF_Clock)     :: clock
-    integer,              intent(out)   :: rc
-
-    rc = ESMF_SUCCESS
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-      acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-  end subroutine InitializeP0
 
   !=============================================================================
   ! InitializeAdvertise — anuncia campos de SST/gelo/corrente para o MED e MPAS
@@ -349,11 +337,11 @@ contains
       end do  ! lde_docn
 
     ! Campos importados — anuncia e realiza todos os N_IMP fluxos do mediador.
-    call RealizeFields(importState, grid, IMP_NAMES, N_IMP, rc)
+    call cap_realize_fields(importState, grid, IMP_NAMES, N_IMP, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Exportados
-    call RealizeFields(exportState, grid, EXP_NAMES, N_EXP, rc)
+    call cap_realize_fields(exportState, grid, EXP_NAMES, N_EXP, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Estado interno
@@ -519,11 +507,11 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Escreve campos no exportState
-    call PutField(exportState, "So_t",    is%sst,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Si_ifrac",is%aice, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_s",    is%sss,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_u",    is%uocn, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_v",    is%vocn, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "So_t",    is%sst,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Si_ifrac",is%aice, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "So_s",    is%sss,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "So_u",    is%uocn, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "So_v",    is%vocn, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
 
     ! Diagnóstico: escrita NetCDF dos campos lidos/preparados a cada passo.
     ! Ativado com write_import_diag=.true. em &nuopc_docn no nuopc.input.
@@ -666,52 +654,6 @@ contains
 
   end subroutine stamp_docn_export
 
-  !=============================================================================
-  ! RealizeFields — cria e realiza um array de campos numa ESMF_Grid
-  !=============================================================================
-  subroutine RealizeFields(state, grid, names, n, rc)
-    type(ESMF_State),  intent(inout) :: state
-    type(ESMF_Grid),   intent(in)    :: grid
-    character(len=32), intent(in)    :: names(:)
-    integer,           intent(in)    :: n
-    integer,           intent(out)   :: rc
-
-    type(ESMF_Field) :: field
-    integer          :: i
-
-    rc = ESMF_SUCCESS
-    do i = 1, n
-      field = ESMF_FieldCreate(grid=grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(names(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(state, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-
-  end subroutine RealizeFields
-
-  !=============================================================================
-  ! PutField — copia array 2D local para campo do exportState
-  !=============================================================================
-  subroutine PutField(state, name, array, rc)
-    type(ESMF_State),    intent(inout) :: state
-    character(len=*),    intent(in)    :: name
-    real(ESMF_KIND_R8),  intent(in)    :: array(:,:)
-    integer,             intent(out)   :: rc
-
-    type(ESMF_Field)            :: field
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
-
-    rc = ESMF_SUCCESS
-    call ESMF_StateGet(state, itemName=trim(name), field=field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="PutField DOCN: "//trim(name), &
-      line=__LINE__, file=__FILE__)) return
-    call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    fptr = array
-    nullify(fptr)
-
-  end subroutine PutField
 
   !=============================================================================
   ! FillFieldConst — preenche campo do State com valor escalar constante

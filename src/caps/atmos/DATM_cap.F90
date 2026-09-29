@@ -53,9 +53,14 @@ module DATM_cap_mod
   ! Sem dependencia de MOM_io: o DATM nao usa stdout nem io_infra_end e nao
   ! precisa ser acoplado ao MOM6.
   use coupler_utils_mod, only : ChkErr
+  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field
 
   implicit none
   private
+
+  ! Início da mensagem de erro de cap_put_field quando o campo não existe.
+  character(len=*), parameter :: PUT_TAG = "PutField: "
+
   public :: SetServices
 
   !----------------------------------------------------------------------------
@@ -95,7 +100,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
-      userRoutine=InitializeP0, phase=0, rc=rc)
+      userRoutine=cap_initialize_p0, phase=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSetEntryPoint(gcomp, ESMF_METHOD_INITIALIZE, &
@@ -117,22 +122,6 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
   end subroutine SetServices
-
-  !============================================================================
-  ! InitializeP0
-  !============================================================================
-  subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
-    type(ESMF_GridComp)  :: gcomp
-    type(ESMF_State)     :: importState, exportState
-    type(ESMF_Clock)     :: clock
-    integer, intent(out) :: rc
-    rc = ESMF_SUCCESS
-
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-      acceptStringList=(/"IPDv03p"/), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-  end subroutine InitializeP0
 
   !============================================================================
   ! InitializeAdvertise - anuncia apenas campos BRUTOS para o MED
@@ -240,15 +229,10 @@ contains
     end do
 
     ! Realiza campos brutos
-    call RealizeField(exportState, grid, "Sa_u10m",   rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Sa_v10m",   rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Sa_tbot",   rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Sa_shum",   rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Sa_pslv",   rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Faxa_swdn", rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Faxa_lwdn", rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Faxa_rain", rc); if (rc/=ESMF_SUCCESS) return
-    call RealizeField(exportState, grid, "Faxa_snow", rc); if (rc/=ESMF_SUCCESS) return
+    call cap_realize_fields(exportState, grid, &
+      [character(len=9) :: "Sa_u10m", "Sa_v10m", "Sa_tbot", "Sa_shum", "Sa_pslv", &
+                           "Faxa_swdn", "Faxa_lwdn", "Faxa_rain", "Faxa_snow"], 9, rc)
+    if (rc/=ESMF_SUCCESS) return
 
     allocate(iswrap%wrap)
     is => iswrap%wrap
@@ -260,24 +244,6 @@ contains
 
     call ESMF_LogWrite('DATM: InitializeRealize concluido', ESMF_LOGMSG_INFO)
   end subroutine InitializeRealize
-
-  !============================================================================
-  ! RealizeField - helper
-  !============================================================================
-  subroutine RealizeField(state, grid, stdname, rc)
-    type(ESMF_State),  intent(inout) :: state
-    type(ESMF_Grid),   intent(in)    :: grid
-    character(len=*),  intent(in)    :: stdname
-    integer,           intent(inout) :: rc
-
-    type(ESMF_Field) :: field
-
-    field = ESMF_FieldCreate(grid=grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(stdname), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Realize(state, field=field, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine RealizeField
 
   !============================================================================
   ! InitializeDataComplete - IPDv03p7: componente de dados puro
@@ -426,15 +392,15 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg="Falha prsn", line=__LINE__, file=__FILE__)) return
 
     ! Escreve campos lidos no exportState
-    call PutField(exportState, "Sa_u10m",   is%uas,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Sa_v10m",   is%vas,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Sa_tbot",   is%tas,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Sa_shum",   is%huss, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Sa_pslv",   is%psl,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Faxa_swdn", is%rsds, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Faxa_lwdn", is%rlds, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Faxa_rain", is%prra, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Faxa_snow", is%prsn, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Sa_u10m",   is%uas,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Sa_v10m",   is%vas,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Sa_tbot",   is%tas,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Sa_shum",   is%huss, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Sa_pslv",   is%psl,  PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Faxa_swdn", is%rsds, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Faxa_lwdn", is%rlds, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Faxa_rain", is%prra, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
+    call cap_put_field(exportState, "Faxa_snow", is%prsn, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
 
     ! Atualizar timestamps
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
@@ -453,31 +419,6 @@ contains
 
     call ESMF_LogWrite('DATM: ModelAdvance concluido (campos brutos)', ESMF_LOGMSG_INFO)
   end subroutine ModelAdvance
-
-  !============================================================================
-  ! PutField - escreve array 2D em campo do exportState
-  !============================================================================
-  subroutine PutField(state, name, array, rc)
-    type(ESMF_State),               intent(inout) :: state
-    character(len=*),               intent(in)    :: name
-    real(ESMF_KIND_R8),             intent(in)    :: array(:,:)
-    integer,                        intent(out)   :: rc
-
-    type(ESMF_Field) :: field
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
-
-    rc = ESMF_SUCCESS
-
-    call ESMF_StateGet(state, itemName=trim(name), field=field, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="PutField: "//trim(name), &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    fptr = array
-
-  end subroutine PutField
 
   !============================================================================
   ! ReadJRAFieldInterp - interpolacao temporal linear entre snapshots 3h
