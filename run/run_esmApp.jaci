@@ -1284,7 +1284,7 @@ mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 # 'select=1:ncpus=NPES:mpiprocs=NPES', o que só cabia em um único nó (≤128 PETs).
 cat > "${PBS_SCRIPT}" << HEREDOC
 #!/bin/bash
-#PBS -N GTA-MONAN2xMOM6
+#PBS -N GTA-COUPLER
 #PBS -q ${QUEUE}
 #PBS -l ${SELECT}
 #PBS -l place=${PLACE}

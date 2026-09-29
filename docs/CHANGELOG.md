@@ -9,6 +9,18 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Passo do DOCN: leitura dos campos e carimbo de tempo em rotinas próprias (R-FASE8-11).** Nona e última revisão de rotina longa da fase 8. Nenhum cálculo muda.
+  - `ModelAdvance` (`DOCN_cap.F90`, 116 linhas de código) juntava o relógio, a alocação dos buffers, a leitura dos arquivos, a gravação no `exportState`, o diagnóstico e o carimbo de tempo. Saem sem mudança:
+    - `read_docn_fields`: SST (com a conversão para kelvin), fração de gelo (com a conversão de porcentagem e o limite a [0,1]) e salinidade constante;
+    - `read_docn_currents`: correntes do arquivo opcional, com zero quando o arquivo falta ou a leitura falha e com o descarte de valores de preenchimento (módulo de 10 m/s ou mais), como antes;
+    - `stamp_docn_export`: o laço que carimba todos os campos do `exportState` com um instante. O mesmo laço aparecia no `InitializeDataComplete` (com o instante inicial) e no `ModelAdvance` (com o instante seguinte); agora os dois chamam a rotina.
+  - `ModelAdvance` fica com 66 linhas de código e `InitializeDataComplete` com 55 (antes 68).
+  - Conferência: a rodada de validação não usa o DOCN (o oceano é o MOM6), e nenhum teste local o executava. Um programa de teste avulso (não incluído no repositório) montou um driver NUOPC mínimo com o DOCN, um componente fonte para as 14 importações e dois conectores, e rodou 4 passos de 9 h em 4 PETs sobre arquivos sintéticos de SST, gelo em porcentagem e correntes com valores de preenchimento, com o diagnóstico `docn_import_*.nc` ligado. Em dois cenários (com e sem arquivo de correntes), os seis campos exportados em cada PET, com os carimbos de tempo, os quatro arquivos de diagnóstico e os logs do ESMF saíram iguais byte a byte entre a versão anterior e a nova.
+  - Defeito encontrado e mantido: em `ReadOcnFieldInterp` (`docn_cap_netcdf.F90`), se a leitura do arquivo falha no PET 0 (por exemplo, arquivo de correntes sem a variável `vo`), o PET 0 retorna antes do `ESMF_VMBroadcast`, e os demais PETs ficam esperando por ele: a execução trava em vez de seguir com a corrente zero prevista em `read_docn_currents`. Registrado no estado do projeto.
+  - Fora do código: o nome do job no PBS gerado por `run/run_esmApp.jaci` passa de `GTA-MONAN2xMOM6` para `GTA-COUPLER`, como já estava na cópia da Jaci antes da R-FASE8-10.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas diferenças são só declarações, cabeçalhos e chamadas das rotinas novas e o laço de carimbo trocado pela chamada. Literais iguais (62).
+  - Indicadores: rotinas de 313 para 316; rotinas com mais de 100 linhas de código de 2 para 1 (só o `config_read`, que fica como está).
+
 - **Fluxos instantâneos do MONAN-A: uma rotina por grandeza (R-FASE8-10).** Oitava revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `compute_instantaneous_fluxes` (`mpas_atm_fluxes.F90`, 122 linhas de código) calculava cinco grandezas independentes, cada uma com as suas constantes locais. Cada trecho vira uma rotina, sem mudança, e leva junto as suas variáveis e constantes:
 
@@ -25,6 +37,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Defeito encontrado e mantido: em `wind_10m_fallback`, o teste `associated(atm_state%pool_zgrid) .and. size(atm_state%pool_zgrid,1) > 1` não garante que `size` deixe de ser avaliado quando o ponteiro não está associado. Com `-fcheck=all` (opção usada na Jaci), a execução aborta se o vento de reserva estiver ativo e `zgrid` faltar. Na rodada de validação `zgrid` existe e o caso não ocorre. A correção (dois `if` aninhados) fica registrada no estado do projeto para uma etapa própria.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas diferenças são só declarações, cabeçalhos e chamadas das cinco rotinas novas. O arquivo não tem constantes de texto.
   - Indicadores: rotinas de 308 para 313; rotinas com mais de 100 linhas de código de 3 para 2.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase8-10-validada`).
 
 - **Passo do MONAN-A: injeção do contorno do oceano e diagnóstico do albedo em rotinas próprias (R-FASE8-09).** Sétima revisão de rotina longa da fase 8. Nenhum cálculo muda.
   - `mpas_atm_run` (`mpas_atm_model.F90`, 130 linhas de código) juntava a preparação do passo, o laço que copia o contorno do oceano para as células do MONAN-A, a chamada de `core_run` e um diagnóstico do albedo depois dela. Dois trechos saem sem mudança:

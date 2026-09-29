@@ -383,9 +383,7 @@ contains
     type(ESMF_Clock)               :: clock_idc
     type(ESMF_Time)                :: startTime_idc
     integer                        :: fieldCount, i
-    integer                        :: fieldCount_ts
     character(len=64), allocatable :: fieldNameList(:)
-    character(len=64), allocatable :: fldNames_ts(:)
     real(ESMF_KIND_R8), pointer    :: fptr(:,:)
 
     rc = ESMF_SUCCESS
@@ -439,19 +437,8 @@ contains
     call ESMF_ClockGet(clock_idc, startTime=startTime_idc, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_StateGet(exportState, itemCount=fieldCount_ts, rc=rc)
+    call stamp_docn_export(exportState, startTime_idc, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    allocate(fldNames_ts(fieldCount_ts))
-    call ESMF_StateGet(exportState, itemNameList=fldNames_ts, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    do i = 1, fieldCount_ts
-      call ESMF_StateGet(exportState, itemName=trim(fldNames_ts(i)), &
-        field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, startTime_idc, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    deallocate(fldNames_ts)
 
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -486,8 +473,6 @@ contains
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
     integer                  :: i1, i2, j1, j2
     integer                  :: year, month, day, hour, minu, sec
-    integer                  :: fieldCount, k
-    character(len=64), allocatable :: fieldNameList(:)
     character(len=256) :: msg
 
     rc = ESMF_SUCCESS
@@ -530,6 +515,54 @@ contains
       allocate(is%vocn (i1:i2, j1:j2))
     end if
 
+    call read_docn_fields(gcomp, is, currTime, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    ! Escreve campos no exportState
+    call PutField(exportState, "So_t",    is%sst,  rc); if (rc/=ESMF_SUCCESS) return
+    call PutField(exportState, "Si_ifrac",is%aice, rc); if (rc/=ESMF_SUCCESS) return
+    call PutField(exportState, "So_s",    is%sss,  rc); if (rc/=ESMF_SUCCESS) return
+    call PutField(exportState, "So_u",    is%uocn, rc); if (rc/=ESMF_SUCCESS) return
+    call PutField(exportState, "So_v",    is%vocn, rc); if (rc/=ESMF_SUCCESS) return
+
+    ! Diagnóstico: escrita NetCDF dos campos lidos/preparados a cada passo.
+    ! Ativado com write_import_diag=.true. em &nuopc_docn no nuopc.input.
+    ! Gera: diag_import/docn_import_YYYYMMDD_HHMMSS.nc (grade DOCN, 1°×1°)
+    ! Lido por: postproc_mom6_import.py  (validação de SST/gelo vs fonte)
+    if (cfg_write_import_diag) then
+      call WriteDOCNDiag(gcomp, currTime, cfg_docn_nx, cfg_docn_ny, rc)
+      if (rc /= ESMF_SUCCESS) then
+        call ESMF_LogWrite('DOCN: AVISO: WriteDOCNDiag falhou — continuando', &
+          ESMF_LOGMSG_WARNING)
+        rc = ESMF_SUCCESS
+      end if
+    end if
+
+    ! Sf_zorl: rugosidade constante (funcao de amplitude de onda nao modelada aqui)
+    call FillFieldConst(exportState, "Sf_zorl", ZORL_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    ! Atualizar timestamps de todos os campos exportados
+    call stamp_docn_export(exportState, nextTime, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    call ESMF_LogWrite('DOCN: ModelAdvance concluido (OISST netcdf)', &
+      ESMF_LOGMSG_INFO)
+
+  end subroutine ModelAdvance
+
+  !=============================================================================
+  ! read_docn_fields — lê SST e gelo com interpolação temporal, as correntes
+  ! (opcionais) e define a salinidade constante, nos buffers do estado interno
+  !=============================================================================
+  subroutine read_docn_fields(gcomp, is, currTime, rc)
+    type(ESMF_GridComp),      intent(inout) :: gcomp
+    type(DOCN_InternalState), intent(inout) :: is
+    type(ESMF_Time),          intent(in)    :: currTime
+    integer,                  intent(out)   :: rc
+
+    rc = ESMF_SUCCESS
+
     ! ── Leitura dos campos oceânicos com interpolação temporal ────────────────
     ! nomes de variável configuráveis via nuopc.input (docn_*_varname).
     ! OISST v2.1: sst_varname='sst'  ice_varname='icec'
@@ -550,6 +583,26 @@ contains
     if (cfg_docn_ice_pct) is%aice = is%aice / 100.0_ESMF_KIND_R8
     ! Clamping físico: fração de gelo em [0,1]
     is%aice = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, is%aice))
+
+    call read_docn_currents(gcomp, is, currTime, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    ! Salinidade: sem arquivo de dado, usar climatologia constante
+    is%sss = 35.0_ESMF_KIND_R8
+
+  end subroutine read_docn_fields
+
+  !=============================================================================
+  ! read_docn_currents — correntes superficiais do arquivo opcional; sem
+  ! arquivo, ou se a leitura falhar, a componente fica zero
+  !=============================================================================
+  subroutine read_docn_currents(gcomp, is, currTime, rc)
+    type(ESMF_GridComp),      intent(inout) :: gcomp
+    type(DOCN_InternalState), intent(inout) :: is
+    type(ESMF_Time),          intent(in)    :: currTime
+    integer,                  intent(out)   :: rc
+
+    rc = ESMF_SUCCESS
 
     ! Correntes superficiais (arquivo opcional)
     if (len_trim(cfg_docn_cur_file) > 0) then
@@ -580,34 +633,23 @@ contains
       is%vocn = 0.0_ESMF_KIND_R8
     end if
 
-    ! Salinidade: sem arquivo de dado, usar climatologia constante
-    is%sss = 35.0_ESMF_KIND_R8
+  end subroutine read_docn_currents
 
-    ! Escreve campos no exportState
-    call PutField(exportState, "So_t",    is%sst,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "Si_ifrac",is%aice, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_s",    is%sss,  rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_u",    is%uocn, rc); if (rc/=ESMF_SUCCESS) return
-    call PutField(exportState, "So_v",    is%vocn, rc); if (rc/=ESMF_SUCCESS) return
+  !=============================================================================
+  ! stamp_docn_export — carimba todos os campos do exportState com o instante
+  ! dado (NUOPC_SetTimestamp)
+  !=============================================================================
+  subroutine stamp_docn_export(exportState, stampTime, rc)
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Time),  intent(in)    :: stampTime
+    integer,          intent(out)   :: rc
 
-    ! Diagnóstico: escrita NetCDF dos campos lidos/preparados a cada passo.
-    ! Ativado com write_import_diag=.true. em &nuopc_docn no nuopc.input.
-    ! Gera: diag_import/docn_import_YYYYMMDD_HHMMSS.nc (grade DOCN, 1°×1°)
-    ! Lido por: postproc_mom6_import.py  (validação de SST/gelo vs fonte)
-    if (cfg_write_import_diag) then
-      call WriteDOCNDiag(gcomp, currTime, cfg_docn_nx, cfg_docn_ny, rc)
-      if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('DOCN: AVISO: WriteDOCNDiag falhou — continuando', &
-          ESMF_LOGMSG_WARNING)
-        rc = ESMF_SUCCESS
-      end if
-    end if
+    type(ESMF_Field)               :: field
+    integer                        :: fieldCount, k
+    character(len=64), allocatable :: fieldNameList(:)
 
-    ! Sf_zorl: rugosidade constante (funcao de amplitude de onda nao modelada aqui)
-    call FillFieldConst(exportState, "Sf_zorl", ZORL_DEFAULT, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
+    rc = ESMF_SUCCESS
 
-    ! Atualizar timestamps de todos os campos exportados
     call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     allocate(fieldNameList(fieldCount))
@@ -617,15 +659,12 @@ contains
       call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
         field=field, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, nextTime, rc=rc)
+      call NUOPC_SetTimestamp(field, stampTime, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     deallocate(fieldNameList)
 
-    call ESMF_LogWrite('DOCN: ModelAdvance concluido (OISST netcdf)', &
-      ESMF_LOGMSG_INFO)
-
-  end subroutine ModelAdvance
+  end subroutine stamp_docn_export
 
   !=============================================================================
   ! RealizeFields — cria e realiza um array de campos numa ESMF_Grid
