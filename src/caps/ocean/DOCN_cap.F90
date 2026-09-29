@@ -61,7 +61,9 @@ module DOCN_cap_mod
 
   use docn_cap_netcdf_mod, only: ReadOcnFieldInterp, WriteDOCNDiag
   use coupler_utils_mod,   only: ChkErr, int_to_str
-  use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field
+  use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &
+                                 cap_fill_export_initial, cap_set_data_complete, &
+                                 cap_stamp_export
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -367,54 +369,24 @@ contains
     integer,              intent(out)   :: rc
 
     type(ESMF_State)               :: exportState
-    type(ESMF_Field)               :: field
     type(ESMF_Clock)               :: clock_idc
     type(ESMF_Time)                :: startTime_idc
-    integer                        :: fieldCount, i
-    character(len=64), allocatable :: fieldNameList(:)
-    real(ESMF_KIND_R8), pointer    :: fptr(:,:)
 
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGet(gcomp, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Preencher exportState com valores iniciais fisicamente consistentes
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    ! Preencher exportState com valores iniciais fisicamente consistentes:
+    ! SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fracao de gelo
+    ! padrao, rugosidade ZORL_DEFAULT e salinidade media global de 35 psu; as
+    ! correntes (So_u, So_v) e os demais campos comecam em zero (repouso).
+    call cap_fill_export_initial(exportState,                           &
+      [character(len=8) :: 'So_t', 'Si_ifrac', 'Sf_zorl', 'So_s'],       &
+      [real(cfg_sst_default, ESMF_KIND_R8),                             &
+       real(cfg_ice_fraction_default, ESMF_KIND_R8),                    &
+       ZORL_DEFAULT, 35.0_ESMF_KIND_R8], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    if (fieldCount > 0) then
-      allocate(fieldNameList(fieldCount))
-      call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      do i = 1, fieldCount
-        call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
-          field=field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-
-        call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-
-        select case (trim(fieldNameList(i)))
-          case ('So_t')
-            ! SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default)
-            fptr = real(cfg_sst_default, ESMF_KIND_R8)
-          case ('Si_ifrac')
-            fptr = real(cfg_ice_fraction_default, ESMF_KIND_R8)
-          case ('Sf_zorl')
-            fptr = ZORL_DEFAULT
-          case ('So_s')
-            fptr = 35.0_ESMF_KIND_R8   ! salinidade media global [psu]
-          case ('So_u', 'So_v')
-            fptr = 0.0_ESMF_KIND_R8    ! correntes em repouso
-          case default
-            fptr = 0.0_ESMF_KIND_R8
-        end select
-        nullify(fptr)
-      end do
-      deallocate(fieldNameList)
-    end if
 
     ! Atualizar timestamps: NUOPC_ModelBase verifica que os campos no
     ! importState do componente seguinte estejam no currTime do clock.
@@ -425,12 +397,10 @@ contains
     call ESMF_ClockGet(clock_idc, startTime=startTime_idc, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call stamp_docn_export(exportState, startTime_idc, rc)
+    call cap_stamp_export(exportState, startTime_idc, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete",  value="true", rc=rc)
+    call cap_set_data_complete(gcomp, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DOCN: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
@@ -531,7 +501,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Atualizar timestamps de todos os campos exportados
-    call stamp_docn_export(exportState, nextTime, rc)
+    call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DOCN: ModelAdvance concluido (OISST netcdf)', &
@@ -622,37 +592,6 @@ contains
     end if
 
   end subroutine read_docn_currents
-
-  !=============================================================================
-  ! stamp_docn_export — carimba todos os campos do exportState com o instante
-  ! dado (NUOPC_SetTimestamp)
-  !=============================================================================
-  subroutine stamp_docn_export(exportState, stampTime, rc)
-    type(ESMF_State), intent(inout) :: exportState
-    type(ESMF_Time),  intent(in)    :: stampTime
-    integer,          intent(out)   :: rc
-
-    type(ESMF_Field)               :: field
-    integer                        :: fieldCount, k
-    character(len=64), allocatable :: fieldNameList(:)
-
-    rc = ESMF_SUCCESS
-
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    allocate(fieldNameList(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
-        field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, stampTime, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    deallocate(fieldNameList)
-
-  end subroutine stamp_docn_export
 
 
   !=============================================================================

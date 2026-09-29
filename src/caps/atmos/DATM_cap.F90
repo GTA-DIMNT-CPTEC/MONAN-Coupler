@@ -50,7 +50,9 @@ module DATM_cap_mod
   ! Sem dependencia de MOM_io: o DATM nao usa stdout nem io_infra_end e nao
   ! precisa ser acoplado ao MOM6.
   use coupler_utils_mod, only : ChkErr
-  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field
+  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field, &
+                             cap_fill_export_initial, cap_set_data_complete, &
+                             cap_stamp_export
 
   implicit none
   private
@@ -250,48 +252,20 @@ contains
     integer, intent(out) :: rc
 
     type(ESMF_State)  :: exportState
-    type(ESMF_Field)  :: field
-    integer           :: fieldCount, i
-    character(len=64), allocatable :: fieldNameList(:)
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
 
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGet(gcomp, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    ! Valores de partida, substituidos pelos campos do JRA55 no primeiro
+    ! ModelAdvance: pressao padrao e Sa_tbot de 290 K (ativo APENAS quando
+    ! use_datm=.true.); os demais campos comecam em zero.
+    call cap_fill_export_initial(exportState, [character(len=7) :: 'Sa_pslv', 'Sa_tbot'], &
+      [101325.0_ESMF_KIND_R8, 290.0_ESMF_KIND_R8], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    if (fieldCount > 0) then
-      allocate(fieldNameList(fieldCount))
-      call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      do i = 1, fieldCount
-        call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
-          field=field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-
-        call ESMF_FieldGet(field, farrayPtr=fptr, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-
-        select case(trim(fieldNameList(i)))
-          case('Sa_pslv')
-            fptr = 101325.0_ESMF_KIND_R8
-          case('Sa_tbot')
-            fptr = 290.0_ESMF_KIND_R8  ! Sa_tbot bootstrap [K] — ativo APENAS quando use_datm=.true.
-            ! Substituído pelo campo real JRA55 no primeiro ModelAdvance.
-          case default
-            fptr = 0.0_ESMF_KIND_R8
-        end select
-      end do
-      deallocate(fieldNameList)
-    end if
-
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete",  value="true", rc=rc)
+    call cap_set_data_complete(gcomp, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_LogWrite('DATM: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
@@ -319,8 +293,6 @@ contains
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
     integer :: i1, i2, j1, j2
     integer :: year, month, day, hour, minu, sec
-    integer :: fieldCount, k
-    character(len=64), allocatable :: fieldNameList(:)
     character(len=256) :: msg
 
     rc = ESMF_SUCCESS
@@ -400,19 +372,8 @@ contains
     call cap_put_field(exportState, "Faxa_snow", is%prsn, PUT_TAG, rc); if (rc/=ESMF_SUCCESS) return
 
     ! Atualizar timestamps
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    allocate(fieldNameList(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
-        field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, nextTime, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    deallocate(fieldNameList)
 
     call ESMF_LogWrite('DATM: ModelAdvance concluido (campos brutos)', ESMF_LOGMSG_INFO)
   end subroutine ModelAdvance
