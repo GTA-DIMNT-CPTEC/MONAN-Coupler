@@ -9,6 +9,26 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Números fixos levados para `coupler_constants` (R-FASE9-02).** Segunda etapa da fase 9. Só entram as trocas em que o valor e o `kind` são idênticos; nenhum cálculo muda.
+  - Constantes novas em `coupler_constants.F90`: `PI` (π completo), `T_ICE_MIN` e `T_ICE_MAX` (180 K e 273,16 K, faixa de temperatura válida do gelo), `ALB_OCEAN_DEFAULT` (0,08) e `ALB_ICE_DEFAULT` (0,65).
+  - Trocas feitas, todas em `real(ESMF_KIND_R8)`:
+
+    | Constante | Valor | Onde estava escrito |
+    | --- | --- | --- |
+    | `T_FREEZE_SEAWATER` | 271,35 K | `med_ice` (preenchimento de `tice`), `med_init` (valor inicial de `tice` e `tsfc`), `med_ocean` (preenchimento da SST), `med_bulk_ncar` (`ice_temp_eff`) |
+    | `T0_KELVIN` | 273,15 K | `docn_cap_netcdf` (conversão de °C para K), `sis_cap_MONAN` (temperatura inicial do oceano vista pelo gelo), `sis_cap_fields` (teto da temperatura do gelo) |
+    | `T_ICE_MIN`, `T_ICE_MAX` | 180 K, 273,16 K | `med_ice`, `med_bulk_ncar`, `med_export` (só o mínimo) e `sis_cap_fields` (só o mínimo) |
+    | `ALB_ICE_DEFAULT` | 0,65 | `med_ice` (4 preenchimentos), `med_init` (4 valores iniciais), `sis_cap_fields` (`ALBEDO_ICE_FALLBACK`, agora um nome local da constante) |
+    | `ALB_OCEAN_DEFAULT` | 0,08 | `med_init` (albedo inicial) e `mpas_cap_MONAN` (valor padrão de `Sf_albedo`) |
+    | `FILL_VALUE_R8` | -9,99e+20 | `mpas_import_diag` (5 vezes) e `mpas_cap_methods` (1 vez) |
+    | `PI` | π | `mpas_cap_netcdf` (literal com 21 algarismos) e `mpas_import_diag` (`acos(-1.0)`): os dois dão o mesmo número em precisão dupla |
+    | `RAD2DEG` | 180/π | `regrid_mpassit` (literal com 23 algarismos, igual em precisão dupla ao de `coupler_constants`) |
+
+  - Ficam onde estão, anotados nas pendências de `coupler_constants.F90`: o π de 15 algarismos de `med_bulk_ncar` e de `mpas_cap_methods` (valor diferente) e as constantes em `MPAS_RKIND` de `mpas_atm_fluxes`, `mpas_cap_methods` e `mpas_atm_setup` (o `kind` é o do MPAS, que só coincide com `ESMF_KIND_R8` quando o MPAS é compilado em precisão dupla). A nota antiga que citava `mpas_atm_model.F90` foi corrigida.
+  - Comentários corrigidos no caminho: em `sis_cap_fields`, o teto da temperatura do gelo é 0 °C, e não o congelamento da água do mar; em `mpas_cap_MONAN`, o albedo de água aberta do MPAS fica em `mpas_atm_setup.F90`.
+  - Compilação: `med_init`, `med_export`, `sis_cap_MONAN`, `docn_cap_netcdf` e `regrid_mpassit` passam a depender de `coupler_constants` no `Makefile`; o teste de interpolação (`tests/regrid/Makefile`) passa a compilar `coupler_constants`.
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 73 diferenças são as linhas de `use`, as declarações removidas e as linhas em que o número virou nome. Constantes de texto iguais. Conferência extra: o código de máquina dos 13 arquivos alterados, compilados aqui antes e depois, é o mesmo; as únicas diferenças são números de linha e o comprimento do nome do arquivo que as mensagens de erro carregam, e as constantes em ponto flutuante das seções de dados são idênticas.
+
 - **Procedimentos comuns aos caps em módulo compartilhado (R-FASE9-01).** Primeira etapa da fase 9 (duplicação e consistência). Nenhum cálculo muda.
   - Novo `src/shared/cap_common.F90` (módulo `cap_common_mod`) com três procedimentos que os caps repetiam:
     - `cap_initialize_p0`: fase 0 da inicialização, que aceita só as fases do protocolo IPDv03. Havia seis cópias iguais de `InitializeP0` (mediador, MOM6, SIS2, DATM, DOCN e MONAN-A). Os cinco primeiros passam a registrar `cap_initialize_p0` diretamente; o do MONAN-A mantém o seu `InitializeP0`, que chama `cap_initialize_p0` e depois registra a data inicial no log, como antes. O comentário do SIS2 sobre a escolha do IPDv03 e sobre o `SetClock` passa para o registro da fase 0 em `SetServices`.
@@ -18,6 +38,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Compilação: `cap_common` entra em `SRCS` do `Makefile`, depois de `nc_writer`, e os seis caps passam a depender dele; também na lista de `tools/dev/compila-local.bash`. Ele não entra em `MOM6_SRCS`: não declara `real` sem `kind`.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as constantes de texto e as instruções, como esperado numa remoção de cópias. Constantes de texto: `'IPDv03p'` passa de seis cópias para uma, em `cap_common.F90`; nenhuma outra muda. As diferenças de instruções são as rotinas removidas, as três novas, as linhas de `use` e as chamadas. O DOCN foi conferido com o driver NUOPC avulso da R-FASE8-11 (dois cenários, quatro PETs): os arquivos de diagnóstico e os campos exportados saíram iguais entre a versão anterior e a nova. O DATM, que o driver não registra, foi conferido só pela compilação.
   - Indicadores: arquivos Fortran de 45 para 46; linhas totais de 19 150 para 19 080; rotinas de 316 para 310; trechos repetidos de 85 para 82; arquivos com mais de 1 000 linhas de 3 para 2 (`MED_cap.F90` fica com 987).
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase9-01-validada`).
 
 - **Cópia das células MPAS para a grade regular em módulo próprio (R-FASE8-15).** Última das quatro divisões de arquivo da fase 8. Nenhuma instrução muda.
   - Em `mpas_cap_methods.F90` (1 232 linhas), a cópia de um arranjo das células MPAS para um campo do `ExportState` ocupava 460 linhas e só é chamada por `export_mpas_member`. Sai, sem mudança, para `src/caps/atmos/mpas_cell_binning.F90` (módulo `mpas_cell_binning_mod`, 490 linhas): `state_set_field_1d`, `map_cells_to_regular_grid` e as suas etapas (`bin_cells_local`, `mpas_mpi_comm`, `ordered_sum_bcast`, `fill_empty_bins`, `log_fill_marker`, `log_dup_diag` e `copy_to_local_grid`), com o comentário sobre a soma reprodutível entre PETs.

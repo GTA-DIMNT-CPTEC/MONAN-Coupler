@@ -100,7 +100,7 @@ Os dois arquivos novos do oceano e do gelo entram na lista `MOM6_SRCS` do `Makef
 | Etapa | Conteúdo | Classe |
 | --- | --- | --- |
 | R-FASE9-01 | procedimentos comuns aos caps de dados e aos caps do oceano e do gelo (`RealizeField`, `PutField`, `InitializeP0`, obtenção do estado interno) num módulo compartilhado dos caps. Feita na R-FASE9-01: `cap_common.F90` com `cap_initialize_p0`, `cap_realize_fields` e `cap_put_field`; a obtenção do estado interno fica em cada cap, porque o tipo do invólucro é próprio de cada componente | B |
-| R-FASE9-02 | números fixos no código que representam constantes físicas ou de configuração levados para `coupler_constants` ou para a configuração, somente quando o valor e o `kind` forem idênticos (senão, vai para a fase 10) | B |
+| R-FASE9-02 | números fixos no código que representam constantes físicas ou de configuração levados para `coupler_constants` ou para a configuração, somente quando o valor e o `kind` forem idênticos (senão, vai para a fase 10). Feita na R-FASE9-02: cinco constantes novas e 34 trocas; o π de 15 algarismos e as constantes em `MPAS_RKIND` ficam registrados como pendências | B |
 | R-FASE9-03 | revisão final de nomes e comentários: nomes que não dizem o que a variável guarda, comentários que descrevem outra rotina ou um estado antigo, mensagens de log com prefixos inconsistentes (sem mudar as mensagens que os scripts procuram) | A e B |
 
 **Pronto quando:** os indicadores da seção 3 estão nas metas. Nesse ponto, a limpeza termina: atualizar o relatório técnico (RPQ) e abrir o pedido de integração de `refactor/principal` ao `develop`.

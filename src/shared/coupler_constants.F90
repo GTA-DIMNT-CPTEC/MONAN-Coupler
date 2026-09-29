@@ -38,6 +38,7 @@ module coupler_constants_mod
   !--------------------------------------------------------------------------
   ! Conversões e marcas
   !--------------------------------------------------------------------------
+  real(ESMF_KIND_R8), parameter, public :: PI      = 3.14159265358979323846_ESMF_KIND_R8 !< π
   real(ESMF_KIND_R8), parameter, public :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8 !< radianos para graus
   real(ESMF_KIND_R8), parameter, public :: FILL_VALUE_R8 = -9.99e+20_ESMF_KIND_R8   !< _FillValue das saídas NetCDF
 
@@ -46,11 +47,23 @@ module coupler_constants_mod
   !--------------------------------------------------------------------------
   !> Decaimento horário da fração de gelo retida do OISST (≈ exp(-1/24), τ ≈ 24 h)
   real(ESMF_KIND_R8), parameter, public :: SI_IFRAC_DECAY = 0.95924_ESMF_KIND_R8
+  !> Faixa de temperatura válida do gelo [K]: abaixo do mínimo ou acima do
+  !! máximo, o valor recebido é tratado como ausente.
+  real(ESMF_KIND_R8), parameter, public :: T_ICE_MIN = 180.0_ESMF_KIND_R8
+  real(ESMF_KIND_R8), parameter, public :: T_ICE_MAX = 273.16_ESMF_KIND_R8
+
+  !--------------------------------------------------------------------------
+  ! Albedos padrão (valores de partida e de preenchimento)
+  !--------------------------------------------------------------------------
+  real(ESMF_KIND_R8), parameter, public :: ALB_OCEAN_DEFAULT = 0.08_ESMF_KIND_R8 !< água aberta
+  real(ESMF_KIND_R8), parameter, public :: ALB_ICE_DEFAULT   = 0.65_ESMF_KIND_R8 !< gelo
 
   ! Pendências (valores próximos, mas não iguais; unificar muda resultados):
-  !   - π: med_bulk_ncar usa 3.14159265358979 (15 algarismos) no ângulo zenital;
-  !     mpas_cap_netcdf usa π completo.
-  !   - mpas_atm_model.F90 declara em MPAS_RKIND as mesmas constantes de pressão
-  !     de vapor e 0 °C; ficam lá enquanto o arquivo não compila fora da Jaci.
+  !   - π: med_bulk_ncar usa 3.14159265358979 (15 algarismos) no ângulo zenital,
+  !     e mpas_cap_methods faz o mesmo em MPAS_RKIND; PI acima é o π completo.
+  !   - Constantes em MPAS_RKIND (pressão de vapor, eps, 0 °C e 271,35 K em
+  !     mpas_atm_fluxes e mpas_cap_methods; albedo 0,08 em mpas_cap_methods e
+  !     mpas_atm_setup) ficam onde estão: o kind é o do MPAS, que só coincide
+  !     com ESMF_KIND_R8 quando o MPAS é compilado em precisão dupla.
 
 end module coupler_constants_mod

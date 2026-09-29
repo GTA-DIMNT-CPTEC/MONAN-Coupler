@@ -23,6 +23,7 @@ module med_init_mod
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
                                  FillInternalField
   use med_ocean_mod, only: regrid_ocean_currents
+  use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
 
   implicit none
   private
@@ -576,16 +577,16 @@ contains
     ! sis_cap_MONAN.F90) ate o primeiro regrid real do gelo — evita
     ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
     ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
-    call FillInternalField(is%ice%alb_vdr, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%ice%alb_vdf, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%ice%alb_idr, 0.65_ESMF_KIND_R8, rc)
-    call FillInternalField(is%ice%alb_idf, 0.65_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%alb_vdr, ALB_ICE_DEFAULT, rc)
+    call FillInternalField(is%ice%alb_vdf, ALB_ICE_DEFAULT, rc)
+    call FillInternalField(is%ice%alb_idr, ALB_ICE_DEFAULT, rc)
+    call FillInternalField(is%ice%alb_idf, ALB_ICE_DEFAULT, rc)
     call ZeroInternalField(is%sfc%coszen, rc)
-    call FillInternalField(is%sfc%albedo, 0.08_ESMF_KIND_R8, rc)
+    call FillInternalField(is%sfc%albedo, ALB_OCEAN_DEFAULT, rc)
     ! T_gelo default = ponto de congelamento da agua do mar; fluxos
     ! turbulentos do gelo comecam zerados ate o 1o calc_bulk_ncar real.
-    call FillInternalField(is%ice%tice,   271.35_ESMF_KIND_R8, rc)
-    call FillInternalField(is%sfc%tsfc,   271.35_ESMF_KIND_R8, rc)
+    call FillInternalField(is%ice%tice,   T_FREEZE_SEAWATER, rc)
+    call FillInternalField(is%sfc%tsfc,   T_FREEZE_SEAWATER, rc)
     call ZeroInternalField(is%ice%taux,  rc)
     call ZeroInternalField(is%ice%tauy,  rc)
     call ZeroInternalField(is%ice%sen,   rc)

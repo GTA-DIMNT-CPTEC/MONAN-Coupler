@@ -17,6 +17,7 @@ module med_export_mod
   use NUOPC, only: NUOPC_SetTimestamp
   use med_cap_types_mod, only: MED_InternalState
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy
+  use coupler_constants_mod, only: T_ICE_MIN
 
   implicit none
   private
@@ -195,7 +196,7 @@ contains
           if (ifrac_c /= ifrac_c) ifrac_c = 0.0_ESMF_KIND_R8   ! NaN guard
           ifrac_c = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifrac_c))
           if (p_tice_comp(ii_c,jj_c) == p_tice_comp(ii_c,jj_c) .and. &
-              p_tice_comp(ii_c,jj_c) > 180.0_ESMF_KIND_R8 .and. &
+              p_tice_comp(ii_c,jj_c) > T_ICE_MIN .and. &
               p_tice_comp(ii_c,jj_c) < 280.0_ESMF_KIND_R8) then
             p_tsfc_out(ii_c,jj_c) = (1.0_ESMF_KIND_R8 - ifrac_c) * p_sst_src(ii_c,jj_c) &
                                      + ifrac_c * p_tice_comp(ii_c,jj_c)

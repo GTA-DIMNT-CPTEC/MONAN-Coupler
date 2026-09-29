@@ -39,7 +39,7 @@
 module mpas_cap_netcdf_mod
 
   use ESMF
-  use coupler_constants_mod, only : FILL_VALUE_R8
+  use coupler_constants_mod, only : FILL_VALUE_R8, PI
   use mpi
   ! Wrappers tipadas em módulo separado (mpi_allreduce_wrappers.F90):
   ! O ftn/gfortran cruza tipos de MPI_Allreduce entre chamadas no mesmo módulo
@@ -623,7 +623,6 @@ contains
     real(ESMF_KIND_R8), intent(in)    :: outlier_thr
     integer,   parameter :: NSPAN_LAT = 1
     real(ESMF_KIND_R8), parameter :: CELL_HALF = 0.60_ESMF_KIND_R8
-    real(ESMF_KIND_R8), parameter :: PI = 3.14159265358979323846_ESMF_KIND_R8
     real(ESMF_KIND_R8) :: val, lon_n, cos_lat
     integer :: k, ic, jc, i2, j2, di, dj, ns
     do k = 1, n

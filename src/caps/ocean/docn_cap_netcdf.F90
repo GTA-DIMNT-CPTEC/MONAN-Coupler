@@ -25,6 +25,7 @@ module docn_cap_netcdf_mod
   use netcdf
   use nc_writer_mod, only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use mpi
+  use coupler_constants_mod, only: T0_KELVIN
   use coupler_utils_mod, only: ChkErr, int_to_str, real_to_str
 
   use coupler_config_mod, only: cfg_docn_mode,           &
@@ -434,7 +435,7 @@ contains
       ncstat = nf90_get_var(ncid_r, varid_src, f0, start=[1,1,tidx0], count=[nx,ny,1])
       ncstat = nf90_get_var(ncid_r, varid_src, f1, start=[1,1,tidx1], count=[nx,ny,1])
       fout = (1.0_ESMF_KIND_R8 - alpha)*f0 + alpha*f1
-      fout = fout + 273.15_ESMF_KIND_R8   ! conversão °C → K
+      fout = fout + T0_KELVIN   ! conversão °C → K
       where (abs(f0) > 1.0e10_ESMF_KIND_R8 .or. abs(f1) > 1.0e10_ESMF_KIND_R8) &
         fout = fill_val
     else

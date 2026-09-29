@@ -16,7 +16,7 @@
 module mpas_cap_MONAN_mod
 
   use ESMF
-  use coupler_constants_mod, only : RAD2DEG
+  use coupler_constants_mod, only : RAD2DEG, ALB_OCEAN_DEFAULT
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
@@ -586,9 +586,9 @@ contains
     defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
     defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl [m]
     ! Sf_albedo: o mesmo valor de agua aberta usado em mpas_cap_methods.F90 e
-    ! mpas_atm_model.F90. O laco abaixo percorre 1..N_IMP, entao todo campo de
+    ! mpas_atm_setup.F90. O laco abaixo percorre 1..N_IMP, entao todo campo de
     ! IMP_NAMES precisa de valor aqui.
-    defaults(6) = 0.08_ESMF_KIND_R8                             ! Sf_albedo [0-1]
+    defaults(6) = ALB_OCEAN_DEFAULT                             ! Sf_albedo [0-1]
     defaults(7) = 1.0_ESMF_KIND_R8                              ! Sx_omask  [0-1] — tudo oceano
 
     do i = 1, N_IMP

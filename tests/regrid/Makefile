@@ -12,7 +12,7 @@ FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) -I. -J. \
 LIBS := $(ESMF_F90LINKOPTS) $(ESMF_F90LINKPATHS) $(ESMF_F90LINKRPATHS) $(ESMF_F90ESMFLINKLIBS)
 NP ?= 1
 
-OBJS := coupler_utils.o coupler_config.o regrid_base.o regrid_esmf.o regrid_weights.o \
+OBJS := coupler_utils.o coupler_constants.o coupler_config.o regrid_base.o regrid_esmf.o regrid_weights.o \
         regrid_mpassit.o regrid_registry.o regrid_manager.o identity_scheme.o test_regrid.o
 vpath %.F90 $(SRC)/shared $(SRC)/regrid .
 
@@ -25,7 +25,7 @@ test_regrid: $(OBJS)
 # dependências entre módulos
 coupler_config.o: coupler_utils.o
 regrid_esmf.o regrid_weights.o: regrid_base.o
-regrid_mpassit.o: regrid_esmf.o
+regrid_mpassit.o: regrid_esmf.o coupler_constants.o
 regrid_registry.o: regrid_esmf.o regrid_weights.o regrid_mpassit.o
 regrid_manager.o: regrid_registry.o coupler_config.o
 identity_scheme.o: regrid_base.o

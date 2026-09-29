@@ -14,7 +14,8 @@
 module med_bulk_ncar_mod
 
   use ESMF
-  use coupler_constants_mod, only : GRAV, T_FREEZE_SEAWATER, ATM_NX, ATM_NY
+  use coupler_constants_mod, only : GRAV, T_FREEZE_SEAWATER, ATM_NX, ATM_NY, &
+                                    T_ICE_MIN, T_ICE_MAX
 
   use coupler_config_mod, only: cfg_use_docn_ice,        &
                                 cfg_use_sis2_dynamic,     &
@@ -649,8 +650,8 @@ contains
     real(ESMF_KIND_R8), intent(in) :: tice
     real(ESMF_KIND_R8) :: tice_eff
 
-    tice_eff = merge(tice, 271.35_ESMF_KIND_R8, &
-      tice > 180.0_ESMF_KIND_R8 .and. tice <= 273.16_ESMF_KIND_R8)
+    tice_eff = merge(tice, T_FREEZE_SEAWATER, &
+      tice > T_ICE_MIN .and. tice <= T_ICE_MAX)
   end function ice_temp_eff
 
   !============================================================================

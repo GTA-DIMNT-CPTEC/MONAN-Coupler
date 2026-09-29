@@ -69,6 +69,7 @@ module sis_cap_MONAN_mod
   use sis_cap_fields_mod, only : ice_internal_state_type, import_forcing, &
                                   export_si_ifrac, export_si_albedo,     &
                                   export_si_tskin
+  use coupler_constants_mod, only : T0_KELVIN
 
   implicit none
   private
@@ -515,7 +516,7 @@ contains
     allocate(is%oib%t(ni_loc,nj_loc),  is%oib%s(ni_loc,nj_loc))
     allocate(is%oib%frazil(ni_loc,nj_loc), is%oib%sea_level(ni_loc,nj_loc))
     is%oib%u = 0.0_ESMF_KIND_R8; is%oib%v = 0.0_ESMF_KIND_R8
-    is%oib%t = 273.15_ESMF_KIND_R8; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
+    is%oib%t = T0_KELVIN; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
     is%oib%frazil = 0.0_ESMF_KIND_R8; is%oib%sea_level = 0.0_ESMF_KIND_R8
     is%oib%stagger = AGRID
 

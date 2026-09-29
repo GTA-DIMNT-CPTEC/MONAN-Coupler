@@ -10,7 +10,7 @@
 module mpas_cap_methods_mod
 
   use ESMF
-  use coupler_constants_mod, only : ATM_NX, ATM_NY, RAD2DEG
+  use coupler_constants_mod, only : ATM_NX, ATM_NY, RAD2DEG, FILL_VALUE_R8
   use mpas_atm_types_mod, only : mpas_atm_public_type,   &
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
@@ -706,7 +706,7 @@ contains
 
         ! 1) Reunir o campo distribuído (ordem de índice global) no PET 0.
         allocate(buf2d(ATM_NX, ATM_NY))
-        buf2d = -9.99e+20_ESMF_KIND_R8
+        buf2d = FILL_VALUE_R8
         call ESMF_FieldGather(field, farray=buf2d, rootPet=0, rc=rc)
         if (rc /= ESMF_SUCCESS) then
           deallocate(buf2d); rc = ESMF_SUCCESS; return

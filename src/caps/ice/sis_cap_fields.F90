@@ -20,7 +20,8 @@ module sis_cap_fields_mod
 
   use ESMF
   use NUOPC_Model, only : NUOPC_ModelGet
-  use coupler_constants_mod, only : TICE_FALLBACK => T_FREEZE_SEAWATER
+  use coupler_constants_mod, only : TICE_FALLBACK => T_FREEZE_SEAWATER, T0_KELVIN, &
+                                    T_ICE_MIN, ALBEDO_ICE_FALLBACK => ALB_ICE_DEFAULT
   use coupler_config_mod, only : cfg_write_fixdiag
   use ice_model_mod, only : ice_data_type, ocean_ice_boundary_type, &
                              atmos_ice_boundary_type
@@ -323,8 +324,8 @@ contains
     integer :: ii, jj, k_lo, k_hi
     ! Fallback usado apenas onde a fracao de gelo e desprezivel (o peso do
     ! termo de gelo no blend por ifrac feito no mediador torna esse valor
-    ! quase irrelevante), ou onde Ice%albedo_* ainda nao estiver associado.
-    real(ESMF_KIND_R8), parameter :: ALBEDO_ICE_FALLBACK = 0.65_ESMF_KIND_R8
+    ! quase irrelevante), ou onde Ice%albedo_* ainda nao estiver associado:
+    ! ALBEDO_ICE_FALLBACK (ALB_ICE_DEFAULT de coupler_constants).
         character(len=200) :: diag_msg7
 
     rc = ESMF_SUCCESS
@@ -462,8 +463,8 @@ contains
           ptr_tice(ii,jj) = TICE_FALLBACK
         end if
         ! blindagem fisica: temperatura de gelo/neve nunca abaixo de ~180 K
-        ! (recorde antartico ~184 K) nem acima do congelamento da agua do mar
-        ptr_tice(ii,jj) = max(180.0_ESMF_KIND_R8, min(273.15_ESMF_KIND_R8, ptr_tice(ii,jj)))
+        ! (recorde antartico ~184 K) nem acima de 0 °C
+        ptr_tice(ii,jj) = max(T_ICE_MIN, min(T0_KELVIN, ptr_tice(ii,jj)))
       end do
     end do
 

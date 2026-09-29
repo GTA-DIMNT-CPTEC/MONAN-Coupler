@@ -11,7 +11,8 @@
 
 module med_ice_mod
   use ESMF
-  use coupler_constants_mod, only: ATM_NX, ATM_NY
+  use coupler_constants_mod, only: ATM_NX, ATM_NY, T_FREEZE_SEAWATER, T_ICE_MIN, &
+                                   T_ICE_MAX, ALB_ICE_DEFAULT
   use diag_bitsum_mod, only: diag_bitsum_log
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_spec, regrid_manager_t
@@ -94,15 +95,15 @@ contains
       call check_ice_geography(p_ifrac_out)
 
     call extrapolate_ice_field(is%ice%alb_vdr, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
     call extrapolate_ice_field(is%ice%alb_vdf, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
     call extrapolate_ice_field(is%ice%alb_idr, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
     call extrapolate_ice_field(is%ice%alb_idf, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.65_ESMF_KIND_R8))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
     call extrapolate_ice_field(is%ice%tice, regrid_fill_t(enabled=.true., &
-      vmin=180.0_ESMF_KIND_R8, vmax=273.16_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8))
+      vmin=T_ICE_MIN, vmax=T_ICE_MAX, vfill=T_FREEZE_SEAWATER))
 
     call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
       'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &

@@ -13,7 +13,7 @@
 module mpas_import_diag_mod
 
   use ESMF
-  use coupler_constants_mod, only : FILL_VALUE_R8
+  use coupler_constants_mod, only : FILL_VALUE_R8, PI
   use mpi
   use netcdf
   use nc_writer_mod,      only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
@@ -385,15 +385,15 @@ contains
 
     okf = nc_def_field2d(ncid, 'So_t', dimid_lon, dimid_lat, varids(IMP_SOT), 'write_mpas_import_diag', &
            long_name='SST dinamica MOM6 importada pelo MPAS', &
-           units='K', standard_name='sea_surface_temperature', fill_r8=-9.99e+20_ESMF_KIND_R8)
+           units='K', standard_name='sea_surface_temperature', fill_r8=FILL_VALUE_R8)
 
     okf = nc_def_field2d(ncid, 'Si_ifrac', dimid_lon, dimid_lat, varids(IMP_IFRAC), 'write_mpas_import_diag', &
            long_name='Fracao de gelo marinho importada pelo MPAS', &
-           units='1', standard_name='sea_ice_area_fraction', fill_r8=-9.99e+20_ESMF_KIND_R8)
+           units='1', standard_name='sea_ice_area_fraction', fill_r8=FILL_VALUE_R8)
 
     okf = nc_def_field2d(ncid, 'Sf_zorl', dimid_lon, dimid_lat, varids(IMP_ZORL), 'write_mpas_import_diag', &
            long_name='Rugosidade superficial Charnock+Smith importada pelo MPAS', &
-           units='m', standard_name='surface_roughness_length', fill_r8=-9.99e+20_ESMF_KIND_R8)
+           units='m', standard_name='surface_roughness_length', fill_r8=FILL_VALUE_R8)
 
     okf = nc_def_field2d(ncid, 'So_u', dimid_lon, dimid_lat, varids(IMP_UOCN), 'write_mpas_import_diag', &
            long_name='Corrente oceanica zonal importada pelo MPAS', &
@@ -601,7 +601,6 @@ contains
     real(ESMF_KIND_R8) :: lon_n, cos_lat, val, ofrac_min
     logical :: is_valid
     integer :: k, ic, jc, di, dj, i2, j2, ns
-    real(ESMF_KIND_R8), parameter :: PI        = acos(-1.0_ESMF_KIND_R8)
     real(ESMF_KIND_R8), parameter :: CELL_HALF = 0.60_ESMF_KIND_R8
     integer,            parameter :: NSPAN_LAT = 1
 
@@ -644,13 +643,13 @@ contains
       end do
     end do
 
-    grid_out = -9.99e+20_ESMF_KIND_R8
+    grid_out = FILL_VALUE_R8
     where (cnt > 0) grid_out = acc / real(cnt, ESMF_KIND_R8)
 
     if (ofrac_min > 0.0_ESMF_KIND_R8) then
       where (cnt_all > 0 .and. &
              real(cnt, ESMF_KIND_R8) / real(cnt_all, ESMF_KIND_R8) < ofrac_min)
-        grid_out = -9.99e+20_ESMF_KIND_R8
+        grid_out = FILL_VALUE_R8
       end where
     end if
 

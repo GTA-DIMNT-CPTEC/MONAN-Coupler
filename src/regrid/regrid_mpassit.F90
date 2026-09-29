@@ -22,6 +22,7 @@ module regrid_mpassit_mod
 
   use ESMF
   use regrid_esmf_mod, only : esmf_regridder_t, regrid_method_flag
+  use coupler_constants_mod, only : RAD2DEG
 
   implicit none
   private
@@ -38,8 +39,6 @@ module regrid_mpassit_mod
     procedure :: setup   => mpassit_setup
     procedure :: execute => mpassit_execute
   end type mpassit_regridder_t
-
-  real(ESMF_KIND_R8), parameter :: RAD2DEG = 57.295779513082320876798_ESMF_KIND_R8
 
 contains
 

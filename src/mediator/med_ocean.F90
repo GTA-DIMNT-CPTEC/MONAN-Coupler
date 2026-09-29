@@ -12,7 +12,7 @@
 module med_ocean_mod
   use ESMF
   use netcdf
-  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY
+  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY, T_FREEZE_SEAWATER
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_spec
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny, cfg_use_docn_ice, &
@@ -149,7 +149,7 @@ contains
   subroutine fill_sst_gaps(sst)
     real(ESMF_KIND_R8), pointer :: sst(:,:)
     type(regrid_fill_t), parameter :: SST_FILL = regrid_fill_t(enabled=.true.,     &
-    vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=271.35_ESMF_KIND_R8, &
+    vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=T_FREEZE_SEAWATER, &
     max_iter=40, skip_fraction=1.0_ESMF_KIND_R8, overflow_to_fill=.true.)
     integer :: n_invalid, n_left
     character(len=120) :: msg
