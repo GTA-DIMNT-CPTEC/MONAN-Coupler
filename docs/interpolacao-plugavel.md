@@ -7,7 +7,7 @@ Toda interpolação entre grades feita pelo acoplador passa por um único conjun
 | Local | Situação |
 | --- | --- |
 | Mediador (`MED_cap.F90`, `med_cap_methods.F90`, `med_bulk_ncar.F90`) | Usa o framework: seis rotas com nome (tabela abaixo) |
-| Cap atmosférico (`mpas_cap_methods.F90`, `state_set_field_1d`) | Interpolação própria da malha Voronoi para a grade de 1 grau (vizinho mais próximo com espalhamento). É o ponto de entrada natural do esquema `mpassit`; a troca muda resultados e depende de decisão científica |
+| Cap atmosférico (`mpas_cell_binning.F90`, `state_set_field_1d`) | Interpolação própria da malha Voronoi para a grade de 1 grau (vizinho mais próximo com espalhamento). É o ponto de entrada natural do esquema `mpassit`; a troca muda resultados e depende de decisão científica |
 | Conectores NUOPC | Interpolação automática entre componentes, hoje entre grades iguais. Um conector especializado que use o framework só será necessário quando as grades passarem a diferir |
 
 ## Rotas do mediador

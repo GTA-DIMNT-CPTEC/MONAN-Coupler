@@ -153,7 +153,7 @@ O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F9
 
 O teste foi conferido ao contrário, com cinco alterações de propósito no código, uma de cada vez: trocar `<=` por `<` no limite de 273,16 K, trocar um coeficiente do fator de Louis, trocar o expoente 1,7 do albedo, mudar o teto do fator e inverter o sinal da longitude no ângulo horário. Todas fizeram o teste falhar.
 
-`test_grade_atm.F90` cobre as duas etapas de cálculo de `map_cells_to_regular_grid` (`mpas_cap_methods`), que leva as células MPAS à grade regular 360 x 180 do cap atmosférico:
+`test_grade_atm.F90` cobre as duas etapas de cálculo de `map_cells_to_regular_grid` (`mpas_cell_binning`), que leva as células MPAS à grade regular 360 x 180 do cap atmosférico:
 
 | Rotina | O que confere | Casos |
 | --- | --- | --- |

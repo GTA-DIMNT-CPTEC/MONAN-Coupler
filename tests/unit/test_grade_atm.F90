@@ -4,7 +4,7 @@
 !!
 !! O teste de regressão tests/atmgrid compara duas versões de mpas_export
 !! e responde "o resultado mudou?". Este confere, sem MPI, as duas etapas
-!! de cálculo de map_cells_to_regular_grid (mpas_cap_methods_mod) contra
+!! de cálculo de map_cells_to_regular_grid (mpas_cell_binning_mod) contra
 !! valores esperados calculados à parte:
 !!
 !!   bin_cells_local  cada célula cai na caixa de 1 grau certa: longitude
@@ -33,7 +33,7 @@ program test_grade_atm
   use ESMF, only: ESMF_KIND_R8
   use coupler_constants_mod, only: ATM_NX, ATM_NY
   use mpas_atm_types_mod, only: MPAS_RKIND
-  use mpas_cap_methods_mod, only: bin_cells_local, fill_empty_bins
+  use mpas_cell_binning_mod, only: bin_cells_local, fill_empty_bins
   implicit none
 
   integer, parameter :: R8 = ESMF_KIND_R8
