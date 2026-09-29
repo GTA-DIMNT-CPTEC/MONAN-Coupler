@@ -47,14 +47,6 @@ contains
   !============================================================================
 
   !----------------------------------------------------------------------------
-  ! mom6_supergrid_dims: le as dimensoes do supergrid (variaveis 'nx'/'ny'
-  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
-  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
-  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
-  !----------------------------------------------------------------------------
-
-
-  !----------------------------------------------------------------------------
   ! mom6_supergrid_dims — le as dimensoes do supergrid (variaveis 'nx'/'ny'
   ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
   ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
@@ -127,9 +119,8 @@ contains
     integer,              intent(out)  :: rc
     character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
     character(len=64) :: pfx
-    integer :: ncid, varid_x, varid_y, ncstat
+    logical :: lido
     integer :: i1, i2, j1, j2, ni_local, nj_local
-    integer :: start2(2), count2(2), stride2(2)
     character(len=300) :: dbgmsg
     real(ESMF_KIND_R8) :: x_row_min
     real(ESMF_KIND_R8) :: x_row_max
@@ -137,68 +128,15 @@ contains
     real(ESMF_KIND_R8) :: y_col_max
 
     pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
-    rc = ESMF_SUCCESS
-    if (.not. associated(coordX) .or. .not. associated(coordY)) return
+    ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
+    call read_supergrid_points(filename, 0, ' para ler coordenadas T reais do MOM6', &
+      '"x" (lon)', '"y" (lat)', pfx, coordX, coordY, lido, rc)
+    if (.not. lido) return
 
     i1 = lbound(coordX,1); i2 = ubound(coordX,1)
     j1 = lbound(coordX,2); j2 = ubound(coordX,2)
     ni_local = i2 - i1 + 1
     nj_local = j2 - j1 + 1
-    if (ni_local <= 0 .or. nj_local <= 0) return
-
-    ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao abrir ' // trim(filename) // &
-        ' para ler coordenadas T reais do MOM6', ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      return
-    end if
-
-    ncstat = nf90_inq_varid(ncid, 'x', varid_x)
-    if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': variaveis "x"/"y" nao encontradas em ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-      ncstat = nf90_close(ncid)
-      return
-    end if
-
-    ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
-    ! stride=2 le direto os centros, sem carregar o supergrid inteiro (2x
-    ! resolucao) na memoria de cada PET.
-    start2  = (/ 2*i1, 2*j1 /)
-    count2  = (/ ni_local, nj_local /)
-    stride2 = (/ 2, 2 /)
-
-    ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler "x" (lon) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ! normaliza longitude bruta do supergrid (ex.: -300..60,
-    ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
-    ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
-    ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
-    where (coordX < 0.0_ESMF_KIND_R8)
-      coordX = coordX + 360.0_ESMF_KIND_R8
-    end where
-    where (coordX >= 360.0_ESMF_KIND_R8)
-      coordX = coordX - 360.0_ESMF_KIND_R8
-    end where
-
-    ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
-      stride=stride2)
-    if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler "y" (lat) de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
-      rc = ESMF_FAILURE
-    end if
-
-    ncstat = nf90_close(ncid)
 
     ! DIAGNOSTICO TEMPORARIO comprova o que foi lido de fato.
     ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
@@ -233,7 +171,7 @@ contains
   ! sobreposicao de AREA entre celulas fonte e destino — exige os 4 cantos
   ! de cada celula, nao so' o centro.
   !
-  ! Mesma logica de mom6_supergrid_tcoords (mesmo arquivo ocean_hgrid.nc,
+  ! Mesma leitura de mom6_supergrid_tcoords (mesmo arquivo ocean_hgrid.nc,
   ! mesmo stride=2), com UM offset de indice diferente: celula T (i,j) esta
   ! no vertice de supergrid (2*i, 2*j); o canto inferior-esquerdo dessa
   ! MESMA celula esta em (2*i-1, 2*j-1). Como o canto (i,j) e' compartilhado
@@ -250,11 +188,48 @@ contains
     integer,              intent(out)  :: rc
     character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
     character(len=64) :: pfx
+    logical :: lido
+
+    pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
+    ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
+    ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
+    call read_supergrid_points(filename, 1, ' para ler cantos (vertices) do MOM6', &
+      '"x" (lon, canto)', '"y" (lat, canto)', pfx, coordX, coordY, lido, rc)
+
+  end subroutine mom6_supergrid_corners
+
+  !----------------------------------------------------------------------------
+  !> Le do supergrid os pontos (2*i-off, 2*j-off) da porcao local de
+  !! coordX/coordY (bounds em indice GLOBAL), com stride=2: off=0 da os centros
+  !! T e off=1 os cantos. A longitude e' normalizada para [0,360).
+  !!
+  !! lido fica .false. quando nao ha o que ler (ponteiros nao associados ou
+  !! porcao local vazia, com rc=ESMF_SUCCESS) ou quando o arquivo nao abre
+  !! ou nao tem as variaveis "x"/"y" (rc=ESMF_FAILURE). Falha na leitura de
+  !! "x" ou "y" poe rc=ESMF_FAILURE, mas lido fica .true.
+  !!
+  !! @param[in]  filename  supergrid ocean_hgrid.nc
+  !! @param[in]  off       0 para centros T, 1 para cantos
+  !! @param[in]  txt_open  complemento da mensagem de falha ao abrir
+  !! @param[in]  txt_x     nome de "x" nas mensagens de falha de leitura
+  !! @param[in]  txt_y     nome de "y" nas mensagens de falha de leitura
+  !! @param[in]  pfx       prefixo das mensagens de log
+  !! @param[out] lido      se o arquivo foi aberto e lido
+  !! @param[out] rc        ESMF_SUCCESS ou ESMF_FAILURE
+  !----------------------------------------------------------------------------
+  subroutine read_supergrid_points(filename, off, txt_open, txt_x, txt_y, pfx, &
+                                   coordX, coordY, lido, rc)
+    character(len=*),   intent(in)  :: filename
+    integer,            intent(in)  :: off
+    character(len=*),   intent(in)  :: txt_open, txt_x, txt_y, pfx
+    real(ESMF_KIND_R8), pointer     :: coordX(:,:), coordY(:,:)
+    logical,            intent(out) :: lido
+    integer,            intent(out) :: rc
     integer :: ncid, varid_x, varid_y, ncstat
     integer :: i1, i2, j1, j2, ni_local, nj_local
     integer :: start2(2), count2(2), stride2(2)
 
-    pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
+    lido = .false.
     rc = ESMF_SUCCESS
     if (.not. associated(coordX) .or. .not. associated(coordY)) return
 
@@ -267,7 +242,7 @@ contains
     ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
     if (ncstat /= NF90_NOERR) then
       call ESMF_LogWrite(trim(pfx)//': falha ao abrir ' // trim(filename) // &
-        ' para ler cantos (vertices) do MOM6', ESMF_LOGMSG_ERROR)
+        txt_open, ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
       return
     end if
@@ -281,22 +256,26 @@ contains
       ncstat = nf90_close(ncid)
       return
     end if
+    lido = .true.
 
-    ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
-    ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
-    start2  = (/ 2*i1 - 1, 2*j1 - 1 /)
+    ! stride=2 le direto os pontos pedidos, sem carregar o supergrid inteiro
+    ! (2x resolucao) na memoria de cada PET.
+    start2  = (/ 2*i1 - off, 2*j1 - off /)
     count2  = (/ ni_local, nj_local /)
     stride2 = (/ 2, 2 /)
 
     ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
       stride=stride2)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler "x" (lon, canto) de ' // &
+      call ESMF_LogWrite(trim(pfx)//': falha ao ler ' // txt_x // ' de ' // &
         trim(filename), ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
 
-    ! Mesma normalizacao de longitude 0..360 usada para o centro.
+    ! normaliza longitude bruta do supergrid (ex.: -300..60,
+    ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
+    ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
+    ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
     where (coordX < 0.0_ESMF_KIND_R8)
       coordX = coordX + 360.0_ESMF_KIND_R8
     end where
@@ -307,13 +286,13 @@ contains
     ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
       stride=stride2)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler "y" (lat, canto) de ' // &
+      call ESMF_LogWrite(trim(pfx)//': falha ao ler ' // txt_y // ' de ' // &
         trim(filename), ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
 
     ncstat = nf90_close(ncid)
 
-  end subroutine mom6_supergrid_corners
+  end subroutine read_supergrid_points
 
 end module mom6_supergrid_mod
