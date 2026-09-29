@@ -73,17 +73,6 @@ contains
     logical :: mpas_available
     integer :: i1_glob, i2_glob, j1_glob, j2_glob   ! limites de Sa_u10m_mpas
 
-    ! Campos do DATM (fallback)
-    real(ESMF_KIND_R8), pointer :: uas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: vas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: tas_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: shum_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: psl_datm(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: swdn_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: lwdn_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: rain_datm(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: snow_datm(:,:) => null()
-
     proceed = .false.
 
     !==========================================================================
@@ -163,54 +152,94 @@ contains
         rc = ESMF_SUCCESS; return
       end if
       ! DATM fallback (apenas quando use_mpas_atm=false)
-      call GetFieldPtr(importState, "Sa_u10m",   uas_datm,  rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Sa_v10m",   vas_datm,  rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Sa_tbot",   tas_datm,  rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Sa_shum",   shum_datm, rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Sa_pslv",   psl_datm,  rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Faxa_swdn", swdn_datm, rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Faxa_lwdn", lwdn_datm, rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Faxa_rain", rain_datm, rc); if (rc/=ESMF_SUCCESS) return
-      call GetFieldPtr(importState, "Faxa_snow", snow_datm, rc); if (rc/=ESMF_SUCCESS) return
-
-      uas  => uas_datm;  vas  => vas_datm;  tas  => tas_datm
-      shum => shum_datm; psl  => psl_datm;  swdn => swdn_datm
-      lwdn => lwdn_datm; rain => rain_datm; snow => snow_datm
-
-      call ESMF_LogWrite('MED: Usando DATM (JRA55) como fonte atmosferica (fallback)', &
-        ESMF_LOGMSG_INFO)
+      call get_datm_forcing(importState, uas, vas, tas, shum, psl, swdn, lwdn, rain, snow, rc)
+      if (rc /= ESMF_SUCCESS) return
     else
       uas  => uas_mpas;  vas  => vas_mpas;  tas  => tas_mpas
       psl  => psl_mpas;  swdn => swdn_mpas; lwdn => lwdn_mpas
       rain => rain_mpas
 
-      ! shum opcional — usar SHUM_OCEAN_DEFAULT quando ausente
-      if (associated(shum_mpas)) then
-        shum => shum_mpas
-      else
-        allocate(shum_local(i1_glob:i2_glob, j1_glob:j2_glob))
-        shum_local = SHUM_OCEAN_DEFAULT
-        shum => shum_local
-        call ESMF_LogWrite('MED: Sa_shum_mpas ausente (Fase 2) ' &
-          //'-- usando SHUM_DEFAULT=0.010 kg/kg', ESMF_LOGMSG_INFO)
-      end if
-
-      ! snow opcional — zero quando ausente
-      if (associated(snow_mpas)) then
-        snow => snow_mpas
-      else
-        allocate(snow_local(i1_glob:i2_glob, j1_glob:j2_glob))
-        snow_local = 0.0_ESMF_KIND_R8
-        snow => snow_local
-        call ESMF_LogWrite('MED: Faxa_snow_mpas ausente (Fase 2) ' &
-          //'-- precipitacao solida = 0.0', ESMF_LOGMSG_INFO)
-      end if
+      call select_optional_mpas_forcing(shum_mpas, snow_mpas, i1_glob, i2_glob, j1_glob, j2_glob, &
+                                        shum, snow, shum_local, snow_local)
 
       call ESMF_LogWrite('MED: Usando MPAS como fonte atmosferica primaria', &
         ESMF_LOGMSG_INFO)
     end if
     proceed = .true.
   end subroutine get_atm_forcing
+
+  !> Forcantes do DATM (uso quando use_mpas_atm e' falso): os nove campos
+  !! do importState, todos obrigatorios. Na falta de um deles, retorna com o
+  !! codigo de erro de GetFieldPtr e os ponteiros de saida como estavam.
+  subroutine get_datm_forcing(importState, uas, vas, tas, shum, psl, swdn, lwdn, rain, snow, rc)
+    type(ESMF_State),            intent(in)    :: importState
+    real(ESMF_KIND_R8), pointer, intent(inout) :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: psl(:,:), swdn(:,:), lwdn(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: rain(:,:), snow(:,:)
+    integer,                     intent(inout) :: rc
+
+    ! Campos do DATM (fallback)
+    real(ESMF_KIND_R8), pointer :: uas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: vas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: tas_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: shum_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: psl_datm(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: swdn_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: lwdn_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: rain_datm(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: snow_datm(:,:) => null()
+
+    call GetFieldPtr(importState, "Sa_u10m",   uas_datm,  rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Sa_v10m",   vas_datm,  rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Sa_tbot",   tas_datm,  rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Sa_shum",   shum_datm, rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Sa_pslv",   psl_datm,  rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Faxa_swdn", swdn_datm, rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Faxa_lwdn", lwdn_datm, rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Faxa_rain", rain_datm, rc); if (rc/=ESMF_SUCCESS) return
+    call GetFieldPtr(importState, "Faxa_snow", snow_datm, rc); if (rc/=ESMF_SUCCESS) return
+
+    uas  => uas_datm;  vas  => vas_datm;  tas  => tas_datm
+    shum => shum_datm; psl  => psl_datm;  swdn => swdn_datm
+    lwdn => lwdn_datm; rain => rain_datm; snow => snow_datm
+
+    call ESMF_LogWrite('MED: Usando DATM (JRA55) como fonte atmosferica (fallback)', &
+      ESMF_LOGMSG_INFO)
+  end subroutine get_datm_forcing
+
+  !> Umidade e neve do MPAS, opcionais: aponta shum e snow para os campos do
+  !! importState quando existem; senao, aloca shum_local (SHUM_OCEAN_DEFAULT)
+  !! e snow_local (zero) nos limites locais de Sa_u10m_mpas e aponta para
+  !! eles, registrando a ausencia no log.
+  subroutine select_optional_mpas_forcing(shum_mpas, snow_mpas, i1_glob, i2_glob, j1_glob, j2_glob, &
+                                          shum, snow, shum_local, snow_local)
+    real(ESMF_KIND_R8), pointer, intent(in)    :: shum_mpas(:,:), snow_mpas(:,:)
+    integer,                     intent(in)    :: i1_glob, i2_glob, j1_glob, j2_glob
+    real(ESMF_KIND_R8), pointer, intent(inout) :: shum(:,:), snow(:,:)
+    real(ESMF_KIND_R8), pointer, intent(inout) :: shum_local(:,:), snow_local(:,:)
+
+    ! shum opcional — usar SHUM_OCEAN_DEFAULT quando ausente
+    if (associated(shum_mpas)) then
+      shum => shum_mpas
+    else
+      allocate(shum_local(i1_glob:i2_glob, j1_glob:j2_glob))
+      shum_local = SHUM_OCEAN_DEFAULT
+      shum => shum_local
+      call ESMF_LogWrite('MED: Sa_shum_mpas ausente (Fase 2) ' &
+        //'-- usando SHUM_DEFAULT=0.010 kg/kg', ESMF_LOGMSG_INFO)
+    end if
+
+    ! snow opcional — zero quando ausente
+    if (associated(snow_mpas)) then
+      snow => snow_mpas
+    else
+      allocate(snow_local(i1_glob:i2_glob, j1_glob:j2_glob))
+      snow_local = 0.0_ESMF_KIND_R8
+      snow => snow_local
+      call ESMF_LogWrite('MED: Faxa_snow_mpas ausente (Fase 2) ' &
+        //'-- precipitacao solida = 0.0', ESMF_LOGMSG_INFO)
+    end if
+  end subroutine select_optional_mpas_forcing
 
   !============================================================================
   !> @brief Reune os forcantes atmosfericos na grade ATM global, em todos os PETs.
