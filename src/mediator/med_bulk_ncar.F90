@@ -151,7 +151,7 @@ contains
     ! interpolada de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
     ! (is%ice%alb_*, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
-    ! em sis_cap_MONAN.F90). Com albedo_ocn = 0,06 em toda celula, a absorcao
+    ! em sis_cap_fields.F90). Com albedo_ocn = 0,06 em toda celula, a absorcao
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
     !==========================================================================
@@ -247,7 +247,7 @@ contains
     !
     ! Com cfg_use_sis2_dynamic=.true., a fonte AUTORITATIVA de is%ice%ifrac
     ! e' a rota mascarada 'ocn2atm_ice' com extrapolacao, aplicada em
-    ! MED_cap.F90 antes desta subrotina, e este bloco fica inativo. Sem SIS2
+    ! med_ice.F90 antes desta subrotina, e este bloco fica inativo. Sem SIS2
     ! dinamico, legacy_ice_fraction usa o OISST (use_docn_ice) ou le
     ! "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2") pela rota
     ! generica 'ocn2atm', SEM mascara, e aplica a mascara SST~=T_FILL_LAND,
@@ -883,7 +883,7 @@ contains
   !! diretas, albedo_ocn nas difusas) e vai para o MOM6, que representa so' a
   !! fracao (1-Si_ifrac) da celula. Fioi_swnet_* usa SOMENTE o albedo do gelo
   !! por banda (alb_vdr/vdf/idr/idf) e vai para o SIS2 (ver
-  !! sis_cap_MONAN.F90::import_forcing). Com um unico valor calculado pelo
+  !! sis_cap_fields.F90::import_forcing). Com um unico valor calculado pelo
   !! albedo medio para os dois, o gelo absorveria SW com um albedo mais baixo
   !! que o seu proprio (contaminado pela agua aberta) e o oceano, com um mais
   !! alto (contaminado pelo gelo): dupla contabilizacao fisica incorreta em
@@ -1021,7 +1021,7 @@ contains
   !! celula (i,j) da grade ATM 360x180.
   !!
   !! lat/lon analiticos da grade ATM (mesma formula da criacao da grade em
-  !! MED_cap.F90::InitializeRealize). Albedo de Briegleb et al. (1986); o
+  !! med_init.F90::create_atm_grid). Albedo de Briegleb et al. (1986); o
   !! corte coszen>=0.02 evita divergencia perto do horizonte (ali a celula
   !! ja recebe swdn~0), e o resultado fica em [0.03, 0.99].
   subroutine ocean_direct_albedo(i, j, utc_hour, decl, coszen_ij, alb_ocn_dir)

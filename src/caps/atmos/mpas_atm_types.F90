@@ -1,23 +1,17 @@
 !> @file mpas_atm_types.F90
 !! @brief Tipos públicos do cap MONAN-A 2.0 — sem dependência direta do ESMF.
 !!
-!! Versão 7.0 —
-!!   atm_ocean_boundary_type estendido com 2 campos do oceano dinâmico:
-!!     uocn, vocn : correntes superficiais [m/s] do MOM6 via mediador
-!!   Habilita cálculo correto do vento relativo ao oceano:
-!!     |V_atm − V_ocn|² em vez de |V_atm|² (era erro em correntes fortes).
-!!
-!! Versão 6.0 — Campos ajustados ao mediador MED_cap (ESMF/NUOPC 8.9.1):
-!!   mpas_atm_public_type agora inclui:
-!!     q2m       : umidade específica a 2 m [kg/kg]  → Sa_shum_mpas
-!!     prec_rain : precipitação líquida  [kg/m²/s]   → Faxa_rain_mpas
-!!     prec_snow : precipitação sólida   [kg/m²/s]   → Faxa_snow_mpas
-!!
-!!   O campo prec_total é mantido para compatibilidade, mas NÃO é exportado
-!!   ao mediador. O mediador espera rain e snow separados.
+!! mpas_atm_public_type: campos que o MONAN-A exporta ao mediador, entre
+!!   eles q2m (-> Sa_shum_mpas), prec_rain (-> Faxa_rain_mpas) e prec_snow
+!!   (-> Faxa_snow_mpas). prec_total continua no tipo, mas nao e' exportado:
+!!   o mediador espera chuva e neve separadas.
+!! atm_ocean_boundary_type: contorno inferior vindo do mediador, com as
+!!   correntes superficiais uocn/vocn do MOM6 para o vento relativo ao
+!!   oceano (|V_atm - V_ocn|^2).
 !!
 !! Depende apenas de mpas_kind_types (sem ESMF).
-!! Usado por: mpas_atm_model_mod, mpas_cap_methods_mod, mpas_cap_mod.
+!! Usado por: mpas_atm_model_mod, mpas_atm_setup_mod, mpas_atm_fluxes_mod,
+!! mpas_cap_methods_mod, mpas_cap_MONAN_mod e mpas_import_diag_mod.
 
 module mpas_atm_types_mod
 
@@ -145,10 +139,8 @@ module mpas_atm_types_mod
   !   So_v      → vocn          corrente meridional a 0 m [m/s]
   ! Sf_zorl → zorl rugosidade [m] (Charnock no MED —)
   !
-  ! adicionados uocn/vocn para habilitar vento
-  !   relativo ao oceano nos esquemas de superfície do MPAS-A.
-  !   Antes: zorl/ice_fraction/uocn/vocn fixos em defaults; SST do MOM6.
-  !   Agora: SST/ifrac/uocn/vocn dinâmicos do MOM6; zorl ainda default.
+  ! uocn/vocn permitem o vento relativo ao oceano nos esquemas de
+  !   superfície do MPAS-A.
   type, public :: atm_ocean_boundary_type
     real(MPAS_RKIND), allocatable :: sst(:)          !< SST                      [K]
     real(MPAS_RKIND), allocatable :: ice_fraction(:) !< fração de gelo           [0–1]

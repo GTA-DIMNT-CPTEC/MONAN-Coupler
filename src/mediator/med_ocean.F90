@@ -37,9 +37,9 @@ module med_ocean_mod
   ! is%run%ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado
   !   na primeira MediatorAdvance (estado interno, med_cap_types).
   !
-  ! SI_IFRAC_DECAY_MED  : fator de decaimento de Si_ifrac por passo de
-  !   acoplamento (dt=3600 s, τ=86400 s):  exp(-dt/τ) = exp(-1/24) ≈ 0.9592.
-  !   Sincronizado com SI_IFRAC_DECAY em mom_cap_MONAN.F90.
+  ! SI_IFRAC_DECAY (coupler_constants): fator de decaimento de Si_ifrac por
+  !   passo de acoplamento (dt=3600 s, τ=86400 s): exp(-dt/τ) = exp(-1/24)
+  !   ≈ 0.9592. O cap do oceano (mom_si_ifrac.F90) usa a mesma constante.
 
 contains
 

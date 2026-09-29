@@ -15,9 +15,8 @@ module mpas_cap_methods_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
-  ! cfg_zorl_default usado como fallback NaN-guard em mpas_import
-  ! cfg_sst_default adicionado — usado como
-  ! fallback no guard de SST agora aplicado (ver abaixo).
+  ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
+  ! para rugosidade e SST invalidas (ver fill_invalid_sst).
   use coupler_config_mod, only : cfg_zorl_default,          &
                                    cfg_sst_default,           &
                                    cfg_write_import_diag,     &
@@ -94,19 +93,18 @@ contains
     ! ja tinham essa protecao (ver abaixo), mas Sx_tsfc/So_t nao, apesar de
     ! ser usado
     ! DIRETAMENTE em skintemp_field/sst_field logo antes de core_run
-    ! (mpas_atm_model.F90). Qualquer celula da malha Voronoi que caia perto de
+    ! (mpas_atm_model.F90::inject_ocean_cells). Qualquer celula da malha Voronoi que caia perto de
     ! uma regiao sem mapeamento valido no regrid grade-regular->Voronoi (ex.:
     ! extremos de latitude/polos) pode chegar aqui como NaN ou valor fisico
-    ! absurdo, alimentando core_run sem protecao — candidato direto para o
-    ! SIGSEGV recorrente em core_run observado nesta sessao. Clamp usa a mesma
-    ! faixa fisica ja adotada no mediador (MED_cap.F90: T_MIN=270, T_MAX=310).
-    ! fallback agora depende da latitude — usar
-    ! cfg_sst_default (~298K, valor tropical) para QUALQUER celula invalida,
-    ! inclusive polar, introduz um vies quente artificial de ~27K exatamente
-    ! nas altas latitudes (>60°), onde a agua do mar real fica perto do ponto
-    ! de congelamento (~271.35K = -1.8°C, T_FILL_POLAR abaixo — mesmo valor
-    ! ja usado como T_FILL no mediador, MED_cap.F90).
-    ! degrau abrupto em 60° trocado por
+    ! absurdo, alimentando core_run sem protecao (candidato a causa de um
+    ! SIGSEGV em core_run ja observado). O corte usa a mesma faixa fisica do
+    ! mediador (med_ocean.F90, SST_FILL: 270 K a 310 K).
+    ! O valor de reserva depende da latitude: usar cfg_sst_default (~298 K,
+    ! valor tropical) em QUALQUER celula invalida, inclusive polar, criaria
+    ! um vies quente artificial de ~27 K nas altas latitudes (>60°), onde a
+    ! agua do mar fica perto do ponto de congelamento (~271.35 K = -1.8 °C,
+    ! T_FILL_POLAR abaixo, o mesmo valor de preenchimento do mediador).
+    ! Em vez de um degrau em 60°, usa-se
     ! interpolacao LINEAR continua em |latitude| (graus), de T_FILL_TROPICAL
     ! no equador (0°) ate T_FILL_POLAR no polo (90°). Mais realista que um
     ! degrau (o perfil zonal real de SST decai suavemente, nao em bloco) e
@@ -117,8 +115,7 @@ contains
     end if
 
     ! -- Fracao de gelo marinho [0-1] -------------------------------------
-    ! agora importado do SIS2 via mediador (era cfg_ice_fraction_default
-    ! fixo). Clamp fisico [0,1] aplicado defensivamente -- regrid bilinear pode
+    ! importada do SIS2 via mediador. Clamp fisico [0,1] aplicado defensivamente -- regrid bilinear pode
     ! extrapolar levemente fora do intervalo (tipico +/- 0.02 em fronteiras
     ! gelo/agua).
     call state_get_field_1d(importState, 'Si_ifrac', nCells, &
@@ -208,9 +205,9 @@ contains
     ! agua aberta (Briegleb 1986, dependente do zenite solar) e albedo real
     ! do gelo (SIS2), ponderados por Si_ifrac. Substitui a climatologia
     ! mensal (albedo12m) do MONAN-A sobre agua/gelo — requer
-    ! config_sfc_albedo=.false. no namelist (ver mpas_atm_model.F90,
-    ! para confirmacao empirica de que o NOAH LSM
-    ! nao sobrescreve o valor apos core_run).
+    ! config_sfc_albedo=.false. no namelist (ver log_albedo_feedback em
+    ! mpas_atm_model.F90, que confere se o NOAH LSM sobrescreve o valor
+    ! depois de core_run).
     if (allocated(atm_bnd%alb)) then
       atm_bnd%alb = 0.08_MPAS_RKIND   ! default agua aberta, mesmo padrao de zorl acima
       call state_get_field_1d(importState, 'Sf_albedo', nCells, atm_bnd%alb, rc, &
@@ -273,13 +270,10 @@ contains
     real(MPAS_RKIND), allocatable :: lat_deg(:), frac(:), t_fallback(:)
     real(MPAS_RKIND) :: t_fill_tropical
     integer :: n
-    ! usar nCells (argumento explicito da
-    ! subrotina, mesma contagem ja usada para lonCell/latCell em todas as
-    ! chamadas de state_get_field_1d acima) em vez de size(atm_bnd%sst).
-    ! A versao anterior usava size(atm_bnd%sst) e causou 'Array bound
-    ! mismatch' em runtime — atm_bnd%sst aparentemente NAO tem sempre o
-    ! mesmo tamanho de latCell/lonCell (possivelmente por halo). Limitando
-    ! tudo a (1:nCells), consistente com o resto desta subrotina.
+    ! Usa nCells (a mesma contagem de lonCell/latCell nas chamadas de
+    ! state_get_field_1d de mpas_import), e nao size(atm_bnd%sst): atm_bnd%sst
+    ! pode ser maior que latCell/lonCell (celulas de halo), e usar o tamanho
+    ! dele causa 'Array bound mismatch'.
     n = nCells
     t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
     allocate(invalid_sst(n), t_fallback(n))
@@ -313,14 +307,14 @@ contains
   !!   fluxos JA calculados pelo esquema de camada limite do MONAN-A
   !!   (atm_public%shflx/lhflx vindos de 'hfx'/'lh' do pool
   !!   diag/diag_physics; taux_sfc/tauy_sfc derivados de 'ust' em
-  !!   mpas_atm_model.F90). Com eles, o MED_cap usa o fluxo consistente com o
+  !!   mpas_atm_fluxes.F90). Com eles, o mediador usa o fluxo consistente com o
   !!   balanco de energia do PBL do MONAN-A (apply_native_fluxes em
-  !!   MED_cap.F90), em vez de recalcular sensivel/latente/momento pelo bulk
+  !!   med_flux.F90), em vez de recalcular sensivel/latente/momento pelo bulk
   !!   NCAR a partir de T/q/vento de 10 m.
   !!
   !! CONFIRMADO: convencao de sinal de 'hfx'/'lh' verificada com a
   !!   equipe de fisica do MONAN-A — POSITIVO PARA CIMA (superficie ->
-  !!   atmosfera), convencao usual WRF/MPAS/GFS. O MED_cap.F90 ja inverte o
+  !!   atmosfera), convencao usual WRF/MPAS/GFS. O mediador (med_flux.F90) inverte o
   !!   sinal ao consumir estes campos (ver comentario la), consistente com
   !!   esta confirmacao.
   !!
@@ -602,7 +596,7 @@ contains
   !! Campo rank-1: copia posicional das primeiras celulas, sem alterar o
   !! resto de data(). Campo rank-2 (ESMF_Grid 360x180): o campo completo e'
   !! reunido no PET 0 (ESMF_FieldGather) e difundido a todos os PETs
-  !! (ESMF_VMBroadcast), porque a malha MPAS e a grade g_grid tem
+  !! (ESMF_VMBroadcast), porque a malha MPAS e a grade do cap tem
   !! decomposicoes independentes; com lon_rad/lat_rad presentes, cada celula
   !! MPAS recebe o ponto da grade que contem sua posicao geografica; sem as
   !! coordenadas, a copia segue a ordem global linear.
@@ -677,13 +671,13 @@ contains
       ! data(n_esmf+1:n) mantido inalterado — preserva valor inicial
       nullify(fptr1d)
     else
-      ! ── Campo rank-2: ESMF_Grid regular 360×180 (g_grid, INDEX_GLOBAL) ──
+      ! ── Campo rank-2: ESMF_Grid regular 360×180 (INDEX_GLOBAL) ──
       !
       ! Por que reunir o campo inteiro
       ! ------------------------------------------------------------------
       ! Ler fptr2d(ig,jg) só quando o ponto de grade global (ig,jg) pertence ao
       ! tile LOCAL deste PET não basta: a malha MPAS (que CONSOME o dado) e a
-      ! grade g_grid (que o PRODUZ) têm decomposições MPI INDEPENDENTES, e a
+      ! grade do cap (que o PRODUZ) têm decomposições MPI INDEPENDENTES, e a
       ! maioria das células MPAS precisa de um ponto de grade de OUTRO PET.
       ! Sem isso, essas células ficariam no valor padrão de data() (So_t ≈ 298 K
       ! e Sf_zorl ≈ 0,01 m em quase todo o globo).
@@ -729,7 +723,7 @@ contains
             lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
             ! Convenção de longitude da grade
             ! ------------------------------------------------------------
-            ! A g_grid é criada em mpas_create_grid com longitudes de CENTRO
+            ! A grade do cap é criada em mpas_create_grid com longitudes de CENTRO
             ! coordX(ig) = -180 + (ig - 0.5)*DLON, ou seja ig=1 ↔ -179,5° e
             ! ig=360 ↔ +179,5° — convenção [-180, +180).
             ! Normalizar lon_d para [0, 360) e fazer ig = int(lon_d/DLON)+1

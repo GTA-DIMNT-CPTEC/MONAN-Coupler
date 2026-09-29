@@ -5,8 +5,8 @@
 !! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
 !! cap exporta a forcante atmosferica do MONAN-A ao mediador e importa dele
 !! a superficie do oceano e do gelo (IMP_NAMES, abaixo). A troca com o
-!! MPAS-A fica em mpas_cap_methods.F90, e o diagnostico NetCDF em
-!! mpas_cap_netcdf.F90.
+!! MPAS-A fica em mpas_cap_methods.F90, e os diagnosticos NetCDF em
+!! mpas_cap_netcdf.F90 e mpas_import_diag.F90.
 !!
 !! As coordenadas para o NetCDF vem de lonCell(1:n_local), com
 !! n_local = min(localCells_ESMF, nCells_MPAS), e nao de ownedElemCoords,
@@ -95,7 +95,7 @@ module mpas_cap_MONAN_mod
   ! Sx_tsfc (e nao So_t) alimenta atm_bnd%sst: So_t e' a SST pura do MOM6,
   ! que o SIS2 tambem importa e precisa pura para o fluxo de calor basal do
   ! gelo (ICE_KMELT); Sx_tsfc e' o composto (1-Si_ifrac)*So_t +
-  ! Si_ifrac*Si_t_sis2, calculado no MED (MED_cap.F90) para a atmosfera, que
+  ! Si_ifrac*Si_t_sis2, calculado no MED (med_export.F90) para a atmosfera, que
   ! enxerga uma unica celula mista agua+gelo.
   !
   ! Sf_zorl e' a rugosidade calculada no MED por Charnock + Smith a partir de
@@ -433,7 +433,7 @@ contains
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    ! ESMF_GridDestroy removido: os campos do importState/exportState
+    ! Sem ESMF_GridDestroy: os campos do importState/exportState
     ! ainda referenciam st%grid quando ModelFinalize e chamado.
     ! Destruir o grid aqui causa SIGSEGV no cleanup posterior do framework.
     ! O ESMF finaliza o grid automaticamente em ESMF_Finalize.

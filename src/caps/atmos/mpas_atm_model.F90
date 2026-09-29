@@ -368,7 +368,7 @@ contains
     ! Pós-processamento dos campos acumulados e stress superficial.
     !
     ! Os arrays do pool (atm_state%pool_*) foram atualizados por core_run.
-    ! Agora computamos os valores instantâneos para o intervalo de
+    ! Aqui calculam-se os valores instantâneos para o intervalo de
     ! acoplamento e armazenamos nos buffers g_*_inst / atm_state%taux_buf / atm_state%tauy_buf
     ! que são apontados por atm_public%swdn_sfc, lwdn_sfc, prec_total,
     ! taux_sfc, tauy_sfc (configurado em mpas_atm_init).
@@ -517,8 +517,8 @@ contains
   !! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
   !! do mpas_cap_methods), em que a mesma celula fisica recebe
   !! contribuicao do regrid em mais de um PET. Se a divergencia
-  !! persistir depois desta correcao, esse e' o alvo seguinte, e o
-  !! conserto e' em mpas_cap_MONAN.F90/mpas_cap_methods.F90.
+  !! persistir, esse e' o alvo seguinte, e o conserto e' no cap
+  !! (mpas_cap_MONAN.F90 e mpas_cell_binning.F90).
   ! ============================================================================
   subroutine exchange_surface_halos(sfcInputPool, diag_physicsPool)
     type(mpas_pool_type), pointer :: sfcInputPool

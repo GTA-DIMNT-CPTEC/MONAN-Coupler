@@ -196,10 +196,9 @@ contains
   !============================================================================
   !> @brief Regrid ATM→OCN com fallback quando routehandle ainda não foi criado.
   !!
-  !! Correção 3: ramo else adicionado para rh_created = .false.
-  !! Sem o else, campos exportados ao OCN ficavam zerados silenciosamente
-  !! quando routehandles não estavam criados (1º passo ou erro na IDC).
-  !! Com o else, faz regrid on-the-fly via ESMF_FieldRegridStore temporário.
+  !! Quando as rotas ainda não foram criadas (1º passo ou erro na IDC), faz
+  !! o regrid com um ESMF_FieldRegridStore temporário, em vez de deixar
+  !! zerados os campos exportados ao OCN.
   !============================================================================
   subroutine RegridOrCopy(src_field, dst_state, dst_name, is, rc)
     type(ESMF_Field),        intent(inout) :: src_field

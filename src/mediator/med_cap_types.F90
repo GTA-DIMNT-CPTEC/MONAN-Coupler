@@ -133,7 +133,7 @@ module med_cap_types_mod
     type(ESMF_Field) :: zorl
     !> Cosseno do ângulo zenital solar, calculado no bulk NCAR a partir de
     !! lat/lon/clock; exportado como Faxa_coszen -> SIS2 (is%aib%coszen, ver
-    !! sis_cap_MONAN.F90::import_forcing).
+    !! sis_cap_fields.F90::import_forcing).
     type(ESMF_Field) :: coszen
     !> Albedo de banda larga efetivo (água aberta dinâmica + gelo real,
     !! ponderado por f_vis_dir/f_vis_dif/f_nir_dir/f_nir_dif), exportado como
@@ -141,7 +141,7 @@ module med_cap_types_mod
     type(ESMF_Field) :: albedo
     !> Temperatura de superfície COMPOSTA (Si_ifrac pondera SST e Si_t_sis2),
     !! útil só para a atmosfera (radiação e camada limite sobre a célula
-    !! mista), exportada como "Sx_tsfc" (ver MED_cap.F90 e mpas_cap_MONAN.F90).
+    !! mista), exportada como "Sx_tsfc" (ver med_export.F90 e mpas_cap_MONAN.F90).
     type(ESMF_Field) :: tsfc
   end type med_sfc_fields_t
 

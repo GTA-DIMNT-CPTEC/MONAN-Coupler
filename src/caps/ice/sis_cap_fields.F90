@@ -292,9 +292,9 @@ contains
 
   !! exporta o albedo real do gelo, por banda,
   !! calculado pela fisica do proprio SIS2 (esquema optico em
-  !! SIS_optics.F90/fast_radiation_diagnostics), agora acessivel porque
-  !! Ice%albedo_vis_dir/vis_dif/nir_dir/nir_dif (fachada publica) passaram
-  !! a ser preenchidos pelas correcoes /02 acima.
+  !! SIS_optics.F90/fast_radiation_diagnostics), acessivel porque
+  !! Ice%albedo_vis_dir/vis_dif/nir_dir/nir_dif (fachada publica) sao
+  !! preenchidos por set_ice_surface_state (ver sis_cap_MONAN.F90).
   !!
   !! Diferente de Si_ifrac_sis2 (que le sCS%IST%part_size com deslocamento
   !! i_off/j_off), aqui usamos Ice%part_size e Ice%albedo_* diretamente —
@@ -411,13 +411,11 @@ contains
   !! gelo, media ponderada por area de categoria (mesmo padrao de
   !! export_si_albedo). Usada pelo mediador para calcular um segundo
   !! conjunto de fluxos turbulentos (Fioi_*) especifico para a fracao de
-  !! gelo, em vez de reusar o Foxx_* calculado com SST — que e o que o
-  !! SIS2 recebia ate aqui (ver import_names_atm, historicamente
-  !! compartilhado com o MOM6).
+  !! gelo, em vez de reusar o Foxx_* calculado com SST (ver
+  !! import_names_atm em sis_cap_MONAN.F90).
   !!
   !! Ice%t_surf e' preenchido pela MESMA rotina (set_ice_surface_state) que
-  !! Ice%part_size/Ice%albedo_* — ja' confirmada funcionando pelas
-  !! correcoes /02.
+  !! Ice%part_size/Ice%albedo_*.
   subroutine export_si_tskin(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp

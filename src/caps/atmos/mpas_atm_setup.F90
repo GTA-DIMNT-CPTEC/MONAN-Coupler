@@ -135,10 +135,9 @@ contains
     !    Qualquer mpas_log_write ANTES deste ponto → atm_state%domain%logInfo
     !    não inicializado → SIGSEGV.
     !
-    ! removida chamada prematura a mpas_log_write que existia
-    !    logo após atm_setup_domain — era a causa raiz do SIGSEGV observado
-    !    em todos os 128 ranks (backtrace: mpas_atm_model.F90:251).
-    !    Mensagens de progresso anteriores a este ponto devem usar write(*,…).
+    !    Por isso nao ha mpas_log_write logo apos atm_setup_domain (uma
+    !    chamada ali causou SIGSEGV em todos os 128 ranks). Mensagens de
+    !    progresso anteriores a este ponto devem usar write(*,…).
     !
     !    Sequência de mpas_subdriver.F:
     !      ierr = domain_ptr%core%setup_log(domain_ptr%logInfo, domain_ptr)
@@ -662,8 +661,7 @@ contains
     atm_bnd%vocn         = 0.0_MPAS_RKIND  ! corrente meridional
     atm_bnd%zorl         = real(cfg_zorl_default,         MPAS_RKIND)
     ! default fisico de agua aberta (~0,08) ate a 1a troca real
-    ! do mediador. Sem config dedicado (cfg_alb_default) para nao adicionar
-    ! mais uma dependencia de namelist so' para um valor de bootstrap.
+    ! do mediador; sem chave de namelist, por ser so' um valor de partida.
     atm_bnd%alb          = 0.08_MPAS_RKIND
     ! default 1,0 (tudo oceano) ate a 1a troca real com o
     ! mediador. Mesmo criterio do fallback de is%ocn%omask no MED: se a

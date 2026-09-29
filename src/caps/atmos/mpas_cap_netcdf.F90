@@ -198,7 +198,7 @@ contains
       write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lat_local falhou'
 
     ! Salvar a decomposicao MPI para reuso em export_write_netcdf.
-    ! Garante que recvBuf(i) corresponde a g_lon/lat_global(i) — sem desfase.
+    ! Garante que recvBuf(i) corresponde a lon_global/lat_global(i).
     diag%nlocal  = nLocal
     diag%nglobal = nGlobal
     allocate(diag%all_counts(petCount))
@@ -212,8 +212,8 @@ contains
     diag%lon_local = lon_local(1:nLocal)
     diag%lat_local = lat_local(1:nLocal)
 
-    ! CORREÇÃO 1: alocar diag%raw_local AQUI onde diag%nlocal > 0 é garantido.
-    ! Se alocado em push_raw_field, diag%nlocal pode ser 0 → size=1 → OOB/skip.
+    ! diag%raw_local e' alocado aqui, onde diag%nlocal ja' e' conhecido; em
+    ! netcdf_push_raw_field, diag%nlocal ainda poderia ser 0.
     if (allocated(diag%raw_local)) deallocate(diag%raw_local)
     allocate(diag%raw_local(nLocal, MAX_RAW))
     diag%raw_local = 0.0_ESMF_KIND_R8

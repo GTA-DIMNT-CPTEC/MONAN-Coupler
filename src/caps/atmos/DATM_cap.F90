@@ -1,9 +1,9 @@
 !==============================================================================!
-! Datm_cap.F90 - Data Atmosphere NUOPC Component (JRA55 fallback para MED)    !
+! DATM_cap.F90 - Data Atmosphere NUOPC Component (JRA55 fallback para MED)    !
 !                                                                              !
-! ADAPTACAO AtmOcnMedPetListProto:                                             !
-! O DATM exporta os campos BRUTOS do JRA55 para o MEDIADOR.                   !
-! O calculo de fluxos bulk NCAR foi movido para MED_cap.F90.                  !
+! Baseado no exemplo AtmOcnMedPetListProto do ESMF.                          !
+! O DATM exporta os campos BRUTOS do JRA55 para o MEDIADOR; o calculo dos     !
+! fluxos bulk NCAR fica no mediador (med_bulk_ncar.F90).                      !
 !                                                                              !
 ! Campos exportados para o MED (importState do mediador):                      !
 !   Sa_u10m     - vento zonal 10m       [m s-1]                               !
@@ -16,11 +16,8 @@
 !   Faxa_rain   - precipitacao liquida  [kg m-2 s-1]                          !
 !   Faxa_snow   - precipitacao solida   [kg m-2 s-1]                          !
 !                                                                              !
-! CORRECOES APLICADAS:                                                         !
-!   1. epochTime corrigido para 2016-01-01 00:00:00 (era 01:30:00 - causava   !
-!      tidx0 negativo ou errado para runs iniciando em t=0).                   !
-!   2. Removida dependencia desnecessaria de MOM_io (stdout, io_infra_end).    !
-!   3. ReadJRAFieldByIndex removida (era codigo morto comentado com !PK).      !
+! Epoca dos arquivos JRA55: 2016-01-01 01:30:00 (ver a nota antes de           !
+! ReadJRAFieldInterp). O DATM nao depende de MOM_io.                          !
 !==============================================================================!
 module DATM_cap_mod
   use ESMF
@@ -126,8 +123,8 @@ contains
   !============================================================================
   ! InitializeAdvertise - anuncia apenas campos BRUTOS para o MED
   !
-  ! MUDANCA: O DATM nao mais anuncia Foxx_* (fluxos calculados).
-  !          Exporta somente o que vem diretamente do JRA55.
+  ! O DATM nao anuncia fluxos (Foxx_*): exporta somente o que vem
+  ! diretamente do JRA55.
   !============================================================================
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -303,7 +300,7 @@ contains
   !============================================================================
   ! ModelAdvance - le JRA55 e popula exportState com campos BRUTOS
   !
-  ! MUDANCA: nao calcula mais bulk. Apenas le NetCDF e escreve:
+  ! Nao calcula fluxos: apenas le o NetCDF e escreve:
   !   Sa_u10m = uas, Sa_v10m = vas, Sa_tbot = tas, Sa_shum = huss,
   !   Sa_pslv = psl, Faxa_swdn = rsds, Faxa_lwdn = rlds,
   !   Faxa_rain = prra, Faxa_snow = prsn
@@ -452,8 +449,7 @@ contains
     integer                 :: tidx0, tidx1
     real(ESMF_KIND_R8)      :: alpha
 
-    ! Arrays globais (usados apenas em PET0 para leitura, depois broadcast)
-    ! f0/f1 removidos: eram dead code (nunca preenchidos apos refatoracao)
+    ! Arrays globais (usados apenas em PET0 para leitura, depois broadcast).
     ! A interpolacao temporal e feita em f0_global antes do broadcast.
     integer, parameter :: NX = 640, NY = 320
     real(ESMF_KIND_R8), target    :: f0_global(NX,NY), f1_global(NX,NY)
@@ -468,7 +464,6 @@ contains
     ni = size(array, 1)
     nj = size(array, 2)
     allocate(buf_global(NX*NY))
-    ! (f0/f1 removidos - veja declaracoes)
     ! VM do componente, não a global (ver docn_cap_netcdf.F90): evita
     ! broadcast coletivo sobre todos os PETs quando o DATM roda só no
     ! subconjunto da atmosfera (teste DATM concorrente).
@@ -549,7 +544,6 @@ contains
       'DATM: interp ', trim(varname), &
       ' tidx0=', tidx0, ' tidx1=', tidx1, ' alpha=', alpha
     call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-    ! (deallocate f0/f1 removido)
   end subroutine ReadJRAFieldInterp
 
   !============================================================================

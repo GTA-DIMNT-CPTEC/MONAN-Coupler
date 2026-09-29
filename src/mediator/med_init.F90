@@ -573,8 +573,8 @@ contains
     call ZeroInternalField(is%ocn_flx%pslv,   rc)
     call ZeroInternalField(is%ice%ifrac,  rc)
     call ZeroInternalField(is%ocn_flx%duu10n, rc)
-    ! fallback nao-zero (mesmo valor de ALBEDO_ICE_FALLBACK em
-    ! sis_cap_MONAN.F90) ate o primeiro regrid real do gelo — evita
+    ! fallback nao-zero (ALB_ICE_DEFAULT, o mesmo valor que o cap do gelo usa
+    ! como ALBEDO_ICE_FALLBACK) ate o primeiro regrid real do gelo — evita
     ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
     ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
     call FillInternalField(is%ice%alb_vdr, ALB_ICE_DEFAULT, rc)

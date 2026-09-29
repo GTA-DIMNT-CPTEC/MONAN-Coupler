@@ -9,6 +9,13 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Revisão final dos comentários (R-FASE9-03).** Terceira etapa da fase 9. Só comentários mudam: a conferência das instruções dá zero diferenças nos 16 arquivos alterados, e as constantes de texto são as mesmas.
+  - Comentários que apontavam para o arquivo errado depois das divisões da fase 8 passam a citar o lugar atual: `MED_cap.F90` vira `med_ice.F90`, `med_init.F90::create_atm_grid`, `med_export.F90`, `med_flux.F90` ou `med_ocean.F90` (faixa de preenchimento da SST); `sis_cap_MONAN.F90` vira `sis_cap_fields.F90` onde o assunto é `import_forcing` ou `export_si_*`; `mpas_atm_model.F90` vira `mpas_atm_fluxes.F90` onde o assunto são os fluxos instantâneos.
+  - Comentários que descreviam mudanças em vez do comportamento atual foram reescritos: "Correção 3", "CORREÇÃO 1", "MUDANCA", "removido", "adicionado", "agora", "a versão anterior", "Versão 6.0/7.0" (em `DATM_cap`, `med_cap_methods`, `mpas_cap_netcdf`, `mpas_cap_methods`, `mpas_atm_setup`, `mpas_atm_types`, `mpas_cap_MONAN`, `sis_cap_fields`).
+  - Comentários errados corrigidos: o cabeçalho do `DATM_cap` dizia que a época do JRA55 fora corrigida para 00:00, mas o código usa 01:30 (a escolha continua na trilha de decisões da fase 10); o nome do arquivo estava grafado `Datm_cap.F90`; `mpas_atm_types` listava `mpas_cap_mod` entre os usuários; `med_ocean` citava `SI_IFRAC_DECAY_MED` e `MED_cap` falava de uma declaração que não existe mais; `mpas_cell_binning` e `mpas_cap_netcdf` citavam variáveis com nomes antigos (`buf_sum`, `buf_count`, `g_lon`), e `mpas_cap_methods` uma grade `g_grid`; o comentário de `med_flux` sobre o sinal de `hfx`/`lh` repetia o mesmo item duas vezes.
+  - Ficam como estão, por decisão desta etapa: as mensagens de log (prefixos como `MED:`, `OCN(MOM6):`, `ICE(SIS2):` e os marcadores `FIX-DIAG-*`, que `tools/coupler/mede-taxa-repro.sh` procura nos logs), porque mudar o texto delas muda as constantes de texto e o que os scripts e a equipe procuram; e os nomes de variáveis, porque renomear muda as instruções. Os seis comentários que o indicador de marcas de histórico ainda conta são citações legítimas (`OISST v2.1`, nome de um conjunto de dados, e o marcador `BUG-SPARSE-02 v7.6` impresso no log).
+  - Conferências locais: `confere-tudo.bash -i HEAD` sem nenhuma falha, inclusive a de instruções.
+
 - **Números fixos levados para `coupler_constants` (R-FASE9-02).** Segunda etapa da fase 9. Só entram as trocas em que o valor e o `kind` são idênticos; nenhum cálculo muda.
   - Constantes novas em `coupler_constants.F90`: `PI` (π completo), `T_ICE_MIN` e `T_ICE_MAX` (180 K e 273,16 K, faixa de temperatura válida do gelo), `ALB_OCEAN_DEFAULT` (0,08) e `ALB_ICE_DEFAULT` (0,65).
   - Trocas feitas, todas em `real(ESMF_KIND_R8)`:
@@ -28,6 +35,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - Comentários corrigidos no caminho: em `sis_cap_fields`, o teto da temperatura do gelo é 0 °C, e não o congelamento da água do mar; em `mpas_cap_MONAN`, o albedo de água aberta do MPAS fica em `mpas_atm_setup.F90`.
   - Compilação: `med_init`, `med_export`, `sis_cap_MONAN`, `docn_cap_netcdf` e `regrid_mpassit` passam a depender de `coupler_constants` no `Makefile`; o teste de interpolação (`tests/regrid/Makefile`) passa a compilar `coupler_constants`.
   - Conferências locais: `confere-tudo.bash -i HEAD` sem falhas, fora as instruções, cujas 73 diferenças são as linhas de `use`, as declarações removidas e as linhas em que o número virou nome. Constantes de texto iguais. Conferência extra: o código de máquina dos 13 arquivos alterados, compilados aqui antes e depois, é o mesmo; as únicas diferenças são números de linha e o comprimento do nome do arquivo que as mensagens de erro carregam, e as constantes em ponto flutuante das seções de dados são idênticas.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02 (tag `fase9-02-validada`).
 
 - **Procedimentos comuns aos caps em módulo compartilhado (R-FASE9-01).** Primeira etapa da fase 9 (duplicação e consistência). Nenhum cálculo muda.
   - Novo `src/shared/cap_common.F90` (módulo `cap_common_mod`) com três procedimentos que os caps repetiam:

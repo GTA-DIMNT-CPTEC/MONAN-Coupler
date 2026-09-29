@@ -94,8 +94,8 @@ contains
       ! celulas Voronoi, de PETs diferentes, podem cair no mesmo ponto (ig,jg)
       ! da grade 1°x1°, sobretudo perto dos polos. Uma soma simples dobraria o
       ! valor (Sa_pslv chegou a 2017 hPa). Por isso somam-se valores e contagens
-      ! de todos os PETs, e o ponto recebe a media:
-      !   buf_global(ig,jg) = buf_sum(ig,jg) / max(buf_count(ig,jg), 1)
+      ! de todos os PETs, e o ponto recebe a media (zero onde nao ha celula):
+      !   buf_global(ig,jg) = sum_global(ig,jg) / count_global(ig,jg)
       if (present(lon_rad) .and. present(lat_rad) .and. &
           size(lon_rad) >= n .and. size(lat_rad) >= n) then
 

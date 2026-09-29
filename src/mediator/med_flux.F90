@@ -377,7 +377,7 @@ contains
   !!     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
   !!
   !! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
-  !! hfx/lh/ust internos (ver mpas_atm_model.F90/mpas_cap_methods.F90).
+  !! hfx/lh/ust internos (ver mpas_atm_fluxes.F90/mpas_cap_methods.F90).
   !! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
   !! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
   !! inconsistencia entre o balanco de energia do MONAN-A e o forcante
@@ -389,12 +389,9 @@ contains
   !!  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
   !!  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
   !!  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
-  !!  sis_cap_MONAN.F90 para o sinal desses.
-  !!  1) Sinal de hfx/lh: POSITIVO PARA CIMA (convencao
-  !!     usual WRF/MPAS/GFS), por isso invertido (-sen_g2, -lat_g2) para
-  !!     bater com a convencao Foxx_sen/Foxx_evap (positivo = aquece o
-  !!     oceano).
-  !!  2) taux_sfc/tauy_sfc (de mpas_atm_model.F90) usam a mesma forma
+  !!  sis_cap_fields.F90 para o sinal desses.
+  !!
+  !!  taux_sfc/tauy_sfc (de mpas_atm_fluxes.F90) usam a mesma forma
   !!     rho*Cd*|V|*V do bulk NCAR — nao invertidos aqui, mas confirme
   !!     que a rotacao de referencial (Terra vs. grade) ja e tratada
   !!     antes de exportar (deve ser, pois MPAS ja roda em lat/lon).

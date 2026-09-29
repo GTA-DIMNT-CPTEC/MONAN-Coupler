@@ -835,11 +835,10 @@ contains
     !     (campo congelado em OISST).
     !   use_docn_ice=T  init_only=T  → fill_ifrac_from_oisst apenas na 1ª
     !     MediatorAdvance (flag is%run%ifrac_init_done); nas demais, o campo
-    !     decai exponencialmente (SI_IFRAC_DECAY_MED).
+    !     decai exponencialmente (SI_IFRAC_DECAY, de coupler_constants).
     !   use_docn_ice=F               → nada a fazer aqui; com SIS2 dinamico,
     !     Si_ifrac ja' veio do gelo na secao 3.
     !==========================================================================
-    ! SI_IFRAC_DECAY_MED declarado no escopo do módulo (acessível aqui via host association)
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
     ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
     ! use_docn_ice=F: is%ice%ifrac fica como saiu da secao 3
