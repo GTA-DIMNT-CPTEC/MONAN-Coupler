@@ -37,12 +37,14 @@ Como se mede:
                      v2.5 ou datas.
 
 Indicadores da fase 11 (contados nas instruções, sem comentários):
-  lista de campos    arquivo com nomes de campos do acoplamento (Sa_, So_,
-                     Si_, Sf_, Sx_, Faxa_, Foxx_...) escritos à mão para
-                     anúncio ou realização: instrução com 3 ou mais nomes
-                     (lista), NUOPC_Advertise ou NUOPC_Realize com um nome,
-                     ou ESMF_FieldCreate com name= um nome num arquivo que
-                     chama NUOPC_Realize;
+  lista de campos    arquivo fora de src/coupling/ com nomes de campos do
+                     acoplamento (Sa_, So_, Si_, Sf_, Sx_, Faxa_, Foxx_...)
+                     escritos à mão para anúncio ou realização: instrução
+                     com 3 ou mais nomes (lista), NUOPC_Advertise ou
+                     NUOPC_Realize com um nome, ou ESMF_FieldCreate com
+                     name= um nome num arquivo que chama NUOPC_Realize (o
+                     mapa de acoplamento, em src/coupling/, é onde os nomes
+                     devem ficar);
   malha ESMF         chamada a ESMF_GridCreate* fora de src/coupling/;
   criação de rota    chamada a regrid%add fora de med_exchange.F90;
   rota na física     chamada a regrid%apply em med_bulk_ncar.F90;
@@ -162,7 +164,8 @@ def acoplamento(caminho, instr, res):
         if re.match(r'\s*use\b', cod, re.I):
             continue
         nomes = RE_NOME_CAMPO.findall(s)
-        if (len(nomes) >= 3
+        if '/coupling/' not in caminho and (
+                len(nomes) >= 3
                 or nomes and re.search(r'\bNUOPC_(Advertise|Realize)\s*\(', cod, re.I)
                 or realiza and re.search(r'\bESMF_FieldCreate\s*\(', cod, re.I)
                 and re.search(r"""\bname\s*=\s*["'](?:S[aoixf]|F[a-z]{3})_""", s, re.I)):

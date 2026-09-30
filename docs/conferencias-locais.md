@@ -29,6 +29,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
 | `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
+| `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
 
 ### 2.0 Todas as conferências de uma vez
 
@@ -37,7 +38,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6, 2.9 e 2.10 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.11 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -49,6 +50,7 @@ Resumo (referência: HEAD)
   bulk         OK                              82 s
   grade        OK                              83 s
   unitarios    OK                              31 s
+  mapa         OK                               0 s
   supergrid    OK                               4 s
   docn         OK                             178 s
 ```
@@ -63,7 +65,8 @@ O que cada linha confere:
 | `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
-| `unitarios` | algum teste com valor esperado (seção 2.8) falha |
+| `unitarios` | algum teste com valor esperado ou o teste de consistência do mapa de acoplamento (seção 2.8) falha |
+| `mapa` | `docs/acoplamento.md` não é o que `tools/dev/mapa-acoplamento.py` gera do mapa (seção 2.11) |
 | `supergrid`, `docn` | os testes de regressão das seções 2.9 e 2.10 acusam diferença |
 
 A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de nove minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
@@ -145,7 +148,7 @@ Uma segunda tabela traz os indicadores da fase 11 (arquitetura de acoplamento, [
 
 | Indicador | O que conta |
 | --- | --- |
-| arquivos com nomes de campos anunciados ou realizados à mão | arquivos com uma instrução de 3 ou mais nomes de campos (`Sa_`, `So_`, `Si_`, `Faxa_`, `Foxx_` e semelhantes), com `NUOPC_Advertise` ou `NUOPC_Realize` de um nome escrito no código, ou com `ESMF_FieldCreate(name=...)` de um nome num arquivo que chama `NUOPC_Realize` |
+| arquivos com nomes de campos anunciados ou realizados à mão | arquivos fora de `src/coupling/` (onde fica o mapa de acoplamento) com uma instrução de 3 ou mais nomes de campos (`Sa_`, `So_`, `Si_`, `Faxa_`, `Foxx_` e semelhantes), com `NUOPC_Advertise` ou `NUOPC_Realize` de um nome escrito no código, ou com `ESMF_FieldCreate(name=...)` de um nome num arquivo que chama `NUOPC_Realize` |
 | chamadas e arquivos com `ESMF_GridCreate*` fora de `src/coupling` | construções de malha fora do catálogo de malhas |
 | rotas criadas (`regrid%add`) fora de `med_exchange` | pontos de criação de rota espalhados pelo mediador |
 | chamadas de rota em módulos de física | `regrid%apply` em `med_bulk_ncar.F90` |
@@ -181,6 +184,18 @@ O teste foi conferido ao contrário, com cinco alterações de propósito no có
 Os valores esperados do preenchimento foram calculados em aritmética exata (frações do Python) para o campo f(i, j) = i + 1000 j. Na borda norte, a linha 181 vira a própria linha 180, e dois vizinhos contam duas vezes; o teste registra esse comportamento atual, que só pode mudar numa etapa própria, com nova linha de base.
 
 Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a volta da longitude para [0°, 360°), arredondar a latitude em vez de truncar, mudar a marca 0,5 das caixas preenchidas e ignorar o `n` fizeram o teste falhar (o último, pela verificação de limites de array, que aborta o programa).
+
+`test_cpl_map.F90` não calcula nada: confere a consistência do mapa de acoplamento (`src/coupling/cpl_fields.F90` e `cpl_map.F90`) nas cinco configurações de `&nuopc_mode` que ele declara (produção; MOM6 sem SIS2; MONAN-A com DOCN; DATM com MOM6; DATM com DOCN):
+
+| Grupo | O que confere |
+| --- | --- |
+| estrutura | nomes únicos; todo campo de `TROCAS` está em `CAMPOS` e todo campo de `CAMPOS` é usado; pontos `COMPONENTE@malha` com malha conhecida; condições válidas; conector entre dois componentes, `cap` dentro de um, rota dentro do mediador e entre as malhas da rota; rotas com reserva anterior, máscara, `sem_valor` e `criar` válidos; toda rota usada |
+| origem | em cada configuração, cada campo importado por um componente tem uma única origem |
+| cadeia | em cada configuração, todo campo que parte da grade do cap atmosférico ou da grade do oceano no mediador chegou antes a ela; as exceções têm de ser exatamente as lacunas conhecidas, registradas no teste (com o DOCN, `So_omask` não chega ao mediador; com o DOCN e o MONAN-A, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A) |
+| contagens | campos de cada conector na produção iguais aos do Apêndice A do documento de arquitetura |
+| mediador | campos que chegam ao mediador iguais, nome a nome e na mesma ordem, a `import_mpas_names` e `import_datm_names`; campos que voltam da malha de fluxo para a do oceano iguais a `export_names` (`med_cap_types`) |
+
+Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
 
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
 
@@ -219,6 +234,15 @@ A rodada da linha de base não usa o DOCN. Este teste o executa num driver NUOPC
 São quatro casos, com e sem arquivo de correntes, e em cada um só a inicialização (argumento `inicio`) ou a rodada completa, sempre com 4 processos MPI. Cada processo grava os campos exportados pelo DOCN, com os limites e o carimbo de tempo; o DOCN grava os diagnósticos de importação. Têm de ser idênticos, bit a bit, esses arquivos e as mensagens do DOCN no log do ESMF, sem data e hora.
 
 O script compila as duas versões inteiras (`compila-local.bash`) e leva cerca de três minutos. Conferido ao contrário: dividir a fração de gelo por 100,0000001 em vez de 100 faz os campos exportados diferirem. O teste é a conferência das etapas que mexem no DOCN (fase 11, blocos B e F).
+
+### 2.11 Mapa de acoplamento em Markdown
+
+```bash
+tools/dev/mapa-acoplamento.py        # gera docs/acoplamento.md
+tools/dev/mapa-acoplamento.py -c     # só confere se ele está em dia
+```
+
+O mapa de acoplamento é escrito em Fortran (`src/coupling/cpl_fields.F90` e `cpl_map.F90`), para que os componentes possam usá-lo nas etapas seguintes da fase 11. O script lê as tabelas desses dois fontes e gera `docs/acoplamento.md`, com o resumo dos conectores por configuração, as trocas de cada conector, as trocas dentro dos componentes, as rotas do mediador, as malhas e o dicionário de campos. Toda mudança no mapa é seguida da geração do Markdown; a conferência `mapa` acusa quando ele ficou para trás. O script também acusa um texto mais longo que o campo que o recebe, que o compilador só cortaria com aviso. Escrito para o Python 3.6 da Jaci.
 
 ## 3. Interfaces mínimas
 

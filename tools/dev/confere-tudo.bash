@@ -15,7 +15,10 @@
 #   gravadores  tests/writers/compara-gravadores.bash REV
 #   bulk        tests/bulk/compara-bulk.bash REV
 #   grade       tests/atmgrid/compara-grade-atm.bash REV
-#   unitarios   testes com valor esperado (tests/unit/roda-unitarios.bash)
+#   unitarios   testes com valor esperado (tests/unit/roda-unitarios.bash),
+#               entre eles o da consistência do mapa de acoplamento
+#   mapa        docs/acoplamento.md em dia com o mapa de acoplamento
+#               (tools/dev/mapa-acoplamento.py -c)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
 #   docn        tests/docn/compara-docn.bash REV (o mais demorado: compila
 #               as duas versões e roda o DOCN num driver NUOPC)
@@ -39,12 +42,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios supergrid docn"
+TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios mapa supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,38p' "$0"; exit 2; }
+uso() { sed -n '2,41p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -179,6 +182,7 @@ quer gravadores && executa gravadores tests/writers/compara-gravadores.bash "${R
 quer bulk       && executa bulk tests/bulk/compara-bulk.bash "${REV}" "${SAIDA}/bulk"
 quer grade      && executa grade tests/atmgrid/compara-grade-atm.bash "${REV}" "${SAIDA}/atmgrid"
 quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
+quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"
 

@@ -60,6 +60,7 @@ done
 falhas=0
 for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergrid nc_writer cap_common \
          regrid_base regrid_esmf regrid_weights regrid_mpassit regrid_registry regrid_manager \
+         cpl_fields cpl_map \
          mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
          mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_cap_methods mpas_cap_MONAN DATM_cap \
          docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \

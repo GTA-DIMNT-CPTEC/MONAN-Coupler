@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE11-01 (30/09/2026), início da fase 11. Para retomar, comece pela seção 10.
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE11-02 (30/09/2026), segunda etapa da fase 11. Para retomar, comece pela seção 10.
 
 ## 1. O que é o projeto
 
@@ -56,6 +56,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
 | R-FASE11-01 | início da fase 11: `docs/arquitetura-acoplamento.md` (arquitetura e plano), indicadores da fase em `indicadores.py`, testes do supergrid do MOM6 e do DOCN no repositório e em `confere-tudo.bash`, seção de retomada deste documento; só documentação e ferramentas |
+| R-FASE11-02 | mapa de acoplamento em `src/coupling/` (`cpl_fields.F90` com `CAMPOS`; `cpl_map.F90` com `MALHAS`, `TROCAS` e `ROTAS`), compilado e ligado, sem uso; teste `tests/unit/test_cpl_map.F90`; `tools/dev/mapa-acoplamento.py` e `docs/acoplamento.md` |
 | R-FASE9-07 | encerramento da fase 9: indicadores finais, RPQ na sexta versão e procedimento de integração ao `develop`; só documentação |
 | R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 |
 | R-FASE9-05 | leitura do supergrid do MOM6 (`mom6_supergrid_tcoords` e `mom6_supergrid_corners`) numa rotina privada; trechos repetidos de 67 para 54; conferida com teste avulso |
@@ -149,6 +150,8 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | `tests/atmgrid/compara-grade-atm.bash` | compara bit a bit a passagem das células MPAS para a grade 360 x 180 do cap atmosférico (`mpas_export`) em duas versões |
 | `tests/supergrid/compara-supergrid.bash` | compara bit a bit a leitura do supergrid do MOM6 (`mom6_supergrid_mod`) em duas versões, com supergrids sintéticos e casos de erro |
 | `tests/docn/compara-docn.bash` | roda o DOCN num driver NUOPC mínimo, com dados sintéticos, e compara bit a bit os campos exportados, os diagnósticos e as mensagens de duas versões |
+| `tests/unit/test_cpl_map.F90` | consistência do mapa de acoplamento nas cinco combinações de `&nuopc_mode` e contra as listas de campos do mediador (roda com `roda-unitarios.bash`) |
+| `tools/dev/mapa-acoplamento.py` | gera `docs/acoplamento.md` a partir do mapa de acoplamento; com `-c`, confere se ele está em dia (conferência `mapa`) |
 
 O uso das ferramentas de conferência local, antes de levar uma mudança à Jaci, está em `docs/conferencias-locais.md`.
 
@@ -215,7 +218,7 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 concluída (PASS, 73 iguais, tag `fase8-10-validada`); R-FASE8-11 concluída (PASS, 73 iguais, tag `fase8-11-validada`), com ela terminam as revisões de rotinas longas; R-FASE8-12 concluída (PASS, 73 iguais, tag `fase8-12-validada`), primeira das quatro divisões de arquivo; R-FASE8-13 concluída (PASS, 73 iguais, tag `fase8-13-validada`); R-FASE8-14 concluída (PASS, 73 iguais, tag `fase8-14-validada`); R-FASE8-15 concluída (PASS, 73 iguais, tag `fase8-15-validada`), última das quatro divisões de arquivo; fase concluída |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-07 | R-FASE9-01 concluída (PASS, 73 iguais, tag `fase9-01-validada`); R-FASE9-02 concluída (PASS, 73 iguais, tag `fase9-02-validada`); R-FASE9-03 concluída (PASS, 73 iguais, tag `fase9-03-validada`); R-FASE9-04 concluída (PASS, 73 iguais, tag `fase9-04-validada`), pedida em 29/09/2026 para reduzir os trechos repetidos; R-FASE9-05 concluída (PASS, 73 iguais, tag `fase9-05-validada`); R-FASE9-06 concluída (PASS, 73 iguais, tag `fase9-06-validada`); R-FASE9-07 encerra a fase (só documentação); fase concluída, RPQ na sexta versão, integração ao `develop` pelo procedimento abaixo |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
-| 11 | arquitetura de acoplamento: malhas, campos e trocas descritos em `src/coupling/`, trocas do mediador em `med_exchange.F90`, sem mudar resultados | R-FASE11-01 a R-FASE11-25 (plano em `docs/arquitetura-acoplamento.md`, seção 4) | R-FASE11-01 entregue (só documentação e ferramentas); próxima: R-FASE11-02 |
+| 11 | arquitetura de acoplamento: malhas, campos e trocas descritos em `src/coupling/`, trocas do mediador em `med_exchange.F90`, sem mudar resultados | R-FASE11-01 a R-FASE11-25 (plano em `docs/arquitetura-acoplamento.md`, seção 4) | R-FASE11-01 concluída (só documentação e ferramentas, tag `fase11-01-validada`); R-FASE11-02 entregue (mapa de acoplamento, sem uso pelos componentes), aguardando a validação; próxima: R-FASE11-03 |
 
 ### Fase 11: arquitetura de acoplamento
 
@@ -225,6 +228,12 @@ Decisões de 30/09/2026:
 - a integração ao `develop` fica para mais adiante, por decisão do Daniel; o procedimento abaixo continua válido e deve ser refeito com o nome da última etapa validada no passo 1 e na mensagem do passo 6;
 - as regras são as das fases 1 a 9, e cada tipo de mudança tem a sua conferência local (`docs/arquitetura-acoplamento.md`, seção 4.2);
 - os testes do supergrid do MOM6 (usado na R-FASE9-05) e do DOCN (usado na R-FASE8-11), antes avulsos, passam a fazer parte do repositório e de `confere-tudo.bash`, porque as etapas dos blocos B, C e F dependem deles.
+
+Achados ao escrever o mapa (R-FASE11-02), nenhum corrigido, porque a fase 11 não muda resultados:
+
+- Sem o SIS2, `legacy_ice_fraction` (`med_bulk_ncar`) procura `Si_ifrac` no importState do mediador para interpolá-lo pela rota `ocn2atm`, mas o mediador não anuncia esse campo: a busca sempre falha e a fração de gelo sai do OISST ou da SST. A única chamada de rota na física (indicador da fase) nunca interpola. A R-FASE11-18, que tira essa interpolação de `calc_bulk_ncar`, tem de preservar esse comportamento; retirar o trecho é decisão da fase 10.
+- Os arquivos `mom6_import_*.nc` gravam `Foxx_sen` e `Fioi_sen` com `standard_name = surface_upward_sensible_heat_flux`, mas `med_bulk_ncar` os calcula positivos para a superfície (ρ cp Ch |V| (Tar - Tsup)), como diz o comentário do cap do SIS2. O dicionário de campos registra a convenção do cálculo. Corrigir o atributo muda só metadados desses arquivos ("difere só nos METADADOS" na comparação); fica para uma etapa própria, se decidido.
+- O DOCN não exporta `So_omask`: com ele, o campo do mediador fica sem origem. Com o DOCN e `use_med_to_mpas=.false.`, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A, e o cap atmosférico interrompe a rodada (comportamento já conhecido, agora registrado no teste do mapa).
 
 Indicadores da fase na partida (`fase9-07-validada`): 8 arquivos com nomes de campos anunciados ou realizados à mão; 7 chamadas `ESMF_GridCreate*` em 6 arquivos; 7 pontos de criação de rota em 5 arquivos; 1 chamada de rota na física; 5 arquivos que carimbam o tempo. As metas estão no documento de arquitetura, seção 4.4.
 

@@ -29,10 +29,12 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-# Objetos de que os testes dependem: med_bulk_ncar e mpas_cell_binning, com o
-# que eles usam (mpas_stubs.o são as interfaces mínimas do MPAS).
+# Objetos de que os testes dependem: med_bulk_ncar, mpas_cell_binning e o mapa
+# de acoplamento (cpl_fields, cpl_map), com o que eles usam (mpas_stubs.o são
+# as interfaces mínimas do MPAS).
 OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writer.o
       regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
+      cpl_fields.o cpl_map.o
       med_cap_types.o med_bulk_ncar.o
       mpas_stubs.o mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
       mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o"

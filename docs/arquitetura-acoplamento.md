@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01. Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -175,19 +175,35 @@ type(cpl_campo_t), parameter :: CAMPOS(*) = [                                   
 
 ### 3.5 Mapa de acoplamento
 
-`TROCAS` tem uma linha por passagem de um campo de uma malha a outra. As colunas são: campo, `componente@malha` de origem, `componente@malha` de destino, meio (`conector`, nome de rota ou `cap`) e `quando` (`''` para sempre, ou `sis2`, `docn`, `med_to_mpas`, `datm`). Exemplo com o caminho da temperatura de superfície:
+O mapa está em `src/coupling/cpl_map.F90` desde a R-FASE11-02, e a versão em tabelas, gerada dele, em `docs/acoplamento.md`.
+
+`TROCAS` tem uma linha por passagem de um campo de uma malha a outra. As colunas são: campo, `componente@malha` de origem, `componente@malha` de destino, meio (`conector`, nome de rota ou `cap`) e `quando`, a lista de condições em que a troca vale, separadas por vírgula (vazia: vale sempre). Cada chave de `&nuopc_mode` tem as duas condições, a de cada valor, para que toda troca diga onde vale sem precisar de negação:
+
+| Condições | Chave |
+| --- | --- |
+| `mpas` / `datm` | `use_datm` |
+| `mom6` / `docn` | `use_docn` |
+| `med_to_mpas` / `ocn_to_mpas` | `use_med_to_mpas` |
+| `sis2` | `use_sis2_dynamic` |
+
+Exemplo com o caminho da temperatura de superfície:
 
 ```fortran
-type(cpl_troca_t), parameter :: TROCAS(*) = [                                          &
+type(cpl_troca_t), parameter :: TROCAS(*) = [                                                &
   !           campo            de              para            meio           quando
-  cpl_troca_t('So_t',          'OCN@ocn_mom6', 'MED@ocn_med',  'conector',    ''),            &
-  cpl_troca_t('So_t',          'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst', ''),            &
-  cpl_troca_t('Sx_tsfc',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',     ''),            &
-  cpl_troca_t('Sx_tsfc',       'MED@ocn_med',  'ATM@atm_cap',  'conector',    'med_to_mpas'), &
-  cpl_troca_t('Sx_tsfc',       'ATM@atm_cap',  'ATM@mpas',     'cap',         ''),            &
-  cpl_troca_t('Si_ifrac_sis2', 'ICE@ice_sis2', 'MED@ocn_med',  'conector',    'sis2'),        &
+  cpl_troca_t('So_t',          'OCN@ocn_mom6', 'MED@ocn_med',  'conector',    'mom6'),              &
+  cpl_troca_t('So_t',          'OCN@docn',     'MED@ocn_med',  'conector',    'docn'),              &
+  cpl_troca_t('So_t',          'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst', ''),                  &
+  cpl_troca_t('Sx_tsfc',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',     ''),                  &
+  cpl_troca_t('Sx_tsfc',       'MED@ocn_med',  'ATM@atm_cap',  'conector',    'mpas,med_to_mpas'),  &
+  cpl_troca_t('Sx_tsfc',       'ATM@atm_cap',  'ATM@mpas',     'cap',         'mpas'),              &
+  cpl_troca_t('Si_ifrac_sis2', 'ICE@ice_sis2', 'MED@ocn_med',  'conector',    'sis2'),              &
   cpl_troca_t('Si_ifrac_sis2', 'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice', 'sis2') ]
 ```
+
+No mediador, o mesmo nome pode existir duas vezes em `MED@ocn_med`: o campo importado e o exportado (`So_t`, `So_u` e `So_v`). A regra de leitura do mapa é que uma rota que parte de `MED@ocn_med` lê o campo importado, e um conector que parte dali leva o exportado, que chegou de `MED@atm_med` pela rota `atm2ocn`.
+
+O DATM está no mapa como o cap dele anuncia os campos (malha `datm`, condição `datm`), mas o driver não o registra: com `use_datm=.true.` o componente atmosférico continua sendo o MONAN-A. Duas lacunas de hoje ficam registradas no teste do mapa: com o DOCN, `So_omask` não chega ao mediador (o DOCN não a exporta); com o DOCN e o contorno direto do oceano, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A, e o cap atmosférico interrompe a rodada.
 
 `ROTAS` tem uma linha por interpolação do mediador. Toda rota tem as mesmas quatro etapas, na mesma ordem, e as colunas que não aparecem ficam com o valor padrão, que desliga a etapa:
 
@@ -198,7 +214,7 @@ type(cpl_troca_t), parameter :: TROCAS(*) = [                                   
 | 3. completar | `completar` (um `regrid_fill_t`: faixa válida, valor fixo, passadas) |
 | 4. limitar | `limite_min`, `limite_max`, `nan_para` |
 
-E uma coluna que não é etapa: `criar` (`inicio` ou `mascara_mista`), o momento em que a rota é criada.
+E uma coluna que não é etapa: `criar`, o momento em que a rota é criada: `inicio` (em `InitializeDataComplete`), `primeiro_uso` (na primeira vez que o mediador precisa dela; é o caso de `ocn2atm_ice`, `ocn2atm_landmask` e `atm2ocn_ice`) ou `mascara_mista` (no primeiro passo em que a máscara do oceano tem terra e mar). O valor `primeiro_uso` foi acrescentado na R-FASE11-02, ao escrever as seis rotas: com só `inicio` e `mascara_mista`, o mapa não reproduziria o momento de criação de três delas.
 
 ```fortran
 type(cpl_rota_t), parameter :: ROTAS(*) = [                                      &
@@ -212,12 +228,12 @@ type(cpl_rota_t), parameter :: ROTAS(*) = [                                     
                  skip_fraction=1.0_r8, overflow_to_fill=.true.)),                &
   cpl_rota_t(nome='ocn2atm_ice', de='ocn_med', para='atm_med',                   &
              metodos='conserve,bilinear', mascara='So_omask',                    &
-             reserva='ocn2atm', sem_valor='sentinela'),                          &
+             reserva='ocn2atm', sem_valor='sentinela', criar='primeiro_uso'),    &
   cpl_rota_t(nome='atm2ocn',     de='atm_med', para='ocn_med',                   &
              metodos='nearest_stod', nan_para=0.0_r8) ]
 ```
 
-Na `ocn2atm_ice`, o preenchimento continua explícito em `med_exchange`, porque hoje ele acontece depois de diagnósticos que registram o campo antes dele.
+Na `ocn2atm_ice`, o preenchimento continua explícito em `med_exchange`, porque hoje ele acontece depois de diagnósticos que registram o campo antes dele. As colunas `limite_min`, `limite_max` e `nan_para` ficam desligadas com o valor `CPL_AUSENTE` (`huge(1.0_r8)`). As seis rotas completas estão em `cpl_map.F90`.
 
 ### 3.6 Conferência e relatório de acoplamento
 
@@ -395,7 +411,9 @@ A arquitetura torna visíveis escolhas que hoje estão escondidas. Estas entram 
 
 A R-FASE11-01 trouxe este documento para o repositório, registrou a fase 11 no roteiro e no estado do projeto, acrescentou os indicadores da fase a `indicadores.py` e levou para o repositório os testes do supergrid e do DOCN, que eram avulsos.
 
-Próxima etapa: **R-FASE11-02**, com `cpl_fields.F90` (`CAMPOS`), `cpl_map.F90` (`TROCAS` e `ROTAS` descrevendo o acoplamento de hoje, nas quatro configurações), o teste unitário `test_cpl_map` e `tools/dev/mapa-acoplamento.py`, conforme a tabela do bloco A.
+A R-FASE11-02 escreveu o mapa: `src/coupling/cpl_fields.F90` (57 campos) e `src/coupling/cpl_map.F90` (8 malhas, 154 trocas, 6 rotas), o teste `tests/unit/test_cpl_map.F90`, que confere o mapa nas cinco combinações de `&nuopc_mode` e contra as listas do mediador, e `tools/dev/mapa-acoplamento.py`, que gera `docs/acoplamento.md`. Os módulos são compilados e ligados, mas nenhum componente os usa. Com isso, o indicador "trocas sem linha no mapa" vai a 0. Ao escrever o mapa, a coluna `quando` ganhou as condições dos dois valores de cada chave e a lista de condições, e a coluna `criar` ganhou `primeiro_uso` (seção 3.5).
+
+Próxima etapa: **R-FASE11-03**, com `cpl_check`: conferência do mapa contra os campos anunciados, chamada pelo driver, só com registro no log, e o relatório dos conectores, conforme a tabela do bloco A.
 
 ---
 

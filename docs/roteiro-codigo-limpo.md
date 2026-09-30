@@ -144,6 +144,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | Etapa | Situação |
 | --- | --- |
 | R-FASE11-01 | documento de arquitetura no repositório; fase 11 no roteiro e no estado do projeto; indicadores da fase em `indicadores.py`; testes do supergrid do MOM6 e do DOCN levados para o repositório e para `confere-tudo.bash` |
+| R-FASE11-02 | mapa de acoplamento em `src/coupling/` (`cpl_fields.F90`: 57 campos; `cpl_map.F90`: 8 malhas, 154 trocas e 6 rotas), compilado e ligado, sem uso; teste `test_cpl_map` em `tests/unit`; `tools/dev/mapa-acoplamento.py` gera `docs/acoplamento.md` (conferência `mapa`); trocas sem linha no mapa: 0 |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 
@@ -154,6 +155,8 @@ Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda ta
 | rotas criadas (`regrid%add`) fora de `med_exchange` | 7, em 5 arquivos | 0 |
 | chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 |
 | arquivos que carimbam o tempo dos campos | 5 | `cap_common` e `med_exchange` |
+
+Desde a R-FASE11-02, o primeiro indicador não conta os arquivos de `src/coupling/`, que é onde os nomes devem ficar; os valores de partida não mudam.
 
 A fase 10 continua reservada às decisões que mudam resultados e pode ser tratada em paralelo, nunca na mesma etapa.
 
