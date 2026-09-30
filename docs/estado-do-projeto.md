@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado ao fim da fase 9 (29/09/2026).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE11-01 (30/09/2026), início da fase 11. Para retomar, comece pela seção 10.
 
 ## 1. O que é o projeto
 
@@ -11,7 +11,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | Item | Valor |
 | --- | --- |
 | Repositório | `GTA-DIMNT-CPTEC/MONAN-Coupler`, partindo do commit `ea10fb6` do ramo `develop` |
-| Ramo local da refatoração | `refactor/principal` (tag `fase3-03-validada` no último ponto validado) |
+| Ramo da refatoração | `refactor/principal`, também no GitHub; cada etapa validada tem a tag `faseN-NN-validada` (a mais recente marca o último ponto validado) |
 | Instalação na Jaci | `/p/projetos/gta/daniel.massaru/refatorado/Coupler-Install/MONAN-Coupler` |
 | Instalação de produção (não usar para validar) | `/p/projetos/gta/daniel.massaru/coupling/Coupler-Install/MONAN-Coupler` |
 | Linhas de base | `/p/projetos/gta/daniel.massaru/refatorado/baseline/` |
@@ -55,6 +55,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE5-05 | `map_cells_to_regular_grid` dividida em etapas; teste da grade do cap atmosférico |
 | R-FASE5-06 | `InitializeDataComplete` e `blend_albedo_with_ice` divididas em etapas |
 | R-FASE5-07 | comentários dos scripts de `tools/` sem marcas de histórico; históricos dos cabeçalhos em `docs/historico-scripts.md` |
+| R-FASE11-01 | início da fase 11: `docs/arquitetura-acoplamento.md` (arquitetura e plano), indicadores da fase em `indicadores.py`, testes do supergrid do MOM6 e do DOCN no repositório e em `confere-tudo.bash`, seção de retomada deste documento; só documentação e ferramentas |
 | R-FASE9-07 | encerramento da fase 9: indicadores finais, RPQ na sexta versão e procedimento de integração ao `develop`; só documentação |
 | R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 |
 | R-FASE9-05 | leitura do supergrid do MOM6 (`mom6_supergrid_tcoords` e `mom6_supergrid_corners`) numa rotina privada; trechos repetidos de 67 para 54; conferida com teste avulso |
@@ -146,8 +147,10 @@ Resultado esperado contra a R-NOFMA-02: 73 iguais, 0 com metadados diferentes, P
 | `tests/bulk/compara-bulk.bash` | compara bit a bit os campos calculados por `calc_bulk_ncar` em duas versões |
 | `tests/unit/roda-unitarios.bash` | testes com valor esperado (fórmulas comparadas com valores calculados à parte) |
 | `tests/atmgrid/compara-grade-atm.bash` | compara bit a bit a passagem das células MPAS para a grade 360 x 180 do cap atmosférico (`mpas_export`) em duas versões |
+| `tests/supergrid/compara-supergrid.bash` | compara bit a bit a leitura do supergrid do MOM6 (`mom6_supergrid_mod`) em duas versões, com supergrids sintéticos e casos de erro |
+| `tests/docn/compara-docn.bash` | roda o DOCN num driver NUOPC mínimo, com dados sintéticos, e compara bit a bit os campos exportados, os diagnósticos e as mensagens de duas versões |
 
-O uso das cinco últimas, antes de levar uma mudança à Jaci, está em `docs/conferencias-locais.md`.
+O uso das ferramentas de conferência local, antes de levar uma mudança à Jaci, está em `docs/conferencias-locais.md`.
 
 ## 8. Pendências e próximos passos
 
@@ -212,10 +215,22 @@ Decisões de 28/09/2026: o DTN-01 fica de lado por enquanto (o levantamento est�
 | 8 | módulos coesos: `MED_cap.F90` e `mpas_atm_model.F90` divididos por assunto; rotinas entre 100 e 150 linhas revistas | R-FASE8-01 em diante (a R-FASE8-03 virou uma etapa por rotina) | R-FASE8-01 concluída (PASS, 73 iguais, tag `fase8-01-validada`); R-FASE8-02 concluída (PASS, 73 iguais, tag `fase8-02-validada`); R-FASE8-03 concluída (PASS, 73 iguais, tag `fase8-03-validada`); R-FASE8-04 concluída (PASS, 73 iguais, tag `fase8-04-validada`); R-FASE8-05 concluída (PASS, 73 iguais, tag `fase8-05-validada`); R-FASE8-06 concluída (PASS, 73 iguais, tag `fase8-06-validada`); R-FASE8-07 concluída (PASS, 73 iguais, tag `fase8-07-validada`); R-FASE8-08 concluída (PASS, 73 iguais, tag `fase8-08-validada`); R-FASE8-09 concluída (PASS, 73 iguais, tag `fase8-09-validada`); R-FASE8-10 concluída (PASS, 73 iguais, tag `fase8-10-validada`); R-FASE8-11 concluída (PASS, 73 iguais, tag `fase8-11-validada`), com ela terminam as revisões de rotinas longas; R-FASE8-12 concluída (PASS, 73 iguais, tag `fase8-12-validada`), primeira das quatro divisões de arquivo; R-FASE8-13 concluída (PASS, 73 iguais, tag `fase8-13-validada`); R-FASE8-14 concluída (PASS, 73 iguais, tag `fase8-14-validada`); R-FASE8-15 concluída (PASS, 73 iguais, tag `fase8-15-validada`), última das quatro divisões de arquivo; fase concluída |
 | 9 | duplicação e consistência; ao fim, RPQ atualizado e integração ao `develop` | R-FASE9-01 a R-FASE9-07 | R-FASE9-01 concluída (PASS, 73 iguais, tag `fase9-01-validada`); R-FASE9-02 concluída (PASS, 73 iguais, tag `fase9-02-validada`); R-FASE9-03 concluída (PASS, 73 iguais, tag `fase9-03-validada`); R-FASE9-04 concluída (PASS, 73 iguais, tag `fase9-04-validada`), pedida em 29/09/2026 para reduzir os trechos repetidos; R-FASE9-05 concluída (PASS, 73 iguais, tag `fase9-05-validada`); R-FASE9-06 concluída (PASS, 73 iguais, tag `fase9-06-validada`); R-FASE9-07 encerra a fase (só documentação); fase concluída, RPQ na sexta versão, integração ao `develop` pelo procedimento abaixo |
 | 10 | trilha de decisões que podem mudar resultados (DATM, `u_star`, precisão da configuração, `-fdefault-real-8`, variáveis não inicializadas, `mpassit`) | uma etapa por decisão | aguardando decisões |
+| 11 | arquitetura de acoplamento: malhas, campos e trocas descritos em `src/coupling/`, trocas do mediador em `med_exchange.F90`, sem mudar resultados | R-FASE11-01 a R-FASE11-25 (plano em `docs/arquitetura-acoplamento.md`, seção 4) | R-FASE11-01 entregue (só documentação e ferramentas); próxima: R-FASE11-02 |
+
+### Fase 11: arquitetura de acoplamento
+
+Decisões de 30/09/2026:
+
+- a fase de arquitetura recebe o número 11, e a 10 continua reservada às decisões que mudam resultados; as duas podem andar em paralelo, nunca na mesma etapa;
+- a integração ao `develop` fica para mais adiante, por decisão do Daniel; o procedimento abaixo continua válido e deve ser refeito com o nome da última etapa validada no passo 1 e na mensagem do passo 6;
+- as regras são as das fases 1 a 9, e cada tipo de mudança tem a sua conferência local (`docs/arquitetura-acoplamento.md`, seção 4.2);
+- os testes do supergrid do MOM6 (usado na R-FASE9-05) e do DOCN (usado na R-FASE8-11), antes avulsos, passam a fazer parte do repositório e de `confere-tudo.bash`, porque as etapas dos blocos B, C e F dependem deles.
+
+Indicadores da fase na partida (`fase9-07-validada`): 8 arquivos com nomes de campos anunciados ou realizados à mão; 7 chamadas `ESMF_GridCreate*` em 6 arquivos; 7 pontos de criação de rota em 5 arquivos; 1 chamada de rota na física; 5 arquivos que carimbam o tempo. As metas estão no documento de arquitetura, seção 4.4.
 
 ### Integração de `refactor/principal` ao `develop`
 
-Autorizada em 29/09/2026, depois da R-FASE9-07. A refatoração partiu do commit `ea10fb6` do `develop`. Na Jaci, um comando por vez, na raiz do repositório:
+Autorizada em 29/09/2026, depois da R-FASE9-07; adiada em 30/09/2026 (ver fase 11). A refatoração partiu do commit `ea10fb6` do `develop`. Na Jaci, um comando por vez, na raiz do repositório:
 
 | Passo | Comando | O que conferir |
 | --- | --- | --- |
@@ -240,13 +255,43 @@ Commits: autor Daniel Massaru <dmassaru@gmail.com>, sem linhas de coautoria nem 
 
 ## 10. Para retomar o trabalho em outro ambiente
 
-Para retomar, reúna:
+O trabalho segue a fase 11. O plano está em `docs/arquitetura-acoplamento.md` (seção 4.3, etapas; seção 6, próximo passo) e o andamento, na seção 8 deste documento e no `docs/CHANGELOG.md`.
 
-- este arquivo;
-- o `docs/CHANGELOG.md`;
-- o relatório RPQ em PDF (e a fonte LaTeX, se for atualizá-lo);
-- o código atual: um arquivo `.tar.gz` do repositório no ramo `refactor/principal`, sem `build/`, `bin/` e `models/`, ou o link do ramo no GitHub, se houver acesso.
+### 10.1 Numa nova conversa ou com outra pessoa
 
-E descreva o que quer fazer a seguir, por exemplo um dos itens da seção 8.
+Basta o ramo `refactor/principal` do GitHub e a descrição do que fazer, por exemplo: "retomar a fase 11 a partir da R-FASE11-02". Os documentos que dão o contexto estão no próprio repositório:
 
-Para as conferências locais (`docs/conferencias-locais.md`), é preciso compilar o ESMF 8.9.1 no próprio ambiente, o que leva cerca de 40 minutos na primeira vez; depois disso, `compila-local.bash` leva menos de um minuto.
+| Documento | Para quê |
+| --- | --- |
+| `docs/estado-do-projeto.md` | este documento: ambiente, etapas, linhas de base, pendências e decisões |
+| `docs/arquitetura-acoplamento.md` | arquitetura proposta e plano da fase 11 |
+| `docs/CHANGELOG.md` | o que cada etapa mudou, com as conferências e a validação |
+| `docs/conferencias-locais.md` | como conferir uma mudança antes da rodada na Jaci |
+| `docs/roteiro-codigo-limpo.md` | critérios, indicadores e metas das fases 6 a 11 |
+
+O relatório técnico (RPQ, sexta versão) e a nota técnica da arquitetura (NTC) ficam fora do repositório, em PDF e com a fonte LaTeX.
+
+### 10.2 Ambiente para as conferências locais
+
+Numa máquina Ubuntu 24.04 (ou semelhante), sem as bibliotecas dos modelos. A compilação do ESMF leva cerca de 40 minutos na primeira vez; depois, `compila-local.bash` leva menos de um minuto e `confere-tudo.bash` cerca de nove.
+
+| Passo | Comando |
+| --- | --- |
+| 1. Pacotes | `apt-get install -y gfortran g++ make git python3 openmpi-bin libopenmpi-dev libnetcdff-dev netcdf-bin` |
+| 2. Fonte do ESMF | `git clone --depth 1 --branch v8.9.1 https://github.com/esmf-org/esmf.git $HOME/esmf` |
+| 3. Variáveis da compilação | `ESMF_DIR=$HOME/esmf ESMF_COMPILER=gfortran ESMF_COMM=mpich ESMF_NETCDF=nc-config ESMF_BOPT=O ESMF_PIO=OFF ESMF_INSTALL_PREFIX=$HOME/esmf-install`, todas exportadas |
+| 4. Compilação e instalação | `cd $HOME/esmf && make -j2 lib && make install` |
+| 5. Arquivo de configuração | `export ESMFMKFILE=$HOME/esmf-install/lib/libO/Linux.gfortran.64.mpich.default/esmf.mk` |
+| 6. Execução MPI (Open MPI como root) | `export MPIRUN="mpirun.openmpi --allow-run-as-root --oversubscribe"` |
+| 7. Código | `git clone --branch refactor/principal https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git` |
+| 8. Conferência | na raiz do repositório, `tools/dev/confere-tudo.bash HEAD`: todas as conferências OK |
+
+Com `ESMF_COMM=mpich`, o ESMF usa o `mpif90` do sistema, que no Ubuntu é o do Open MPI; foi assim que as conferências das fases 6 a 11 rodaram. Sem `--allow-run-as-root`, o Open MPI se recusa a rodar como root, o que é comum em contêineres.
+
+### 10.3 Entrega de uma etapa
+
+1. Conferências locais: `tools/dev/confere-tudo.bash HEAD` antes do commit (ou `HEAD~1` depois), com `-i` quando a etapa só muda comentários.
+2. Um commit, autor Daniel Massaru <dmassaru@gmail.com>, sem linhas de coautoria nem marcas de ferramentas (seção 9).
+3. `git format-patch -1 --stdout > R-FASE11-NN.patch`; informar `head -1` e `md5sum` do arquivo.
+4. Na Jaci, um comando por vez: `git am`, compilação e `valida_rodada.bash` (seção 5); com PASS, `git tag fase11-NN-validada` e envio do ramo e da tag ao GitHub.
+5. Atualizar este documento, o CHANGELOG, o roteiro e, nesta fase, o documento de arquitetura.

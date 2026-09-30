@@ -15,8 +15,10 @@ Uso (na raiz do repositório):
     -l       lista também os itens de cada indicador (arquivos, rotinas,
              variáveis, trechos repetidos), para a última versão pedida
 
-Saída: uma tabela em Markdown, pronta para o CHANGELOG. Código de saída 0,
-ou 2 se uma versão não existir.
+Saída: duas tabelas em Markdown, prontas para o CHANGELOG: a dos
+indicadores de código limpo (fases 5 a 9) e a da arquitetura de
+acoplamento (fase 11, docs/arquitetura-acoplamento.md, seção 4.4). Código
+de saída 0, ou 2 se uma versão não existir.
 
 Como se mede:
   linhas de código   linhas que não são brancas nem só comentário;
@@ -33,6 +35,18 @@ Como se mede:
                      200 caracteres, que aparece em mais de um lugar;
   marca de histórico comentário com FIX, TODO-, Sprint, [N1], versões como
                      v2.5 ou datas.
+
+Indicadores da fase 11 (contados nas instruções, sem comentários):
+  lista de campos    arquivo com nomes de campos do acoplamento (Sa_, So_,
+                     Si_, Sf_, Sx_, Faxa_, Foxx_...) escritos à mão para
+                     anúncio ou realização: instrução com 3 ou mais nomes
+                     (lista), NUOPC_Advertise ou NUOPC_Realize com um nome,
+                     ou ESMF_FieldCreate com name= um nome num arquivo que
+                     chama NUOPC_Realize;
+  malha ESMF         chamada a ESMF_GridCreate* fora de src/coupling/;
+  criação de rota    chamada a regrid%add fora de med_exchange.F90;
+  rota na física     chamada a regrid%apply em med_bulk_ncar.F90;
+  carimbo de tempo   arquivo que chama NUOPC_SetTimestamp.
 """
 import collections
 import io
@@ -74,6 +88,10 @@ RE_DECL = re.compile(
 RE_MARCA = re.compile(
     r'\bFIX\b(?!-DIAG)|TODO-|Sprint|\[[NEBS]\d+\]|\bv\d+\.\d+\b|\d{2}/\d{2}/\d{4}|'
     r'\b(Jan|Fev|Mar|Abr|Mai|Jun|Jul|Ago|Set|Out|Nov|Dez)[a-z]*/?\s?20\d\d')
+
+
+RE_NOME_CAMPO = re.compile(r"""["'](?:S[aoixf]|F[a-z]{3})_\w+\s*["']""")
+FISICA = ('med_bulk_ncar.F90',)
 
 
 def separa(linha):
@@ -130,6 +148,36 @@ def nomes_declarados(entidades):
     return saida
 
 
+def sem_textos(s):
+    """Instrução sem o conteúdo das constantes de texto."""
+    return re.sub(r"'[^']*'|\"[^\"]*\"", "''", s)
+
+
+def acoplamento(caminho, instr, res):
+    """Indicadores da fase 11 de um arquivo (instr: instruções juntadas)."""
+    nome = caminho.split('/')[-1]
+    realiza = any(re.search(r'\bNUOPC_Realize\b', sem_textos(s), re.I) for _, s in instr)
+    for n, s in instr:
+        cod = sem_textos(s)
+        if re.match(r'\s*use\b', cod, re.I):
+            continue
+        nomes = RE_NOME_CAMPO.findall(s)
+        if (len(nomes) >= 3
+                or nomes and re.search(r'\bNUOPC_(Advertise|Realize)\s*\(', cod, re.I)
+                or realiza and re.search(r'\bESMF_FieldCreate\s*\(', cod, re.I)
+                and re.search(r"""\bname\s*=\s*["'](?:S[aoixf]|F[a-z]{3})_""", s, re.I)):
+            res['cpl_campos'].append((caminho, n))
+        if re.search(r'\bESMF_GridCreate\w*\s*\(', cod, re.I) and '/coupling/' not in caminho:
+            res['cpl_malhas'].append((caminho, n))
+        if re.search(r'%\s*add\s*\(', cod, re.I) and re.search(r'regrid\s*%\s*add', cod, re.I) \
+                and nome != 'med_exchange.F90':
+            res['cpl_rotas'].append((caminho, n))
+        if nome in FISICA and re.search(r'regrid\s*%\s*apply\s*\(', cod, re.I):
+            res['cpl_fisica'].append((caminho, n))
+        if re.search(r'\bcall\s+NUOPC_SetTimestamp\b', cod, re.I):
+            res['cpl_carimbo'].append((caminho, n))
+
+
 def analisa_arquivo(caminho, texto, res):
     linhas = texto.split('\n')
     if linhas and linhas[-1] == '':
@@ -158,6 +206,7 @@ def analisa_arquivo(caminho, texto, res):
                 if parte.strip():
                     instr.append((ini, parte.strip()))
         buf, ini = '', None
+    acoplamento(caminho, instr, res)
 
     pilha, em_interface, em_tipo = [], 0, 0
     modulo, privado, publicos, protegidos, estado = None, False, set(), set(), []
@@ -250,7 +299,8 @@ def analisa_arquivo(caminho, texto, res):
 
 def mede(versao):
     res = {'arquivos': [], 'rotinas': [], 'estado_modulo': [], 'save_local': [],
-           'janelas': collections.defaultdict(list), 'marcas': 0}
+           'janelas': collections.defaultdict(list), 'marcas': 0,
+           'cpl_campos': [], 'cpl_malhas': [], 'cpl_rotas': [], 'cpl_fisica': [], 'cpl_carimbo': []}
     for caminho, texto in fontes(versao):
         analisa_arquivo(caminho, texto, res)
     rep = {k: v for k, v in res['janelas'].items() if len(v) > 1}
@@ -281,6 +331,27 @@ def tabela(versoes, medidas):
         ('Trechos repetidos (janelas de 6 linhas)', lambda r: len(r['repetidos'])),
         ('Comentários com marcas de histórico', lambda r: r['marcas']),
     ]
+    return monta(versoes, medidas, linhas)
+
+
+def arquivos(itens):
+    return len({c for c, _ in itens})
+
+
+def tabela_acoplamento(versoes, medidas):
+    linhas = [
+        ('Arquivos com nomes de campos anunciados ou realizados à mão', lambda r: arquivos(r['cpl_campos'])),
+        ('Chamadas ESMF_GridCreate* fora de src/coupling', lambda r: len(r['cpl_malhas'])),
+        ('Arquivos com ESMF_GridCreate* fora de src/coupling', lambda r: arquivos(r['cpl_malhas'])),
+        ('Rotas criadas (regrid%add) fora de med_exchange', lambda r: len(r['cpl_rotas'])),
+        ('Arquivos que criam rotas fora de med_exchange', lambda r: arquivos(r['cpl_rotas'])),
+        ('Chamadas de rota em módulos de física', lambda r: len(r['cpl_fisica'])),
+        ('Arquivos que carimbam o tempo dos campos', lambda r: arquivos(r['cpl_carimbo'])),
+    ]
+    return monta(versoes, medidas, linhas)
+
+
+def monta(versoes, medidas, linhas):
     cab = ['Indicador'] + [('árvore de trabalho' if v == '.' else f'`{v}`') for v in versoes]
     out = ['| ' + ' | '.join(cab) + ' |', '| ' + ' | '.join(['---'] * len(cab)) + ' |']
     for nome, f in linhas:
@@ -310,6 +381,17 @@ def lista(r):
         grupos[tuple(sorted({c.split('/')[-1] for c, _ in v}))] += 1
     for g, k in grupos.most_common():
         out.append(f'- {k} janela(s): ' + ', '.join(f'`{x}`' for x in g))
+    for titulo, chave in (('Nomes de campos anunciados ou realizados à mão', 'cpl_campos'),
+                          ('ESMF_GridCreate* fora de src/coupling', 'cpl_malhas'),
+                          ('Rotas criadas fora de med_exchange', 'cpl_rotas'),
+                          ('Chamadas de rota em módulos de física', 'cpl_fisica'),
+                          ('Carimbo de tempo dos campos', 'cpl_carimbo')):
+        out += ['', f'## {titulo}', '']
+        por_arquivo = collections.OrderedDict()
+        for c, n in r[chave]:
+            por_arquivo.setdefault(c, []).append(str(n))
+        for c, ns in por_arquivo.items():
+            out.append(f'- `{c}`: linha(s) {", ".join(ns)}')
     return '\n'.join(out)
 
 
@@ -326,6 +408,10 @@ def main():
             return 2
     medidas = [mede(v) for v in versoes]
     print(tabela(versoes, medidas))
+    print()
+    print('Arquitetura de acoplamento (fase 11):')
+    print()
+    print(tabela_acoplamento(versoes, medidas))
     if '-l' in sys.argv[1:]:
         print(lista(medidas[-1]))
     return 0

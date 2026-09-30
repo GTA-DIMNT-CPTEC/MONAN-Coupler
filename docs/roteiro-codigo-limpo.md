@@ -135,6 +135,28 @@ Estes itens não são limpeza no sentido estrito: removem remendos ou corrigem e
 | Variáveis usadas antes de definidas | não levantado | rodada de teste com `-finit-real=snan -ffpe-trap=invalid`; cada caso achado é um defeito |
 | Esquema `mpassit` | alternativa ao algoritmo atual do cap atmosférico | decisão científica do GT |
 
+### Fase 11: arquitetura de acoplamento
+
+A limpeza das fases 1 a 9 deixou cada arquivo com um assunto, mas a descrição do acoplamento (que campos vão de onde para onde, em que malha e por qual interpolação) continua espalhada por mais de dez arquivos. A fase 11 reúne essa descrição em três conceitos (malha, campo e troca) e em três arquivos de `src/coupling/` (`cpl_grids.F90`, `cpl_fields.F90` e `cpl_map.F90`), com a execução das trocas do mediador em `med_exchange.F90`. As regras são as mesmas das fases anteriores: nenhuma etapa muda resultados, um patch por etapa e validação bit a bit na Jaci.
+
+O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), as conferências por tipo de mudança, os indicadores e as metas, está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4. Este roteiro não o repete; registra só o andamento.
+
+| Etapa | Situação |
+| --- | --- |
+| R-FASE11-01 | documento de arquitetura no repositório; fase 11 no roteiro e no estado do projeto; indicadores da fase em `indicadores.py`; testes do supergrid do MOM6 e do DOCN levados para o repositório e para `confere-tudo.bash` |
+
+Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
+
+| Indicador | Partida | Meta |
+| --- | --- | --- |
+| arquivos com nomes de campos anunciados ou realizados à mão | 8 | 0 |
+| chamadas `ESMF_GridCreate*` fora de `src/coupling` | 7, em 6 arquivos | só as do DOCN e do DATM, se não migradas |
+| rotas criadas (`regrid%add`) fora de `med_exchange` | 7, em 5 arquivos | 0 |
+| chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 |
+| arquivos que carimbam o tempo dos campos | 5 | `cap_common` e `med_exchange` |
+
+A fase 10 continua reservada às decisões que mudam resultados e pode ser tratada em paralelo, nunca na mesma etapa.
+
 ## 5. Definição de "pronto" para cada etapa
 
 Uma etapa só é entregue quando:
@@ -149,7 +171,7 @@ Uma etapa só é entregue quando:
 
 - **Mover estado muda o tempo de vida das variáveis.** Uma variável com `save`, ou um ponteiro inicializado na declaração, conserva o valor entre chamadas. Ao levá-la para o estado interno, a inicialização precisa acontecer no mesmo momento de antes, ou o resultado muda.
 - **Dividir arquivos muda a ordem de compilação.** O Makefile, `compila-local.bash` e as interfaces mínimas precisam acompanhar cada novo módulo.
-- **O teste bit a bit não cobre tudo.** A linha de base não roda DOCN nem DATM; mudanças nesses caminhos dependem dos testes locais (gravadores, e os que a fase 6 acrescentar).
+- **O teste bit a bit não cobre tudo.** A linha de base não roda DOCN nem DATM e lê um único supergrid, sempre sem erro; mudanças nesses caminhos dependem dos testes locais (gravadores, supergrid e DOCN).
 - **Etapas pequenas.** Uma etapa que toca muitos arquivos é difícil de revisar e, se falhar na Jaci, difícil de diagnosticar. Na dúvida, dividir.
 
 ## Referências

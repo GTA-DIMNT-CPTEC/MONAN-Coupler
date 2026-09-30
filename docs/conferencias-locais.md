@@ -10,6 +10,7 @@ Uma etapa de refatoração só é aprovada pela rodada completa na Jaci, compara
 | NetCDF-Fortran | com `nf-config` no PATH |
 | ESMF 8.9.1 compilado | a variável `ESMFMKFILE` aponta para o `esmf.mk` da instalação |
 | Python 3.6 ou mais novo, e git | para os scripts de conferência; os de `tools/dev/` rodam também com o `python3` do sistema na Jaci (3.6) |
+| `ncgen` (pacote netcdf-bin) | para os dados sintéticos dos testes do supergrid e do DOCN |
 
 Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são compilados contra as interfaces mínimas de `tests/interfaces/` (seção 3).
 
@@ -26,6 +27,8 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
+| `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
+| `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
 
 ### 2.0 Todas as conferências de uma vez
 
@@ -34,7 +37,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6, 2.9 e 2.10 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -46,6 +49,8 @@ Resumo (referência: HEAD)
   bulk         OK                              82 s
   grade        OK                              83 s
   unitarios    OK                              31 s
+  supergrid    OK                               4 s
+  docn         OK                             178 s
 ```
 
 O que cada linha confere:
@@ -59,8 +64,9 @@ O que cada linha confere:
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
 | `unitarios` | algum teste com valor esperado (seção 2.8) falha |
+| `supergrid`, `docn` | os testes de regressão das seções 2.9 e 2.10 acusam diferença |
 
-A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de seis minutos numa máquina de 4 núcleos e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
+A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de nove minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
 
 Foi conferido ao contrário: uma variável sem uso acrescentada a `nc_writer.F90` faz falhar `avisos` e, com `-i`, `instrucoes`.
 
@@ -135,6 +141,18 @@ tools/dev/indicadores.py -l .
 
 Mede, nos fontes próprios de `src/` (sem `upstream/`), os indicadores do roteiro de código limpo (`docs/roteiro-codigo-limpo.md`): arquivos com mais de 1 000 linhas, rotinas com mais de 100 e de 150 linhas de código, variáveis de módulo (públicas, protegidas e privadas), variáveis locais que conservam o valor entre chamadas (`save` explícito, ou implícito por valor na declaração), trechos de 6 linhas repetidos e comentários com marcas de histórico. Cada versão pedida vira uma coluna (`.` é a árvore de trabalho); com `-l`, lista os itens da última versão. A tabela sai em Markdown, pronta para o CHANGELOG. Os indicadores acompanham a evolução do código; não decidem se uma etapa está certa.
 
+Uma segunda tabela traz os indicadores da fase 11 (arquitetura de acoplamento, [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4.4):
+
+| Indicador | O que conta |
+| --- | --- |
+| arquivos com nomes de campos anunciados ou realizados à mão | arquivos com uma instrução de 3 ou mais nomes de campos (`Sa_`, `So_`, `Si_`, `Faxa_`, `Foxx_` e semelhantes), com `NUOPC_Advertise` ou `NUOPC_Realize` de um nome escrito no código, ou com `ESMF_FieldCreate(name=...)` de um nome num arquivo que chama `NUOPC_Realize` |
+| chamadas e arquivos com `ESMF_GridCreate*` fora de `src/coupling` | construções de malha fora do catálogo de malhas |
+| rotas criadas (`regrid%add`) fora de `med_exchange` | pontos de criação de rota espalhados pelo mediador |
+| chamadas de rota em módulos de física | `regrid%apply` em `med_bulk_ncar.F90` |
+| arquivos que carimbam o tempo dos campos | arquivos que chamam `NUOPC_SetTimestamp` |
+
+As contagens são feitas nas instruções, sem comentários nem o conteúdo das mensagens. A regra das fórmulas de índice de grade regular (9 rotinas) não se automatiza bem e é conferida à mão, com a lista do documento de arquitetura.
+
 ### 2.8 Testes com valor esperado
 
 ```bash
@@ -165,6 +183,42 @@ Os valores esperados do preenchimento foram calculados em aritmética exata (fra
 Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a volta da longitude para [0°, 360°), arredondar a latitude em vez de truncar, mudar a marca 0,5 das caixas preenchidas e ignorar o `n` fizeram o teste falhar (o último, pela verificação de limites de array, que aborta o programa).
 
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
+
+### 2.9 Teste da leitura do supergrid do MOM6
+
+```bash
+tests/supergrid/compara-supergrid.bash HEAD
+```
+
+A rodada da linha de base lê um único supergrid, sempre sem erro. Este teste compila `src/shared/mom6_supergrid.F90` do commit `REV` e o da árvore de trabalho, liga a cada um o programa `tests/supergrid/test_supergrid.F90` e o executa sobre três supergrids sintéticos gerados por `tests/supergrid/gera-supergrid.py`:
+
+| Arquivo | Para que serve |
+| --- | --- |
+| `hgrid.nc` | supergrid de 21 x 15 pontos, com longitudes de -329,6° a 93,3° (exercita a passagem para [0°, 360°)) e linhas e colunas inclinadas, para que um erro de índice (par ou ímpar, i e j trocados) apareça nos valores |
+| `impar.nc` | dimensões ímpares, que geram o aviso de `mom6_supergrid_dims` |
+| `sem_xy.nc` | sem as variáveis `x` e `y`, o que faz a leitura falhar |
+
+O programa chama as três rotinas públicas (`mom6_supergrid_dims`, `mom6_supergrid_tcoords` e `mom6_supergrid_corners`), com e sem prefixo de mensagem, também com um arquivo que não existe, e grava os códigos de retorno, as dimensões e as coordenadas lidas numa porção local (3:8, 2:6). Têm de ser idênticos, bit a bit, esse arquivo e as mensagens do módulo no log do ESMF, sem data e hora. Leva poucos segundos, porque compila um só fonte.
+
+Conferido ao contrário: somar 1e-11 à correção de 360° da longitude faz o arquivo diferir, e mudar um espaço na mensagem de aviso faz o log diferir. O teste é a conferência das etapas que movem a construção da malha tripolar (fase 11, bloco C).
+
+### 2.10 Teste do oceano de dados (DOCN)
+
+```bash
+tests/docn/compara-docn.bash HEAD
+```
+
+A rodada da linha de base não usa o DOCN. Este teste o executa num driver NUOPC mínimo, `tests/docn/test_docn.F90`, com o DOCN como componente OCN e um componente fonte (SRC) que exporta os 14 campos que o DOCN importa e importa os 6 que ele exporta, ligados por dois conectores. O relógio vai de 29/03/2026 06h a 30/03/2026 18h, em 4 passos de 9 h. Os dados vêm de `tests/docn/gera-dados-docn.py`, numa grade de 72 x 36 pontos com 10 instantes diários:
+
+| Arquivo | O que exercita |
+| --- | --- |
+| `sst.nc` | interpolação no tempo da SST, com valores abaixo de 0 °C |
+| `ice.nc` | fração de gelo em porcentagem, com valores abaixo de 0 e acima de 100 (conversão e limite a [0, 1]) |
+| `cur.nc` | correntes com pontos de preenchimento (-999) e valores de 12 m/s, que o DOCN descarta |
+
+São quatro casos, com e sem arquivo de correntes, e em cada um só a inicialização (argumento `inicio`) ou a rodada completa, sempre com 4 processos MPI. Cada processo grava os campos exportados pelo DOCN, com os limites e o carimbo de tempo; o DOCN grava os diagnósticos de importação. Têm de ser idênticos, bit a bit, esses arquivos e as mensagens do DOCN no log do ESMF, sem data e hora.
+
+O script compila as duas versões inteiras (`compila-local.bash`) e leva cerca de três minutos. Conferido ao contrário: dividir a fração de gelo por 100,0000001 em vez de 100 faz os campos exportados diferirem. O teste é a conferência das etapas que mexem no DOCN (fase 11, blocos B e F).
 
 ## 3. Interfaces mínimas
 
