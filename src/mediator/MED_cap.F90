@@ -50,7 +50,7 @@ module MED_cap_MONAN_mod
   use cpl_fields_mod,      only: CPL_NOME_LEN
   use cpl_map_mod,         only: cpl_chegadas, cpl_config_atual
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
-  use med_cap_methods_mod, only: RegridOrCopy, RouteOcnToAtm
+  use med_cap_methods_mod, only: RegridOrCopy
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
   use med_init_mod,        only: create_atm_grid, create_ocn_grid,           &
                                   realize_component_fields,                   &
@@ -61,7 +61,7 @@ module MED_cap_MONAN_mod
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid,            &
                                   regrid_ocean_currents,                      &
                                   update_ice_fraction_from_docn
-  use med_export_mod,      only: export_to_components, stamp_export_fields
+  use med_exchange_mod,    only: entregar
   use med_diag_mod,        only: log_ifrac_export_bitsum, relata_completas
 
   implicit none
@@ -661,7 +661,7 @@ contains
   ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
   ! gather_atm_forcing, local_atm_bounds, update_ocean_fields_on_atm_grid,
   ! update_ice_fraction_from_docn, calc_bulk_ncar, apply_native_fluxes,
-  ! export_to_components, stamp_export_fields, RouteOcnToAtm,
+  ! entregar (med_exchange: export_to_components e carimbo de tempo),
   ! log_ifrac_export_bitsum e med_write_import_fields.
   !============================================================================
   subroutine MediatorAdvance(gcomp, rc)
@@ -830,8 +830,12 @@ contains
     ! oceano). Uma heuristica pela SST (celulas de terra com exatamente
     ! 271,35 K) colidiria com agua aberta no ponto de congelamento (borda do
     ! gelo).
+    !
+    ! A exportação e o carimbo de tempo dos campos exportados formam a fase
+    ! entregar (med_exchange); com use_med_to_mpas, o exportState recebe
+    ! depois o tempo atual do relógio.
     !==========================================================================
-    call export_to_components(is, importState, exportState, rc)
+    call entregar(is, importState, exportState, clock, stampTime, rc)
     if (allocated(uas_g)) deallocate(uas_g)
     if (allocated(vas_g)) deallocate(vas_g)
     if (allocated(tas_g)) deallocate(tas_g)
@@ -842,24 +846,7 @@ contains
     if (allocated(shum_g)) deallocate(shum_g)
     if (allocated(snow_g)) deallocate(snow_g)
 
-    ! Atualizar timestamps do exportState
-    call stamp_export_fields(exportState, field, stampTime, rc)
-
     call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
-
-    ! ── RouteOcnToAtm — exportar SST/gelo MOM6 dinâmico ao MPAS ────
-    ! Chamado quando use_med_to_mpas=.true. (nuopc_mode).
-    ! Preenche os campos So_t, Si_ifrac, So_u, So_v no exportState do MED
-    ! para que o conector MED→MPAS entregue a SST dinâmica ao MPAS.
-    ! Sem esta chamada, o MPAS recebe exportState vazio (campos zerados).
-    if (is%use_med_to_mpas) then
-      call RouteOcnToAtm(importState, exportState, clock, is, rc)
-      if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
-          ESMF_LOGMSG_WARNING)
-        rc = ESMF_SUCCESS
-      end if
-    end if
 
     ! Si_ifrac como sai do mediador (etapa 4 de 4 do FIX-DIAG-BITSUM-01)
     if (cfg_write_fixdiag) call log_ifrac_export_bitsum(exportState)

@@ -7,8 +7,9 @@
 !! InitializeAdvertise, create_atm_grid, create_ocn_grid com o supergrid
 !! sintético hgrid.nc, realize_component_fields,
 !! create_internal_fields, idc_create_routes) e roda três passos de
-!! update_ocean_fields_on_atm_grid (med_ocean) e export_to_components
-!! (med_export), com dados sintéticos:
+!! update_ocean_fields_on_atm_grid (med_ocean) e da exportação com o
+!! carimbo de tempo (desde a R-FASE11-15, a fase entregar de med_exchange;
+!! antes, a sequência de MediatorAdvance), com dados sintéticos:
 !!
 !!   So_t       SST com pontos abaixo de 270 K (terra), acima de 310 K e NaN
 !!   So_omask   uniforme (só mar) no passo 1, quando a SST passa pela rota
@@ -16,18 +17,27 @@
 !!              nos passos 2 e 3, pela rota ocn2atm_sst
 !!   Si_ifrac   fração de gelo na malha de fluxo com valores fora de [0, 1]
 !!   demais     campos internos com valores determinísticos
+!!   relógio    passo de 1 h; stampTime é o fim do passo, como no modo
+!!              concorrente, para diferir do tempo atual do relógio;
+!!              use_med_to_mpas ligado só no passo 2
 !!
 !! Em cada passo, grava em saida_<PET>.bin os valores locais da SST na
-!! malha de fluxo e de todos os campos do exportState; no fim, as
+!! malha de fluxo e de todos os campos do exportState, com o carimbo de
+!! tempo de cada um; no fim, as
 !! contagens de pontos completados de cada campo e o relatório de
 !! acoplamento (relata_completas, linhas CPL-REL: no log do ESMF).
 !!
 !! Usa só interfaces que existem desde a R-FASE11-12 (tag
 !! fase11-12-validada), para que o mesmo programa sirva às duas versões
-!! comparadas por compara-completar.bash.
+!! comparadas por compara-completar.bash. A exceção é a exportação: com
+!! COM_ENTREGAR definido (versão com med_exchange), chama entregar; sem
+!! ele, repete a sequência de MediatorAdvance até a R-FASE11-14 (tag
+!! fase11-14-validada), copiada sem mudança: export_to_components,
+!! stamp_export_fields e, com use_med_to_mpas, RouteOcnToAtm.
 program test_completar
   use ESMF
-  use NUOPC,                 only : NUOPC_Advertise, NUOPC_FieldDictionarySetAutoAdd
+  use NUOPC,                 only : NUOPC_Advertise, NUOPC_FieldDictionarySetAutoAdd, &
+                                    NUOPC_GetTimestamp
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use coupler_config_mod,    only : config_read
   use mom6_supergrid_mod,    only : mom6_supergrid_dims
@@ -37,7 +47,12 @@ program test_completar
   use med_init_mod,          only : create_atm_grid, create_ocn_grid, realize_component_fields, &
                                     create_internal_fields, idc_create_routes
   use med_ocean_mod,         only : update_ocean_fields_on_atm_grid
-  use med_export_mod,        only : export_to_components
+#ifdef COM_ENTREGAR
+  use med_exchange_mod,      only : entregar
+#else
+  use med_export_mod,        only : export_to_components, stamp_export_fields
+  use med_cap_methods_mod,   only : RouteOcnToAtm
+#endif
   use med_diag_mod,          only : relata_completas
   implicit none
 
@@ -50,6 +65,9 @@ program test_completar
   character(len=32) :: arquivo
   character(len=ESMF_MAXSTR), allocatable :: nomes(:)
   character(len=CPL_NOME_LEN), allocatable :: anuncio(:)
+  type(ESMF_Clock)        :: relogio
+  type(ESMF_Time)         :: t0, agora, carimbo
+  type(ESMF_TimeInterval) :: dt
 
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, &
                        defaultLogFileName='teste_completar', &
@@ -102,6 +120,11 @@ program test_completar
   allocate(nomes(n_itens))
   call ESMF_StateGet(exp, itemNameList=nomes, rc=rc)
 
+  call ESMF_TimeSet(t0, yy=2026, mm=3, dd=29, h=0, rc=rc)
+  call ESMF_TimeIntervalSet(dt, h=1, rc=rc)
+  relogio = ESMF_ClockCreate(timeStep=dt, startTime=t0, name='relogio', rc=rc)
+  if (rc /= ESMF_SUCCESS) error stop 'ESMF_ClockCreate'
+
   write(arquivo, '(A,I0,A)') 'saida_', localPet, '.bin'
   open(newunit=un, file=trim(arquivo), access='stream', form='unformatted', status='replace')
   diag_feito = .false.
@@ -112,15 +135,33 @@ program test_completar
     call update_ocean_fields_on_atm_grid(is, imp, f, diag_feito, rc)
     write(un) passo, rc
     call grava(un, is%ocn%sst)
+    call ESMF_ClockGet(relogio, currTime=agora, rc=rc)
+    carimbo = agora + dt
+    is%use_med_to_mpas = passo == 2
     rc = ESMF_SUCCESS
+#ifdef COM_ENTREGAR
+    call entregar(is, imp, exp, relogio, carimbo, rc)
+#else
     call export_to_components(is, imp, exp, rc)
+    call stamp_export_fields(exp, f, carimbo, rc)
+    if (is%use_med_to_mpas) then
+      call RouteOcnToAtm(imp, exp, relogio, is, rc)
+      if (rc /= ESMF_SUCCESS) then
+        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
+          ESMF_LOGMSG_WARNING)
+        rc = ESMF_SUCCESS
+      end if
+    end if
+#endif
     write(un) rc
     do k = 1, n_itens
       call ESMF_StateGet(exp, itemName=trim(nomes(k)), field=f, rc=rc)
       if (rc /= ESMF_SUCCESS) error stop 'ESMF_StateGet'
       write(un) nomes(k)
       call grava(un, f)
+      call grava_carimbo(un, f)
     end do
+    call ESMF_ClockAdvance(relogio, rc=rc)
   end do
   do k = 1, size(is%run%completa)
     write(un) k, is%run%completa(k)%aplicacoes, is%run%completa(k)%invalidos, &
@@ -228,6 +269,21 @@ contains
     call ESMF_FieldGet(campo, farrayPtr=p, rc=irc)
     ponteiro = irc == ESMF_SUCCESS
   end function ponteiro
+
+  !> Carimbo de tempo do campo (válido ou não, e o instante).
+  subroutine grava_carimbo(un, campo)
+    integer,          intent(in)    :: un
+    type(ESMF_Field), intent(inout) :: campo
+    type(ESMF_Time) :: t
+    logical :: valido
+    integer :: yy, mm, dd, h, m, s, irc
+
+    call NUOPC_GetTimestamp(campo, isValid=valido, time=t, rc=irc)
+    if (irc /= ESMF_SUCCESS) error stop 'NUOPC_GetTimestamp'
+    yy = 0; mm = 0; dd = 0; h = 0; m = 0; s = 0
+    if (valido) call ESMF_TimeGet(t, yy=yy, mm=mm, dd=dd, h=h, m=m, s=s, rc=irc)
+    write(un) valido, yy, mm, dd, h, m, s
+  end subroutine grava_carimbo
 
   !> Para cada DE local: limites e valores do campo.
   subroutine grava(un, campo)

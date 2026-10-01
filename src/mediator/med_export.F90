@@ -2,8 +2,9 @@
 !! @brief Exportação dos campos do mediador para os componentes.
 !!
 !! Fluxos, temperatura de superfície e fração de gelo levados da grade ATM
-!! interna para os campos do exportState, com a zeragem sobre terra e o
-!! carimbo de tempo dos campos exportados.
+!! interna para os campos do exportState, com a zeragem sobre terra. Chamado
+!! pela fase entregar (med_exchange), que carimba o tempo dos campos
+!! exportados (até a R-FASE11-15, stamp_export_fields ficava aqui).
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
 !!
@@ -12,7 +13,6 @@
 module med_export_mod
   use ESMF
   use coupler_config_mod, only: cfg_write_fixdiag
-  use NUOPC, only: NUOPC_SetTimestamp
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, cria_rota, completar_da_rota
@@ -22,7 +22,6 @@ module med_export_mod
   private
 
   public :: export_to_components
-  public :: stamp_export_fields
 
 contains
 
@@ -371,23 +370,5 @@ contains
     is%ocn%omask_done = .true.
   end subroutine regrid_land_mask
 
-  subroutine stamp_export_fields(exportState, field, stampTime, rc)
-    type(ESMF_State), intent(inout) :: exportState
-    type(ESMF_Field), intent(inout) :: field
-    type(ESMF_Time), intent(inout) :: stampTime
-    integer, intent(inout) :: rc
-    integer :: fieldCount
-    character(len=64), allocatable :: fieldNameList(:)
-    integer :: k
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    allocate(fieldNameList(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fieldNameList(k)), &
-        field=field, rc=rc)
-      call NUOPC_SetTimestamp(field, stampTime, rc=rc)
-    end do
-    deallocate(fieldNameList)
-  end subroutine stamp_export_fields
 
 end module med_export_mod

@@ -46,7 +46,7 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_su
       nc_writer.o cap_common.o regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o
       regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o cpl_check.o
       med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
-      med_ice.o med_ocean.o med_init.o med_flux.o med_export.o MED_cap.o"
+      med_ice.o med_ocean.o med_init.o med_flux.o med_export.o med_exchange.o MED_cap.o"
 
 echo "--- compilando a árvore de trabalho"
 bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compila.txt" \

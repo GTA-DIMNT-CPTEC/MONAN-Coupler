@@ -7,14 +7,15 @@
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
 # programa tests/completar/test_completar.F90 da árvore de trabalho (ele só
-# usa interfaces que existem desde a fase11-12-validada) e o executa com 1,
-# 4, 6 e 8 processos MPI, com um supergrid sintético
+# usa interfaces que existem desde a fase11-12-validada; a exportação usa a
+# fase entregar quando a versão tem med_exchange, com -DCOM_ENTREGAR) e o
+# executa com 1, 4, 6 e 8 processos MPI, com um supergrid sintético
 # (tests/supergrid/gera-supergrid.py). Para cada PET, os valores gravados
 # (saida_<PET>.bin: a SST na malha de fluxo e todos os campos exportados ao
-# oceano, em três passos, e as contagens de pontos completados) têm de ser
-# idênticos, bit a bit, e as mensagens do mediador e do framework de
-# interpolação no log do ESMF também, sem data e hora, incluindo as linhas
-# do relatório de acoplamento (CPL-REL:).
+# oceano, com os carimbos de tempo, em três passos, e as contagens de pontos
+# completados) têm de ser idênticos, bit a bit, e as mensagens do mediador
+# e do framework de interpolação no log do ESMF também, sem data e hora,
+# incluindo as linhas do relatório de acoplamento (CPL-REL:).
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/completar/compara-completar.bash REV [SAIDA]
@@ -30,7 +31,7 @@
 set -uo pipefail
 
 REV=${1:-}
-[[ -n "${REV}" ]] || { sed -n '2,27p' "$0"; exit 2; }
+[[ -n "${REV}" ]] || { sed -n '2,28p' "$0"; exit 2; }
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=$(mkdir -p "${2:-${RAIZ}/build-local/completar}" && cd "${2:-${RAIZ}/build-local/completar}" && pwd)
 MPIRUN=${MPIRUN:-mpiexec}
@@ -46,7 +47,7 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_su
       regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o mpas_stubs.o
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
       med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
-      med_ice.o med_ocean.o med_init.o med_export.o"
+      med_ice.o med_ocean.o med_init.o med_export.o med_exchange.o"
 objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
 
 python3 "${RAIZ}/tests/supergrid/gera-supergrid.py" "${SAIDA}/dados" > /dev/null \
@@ -65,8 +66,10 @@ for versao in antiga nova; do
   bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" -a > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
+    # Com med_exchange (desde a R-FASE11-15), a exportação é a fase entregar
+    defs=""; [[ -f med_exchange.o ]] && defs="-DCOM_ENTREGAR"
     # shellcheck disable=SC2086
-    ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
+    ${FC} ${EINC} -I. -cpp ${defs} -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_completar.F90" -o test_completar.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_completar test_completar.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp

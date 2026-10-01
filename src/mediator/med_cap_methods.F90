@@ -10,7 +10,6 @@
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
 !!   RegridOrCopy               regrid ATM→OCN com fallback temporário
-!!   RouteOcnToAtm              exporta campos OCN→ATM via mediador
 !!   spec_da_rota               configuração de uma rota na tabela ROTAS
 !!   completar_da_rota          preenchimento por vizinhança de uma rota de ROTAS
 !!   cria_rota                  cria uma rota com a configuração de ROTAS
@@ -22,7 +21,6 @@ module med_cap_methods_mod
   use regrid_manager_mod, only : regrid_spec, regrid_manager_t
   use regrid_base_mod,    only : regrid_spec_t, regrid_fill_t
   use cpl_map_mod,        only : ROTAS, cpl_rota_indice, CPL_AUSENTE
-  use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
   use coupler_config_mod, only: cfg_use_sis2_dynamic
@@ -39,7 +37,6 @@ module med_cap_methods_mod
   public :: GetFieldPtr
   public :: GetFieldPtrOptional
   public :: RegridOrCopy
-  public :: RouteOcnToAtm
   public :: spec_da_rota
   public :: completar_da_rota
   public :: cria_rota
@@ -248,56 +245,6 @@ contains
       line=__LINE__, file=__FILE__)) return
 
   end subroutine RegridOrCopy
-
-  !============================================================================
-  !> @brief Roteia campos oceânicos para a atmosfera (MOM6 dinâmico).
-  !!
-  !! MOM6 dinâmico (grade tripolar B-grid):
-  !!   Chamada em MediatorAdvance quando use_med_to_mpas=.true. (nuopc.input).
-  !!   O conector direto OCN→MPAS não existe neste modo; tudo passa pelo MED.
-  !!
-  !! Campos processados:
-  !!   So_t (SST), Si_ifrac, So_u, So_v, Sf_zorl — ver MediatorAdvance para detalhes.
-  !!   Sf_zorl: calculada pelo bulk NCAR via Charnock + Smith (1988).
-  !!
-  !============================================================================
-  subroutine RouteOcnToAtm(importState, exportState, clock, is, rc)
-    type(ESMF_State),        intent(inout) :: importState
-    type(ESMF_State),        intent(inout) :: exportState
-    type(ESMF_Clock),        intent(in)    :: clock
-    type(MED_InternalState), intent(inout) :: is
-    integer,                 intent(out)   :: rc
-
-    real(ESMF_KIND_R8), pointer :: ptr_atm(:,:)
-
-
-    rc = ESMF_SUCCESS
-    nullify(ptr_atm)
-
-    ! Guard: routehandles devem estar criados
-    if (.not. is%regrid%has('ocn2atm')) then
-      call ESMF_LogWrite( &
-        'MED RouteOcnToAtm: rota ocn2atm ainda nao criada; pulando', &
-        ESMF_LOGMSG_WARNING)
-      rc = ESMF_SUCCESS
-      return
-    end if
-
-    ! So_t, Si_ifrac, So_u e So_v ja foram regridados e exportados por
-    ! RegridOrCopy em MediatorAdvance; aqui resta apenas o carimbo de tempo.
-
-    ! Estampilar timestamp no exportState (MPAS usa para validação)
-    call NUOPC_SetTimestamp(exportState, clock, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, &
-      msg='MED RouteOcnToAtm: falha NUOPC_SetTimestamp', &
-      line=__LINE__, file=__FILE__)) return
-
-    call ESMF_LogWrite('MED RouteOcnToAtm: regrid OCN->ATM concluido (Fase 2)', &
-      ESMF_LOGMSG_INFO)
-
-  end subroutine RouteOcnToAtm
-
-
 
   !============================================================================
   !> @brief Configuração da rota nome na tabela ROTAS (cpl_map): métodos em

@@ -66,7 +66,7 @@ for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergr
          mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_cap_methods mpas_cap_MONAN DATM_cap \
          docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
          med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
-         med_diag med_ice med_ocean med_init med_flux med_export MED_cap esm; do
+         med_diag med_ice med_ocean med_init med_flux med_export med_exchange MED_cap esm; do
   f=$(find "${RAIZ}/src" -name "${s}.F90" -not -path '*/upstream/*' | head -1)
   if [[ -z "${f}" ]]; then
     printf '%-24s %s\n' "${s}" "AUSENTE"
