@@ -9,9 +9,11 @@
 ! R-FASE11-06 esses caps geram as listas a partir do mapa. O SIS2 anunciava
 ! primeiro sis_import_names_atm e depois sis_import_names_ocn.
 !
-! MONAN-A, DATM e DOCN: exportações anunciadas por mpas_cap_MONAN.F90
-! (EXP_NAMES), DATM_cap.F90 (na ordem das chamadas a NUOPC_Advertise) e
-! DOCN_cap.F90 (EXP_NAMES), na R-FASE11-06.
+! MONAN-A, DATM e DOCN: listas de mpas_cap_MONAN.F90 (IMP_NAMES e
+! EXP_NAMES), DATM_cap.F90 (na ordem das chamadas a NUOPC_Advertise) e
+! DOCN_cap.F90 (IMP_NAMES e EXP_NAMES) até a R-FASE11-06 (tag
+! fase11-06-validada), copiadas sem mudança, só com os nomes trocados. Desde
+! a R-FASE11-07 esses caps também geram as listas a partir do mapa.
 character(len=32), parameter :: mom_export_names(7) = [ &
     "So_t    ", "So_s    ", "So_u    ", "So_v    ", &
     "So_omask", "Fioo_q  ", "Si_ifrac" ]
@@ -41,3 +43,10 @@ character(len=32), parameter :: datm_exp_names(9) = [ character(len=32) :: &
     'Faxa_swdn', 'Faxa_lwdn', 'Faxa_rain', 'Faxa_snow' ]
 character(len=32), parameter :: docn_exp_names(6) = [ character(len=32) :: &
     'So_t', 'Si_ifrac', 'Sf_zorl', 'So_s', 'So_u', 'So_v' ]
+character(len=32), parameter :: mpas_imp_names(7) = [ character(len=32) :: &
+    'Sx_tsfc', 'Si_ifrac', 'So_u', 'So_v', 'Sf_zorl', 'Sf_albedo', 'Sx_omask' ]
+character(len=32), parameter :: docn_imp_names(14) = [ &
+    "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", &
+    "Foxx_lwnet    ", "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", &
+    "Foxx_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
+    "Si_ifrac      ", "So_duu10n     " ]

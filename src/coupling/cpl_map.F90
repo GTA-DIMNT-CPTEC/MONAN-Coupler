@@ -49,7 +49,10 @@
 !! mediador, por exemplo, só por use_datm e use_sis2_dynamic, e anuncia
 !! So_omask mesmo com o DOCN, que não a exporta); as demais chaves ficam
 !! livres, e a lista é a união das configurações válidas que concordam com
-!! a atual nas chaves pedidas, na ordem de TROCAS, sem repetição.
+!! a atual nas chaves pedidas, na ordem de TROCAS, sem repetição. O
+!! mediador e os caps dos modelos anunciam e realizam os campos nessa ordem
+!! (e na de EXPORTACOES, abaixo): mudar a ordem das linhas muda a ordem do
+!! anúncio.
 !!
 !! EXPORTACOES: o que cada modelo exporta (anuncia no exportState) em cada
 !! ponto, consumido ou não, na ordem do anúncio do cap. Toda troca por
@@ -305,8 +308,8 @@ module cpl_map_mod
     cpl_troca_t('Sa_pslv',        'MED@ocn_med',  'OCN@docn',     'conector',         'docn'),                   &
     cpl_troca_t('Si_ifrac',       'MED@ocn_med',  'OCN@docn',     'conector',         'docn'),                   &
     cpl_troca_t('So_duu10n',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn'),                   &
-    ! 8. Mediador para o gelo, na ordem de import_names_atm e
-    !    import_names_ocn (sis_cap_MONAN)
+    ! 8. Mediador para o gelo: forçante atmosférica e depois So_t, So_u e
+    !    So_v, na ordem do anúncio do SIS2
     cpl_troca_t('Fioi_taux',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
     cpl_troca_t('Fioi_tauy',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
     cpl_troca_t('Fioi_sen',       'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
@@ -323,8 +326,8 @@ module cpl_map_mod
     cpl_troca_t('So_t',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
     cpl_troca_t('So_u',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
     cpl_troca_t('So_v',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2'),                   &
-    ! 9. Contorno oceânico da atmosfera pelo mediador, na ordem de IMP_NAMES
-    !    (mpas_cap_MONAN)
+    ! 9. Contorno oceânico da atmosfera pelo mediador, na ordem do anúncio do
+    !    MONAN-A
     cpl_troca_t('Sx_tsfc',        'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas'),       &
     cpl_troca_t('Si_ifrac',       'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas'),       &
     cpl_troca_t('So_u',           'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas'),       &
@@ -358,7 +361,7 @@ module cpl_map_mod
   !--------------------------------------------------------------------------
   type(cpl_exporta_t), parameter :: EXPORTACOES(*) = [                          &
     !             campo             ponto           quando
-    ! MONAN-A, na ordem de EXP_NAMES (mpas_cap_MONAN)
+    ! MONAN-A (mpas_cap_MONAN)
     cpl_exporta_t('Sa_pslv_mpas',   'ATM@atm_cap',  'mpas'),                     &
     cpl_exporta_t('Sa_tbot_mpas',   'ATM@atm_cap',  'mpas'),                     &
     cpl_exporta_t('Sa_u10m_mpas',   'ATM@atm_cap',  'mpas'),                     &
@@ -372,7 +375,7 @@ module cpl_map_mod
     cpl_exporta_t('Faxa_lat_mpas',  'ATM@atm_cap',  'mpas'),                     &
     cpl_exporta_t('Faxa_taux_mpas', 'ATM@atm_cap',  'mpas'),                     &
     cpl_exporta_t('Faxa_tauy_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    ! DATM, na ordem do anúncio (DATM_cap)
+    ! DATM (DATM_cap)
     cpl_exporta_t('Sa_u10m',        'ATM@datm',     'datm'),                     &
     cpl_exporta_t('Sa_v10m',        'ATM@datm',     'datm'),                     &
     cpl_exporta_t('Sa_tbot',        'ATM@datm',     'datm'),                     &

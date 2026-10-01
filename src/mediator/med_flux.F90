@@ -83,7 +83,7 @@ contains
     mpas_available = is%use_mpas_atm
 
     !--------------------------------------------------------------------------
-    ! 1a. CAMPOS OBRIGATORIOS DO MPAS (7 campos do EXP_NAMES do cap MPAS)
+    ! 1a. CAMPOS OBRIGATORIOS DO MPAS (campos exportados pelo cap do MPAS)
     !--------------------------------------------------------------------------
     i1_glob = 1; i2_glob = 1; j1_glob = 1; j2_glob = 1  ! defaults
     if (mpas_available) then

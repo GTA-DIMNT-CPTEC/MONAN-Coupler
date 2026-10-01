@@ -150,6 +150,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-04-FIX01 | linhas dos pontos completados no último passo do mediador (a finalização dos componentes não é chamada) |
 | R-FASE11-05 | o mediador anuncia e realiza os campos a partir do mapa; arquivos com nomes de campos escritos à mão de 8 para 5 (só os caps) |
 | R-FASE11-06 | os caps do MOM6 e do SIS2 anunciam e realizam os campos a partir do mapa (tabela nova `EXPORTACOES`); arquivos com nomes de campos escritos à mão de 5 para 3 |
+| R-FASE11-07 | os caps do MONAN-A, do DOCN e do DATM anunciam e realizam os campos a partir do mapa; arquivos com nomes de campos escritos à mão de 3 para 0 (meta do bloco B) |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

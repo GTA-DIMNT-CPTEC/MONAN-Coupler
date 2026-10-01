@@ -101,7 +101,7 @@ contains
   !!
   !! INVARIANTE A PRESERVAR: uma variável NetCDF por membro de
   !!   atm_ocean_boundary_type. Ao acrescentar um membro ao tipo (em
-  !!   mpas_atm_types.F90) e ao IMP_NAMES (em mpas_cap_MONAN.F90),
+  !!   mpas_atm_types.F90) e ao mapa de acoplamento (ponto ATM@atm_cap),
   !!   acrescente aqui também. Não há verificação automática: a rotina
   !!   recebe atm_bnd, não o importState, e por isso não pode iterar sobre
   !!   os campos anunciados. A conferência é visual, contando membros.
@@ -109,7 +109,7 @@ contains
   !! NOTA SOBRE O RÓTULO So_t (ver): a variável se chama
   !!   So_t por compatibilidade com o pós-processamento e as animações, mas o
   !!   campo importado é Sx_tsfc, a temperatura de pele composta (ver
-  !!   IMP_NAMES em mpas_cap_MONAN.F90). O nome NÃO foi alterado aqui para
+  !!   o ponto ATM@atm_cap do mapa de acoplamento). O nome NÃO foi alterado aqui para
   !!   não quebrar postproc_monan2_import.py e anim_monan2_import.py; a
   !!   renomeação, se feita, tem de ser coordenada com essas ferramentas.
   !!

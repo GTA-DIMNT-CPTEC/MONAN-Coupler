@@ -42,7 +42,7 @@ mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
 OBJS="coupler_utils.o coupler_constants.o coupler_config.o nc_writer.o cap_common.o
-      docn_cap_netcdf.o DOCN_cap.o"
+      regrid_base.o cpl_fields.o cpl_map.o docn_cap_netcdf.o DOCN_cap.o"
 objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
 
 # Dados sintéticos, os mesmos para as duas versões

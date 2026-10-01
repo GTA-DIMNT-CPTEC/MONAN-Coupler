@@ -103,7 +103,7 @@ contains
     call broadcast_to_cat(ptr2d, is%aib%lw_flux)
     ! Fioi_swnet_* (albedo do gelo por banda, PURO, sem blend com agua
     ! aberta), e nao Foxx_swnet_* (albedo MEDIO da celula, o enviado ao
-    ! MOM6). Ver o comentario de import_names_atm acima e med_bulk_ncar.F90
+    ! MOM6). Ver o comentario de PONTO_ICE em sis_cap_MONAN.F90 e med_bulk_ncar.F90
     ! para o calculo.
     call get_field_2d(importState, "Fioi_swnet_vdr", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_vis_dir)
@@ -413,7 +413,7 @@ contains
   !! export_si_albedo). Usada pelo mediador para calcular um segundo
   !! conjunto de fluxos turbulentos (Fioi_*) especifico para a fracao de
   !! gelo, em vez de reusar o Foxx_* calculado com SST (ver
-  !! import_names_atm em sis_cap_MONAN.F90).
+  !! PONTO_ICE em sis_cap_MONAN.F90).
   !!
   !! Ice%t_surf e' preenchido pela MESMA rotina (set_ice_surface_state) que
   !! Ice%part_size/Ice%albedo_*.

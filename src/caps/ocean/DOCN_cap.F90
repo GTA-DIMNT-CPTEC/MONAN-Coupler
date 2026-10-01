@@ -64,6 +64,8 @@ module DOCN_cap_mod
   use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &
                                  cap_fill_export_initial, cap_set_data_complete, &
                                  cap_stamp_export
+  use cpl_fields_mod,      only: CPL_NOME_LEN
+  use cpl_map_mod,         only: cpl_chegadas, cpl_exportacoes, cpl_config_atual
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -111,23 +113,15 @@ module DOCN_cap_mod
   ! ── Rugosidade oceânica padrão ─────────────────────────────────────────────
   real(ESMF_KIND_R8), parameter :: ZORL_DEFAULT = 0.001_ESMF_KIND_R8  ! [m]
 
-  ! ── Campos exportados (OCN → MED e OCN → MPAS) ───────────────────────────
-  integer, parameter :: N_EXP = 6
-  character(len=32), parameter :: EXP_NAMES(N_EXP) = [ &
-    "So_t    ", &  ! SST [K]
-    "Si_ifrac", &  ! Fracao de gelo [0-1]
-    "Sf_zorl ", &  ! Rugosidade [m]
-    "So_s    ", &  ! Salinidade superficial [psu]  (opcional - padrao 35 psu)
-    "So_u    ", &  ! Corrente zonal [m/s]          (opcional - padrao 0.0)
-    "So_v    " ]   ! Corrente meridional [m/s]     (opcional - padrao 0.0)
-
-  ! ── Campos importados (MED → OCN) ─────────────────────────────────────────
-  integer, parameter :: N_IMP = 14
-  character(len=32), parameter :: IMP_NAMES(N_IMP) = [ &
-    "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", &
-    "Foxx_lwnet    ", "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", &
-    "Foxx_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
-    "Si_ifrac      ", "So_duu10n     " ]
+  ! ── Campos trocados ───────────────────────────────────────────────────────
+  ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
+  ! OCN@docn: a importação são os 14 fluxos e estados que chegam do mediador
+  ! (cpl_chegadas: Foxx_*, Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac e
+  ! So_duu10n); a exportação, os 6 campos de EXPORTACOES (cpl_exportacoes):
+  ! So_t [K], Si_ifrac [0-1], Sf_zorl [m], So_s [psu], So_u e So_v [m/s].
+  ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
+  ! O valor inicial de cada campo exportado está em valor_inicial_exportacao.
+  character(len=*), parameter :: PONTO_OCN = 'OCN@docn'
 
   !----------------------------------------------------------------------------
   ! Estado interno do DOCN
@@ -190,13 +184,12 @@ contains
   !=============================================================================
   ! InitializeAdvertise — anuncia campos de SST/gelo/corrente para o MED e MPAS
   !
-  ! Todos os N_IMP campos importados (fluxos do mediador MED→OCN) são anunciados.
+  ! Todos os campos importados (fluxos do mediador MED→OCN) são anunciados.
   ! O conector NUOPC MED→OCN cria RouteHandles bilineares na grade OISST nativa
   ! (1440×720 com decomposição 2D via sqrt(petCount) tiles por dimensão,
   ! garantindo colunas ≥2 e evitando o erro "DE width 1" em qualquer petCount).
   !
-  ! Campos exportados (N_EXP = 6): So_t, Si_ifrac, Sf_zorl, So_s, So_u, So_v.
-  ! Campos importados (N_IMP = 14): Foxx_*, Faxa_*, Sa_pslv, Si_ifrac, So_duu10n.
+  ! As listas saem do mapa de acoplamento (ponto PONTO_OCN, acima).
   !=============================================================================
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -205,24 +198,28 @@ contains
     integer,              intent(out)   :: rc
 
     integer :: i
+    character(len=CPL_NOME_LEN), allocatable :: imp(:), exp(:)
 
     rc = ESMF_SUCCESS
 
+    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', imp)
+    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', exp)
+
     ! Anuncia todos os campos importados do mediador (MED→OCN).
-    do i = 1, N_IMP
-      call NUOPC_Advertise(importState, StandardName=trim(IMP_NAMES(i)), rc=rc)
+    do i = 1, size(imp)
+      call NUOPC_Advertise(importState, StandardName=trim(imp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     ! Anuncia campos exportados para MED e para OCN→MPAS.
-    do i = 1, N_EXP
-      call NUOPC_Advertise(exportState, StandardName=trim(EXP_NAMES(i)), rc=rc)
+    do i = 1, size(exp)
+      call NUOPC_Advertise(exportState, StandardName=trim(exp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     call ESMF_LogWrite('DOCN: InitializeAdvertise concluido (' &
-      //int_to_str(N_EXP)//' exp, ' &
-      //int_to_str(N_IMP)//' imp)', ESMF_LOGMSG_INFO)
+      //int_to_str(size(exp))//' exp, ' &
+      //int_to_str(size(imp))//' imp)', ESMF_LOGMSG_INFO)
 
   end subroutine InitializeAdvertise
 
@@ -253,6 +250,7 @@ contains
       integer :: regDecomp_2d(2)
       integer :: localDeCount_docn
       integer :: lde_docn
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -338,12 +336,14 @@ contains
         end do
       end do  ! lde_docn
 
-    ! Campos importados — anuncia e realiza todos os N_IMP fluxos do mediador.
-    call cap_realize_fields(importState, grid, IMP_NAMES, N_IMP, rc)
+    ! Campos importados: todos os fluxos do mediador.
+    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', nomes)
+    call cap_realize_fields(importState, grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Exportados
-    call cap_realize_fields(exportState, grid, EXP_NAMES, N_EXP, rc)
+    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Estado interno
@@ -371,21 +371,23 @@ contains
     type(ESMF_State)               :: exportState
     type(ESMF_Clock)               :: clock_idc
     type(ESMF_Time)                :: startTime_idc
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    real(ESMF_KIND_R8),          allocatable :: valores(:)
+    integer :: k
 
     rc = ESMF_SUCCESS
 
     call ESMF_GridCompGet(gcomp, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Preencher exportState com valores iniciais fisicamente consistentes:
-    ! SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fracao de gelo
-    ! padrao, rugosidade ZORL_DEFAULT e salinidade media global de 35 psu; as
-    ! correntes (So_u, So_v) e os demais campos comecam em zero (repouso).
-    call cap_fill_export_initial(exportState,                           &
-      [character(len=8) :: 'So_t', 'Si_ifrac', 'Sf_zorl', 'So_s'],       &
-      [real(cfg_sst_default, ESMF_KIND_R8),                             &
-       real(cfg_ice_fraction_default, ESMF_KIND_R8),                    &
-       ZORL_DEFAULT, 35.0_ESMF_KIND_R8], rc)
+    ! Preencher exportState com valores iniciais fisicamente consistentes
+    ! (valor_inicial_exportacao); os campos sem valor previsto começam em zero.
+    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    allocate(valores(size(nomes)))
+    do k = 1, size(nomes)
+      valores(k) = valor_inicial_exportacao(nomes(k))
+    end do
+    call cap_fill_export_initial(exportState, nomes, valores, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Atualizar timestamps: NUOPC_ModelBase verifica que os campos no
@@ -406,6 +408,31 @@ contains
     call ESMF_LogWrite('DOCN: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
 
   end subroutine InitializeDataComplete
+
+  !=============================================================================
+  ! valor_inicial_exportacao: valor de um campo exportado antes da primeira
+  ! leitura: SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fracao
+  ! de gelo padrao, rugosidade ZORL_DEFAULT e salinidade media global de
+  ! 35 psu; as correntes (So_u, So_v) e os demais campos comecam em zero
+  ! (repouso).
+  !=============================================================================
+  function valor_inicial_exportacao(nome) result(valor)
+    character(len=*), intent(in) :: nome
+    real(ESMF_KIND_R8)           :: valor
+
+    select case (trim(nome))
+    case ('So_t')
+      valor = real(cfg_sst_default, ESMF_KIND_R8)
+    case ('Si_ifrac')
+      valor = real(cfg_ice_fraction_default, ESMF_KIND_R8)
+    case ('Sf_zorl')
+      valor = ZORL_DEFAULT
+    case ('So_s')
+      valor = 35.0_ESMF_KIND_R8
+    case default
+      valor = 0.0_ESMF_KIND_R8
+    end select
+  end function valor_inicial_exportacao
 
   !=============================================================================
   ! ModelAdvance — lê campos oceânicos do NetCDF e popula exportState

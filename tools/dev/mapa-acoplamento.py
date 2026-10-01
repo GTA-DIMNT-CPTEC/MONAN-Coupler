@@ -306,10 +306,9 @@ def gera(t):
         'conferida por `tests/unit/test_cpl_map.F90`; a arquitetura e o plano',
         'estão em `docs/arquitetura-acoplamento.md`.',
         '',
-        'O mapa descreve o acoplamento que o código faz hoje. O mediador (desde a',
-        'R-FASE11-05) e os caps do MOM6 e do SIS2 (desde a R-FASE11-06) anunciam',
-        'e realizam os campos a partir dele; os caps do MONAN-A, do DATM e do DOCN',
-        'ainda usam listas próprias, que o teste confere contra `EXPORTACOES`.',
+        'O mapa descreve o acoplamento que o código faz hoje. O mediador e os caps',
+        'dos cinco modelos anunciam e realizam os campos a partir dele, na ordem',
+        'das linhas de `TROCAS` (importação) e de `EXPORTACOES` (exportação).',
         '',
         '{} campos, {} malhas, {} trocas, {} exportações e {} rotas.'.format(
             len(campos), len(malhas), len(trocas), len(exporta), len(rotas)),

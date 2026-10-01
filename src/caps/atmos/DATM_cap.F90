@@ -53,9 +53,16 @@ module DATM_cap_mod
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field, &
                              cap_fill_export_initial, cap_set_data_complete, &
                              cap_stamp_export
+  use cpl_fields_mod, only : CPL_NOME_LEN
+  use cpl_map_mod,    only : cpl_exportacoes, cpl_config_atual
 
   implicit none
   private
+
+  ! Os campos exportados saem do mapa de acoplamento (src/coupling/
+  ! cpl_map.F90), no ponto ATM@datm: os 9 campos de EXPORTACOES
+  ! (cpl_exportacoes), na ordem do anúncio. O DATM não importa nada.
+  character(len=*), parameter :: PONTO_DATM = 'ATM@datm'
 
   ! Início da mensagem de erro de cap_put_field quando o campo não existe.
   character(len=*), parameter :: PUT_TAG = "PutField: "
@@ -133,32 +140,19 @@ contains
     type(ESMF_State)     :: importState, exportState
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    integer :: i
 
     rc = ESMF_SUCCESS
 
-    ! Campos de estado atmosferico bruto (JRA55)
-    call NUOPC_Advertise(exportState, StandardName="Sa_u10m",   rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Sa_v10m",   rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Sa_tbot",   rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Sa_shum",   rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Sa_pslv",   rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Radiacao descendente (sem decomposicao em bandas - o MED faz isso)
-    call NUOPC_Advertise(exportState, StandardName="Faxa_swdn", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Faxa_lwdn", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Precipitacao
-    call NUOPC_Advertise(exportState, StandardName="Faxa_rain", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Advertise(exportState, StandardName="Faxa_snow", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
+    ! Campos de estado atmosferico bruto (JRA55): vento a 10 m, temperatura,
+    ! umidade e pressao; radiacao descendente (sem decomposicao em bandas, o
+    ! MED faz isso) e precipitacao.
+    call cpl_exportacoes(PONTO_DATM, cpl_config_atual(), '', nomes)
+    do i = 1, size(nomes)
+      call NUOPC_Advertise(exportState, StandardName=trim(nomes(i)), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
 
     call ESMF_LogWrite('DATM: InitializeAdvertise concluido (campos brutos JRA55)', &
       ESMF_LOGMSG_INFO)
@@ -182,6 +176,7 @@ contains
     real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
     type(DATM_InternalStateWrapper) :: iswrap
     type(DATM_InternalState), pointer :: is
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -228,9 +223,8 @@ contains
     end do
 
     ! Realiza campos brutos
-    call cap_realize_fields(exportState, grid, &
-      [character(len=9) :: "Sa_u10m", "Sa_v10m", "Sa_tbot", "Sa_shum", "Sa_pslv", &
-                           "Faxa_swdn", "Faxa_lwdn", "Faxa_rain", "Faxa_snow"], 9, rc)
+    call cpl_exportacoes(PONTO_DATM, cpl_config_atual(), '', nomes)
+    call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
     if (rc/=ESMF_SUCCESS) return
 
     allocate(iswrap%wrap)

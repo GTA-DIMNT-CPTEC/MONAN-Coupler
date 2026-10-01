@@ -97,7 +97,7 @@ contains
     ! artificialmente reduzido em celulas com gelo, suprimindo o derretimento
     ! basal e engrossando o gelo em excesso (efeito observado quando a mistura
     ! era feita na propria So_t). Sx_tsfc so' e' importado pelo MPAS-A
-    ! (IMP_NAMES em mpas_cap_MONAN.F90, para atm_bnd%sst).
+    ! (ponto ATM@atm_cap do mapa de acoplamento, para atm_bnd%sst).
     call export_surface_temperature(is)
 
     ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector MED→MPAS
@@ -123,8 +123,8 @@ contains
     end if
 
     ! Sx_tsfc — composto (SST+Si_t_sis2 por
-    ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst via IMP_NAMES em
-    ! mpas_cap_MONAN.F90). So_t acima permanece SST pura para o SIS2.
+    ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst, ponto ATM@atm_cap do
+    ! mapa de acoplamento). So_t acima permanece SST pura para o SIS2.
     call RegridOrCopy(is%sfc%tsfc,   exportState, "Sx_tsfc",        is, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: RegridOrCopy Sx_tsfc FALHOU — exportState ' // &

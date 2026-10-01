@@ -42,7 +42,8 @@ contains
 
   !> @brief Importa campos do importState ESMF para atm_bnd.
   !!
-  !! Importa os campos do mediador MED->MPAS (IMP_NAMES), entre eles:
+  !! Importa os campos do mediador MED->MPAS (ponto ATM@atm_cap do mapa de
+  !! acoplamento), entre eles:
   !!   Sx_tsfc   -> atm_bnd%sst           Temp. de pele composta [K]
   !!                (So_t, SST pura, e' consumida so' pelo SIS2, para o
   !!                fluxo de calor basal do gelo)

@@ -38,9 +38,11 @@
 !!               configuração é exportado por ele nessa configuração; as
 !!               exportações de cada modelo iguais, nome a nome e na mesma
 !!               ordem, às listas dos caps (listas_caps.inc)
-!!   caps        as listas que os caps do MOM6 e do SIS2 anunciam desde a
-!!               R-FASE11-06, geradas por cpl_chegadas e cpl_exportacoes sem
-!!               chaves, iguais nome a nome e na mesma ordem às de antes
+!!   caps        as listas que os caps dos modelos anunciam, geradas por
+!!               cpl_chegadas e cpl_exportacoes sem chaves (MOM6 e SIS2 desde
+!!               a R-FASE11-06; MONAN-A, DATM e DOCN desde a R-FASE11-07),
+!!               iguais nome a nome e na mesma ordem às de antes, em toda
+!!               configuração
 !!
 !! Configurações conferidas (chaves de &nuopc_mode):
 !!   producao       MONAN-A, MOM6, SIS2, contorno pelo mediador
@@ -471,16 +473,29 @@ contains
                    nerr == 0)
   end subroutine confere_exporta_conector
 
-  !> Listas geradas para os caps do MOM6 e do SIS2 (sem chaves: valem em
-  !! qualquer configuração) iguais às que eles anunciavam até a R-FASE11-05;
-  !! a configuração passada não pode mudar o resultado.
+  !> Listas geradas para os caps dos modelos (sem chaves: valem em qualquer
+  !! configuração) iguais às que eles anunciavam antes; a configuração
+  !! passada não pode mudar o resultado.
   subroutine confere_listas_caps()
     character(len=CPL_NOME_LEN), allocatable :: nomes(:)
     logical :: ok_imp_mom, ok_exp_mom, ok_imp_sis, ok_exp_sis
+    logical :: ok_imp_mpas, ok_exp_mpas, ok_exp_datm, ok_imp_docn, ok_exp_docn
     integer :: kc
 
     ok_imp_mom = .true.; ok_exp_mom = .true.; ok_imp_sis = .true.; ok_exp_sis = .true.
+    ok_imp_mpas = .true.; ok_exp_mpas = .true.; ok_exp_datm = .true.
+    ok_imp_docn = .true.; ok_exp_docn = .true.
     do kc = 1, NCFG
+      call cpl_chegadas('ATM@atm_cap', .true., CFG(kc), '', nomes)
+      ok_imp_mpas = ok_imp_mpas .and. lista_igual(nomes, mpas_imp_names)
+      call cpl_exportacoes('ATM@atm_cap', CFG(kc), '', nomes)
+      ok_exp_mpas = ok_exp_mpas .and. lista_igual(nomes, mpas_exp_names)
+      call cpl_exportacoes('ATM@datm', CFG(kc), '', nomes)
+      ok_exp_datm = ok_exp_datm .and. lista_igual(nomes, datm_exp_names)
+      call cpl_chegadas('OCN@docn', .true., CFG(kc), '', nomes)
+      ok_imp_docn = ok_imp_docn .and. lista_igual(nomes, docn_imp_names)
+      call cpl_exportacoes('OCN@docn', CFG(kc), '', nomes)
+      ok_exp_docn = ok_exp_docn .and. lista_igual(nomes, docn_exp_names)
       call cpl_chegadas('OCN@ocn_mom6', .true., CFG(kc), '', nomes)
       ok_imp_mom = ok_imp_mom .and. lista_igual(nomes, mom_import_names)
       call cpl_exportacoes('OCN@ocn_mom6', CFG(kc), '', nomes)
@@ -495,6 +510,13 @@ contains
     call resultado('caps: exportacao do MOM6 igual a de antes, em toda configuracao', ok_exp_mom)
     call resultado('caps: importacao do SIS2 igual a de antes, em toda configuracao', ok_imp_sis)
     call resultado('caps: exportacao do SIS2 igual a de antes, em toda configuracao', ok_exp_sis)
+    call resultado('caps: importacao do MONAN-A igual a de antes, em toda configuracao', ok_imp_mpas)
+    call resultado('caps: exportacao do MONAN-A igual a de antes, em toda configuracao', ok_exp_mpas)
+    call resultado('caps: exportacao do DATM igual a de antes, em toda configuracao', ok_exp_datm)
+    call resultado('caps: importacao do DOCN igual a de antes, em toda configuracao', ok_imp_docn)
+    call resultado('caps: exportacao do DOCN igual a de antes, em toda configuracao', ok_exp_docn)
+    call cpl_chegadas('ATM@datm', .true., CFG(4), '', nomes)
+    call resultado('caps: o DATM nao importa nada', size(nomes) == 0)
     ! Sem nuopc.input, cpl_config_atual dá a configuração padrão; o resultado
     ! sem chaves é o mesmo.
     call cpl_chegadas('OCN@ocn_mom6', .true., cpl_config_atual(), '', nomes)

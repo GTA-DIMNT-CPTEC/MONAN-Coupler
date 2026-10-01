@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6) e na R-FASE11-06 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6) e na R-FASE11-07 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -205,7 +205,7 @@ No mediador, o mesmo nome pode existir duas vezes em `MED@ocn_med`: o campo impo
 
 As listas de campos que um componente anuncia e realiza saem do mapa por `cpl_chegadas(ponto, por_conector, cfg, chaves, nomes)`: os campos que chegam ao ponto (`COMPONENTE@malha`, ou só o componente), por conector (importação) ou por rota e cap (dentro do componente), na ordem de `TROCAS` e sem repetição. O componente diz quais chaves de `&nuopc_mode` consulta; as outras ficam livres, e a lista é a união das configurações válidas que concordam com a atual nessas chaves. O mediador consulta só `datm` e `sis2` (`MED_CHAVES`): por isso anuncia `So_omask` também com o DOCN, como antes. A importação do mediador é a chegada por conector; a exportação, a chegada em `MED@ocn_med` pelas rotas `atm2ocn` e `atm2ocn_ice`, que já estava na ordem de `export_names`.
 
-A exportação de um modelo não sai de `TROCAS`, porque um modelo pode anunciar campos que nenhum conector leva: o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome na produção (os três avisos da conferência, seção 3.6). Desde a R-FASE11-06, a tabela `EXPORTACOES` tem uma linha por campo que um modelo anuncia no estado de exportação (campo, ponto e `quando`), na ordem do anúncio, e `cpl_exportacoes(ponto, cfg, chaves, nomes)` gera a lista, com a mesma regra de chaves de `cpl_chegadas`. O teste do mapa exige que todo campo que sai de um modelo por conector esteja em `EXPORTACOES` na mesma configuração. Os caps do MOM6 e do SIS2 não consultam nenhuma chave: anunciam sempre as mesmas listas, como antes.
+A exportação de um modelo não sai de `TROCAS`, porque um modelo pode anunciar campos que nenhum conector leva: o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome na produção (os três avisos da conferência, seção 3.6). Desde a R-FASE11-06, a tabela `EXPORTACOES` tem uma linha por campo que um modelo anuncia no estado de exportação (campo, ponto e `quando`), na ordem do anúncio, e `cpl_exportacoes(ponto, cfg, chaves, nomes)` gera a lista, com a mesma regra de chaves de `cpl_chegadas`. O teste do mapa exige que todo campo que sai de um modelo por conector esteja em `EXPORTACOES` na mesma configuração. Os caps dos modelos não consultam nenhuma chave: anunciam sempre as mesmas listas, como antes. Desde a R-FASE11-07, o mediador e os caps dos cinco modelos tiram as listas do mapa, e a ordem das linhas de `TROCAS` e de `EXPORTACOES` é a ordem do anúncio. Onde a ordem da lista servia para alinhar outro dado (os valores iniciais da importação do MONAN-A e da exportação do DOCN), o dado passou a ser escolhido pelo nome do campo.
 
 ```fortran
 type(cpl_exporta_t), parameter :: EXPORTACOES(*) = [          &
@@ -436,7 +436,9 @@ A R-FASE11-05 abriu o bloco B: o mediador anuncia e realiza os campos a partir d
 
 A R-FASE11-06 fez o mesmo nos caps do MOM6 e do SIS2. Para a exportação dos modelos, que `TROCAS` não descreve por inteiro, entrou a tabela `EXPORTACOES` (seção 3.5), com os cinco modelos; os caps do MONAN-A, do DATM e do DOCN ainda não a usam, mas o teste do mapa já a confere contra as listas deles. Arquivos com nomes de campos escritos à mão: de 5 para 3.
 
-Próxima etapa: **R-FASE11-07**, com as listas dos caps do MONAN-A, do DOCN e do DATM lidas do mapa, conforme a tabela do bloco B. O cap atmosférico realiza a importação e a exportação em grades diferentes e escreve campos em pontos próprios; o DOCN tem teste próprio (`tests/docn`).
+A R-FASE11-07 fechou o bloco B com os caps do MONAN-A, do DOCN e do DATM. Os valores iniciais da importação do MONAN-A, que dependiam da posição de cada campo em `IMP_NAMES`, e os da exportação do DOCN passaram a ser escolhidos pelo nome do campo. O teste do DOCN, que roda o cap num driver NUOPC, deu resultado idêntico. Arquivos com nomes de campos escritos à mão: de 3 para 0, a meta do bloco.
+
+Próxima etapa: **R-FASE11-08**, a primeira do bloco C (malhas): `cpl_grids` com `malha_latlon` e as fórmulas de centro e de índice, e as malhas `atm_med` e `atm_cap` construídas por ele, conforme a tabela do bloco C.
 
 ---
 

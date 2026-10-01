@@ -4,7 +4,7 @@
 !! Protocolo NUOPC completo via NUOPC_CompDerive (InitializeAdvertise,
 !! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
 !! cap exporta a forcante atmosferica do MONAN-A ao mediador e importa dele
-!! a superficie do oceano e do gelo (IMP_NAMES, abaixo). A troca com o
+!! a superficie do oceano e do gelo (PONTO_ATM, abaixo). A troca com o
 !! MPAS-A fica em mpas_cap_methods.F90, e os diagnosticos NetCDF em
 !! mpas_cap_netcdf.F90 e mpas_import_diag.F90.
 !!
@@ -58,6 +58,8 @@ module mpas_cap_MONAN_mod
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
   use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
+  use cpl_fields_mod,      only : CPL_NOME_LEN
+  use cpl_map_mod,         only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
 
   implicit none
   private
@@ -107,33 +109,15 @@ module mpas_cap_MONAN_mod
   ! mascarar continentes no diagnostico monan2_import_*.nc, em vez de contar
   ! so' com o filtro ocean_frac_min do binning Voronoi, um criterio de
   ! COBERTURA de celula Voronoi por bin, sem relacao com terra/oceano.
-  integer, parameter :: N_IMP = 7
-  character(len=20), parameter :: IMP_NAMES(N_IMP) = [ &
-    character(len=20) ::  &
-    'Sx_tsfc ',          &  ! Temp. de pele composta [K] → atm_bnd%sst
-    'Si_ifrac',          &  ! Fração de gelo [0-1]       → atm_bnd%ice_fraction
-    'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
-    'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
-    'Sf_zorl ',          &  ! Rugosidade Charnock [m] → atm_bnd%zorl
-    'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb
-    'Sx_omask' ]  ! Máscara 1=oceano/0=terra → atm_bnd%omask
-
-  integer, parameter :: N_EXP = 13
-  character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
-    character(len=20) ::            &
-    'Sa_pslv_mpas  ',               &
-    'Sa_tbot_mpas  ',               &
-    'Sa_u10m_mpas  ',               &
-    'Sa_v10m_mpas  ',               &
-    'Faxa_swdn_mpas',               &
-    'Faxa_lwdn_mpas',               &
-    'Faxa_rain_mpas',               &
-    'Sa_shum_mpas  ',               &  ! B-Fase2-01: q2 [kg/kg] — hum. espec. 2m
-    'Faxa_snow_mpas',               &  ! B-Fase2-02: Δsnownc/dt [kg/m²/s] — neve
-    'Faxa_sen_mpas ',               &  ! calor sensivel nativo do PBL (hfx)
-    'Faxa_lat_mpas ',               &  ! calor latente nativo do PBL (lh)
-    'Faxa_taux_mpas',               &  ! tensao zonal nativa (de ust)
-    'Faxa_tauy_mpas' ]  ! tensao meridional nativa (de ust)
+  !
+  ! Os campos saem do mapa de acoplamento (src/coupling/cpl_map.F90), no
+  ! ponto ATM@atm_cap: a importacao sao os 7 campos que chegam por conector
+  ! (cpl_chegadas: Sx_tsfc, Si_ifrac, So_u, So_v, Sf_zorl, Sf_albedo e
+  ! Sx_omask), e a exportacao, os 13 campos *_mpas de EXPORTACOES
+  ! (cpl_exportacoes), a forcante nativa do MONAN-A. O cap anuncia sempre as
+  ! mesmas listas: nao consulta chaves de &nuopc_mode. O valor inicial de
+  ! cada campo importado esta em valor_inicial_importacao.
+  character(len=*), parameter :: PONTO_ATM = 'ATM@atm_cap'
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -203,19 +187,22 @@ contains
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
     integer :: i
+    character(len=CPL_NOME_LEN), allocatable :: imp(:), exp(:)
     character(len=*), parameter :: subname = '(mpas_cap:InitializeAdvertise)'
     rc = ESMF_SUCCESS
-    do i = 1, N_IMP
-      call NUOPC_Advertise(importState, StandardName=trim(IMP_NAMES(i)), rc=rc)
+    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', imp)
+    call cpl_exportacoes(PONTO_ATM, cpl_config_atual(), '', exp)
+    do i = 1, size(imp)
+      call NUOPC_Advertise(importState, StandardName=trim(imp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end do
-    do i = 1, N_EXP
-      call NUOPC_Advertise(exportState, StandardName=trim(EXP_NAMES(i)), rc=rc)
+    do i = 1, size(exp)
+      call NUOPC_Advertise(exportState, StandardName=trim(exp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end do
     call ESMF_LogWrite(subname//': anunciados '// &
-         int_to_str(N_IMP)//' imp + '// &
-         int_to_str(N_EXP)//' exp', ESMF_LOGMSG_INFO)
+         int_to_str(size(imp))//' imp + '// &
+         int_to_str(size(exp))//' exp', ESMF_LOGMSG_INFO)
   end subroutine InitializeAdvertise
 
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
@@ -232,6 +219,7 @@ contains
       real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)
       integer :: k
       integer :: n_local
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
     rc = ESMF_SUCCESS
 
     ! ── 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada ─
@@ -255,9 +243,11 @@ contains
     ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
     ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
     ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
-    call cap_realize_fields(importState, st%grid, IMP_NAMES, N_IMP, rc)
+    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
+    call cap_realize_fields(importState, st%grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call cap_realize_fields(exportState, st%grid, EXP_NAMES, N_EXP, rc)
+    call cpl_exportacoes(PONTO_ATM, cpl_config_atual(), '', nomes)
+    call cap_realize_fields(exportState, st%grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     ! ── 3. Inicializar MPAS-A (SMIOL começa aqui) ────────────────────────
@@ -444,7 +434,7 @@ contains
     call ESMF_LogWrite(subname//': ModelFinalize concluido', ESMF_LOGMSG_INFO)
   end subroutine ModelFinalize
 
-  !> @brief Aborta se algum campo de IMP_NAMES nao estiver conectado.
+  !> @brief Aborta se algum campo importado nao estiver conectado.
   !!
   !!
   !! O PROBLEMA. Quando o componente OCN nao oferece todos os campos que este
@@ -454,19 +444,20 @@ contains
   !! e mesmo assim DEVOLVE ESMF_SUCCESS. O esmApp.F90 ja' confere o rc de
   !! ESMF_GridCompInitialize com ChkErr e abortaria se ele viesse com erro;
   !! como nao vem, a execucao segue. No primeiro passo o mpas_import le os
-  !! N_IMP campos assim mesmo, inclusive os que nunca foram realizados, e o
+  !! campos importados assim mesmo, inclusive os que nunca foram realizados, e o
   !! ponteiro do farrayPtr de um campo nao conectado leva a SIGSEGV dentro do
   !! libesmf.so, com backtrace irresoluvel. Foi o que aconteceu no perfil
   !! MPAS+DOCN: tres campos faltando, morte sete
   !! segundos depois, sem nenhuma pista no esmApp_run.log.
   !!
   !! O CONSERTO. Verificar explicitamente, antes de tocar no importState, e
-  !! abortar nomeando os campos ausentes. Custo: N_IMP chamadas a
-  !! NUOPC_IsConnected, uma vez por execucao.
+  !! abortar nomeando os campos ausentes. Custo: uma chamada a
+  !! NUOPC_IsConnected por campo importado, uma vez por execucao.
   !!
-  !! POR QUE AQUI E NAO NO DRIVER. A checagem precisa da lista IMP_NAMES, que
-  !! e' deste modulo. Um guarda equivalente no esm.F90 teria de percorrer os
-  !! cplLists de cada conector e reconstruir a mesma informacao de segunda mao.
+  !! POR QUE AQUI E NAO NO DRIVER. A checagem precisa dos campos que este cap
+  !! importa (do mapa, no ponto PONTO_ATM). Um guarda equivalente no esm.F90
+  !! teria de percorrer os cplLists de cada conector e reconstruir a mesma
+  !! informacao de segunda mao.
   !!
   !! ATENCAO: nao confundir com CheckImportAlwaysOK, logo abaixo. Aquela
   !! suprime a validacao de TIMESTAMP, que e' legitima porque o conector
@@ -483,32 +474,34 @@ contains
     character(len=512) :: missing
     character(len=640) :: msg
     type(ESMF_VM)      :: vm
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
     n_missing = 0
     missing   = ''
+    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
 
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    do i = 1, N_IMP
+    do i = 1, size(nomes)
       connected = NUOPC_IsConnected(importState, &
-                                    fieldName=trim(IMP_NAMES(i)), rc=rc)
+                                    fieldName=trim(nomes(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       if (.not. connected) then
         n_missing = n_missing + 1
         if (len_trim(missing) > 0) missing = trim(missing)//', '
-        missing = trim(missing)//trim(IMP_NAMES(i))
+        missing = trim(missing)//trim(nomes(i))
         call ESMF_LogWrite(subname//': campo de importacao NAO conectado: '// &
-                           trim(IMP_NAMES(i)), ESMF_LOGMSG_ERROR)
+                           trim(nomes(i)), ESMF_LOGMSG_ERROR)
       end if
     end do
 
     if (n_missing > 0) then
       write(msg,'(A,I0,A,I0,A)') subname//': ABORTANDO — ', n_missing, &
-        ' de ', N_IMP, ' campos de importacao nao estao conectados: '
+        ' de ', size(nomes), ' campos de importacao nao estao conectados: '
       msg = trim(msg)//trim(missing)
       ! Tambem para a saida padrao: o log de PET nao e' lido quando o
       ! sintoma aparece so' no esmApp_run.log, e foi exatamente esse o
@@ -521,7 +514,7 @@ contains
         write(*,'(A)') ' '//trim(missing)
         write(*,'(A)') ''
         write(*,'(A)') ' O componente OCN configurado nao oferece todos os campos que'
-        write(*,'(A)') ' o cap do MPAS anuncia (IMP_NAMES em mpas_cap_MONAN.F90).'
+        write(*,'(A)') ' o cap do MPAS anuncia (ATM@atm_cap no mapa de acoplamento).'
         write(*,'(A)') ' Prosseguir levaria a SIGSEGV no primeiro passo, ao ler um'
         write(*,'(A)') ' campo nunca realizado.'
         write(*,'(A)') ''
@@ -536,7 +529,7 @@ contains
       return
     end if
 
-    write(msg,'(A,I0,A)') subname//': todos os ', N_IMP, &
+    write(msg,'(A,I0,A)') subname//': todos os ', size(nomes), &
       ' campos de importacao estao conectados'
     call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
 
@@ -560,12 +553,8 @@ contains
   !! Chamado em DataInitialize ANTES do primeiro passo de acoplamento, antes
   !! do MED ter executado. Sem isso, o importState chega ao mpas_import com
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
-  !!
-  !! Valores padrao, na ordem de IMP_NAMES:
-  !!   1: Sx_tsfc  → temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
-  !!   2: Si_ifrac → fração de gelo (cfg_ice_fraction_default = 0.0)
-  !!   3: So_u     → corrente zonal (0.0 m/s — oceano em repouso)
-  !!   4: So_v     → corrente meridional (0.0 m/s — oceano em repouso)
+  !! O valor de cada campo vem de valor_inicial_importacao; um campo do mapa
+  !! sem valor previsto la' interrompe a inicializacao.
   !!
   !! Após o primeiro ciclo MED→MPAS, todos serão sobrescritos pelos campos
   !! reais do MOM6+SIS2.
@@ -575,25 +564,23 @@ contains
     type(ESMF_Field)               :: field
     real(ESMF_KIND_R8), pointer    :: fptr1d(:)
     real(ESMF_KIND_R8), pointer    :: fptr2d(:,:)
-    real(ESMF_KIND_R8)             :: defaults(N_IMP)
+    real(ESMF_KIND_R8)             :: valor
+    logical                        :: conhecido
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
     integer :: i, fld_rank, localDeCount_imp
     rc = ESMF_SUCCESS
 
-    ! defaults alinhados com IMP_NAMES (N_IMP elementos):
-    defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! Sx_tsfc   [K]
-    defaults(2) = real(cfg_ice_fraction_default, ESMF_KIND_R8)  ! Si_ifrac  [0-1]
-    defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
-    defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
-    defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl [m]
-    ! Sf_albedo: o mesmo valor de agua aberta usado em mpas_cap_methods.F90 e
-    ! mpas_atm_setup.F90. O laco abaixo percorre 1..N_IMP, entao todo campo de
-    ! IMP_NAMES precisa de valor aqui.
-    defaults(6) = ALB_OCEAN_DEFAULT                             ! Sf_albedo [0-1]
-    defaults(7) = 1.0_ESMF_KIND_R8                              ! Sx_omask  [0-1] — tudo oceano
-
-    do i = 1, N_IMP
+    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
+    do i = 1, size(nomes)
+      call valor_inicial_importacao(nomes(i), valor, conhecido)
+      if (.not. conhecido) then
+        call ESMF_LogSetError(ESMF_FAILURE, msg='(mpas_cap:init_import_defaults): '// &
+             'campo importado sem valor inicial: '//trim(nomes(i)), &
+             line=__LINE__, file=u_FILE_u, rcToReturn=rc)
+        return
+      end if
       nullify(fptr1d, fptr2d)
-      call ESMF_StateGet(importState, itemName=trim(IMP_NAMES(i)), &
+      call ESMF_StateGet(importState, itemName=trim(nomes(i)), &
                          field=field, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       ! PETs sem DE local na grade MPAS (360×180, regDecomp(2)=90) têm
@@ -608,16 +595,52 @@ contains
       if (fld_rank == 1) then
         call ESMF_FieldGet(field, farrayPtr=fptr1d, rc=rc)
         if (ChkErr(rc, __LINE__, u_FILE_u)) return
-        fptr1d = defaults(i)
+        fptr1d = valor
         nullify(fptr1d)
       else
         call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
         if (ChkErr(rc, __LINE__, u_FILE_u)) return
-        fptr2d = defaults(i)
+        fptr2d = valor
         nullify(fptr2d)
       end if
     end do
   end subroutine init_import_defaults
+
+  !> @brief Valor inicial de um campo importado, antes do primeiro passo.
+  !!
+  !! conhecido = .false. se o campo nao tem valor previsto aqui.
+  !!   Sx_tsfc   temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
+  !!   Si_ifrac  fração de gelo (cfg_ice_fraction_default = 0.0)
+  !!   So_u      corrente zonal (0.0 m/s, oceano em repouso)
+  !!   So_v      corrente meridional (0.0 m/s, oceano em repouso)
+  !!   Sf_zorl   rugosidade (cfg_zorl_default) [m]
+  !!   Sf_albedo o mesmo valor de agua aberta usado em mpas_cap_methods.F90 e
+  !!             mpas_atm_setup.F90 (ALB_OCEAN_DEFAULT)
+  !!   Sx_omask  1, tudo oceano
+  subroutine valor_inicial_importacao(nome, valor, conhecido)
+    character(len=*),   intent(in)  :: nome
+    real(ESMF_KIND_R8), intent(out) :: valor
+    logical,            intent(out) :: conhecido
+
+    conhecido = .true.
+    select case (trim(nome))
+    case ('Sx_tsfc')
+      valor = real(cfg_sst_default, ESMF_KIND_R8)
+    case ('Si_ifrac')
+      valor = real(cfg_ice_fraction_default, ESMF_KIND_R8)
+    case ('So_u', 'So_v')
+      valor = 0.0_ESMF_KIND_R8
+    case ('Sf_zorl')
+      valor = real(cfg_zorl_default, ESMF_KIND_R8)
+    case ('Sf_albedo')
+      valor = ALB_OCEAN_DEFAULT
+    case ('Sx_omask')
+      valor = 1.0_ESMF_KIND_R8
+    case default
+      valor = 0.0_ESMF_KIND_R8
+      conhecido = .false.
+    end select
+  end subroutine valor_inicial_importacao
 
 
 end module mpas_cap_MONAN_mod
