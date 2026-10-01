@@ -6,7 +6,8 @@
 !! Monta o mediador como na inicialização (anúncio dos campos como em
 !! InitializeAdvertise, create_atm_grid, create_ocn_grid com o supergrid
 !! sintético hgrid.nc, realize_component_fields,
-!! create_internal_fields, idc_create_routes) e roda três passos da ida para
+!! create_internal_fields e a fase A da inicialização: desde a R-FASE11-17,
+!! prepara_inicio, de med_exchange; antes, idc_create_routes, de med_init) e roda três passos da ida para
 !! a malha de fluxo (desde a R-FASE11-16, a fase ir_para_malha_de_fluxo de
 !! med_exchange; antes, update_ocean_fields_on_atm_grid e
 !! update_ice_fraction_from_docn, de med_ocean) e da exportação com o
@@ -33,6 +34,8 @@
 !! fase11-12-validada), para que o mesmo programa sirva às duas versões
 !! comparadas por compara-completar.bash. As exceções são as fases do
 !! mediador, conforme a versão (o script define as macros pelo fonte):
+!!   COM_INICIO    chama prepara_inicio; sem ela, idc_create_routes (até a
+!!                 R-FASE11-16, tag fase11-16-validada)
 !!   COM_IR_PARA   chama ir_para_malha_de_fluxo; sem ela, repete as duas
 !!                 chamadas de MediatorAdvance até a R-FASE11-15 (tag
 !!                 fase11-15-validada)
@@ -52,7 +55,12 @@ program test_completar
   use cpl_fields_mod,        only : CPL_NOME_LEN
   use cpl_map_mod,           only : cpl_chegadas, cpl_config_atual
   use med_init_mod,          only : create_atm_grid, create_ocn_grid, realize_component_fields, &
-                                    create_internal_fields, idc_create_routes
+                                    create_internal_fields
+#ifdef COM_INICIO
+  use med_exchange_mod,      only : prepara_inicio
+#else
+  use med_init_mod,          only : idc_create_routes
+#endif
 #ifdef COM_IR_PARA
   use med_exchange_mod,      only : ir_para_malha_de_fluxo
 #else
@@ -125,8 +133,12 @@ program test_completar
 
   call ESMF_StateGet(exp, itemName='Foxx_taux', field=f_taux, rc=rc)
   if (rc /= ESMF_SUCCESS) error stop 'Foxx_taux'
+#ifdef COM_INICIO
+  call prepara_inicio(is, imp, exp, f_taux, rc)
+#else
   call idc_create_routes(is, imp, exp, f_taux, rc)
-  if (rc /= ESMF_SUCCESS) error stop 'idc_create_routes'
+#endif
+  if (rc /= ESMF_SUCCESS) error stop 'fase A da inicializacao'
 
   call ESMF_StateGet(exp, itemCount=n_itens, rc=rc)
   allocate(nomes(n_itens))

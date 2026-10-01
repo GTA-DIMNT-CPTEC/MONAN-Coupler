@@ -2,8 +2,9 @@
 !! @brief Grades, campos e rotas da inicialização do mediador.
 !!
 !! Criação das grades internas ATM e OCN (com a verificação dos cantos da
-!! grade OCN), realização dos campos dos componentes e dos campos internos,
-!! e criação das rotas de interpolação em InitializeDataComplete.
+!! grade OCN), realização dos campos dos componentes e dos campos internos.
+!! A criação das rotas de InitializeDataComplete (idc_create_routes, até a
+!! R-FASE11-17) passou para a fase de inicialização, em med_exchange.
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
 !!
@@ -21,8 +22,7 @@ module med_init_mod
   use cpl_grids_mod, only: cpl_malha_latlon, cpl_malha_tripolar, ORIGEM_LESTE0, &
                            ORIGEM_LESTE0_CANTO
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
-                                 ZeroOcnFluxFields, FillInternalField, cria_rota
-  use med_ocean_mod, only: regrid_ocean_currents
+                                 ZeroOcnFluxFields, FillInternalField
   use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
 
   implicit none
@@ -32,7 +32,6 @@ module med_init_mod
   public :: create_ocn_grid
   public :: realize_component_fields
   public :: create_internal_fields
-  public :: idc_create_routes
 
 contains
 
@@ -367,76 +366,5 @@ contains
     ! Substituida no primeiro passo pela parametrizacao Charnock no bulk NCAR.
     call FillInternalField(is%sfc%zorl, 0.01_ESMF_KIND_R8, rc)
   end subroutine create_internal_fields
-
-  !> Fase A de InitializeDataComplete: cria as rotas 'atm2ocn' (de
-  !! is%ocn_flx%taux para exp_field, na grade OCN) e 'ocn2atm', interpola as
-  !! correntes e preenche o exportState com valores iniciais. Roda uma unica
-  !! vez (enquanto a rota 'ocn2atm' nao existe).
-  subroutine idc_create_routes(is, importState, exportState, exp_field, rc)
-    type(MED_InternalState), pointer :: is
-    type(ESMF_State), intent(inout) :: importState
-    type(ESMF_State), intent(inout) :: exportState
-    type(ESMF_Field), intent(inout) :: exp_field
-    integer, intent(inout) :: rc
-    type(ESMF_Field) :: ocn_field
-
-    if (.not. is%regrid%has('atm2ocn')) then
-      call cria_rota(is%regrid, 'atm2ocn', is%ocn_flx%taux, exp_field, rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end if
-
-    ! So_t está na grade OCN (ver InitializeRealize)
-    call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call cria_rota(is%regrid, 'ocn2atm', ocn_field, is%ocn%sst, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
-    call regrid_ocean_currents(is, importState, zero_on_error=.true.)
-
-    call idc_init_export_fields(exportState)
-
-    ! Si_ifrac_sis2 e os 4 albedos do gelo sao realizados pelo MED em
-    ! ocn_grid, a MESMA grade de So_t (ver InitializeRealize); a rota
-    ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
-    ! de update_ice_fields_on_atm_grid.
-
-    call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
-  end subroutine idc_create_routes
-
-  !> Inicializa o exportState com valores fisicamente razoaveis: Sa_pslv
-  !! com 101325 Pa e os demais campos com zero. PETs sem DE local nao tem o
-  !! que inicializar (ESMF_FieldGet com farrayPtr falharia neles).
-  subroutine idc_init_export_fields(exportState)
-    type(ESMF_State), intent(inout) :: exportState
-    type(ESMF_Field) :: exp_field
-    real(ESMF_KIND_R8), pointer :: fptr(:,:)
-    character(len=64), allocatable :: fieldNameList(:)
-    integer :: fieldCount
-    integer :: i
-    integer :: localDeCount_exp
-    integer :: localrc
-    integer :: rc
-
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    if (fieldCount > 0) then
-      allocate(fieldNameList(fieldCount))
-      call ESMF_StateGet(exportState, itemNameList=fieldNameList, rc=rc)
-      do i = 1, fieldCount
-        call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
-          field=exp_field, rc=rc)
-        call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
-        if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
-        call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
-        select case(trim(fieldNameList(i)))
-          case('Sa_pslv')
-            fptr = 101325.0_ESMF_KIND_R8
-          case default
-            fptr = 0.0_ESMF_KIND_R8
-        end select
-      end do
-      deallocate(fieldNameList)
-    end if
-  end subroutine idc_init_export_fields
 
 end module med_init_mod

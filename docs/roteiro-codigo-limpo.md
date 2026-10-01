@@ -139,7 +139,7 @@ Estes itens não são limpeza no sentido estrito: removem remendos ou corrigem e
 
 A limpeza das fases 1 a 9 deixou cada arquivo com um assunto, mas a descrição do acoplamento (que campos vão de onde para onde, em que malha e por qual interpolação) continua espalhada por mais de dez arquivos. A fase 11 reúne essa descrição em três conceitos (malha, campo e troca) e em três arquivos de `src/coupling/` (`cpl_grids.F90`, `cpl_fields.F90` e `cpl_map.F90`), com a execução das trocas do mediador em `med_exchange.F90`. As regras são as mesmas das fases anteriores: nenhuma etapa muda resultados, um patch por etapa e validação bit a bit na Jaci.
 
-O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), as conferências por tipo de mudança, os indicadores e as metas, está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4. Este roteiro não o repete; registra só o andamento.
+O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), as conferências por tipo de mudança, os indicadores e as metas, está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4. Este roteiro não o repete; registra só o andamento.
 
 | Etapa | Situação |
 | --- | --- |
@@ -160,6 +160,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-14 | etapa completar executada pela rota na SST e na fração de gelo exportada; fim do bloco D; teste de regressão novo `tests/completar` |
 | R-FASE11-15 | `med_exchange.F90` com a fase `entregar` (exportação e carimbo de tempo); `RouteOcnToAtm` sai; arquivos que carimbam o tempo de 5 para 4 |
 | R-FASE11-16 | fase `ir_para_malha_de_fluxo` em `med_exchange` (SST, correntes e gelo na malha de fluxo, e o gelo do OISST) |
+| R-FASE11-17 | fase de inicialização em `med_exchange`, com as rotas de `criar='inicio'` pela tabela; arquivos que carimbam o tempo de 4 para 3; criações de rota fora de `med_exchange` de 7 para 5; etapa R-FASE11-18 acrescentada ao plano |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

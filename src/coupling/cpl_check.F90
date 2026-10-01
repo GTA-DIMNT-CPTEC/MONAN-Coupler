@@ -18,7 +18,7 @@
 !! Cada diferença vira uma linha "CPL-REL: DIFERENCA: ..."; campos exportados
 !! que nenhum componente consome viram "CPL-REL: AVISO: ...", porque são
 !! normais (o MOM6 exporta So_s, por exemplo). A conferência nunca interrompe
-!! a rodada: até a R-FASE11-24 ela só registra. Um erro do ESMF durante a
+!! a rodada: até a R-FASE11-25 ela só registra. Um erro do ESMF durante a
 !! consulta também só é registrado, e a rodada segue.
 !!
 !! As rotinas cpl_confere_conector e cpl_confere_estado não usam o ESMF e

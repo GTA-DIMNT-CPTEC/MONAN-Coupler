@@ -8,7 +8,8 @@
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
 # programa tests/completar/test_completar.F90 da árvore de trabalho (ele só
 # usa interfaces que existem desde a fase11-12-validada; as fases de
-# med_exchange que a versão tiver entram com -DCOM_ENTREGAR e -DCOM_IR_PARA) e o
+# med_exchange que a versão tiver entram com -DCOM_ENTREGAR, -DCOM_IR_PARA
+# e -DCOM_INICIO) e o
 # executa com 1, 4, 6 e 8 processos MPI, com um supergrid sintético
 # (tests/supergrid/gera-supergrid.py). Para cada PET, os valores gravados
 # (saida_<PET>.bin: a SST na malha de fluxo e todos os campos exportados ao
@@ -31,7 +32,7 @@
 set -uo pipefail
 
 REV=${1:-}
-[[ -n "${REV}" ]] || { sed -n '2,28p' "$0"; exit 2; }
+[[ -n "${REV}" ]] || { sed -n '2,30p' "$0"; exit 2; }
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=$(mkdir -p "${2:-${RAIZ}/build-local/completar}" && cd "${2:-${RAIZ}/build-local/completar}" && pwd)
 MPIRUN=${MPIRUN:-mpiexec}
@@ -67,10 +68,12 @@ for versao in antiga nova; do
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
     # Fases de med_exchange presentes na versão: entregar (desde a
-    # R-FASE11-15) e ir_para_malha_de_fluxo (desde a R-FASE11-16)
+    # R-FASE11-15), ir_para_malha_de_fluxo (desde a R-FASE11-16) e a fase A
+    # da inicialização, prepara_inicio (desde a R-FASE11-17)
     defs=""; mx="${src}/src/mediator/med_exchange.F90"
     grep -qi 'subroutine entregar' "${mx}" 2>/dev/null && defs+=" -DCOM_ENTREGAR"
     grep -qi 'subroutine ir_para_malha_de_fluxo' "${mx}" 2>/dev/null && defs+=" -DCOM_IR_PARA"
+    grep -qi 'subroutine prepara_inicio' "${mx}" 2>/dev/null && defs+=" -DCOM_INICIO"
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -cpp ${defs} -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_completar.F90" -o test_completar.o &&
