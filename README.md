@@ -71,7 +71,7 @@ MONAN-Coupler/
 │   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit)
-│   ├── coupling/    mapa de acoplamento: dicionário de campos (cpl_fields), trocas e rotas (cpl_map) e conferência no log (cpl_check)
+│   ├── coupling/    mapa de acoplamento: dicionário de campos (cpl_fields), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash
@@ -97,7 +97,7 @@ Convenções para código novo:
 | Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` (scripts de `tools/`: `docs/historico-scripts.md`) |
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente |
-| Campos trocados | todo campo novo ganha uma linha em `CAMPOS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `TROCAS` (`src/coupling/cpl_map.F90`); rota nova ou alterada, a linha em `ROTAS`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
+| Campos trocados | todo campo novo ganha uma linha em `CAMPOS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `TROCAS` (`src/coupling/cpl_map.F90`); campo que um modelo exporta, a linha em `EXPORTACOES`, na ordem do anúncio; rota nova ou alterada, a linha em `ROTAS`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
 | Constantes físicas e da grade | em `src/shared/coupler_constants.F90`; não redeclarar localmente |
 | Etapas de uma rotina longa | procedimento de módulo com argumentos explícitos e `intent` declarado, em vez de procedimento interno (`contains` dentro da rotina), que enxerga todas as variáveis da rotina hospedeira |
@@ -163,7 +163,7 @@ Guias de uso das ferramentas:
 | [`historico-scripts.md`](docs/historico-scripts.md) | histórico das versões dos scripts Python de `tools/` |
 | [`roteiro-codigo-limpo.md`](docs/roteiro-codigo-limpo.md) | roteiro das fases 6 a 11 (código limpo), com indicadores e metas |
 | [`arquitetura-acoplamento.md`](docs/arquitetura-acoplamento.md) | arquitetura de acoplamento (malhas, campos e trocas) e plano da fase 11 |
-| [`acoplamento.md`](docs/acoplamento.md) | mapa de acoplamento em tabelas (campos, trocas por conector e por configuração, rotas do mediador), gerado por `tools/dev/mapa-acoplamento.py` |
+| [`acoplamento.md`](docs/acoplamento.md) | mapa de acoplamento em tabelas (campos, trocas por conector e por configuração, exportações dos modelos, rotas do mediador), gerado por `tools/dev/mapa-acoplamento.py` |
 | [`conformidade-dtn01.md`](docs/conformidade-dtn01.md) | levantamento de conformidade com o padrão de codificação DTN-01 |
 
 ## Créditos

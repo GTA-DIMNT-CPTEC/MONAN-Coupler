@@ -6,11 +6,12 @@ mão: mudar o Fortran e gerar de novo. A consistência das tabelas é
 conferida por `tests/unit/test_cpl_map.F90`; a arquitetura e o plano
 estão em `docs/arquitetura-acoplamento.md`.
 
-O mapa descreve o acoplamento que o código faz hoje. Ele ainda não
-comanda nada: os componentes anunciam os campos pelas listas próprias,
-e o mapa passa a ser usado a partir das etapas R-FASE11-03 e R-FASE11-05.
+O mapa descreve o acoplamento que o código faz hoje. O mediador (desde a
+R-FASE11-05) e os caps do MOM6 e do SIS2 (desde a R-FASE11-06) anunciam
+e realizam os campos a partir dele; os caps do MONAN-A, do DATM e do DOCN
+ainda usam listas próprias, que o teste confere contra `EXPORTACOES`.
 
-57 campos, 8 malhas, 154 trocas e 6 rotas.
+59 campos, 8 malhas, 154 trocas, 41 exportações e 6 rotas.
 
 ## 1. Configurações
 
@@ -242,7 +243,59 @@ Passagens entre duas malhas do mesmo componente: código próprio do cap
 | `Sf_albedo` | `ATM@atm_cap` | `ATM@mpas` | `cap` | `mpas` |
 | `Sx_omask` | `ATM@atm_cap` | `ATM@mpas` | `cap` | `mpas` |
 
-## 4. Rotas do mediador
+## 4. Exportações dos modelos
+
+Campos que cada modelo anuncia no estado de exportação, na ordem do
+anúncio. Um campo exportado pode não ter consumidor (o conector só leva
+os que o destino importa); a conferência do mapa os lista como aviso.
+"Consumido em" diz em quais configurações conferidas o campo sai por
+algum conector.
+
+| Campo | Ponto | Quando | Consumido em |
+| --- | --- | --- | --- |
+| `Sa_pslv_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Sa_tbot_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Sa_u10m_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Sa_v10m_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_swdn_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_lwdn_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_rain_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Sa_shum_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_snow_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_sen_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_lat_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_taux_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Faxa_tauy_mpas` | `ATM@atm_cap` | `mpas` | `producao`, `mom6_sem_sis2`, `mpas_docn` |
+| `Sa_u10m` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Sa_v10m` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Sa_tbot` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Sa_shum` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Sa_pslv` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Faxa_swdn` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Faxa_lwdn` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Faxa_rain` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `Faxa_snow` | `ATM@datm` | `datm` | `datm_mom6`, `datm_docn` |
+| `So_t` | `OCN@ocn_mom6` | `mom6` | `producao`, `mom6_sem_sis2`, `datm_mom6` |
+| `So_s` | `OCN@ocn_mom6` | `mom6` | nenhuma |
+| `So_u` | `OCN@ocn_mom6` | `mom6` | `producao`, `mom6_sem_sis2`, `datm_mom6` |
+| `So_v` | `OCN@ocn_mom6` | `mom6` | `producao`, `mom6_sem_sis2`, `datm_mom6` |
+| `So_omask` | `OCN@ocn_mom6` | `mom6` | `producao`, `mom6_sem_sis2`, `datm_mom6` |
+| `Fioo_q` | `OCN@ocn_mom6` | `mom6` | nenhuma |
+| `Si_ifrac` | `OCN@ocn_mom6` | `mom6` | nenhuma |
+| `So_t` | `OCN@docn` | `docn` | `mpas_docn`, `datm_docn` |
+| `Si_ifrac` | `OCN@docn` | `docn` | `mpas_docn` |
+| `Sf_zorl` | `OCN@docn` | `docn` | `mpas_docn` |
+| `So_s` | `OCN@docn` | `docn` | nenhuma |
+| `So_u` | `OCN@docn` | `docn` | `mpas_docn`, `datm_docn` |
+| `So_v` | `OCN@docn` | `docn` | `mpas_docn`, `datm_docn` |
+| `Si_ifrac_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+| `Si_avsdr_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+| `Si_avsdf_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+| `Si_anidr_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+| `Si_anidf_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+| `Si_t_sis2` | `ICE@ice_sis2` | `sis2` | `producao` |
+
+## 5. Rotas do mediador
 
 Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),
 interpolar (métodos, reserva, esquema), completar (preenchimento por
@@ -260,7 +313,7 @@ vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.
 
 Esquema de todas as rotas: `esmf` (trocável no grupo `&nuopc_regrid`).
 
-## 5. Malhas
+## 6. Malhas
 
 | Malha | Componente | Tipo | Descrição |
 | --- | --- | --- | --- |
@@ -273,7 +326,7 @@ Esquema de todas as rotas: `esmf` (trocável no grupo `&nuopc_regrid`).
 | `atm_med` | MED | latlon | malha de fluxo do mediador, 1 grau |
 | `ocn_med` | MED | tripolar | oceano no mediador |
 
-## 6. Campos
+## 7. Campos
 
 | Campo | Unidade | Sinal | Descrição |
 | --- | --- | --- | --- |
@@ -303,6 +356,8 @@ Esquema de todas as rotas: `esmf` (trocável no grupo `&nuopc_regrid`).
 | `So_u` | m s-1 |   | corrente zonal superficial |
 | `So_v` | m s-1 |   | corrente meridional superficial |
 | `So_omask` | 1 |   | mascara do MOM6 (1 oceano, 0 terra) |
+| `So_s` | psu |   | salinidade da superficie do mar |
+| `Fioo_q` | W m-2 |   | potencial de fusao ou congelamento (frazil) |
 | `Si_ifrac` | 1 |   | fracao de gelo, entre 0 e 1 |
 | `Sf_zorl` | m |   | rugosidade da superficie |
 | `Si_ifrac_sis2` | 1 |   | fracao de gelo do SIS2 |

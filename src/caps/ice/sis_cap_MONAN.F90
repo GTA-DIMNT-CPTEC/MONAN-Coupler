@@ -42,6 +42,8 @@ module sis_cap_MONAN_mod
 
   use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords
   use coupler_config_mod, only : cfg_mom6_mesh_ocn
+  use cpl_fields_mod, only : CPL_NOME_LEN
+  use cpl_map_mod, only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
 
   ! API do SIS2: models/ocean/MOM6-examples/src/SIS2/src/{ice_model,
   ! ice_type,ice_boundary_types}.F90 (interfaces mínimas para compilar fora
@@ -81,37 +83,20 @@ module sis_cap_MONAN_mod
   end type ice_internal_state_wrapper
 
   ! ── Nomes de campo trocados com o mediador ────────────────────────────────
-  ! Os nomes seguem a exportação do mediador (mapa de acoplamento,
-  ! src/coupling/cpl_map.F90). O conector "MED -> ICE"
-  ! (registrado em esm.F90) casa por StandardName, então os campos que o MED
-  ! exporta alimentam o ICE sem mudança em MED_cap.F90. Um nome que o MED
-  ! não exporta produz "NUOPC INCOMPATIBILITY: Import Fields not all
-  ! connected". lprec/fprec/p vêm de Faxa_rain/Faxa_snow/Sa_pslv.
-  integer, parameter :: n_import_atm = 13  ! forçante atmosférica (ver AIB)
-  integer, parameter :: n_import_ocn = 3   ! So_t, So_u, So_v (ver OIB)
-  character(len=32), dimension(n_import_atm), parameter :: import_names_atm = (/ &
-    "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! fluxos turbulentos do gelo
-    "Fioi_lwnet    ", "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", &  ! onda longa e onda curta do gelo
-    "Fioi_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
-    "Faxa_coszen   " /)  ! angulo zenital solar
+  ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
+  ! ICE@ice_sis2: a importação são os 16 campos que chegam do mediador
+  ! (cpl_chegadas), 13 da forçante atmosférica (os Fioi_*, Faxa_rain,
+  ! Faxa_snow, Sa_pslv e Faxa_coszen, ver AIB) e So_t, So_u e So_v (ver OIB);
+  ! a exportação, os 6 campos *_sis2 de EXPORTACOES (cpl_exportacoes). O
+  ! conector "MED -> ICE" casa por StandardName; um nome que o MED não exporta
+  ! produz "NUOPC INCOMPATIBILITY: Import Fields not all connected".
   ! taux/tauy/sen/evap/lwnet vêm dos Fioi_* (calculados com a temperatura de
-  ! pele real do gelo, Si_t_sis2 — ver export_si_tskin e med_bulk_ncar.F90),
+  ! pele real do gelo, Si_t_sis2; ver export_si_tskin e med_bulk_ncar.F90),
   ! e não dos Foxx_* (calculados com a SST, apropriados para o MOM6). Da
   ! mesma forma, a onda curta vem de Fioi_swnet_*, calculada com o albedo do
-  ! gelo por banda PURO; Foxx_swnet_* usa o albedo MISTURADO por Si_ifrac
-  ! (o enviado ao MOM6), e o gelo absorveria SW calculada com um albedo mais
-  ! baixo que o seu proprio.
-  character(len=32), dimension(n_import_ocn), parameter :: import_names_ocn = (/ &
-    "So_t       ", "So_u       ", "So_v       " /)
-  integer, parameter :: n_export = 6
-  character(len=32), dimension(n_export), parameter :: export_names = (/ &
-    character(len=32) ::                &
-    "Si_ifrac_sis2", &
-    "Si_avsdr_sis2", &  ! albedo visivel direto (Ice%albedo_vis_dir)
-    "Si_avsdf_sis2", &  ! albedo visivel difuso (Ice%albedo_vis_dif)
-    "Si_anidr_sis2", &  ! albedo infravermelho prox. direto (Ice%albedo_nir_dir)
-    "Si_anidf_sis2", &  ! albedo infravermelho prox. difuso (Ice%albedo_nir_dif)
-    "Si_t_sis2"    /)  ! temperatura de pele do gelo (Ice%t_surf)
+  ! gelo por banda puro; Foxx_swnet_* usa o albedo misturado por Si_ifrac.
+  ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
+  character(len=*), parameter :: PONTO_ICE = 'ICE@ice_sis2'
 
 contains
 
@@ -180,20 +165,18 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     integer :: n
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
-    do n = 1, n_import_atm
-      call NUOPC_Advertise(importState, StandardName=trim(import_names_atm(n)), &
+    call cpl_chegadas(PONTO_ICE, .true., cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
+      call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
-    do n = 1, n_import_ocn
-      call NUOPC_Advertise(importState, StandardName=trim(import_names_ocn(n)), &
-        TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    do n = 1, n_export
+    call cpl_exportacoes(PONTO_ICE, cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
       ! O campo de export do ICE é realizado numa grade PRÓPRIA (is%ice_grid,
       ! criada em InitializeRealize) e oferece essa geometria ao conector como
       ! "will provide". Os imports usam "cannot provide", como o import do MED;
@@ -204,7 +187,7 @@ contains
       ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTACOES. Com share
       ! aqui, Si_ifrac saia correto (max=0.997) mas chegava zerado no mediador
       ! (min=max=0): o conector nao fazia a transferencia real.
-      call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
+      call NUOPC_Advertise(exportState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
@@ -463,32 +446,25 @@ contains
     integer,          intent(out)   :: rc
     integer :: k
     type(ESMF_Field) :: fld
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
-    do k = 1, n_import_atm
+    call cpl_chegadas(PONTO_ICE, .true., cpl_config_atual(), '', nomes)
+    do k = 1, size(nomes)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
-        name=trim(import_names_atm(k)), rc=rc)
+        name=trim(nomes(k)), rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-        'FieldCreate import ATM ' // trim(import_names_atm(k)), &
+        'FieldCreate import ' // trim(nomes(k)), &
         line=__LINE__, file=__FILE__)) return
       call NUOPC_Realize(importState, field=fld, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    do k = 1, n_import_ocn
+    call cpl_exportacoes(PONTO_ICE, cpl_config_atual(), '', nomes)
+    do k = 1, size(nomes)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
-        name=trim(import_names_ocn(k)), rc=rc)
+        name=trim(nomes(k)), rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-        'FieldCreate import OCN ' // trim(import_names_ocn(k)), &
-        line=__LINE__, file=__FILE__)) return
-      call NUOPC_Realize(importState, field=fld, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-
-    do k = 1, n_export
-      fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
-        name=trim(export_names(k)), rc=rc)
-      if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-        'FieldCreate export ' // trim(export_names(k)), &
+        'FieldCreate export ' // trim(nomes(k)), &
         line=__LINE__, file=__FILE__)) return
       call NUOPC_Realize(exportState, field=fld, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return

@@ -51,6 +51,13 @@
 !! livres, e a lista é a união das configurações válidas que concordam com
 !! a atual nas chaves pedidas, na ordem de TROCAS, sem repetição.
 !!
+!! EXPORTACOES: o que cada modelo exporta (anuncia no exportState) em cada
+!! ponto, consumido ou não, na ordem do anúncio do cap. Toda troca por
+!! conector que parte de um modelo parte de uma linha desta tabela; um campo
+!! exportado sem troca (So_s e Fioo_q do MOM6, por exemplo) só aparece aqui.
+!! A exportação do mediador não está nesta tabela: ela é o que chega a
+!! MED@ocn_med pelas rotas atm2ocn e atm2ocn_ice (ver cpl_chegadas).
+!!
 !! ROTAS: uma linha por interpolação do mediador. Toda rota tem as mesmas
 !! quatro etapas, na mesma ordem; a coluna com o valor padrão desliga a
 !! etapa (ou, no caso de sem_valor, deixa o comportamento padrão do ESMF):
@@ -93,6 +100,7 @@ module cpl_map_mod
   public :: cpl_rota_indice, cpl_malha_indice
   public :: cpl_ponto_componente, cpl_ponto_malha
   public :: cpl_config_atual, cpl_config_valida, cpl_chegadas
+  public :: cpl_exporta_t, EXPORTACOES, cpl_exportacoes
 
   integer, parameter :: r8 = ESMF_KIND_R8
 
@@ -133,6 +141,13 @@ module cpl_map_mod
     character(len=CPL_MEIO_LEN)   :: meio   = ''
     character(len=CPL_QUANDO_LEN) :: quando = ''
   end type cpl_troca_t
+
+  !> Um campo que um modelo exporta num ponto, na configuração quando.
+  type :: cpl_exporta_t
+    character(len=CPL_NOME_LEN)   :: campo  = ''
+    character(len=CPL_PONTO_LEN)  :: ponto  = ''
+    character(len=CPL_QUANDO_LEN) :: quando = ''
+  end type cpl_exporta_t
 
   !> Uma interpolação do mediador (ver as quatro etapas no cabeçalho).
   type :: cpl_rota_t
@@ -339,6 +354,59 @@ module cpl_map_mod
     cpl_troca_t('Sx_omask',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas') ]
 
   !--------------------------------------------------------------------------
+  ! EXPORTACOES
+  !--------------------------------------------------------------------------
+  type(cpl_exporta_t), parameter :: EXPORTACOES(*) = [                          &
+    !             campo             ponto           quando
+    ! MONAN-A, na ordem de EXP_NAMES (mpas_cap_MONAN)
+    cpl_exporta_t('Sa_pslv_mpas',   'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Sa_tbot_mpas',   'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Sa_u10m_mpas',   'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Sa_v10m_mpas',   'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_swdn_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_lwdn_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_rain_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Sa_shum_mpas',   'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_snow_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_sen_mpas',  'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_lat_mpas',  'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_taux_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    cpl_exporta_t('Faxa_tauy_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    ! DATM, na ordem do anúncio (DATM_cap)
+    cpl_exporta_t('Sa_u10m',        'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Sa_v10m',        'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Sa_tbot',        'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Sa_shum',        'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Sa_pslv',        'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Faxa_swdn',      'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Faxa_lwdn',      'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Faxa_rain',      'ATM@datm',     'datm'),                     &
+    cpl_exporta_t('Faxa_snow',      'ATM@datm',     'datm'),                     &
+    ! MOM6 (mom_cap_MONAN); So_s e Fioo_q não têm consumidor, e Si_ifrac só
+    ! vai ao MONAN-A com use_med_to_mpas=.false.
+    cpl_exporta_t('So_t',           'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('So_s',           'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('So_u',           'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('So_v',           'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('So_omask',       'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('Fioo_q',         'OCN@ocn_mom6', 'mom6'),                     &
+    cpl_exporta_t('Si_ifrac',       'OCN@ocn_mom6', 'mom6'),                     &
+    ! DOCN (DOCN_cap)
+    cpl_exporta_t('So_t',           'OCN@docn',     'docn'),                     &
+    cpl_exporta_t('Si_ifrac',       'OCN@docn',     'docn'),                     &
+    cpl_exporta_t('Sf_zorl',        'OCN@docn',     'docn'),                     &
+    cpl_exporta_t('So_s',           'OCN@docn',     'docn'),                     &
+    cpl_exporta_t('So_u',           'OCN@docn',     'docn'),                     &
+    cpl_exporta_t('So_v',           'OCN@docn',     'docn'),                     &
+    ! SIS2 (sis_cap_MONAN)
+    cpl_exporta_t('Si_ifrac_sis2',  'ICE@ice_sis2', 'sis2'),                     &
+    cpl_exporta_t('Si_avsdr_sis2',  'ICE@ice_sis2', 'sis2'),                     &
+    cpl_exporta_t('Si_avsdf_sis2',  'ICE@ice_sis2', 'sis2'),                     &
+    cpl_exporta_t('Si_anidr_sis2',  'ICE@ice_sis2', 'sis2'),                     &
+    cpl_exporta_t('Si_anidf_sis2',  'ICE@ice_sis2', 'sis2'),                     &
+    cpl_exporta_t('Si_t_sis2',      'ICE@ice_sis2', 'sis2') ]
+
+  !--------------------------------------------------------------------------
   ! ROTAS
   !--------------------------------------------------------------------------
   ! Criação e uso hoje (Apêndice A de docs/arquitetura-acoplamento.md):
@@ -414,33 +482,74 @@ contains
     character(len=*),                         intent(in)  :: chaves
     character(len=CPL_NOME_LEN), allocatable, intent(out) :: nomes(:)
 
-    type(cpl_config_t) :: c
-    integer :: t, k
-    logical :: vale
+    integer :: t
 
     allocate(nomes(0))
     do t = 1, size(TROCAS)
       if ((TROCAS(t)%meio == 'conector') .neqv. por_conector) cycle
-      if (index(ponto, '@') > 0) then
-        if (TROCAS(t)%para /= ponto) cycle
-      else
-        if (cpl_ponto_componente(TROCAS(t)%para) /= ponto) cycle
-      end if
+      if (.not. ponto_confere(TROCAS(t)%para, ponto)) cycle
       if (any(nomes == TROCAS(t)%campo)) cycle
-      vale = .false.
-      do k = 0, 15
-        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), &
-                         sis2=btest(k, 3))
-        if (.not. cpl_config_valida(c)) cycle
-        if (.not. concorda(c, cfg, chaves)) cycle
-        if (cpl_troca_vale(TROCAS(t), c)) then
-          vale = .true.
-          exit
-        end if
-      end do
-      if (vale) nomes = [character(len=CPL_NOME_LEN) :: nomes, TROCAS(t)%campo]
+      if (vale_em_alguma(TROCAS(t)%quando, cfg, chaves)) &
+        nomes = [character(len=CPL_NOME_LEN) :: nomes, TROCAS(t)%campo]
     end do
   end subroutine cpl_chegadas
+
+  !> Campos que um modelo exporta num ponto, na ordem de EXPORTACOES e sem
+  !! repetição, com a mesma regra de chaves de cpl_chegadas.
+  !!
+  !! @param[in]  ponto   'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
+  !! @param[in]  cfg     configuração atual
+  !! @param[in]  chaves  chaves de cfg que o componente consulta
+  !! @param[out] nomes   campos, na ordem de EXPORTACOES
+  subroutine cpl_exportacoes(ponto, cfg, chaves, nomes)
+    character(len=*),                         intent(in)  :: ponto
+    type(cpl_config_t),                       intent(in)  :: cfg
+    character(len=*),                         intent(in)  :: chaves
+    character(len=CPL_NOME_LEN), allocatable, intent(out) :: nomes(:)
+
+    integer :: e
+
+    allocate(nomes(0))
+    do e = 1, size(EXPORTACOES)
+      if (.not. ponto_confere(EXPORTACOES(e)%ponto, ponto)) cycle
+      if (any(nomes == EXPORTACOES(e)%campo)) cycle
+      if (vale_em_alguma(EXPORTACOES(e)%quando, cfg, chaves)) &
+        nomes = [character(len=CPL_NOME_LEN) :: nomes, EXPORTACOES(e)%campo]
+    end do
+  end subroutine cpl_exportacoes
+
+  !> O ponto p é o ponto pedido ('COMPONENTE@malha' exato, ou só o componente).
+  pure logical function ponto_confere(p, pedido) result(ok)
+    character(len=*), intent(in) :: p, pedido
+    if (index(pedido, '@') > 0) then
+      ok = p == pedido
+    else
+      ok = cpl_ponto_componente(p) == pedido
+    end if
+  end function ponto_confere
+
+  !> A lista de condições quando vale em alguma configuração válida que
+  !! concorda com cfg nas chaves listadas.
+  logical function vale_em_alguma(quando, cfg, chaves) result(vale)
+    character(len=*),   intent(in) :: quando, chaves
+    type(cpl_config_t), intent(in) :: cfg
+    type(cpl_config_t) :: c
+    type(cpl_troca_t)  :: t
+    integer :: k
+
+    t%quando = quando
+    vale = .false.
+    do k = 0, 15
+      c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), &
+                       sis2=btest(k, 3))
+      if (.not. cpl_config_valida(c)) cycle
+      if (.not. concorda(c, cfg, chaves)) cycle
+      if (cpl_troca_vale(t, c)) then
+        vale = .true.
+        return
+      end if
+    end do
+  end function vale_em_alguma
 
   !> c e cfg têm o mesmo valor em cada chave listada.
   pure logical function concorda(c, cfg, chaves) result(ok)

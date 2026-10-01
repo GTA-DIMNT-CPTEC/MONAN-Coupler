@@ -2,9 +2,9 @@
 !! @brief Dicionário dos campos trocados no acoplamento (CAMPOS).
 !!
 !! Uma linha por nome de campo que aparece no mapa de acoplamento
-!! (cpl_map.F90), com a unidade, a convenção de sinal, quando houver, e uma
-!! descrição curta. É a referência de "o que é" cada campo; "de onde vem e
-!! para onde vai" fica em TROCAS, no mapa.
+!! (cpl_map.F90, em TROCAS ou em EXPORTACOES), com a unidade, a convenção
+!! de sinal, quando houver, e uma descrição curta. É a referência de "o que
+!! é" cada campo; "de onde vem e para onde vai" fica em TROCAS, no mapa.
 !!
 !! Fontes das unidades e descrições: os metadados que os gravadores de
 !! diagnóstico já escrevem (med_cap_netcdf, mpas_cap_netcdf,
@@ -80,6 +80,8 @@ module cpl_fields_mod
     cpl_campo_t('So_u',           'm s-1',      '', 'corrente zonal superficial'),                            &
     cpl_campo_t('So_v',           'm s-1',      '', 'corrente meridional superficial'),                       &
     cpl_campo_t('So_omask',       '1',          '', 'mascara do MOM6 (1 oceano, 0 terra)'),                   &
+    cpl_campo_t('So_s',           'psu',        '', 'salinidade da superficie do mar'),                       &
+    cpl_campo_t('Fioo_q',         'W m-2',      '', 'potencial de fusao ou congelamento (frazil)'),           &
     cpl_campo_t('Si_ifrac',       '1',          '', 'fracao de gelo, entre 0 e 1'),                           &
     cpl_campo_t('Sf_zorl',        'm',          '', 'rugosidade da superficie'),                              &
     ! Gelo (SIS2), com o sufixo _sis2

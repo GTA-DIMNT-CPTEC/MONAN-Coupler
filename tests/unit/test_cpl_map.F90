@@ -4,8 +4,8 @@
 !! Confere, sem MPI e sem ESMF inicializado, que as tabelas CAMPOS, MALHAS,
 !! TROCAS e ROTAS formam uma descrição coerente do acoplamento de hoje:
 !!
-!!   estrutura   nomes únicos; todo campo de TROCAS está em CAMPOS e todo
-!!               campo de CAMPOS é usado; pontos 'COMPONENTE@malha' com
+!!   estrutura   nomes únicos; todo campo de TROCAS e de EXPORTACOES está
+!!               em CAMPOS e todo campo de CAMPOS é usado; pontos 'COMPONENTE@malha' com
 !!               malha conhecida e componente certo; condições válidas;
 !!               meio coerente com os componentes (conector entre dois
 !!               componentes, cap dentro de um, rota dentro do mediador,
@@ -32,6 +32,15 @@
 !!               às de antes, em cada configuração: importação na malha de
 !!               fluxo, importação na grade do oceano, exportação e a
 !!               importação toda (a ordem do anúncio)
+!!   exportacoes cada linha de EXPORTACOES com campo do dicionário, ponto de
+!!               um modelo (não do mediador) e condição válida, sem
+!!               repetição; todo campo que sai de um modelo por conector numa
+!!               configuração é exportado por ele nessa configuração; as
+!!               exportações de cada modelo iguais, nome a nome e na mesma
+!!               ordem, às listas dos caps (listas_caps.inc)
+!!   caps        as listas que os caps do MOM6 e do SIS2 anunciam desde a
+!!               R-FASE11-06, geradas por cpl_chegadas e cpl_exportacoes sem
+!!               chaves, iguais nome a nome e na mesma ordem às de antes
 !!
 !! Configurações conferidas (chaves de &nuopc_mode):
 !!   producao       MONAN-A, MOM6, SIS2, contorno pelo mediador
@@ -52,13 +61,14 @@ program test_cpl_map
   use cpl_fields_mod,    only : CAMPOS, cpl_campo_indice
   use cpl_map_mod,       only : MALHAS, TROCAS, ROTAS, cpl_config_t, cpl_troca_vale, &
                                 cpl_condicoes_validas, cpl_rota_indice, cpl_malha_indice, &
-                                cpl_ponto_componente, cpl_ponto_malha
-  use cpl_map_mod,       only : cpl_chegadas
+                                cpl_ponto_componente, cpl_ponto_malha, cpl_troca_t
+  use cpl_map_mod,       only : cpl_chegadas, cpl_exportacoes, EXPORTACOES, cpl_config_atual
   use cpl_fields_mod,    only : CPL_NOME_LEN
   use med_cap_types_mod, only : MED_CHAVES
   implicit none
 
   include 'listas_mediador.inc'
+  include 'listas_caps.inc'
 
   integer, parameter :: NCFG = 5
   character(len=16), parameter :: NOME_CFG(NCFG) = [character(len=16) :: &
@@ -100,6 +110,11 @@ program test_cpl_map
   do k = 1, NCFG
     call confere_listas_mediador(k)
   end do
+  call confere_exportacoes()
+  do k = 1, NCFG
+    call confere_exporta_conector(k)
+  end do
+  call confere_listas_caps()
 
   if (nfalhas == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'
@@ -110,7 +125,8 @@ program test_cpl_map
 
 contains
 
-  !> Nomes de CAMPOS únicos e preenchidos; todo campo usado em TROCAS.
+  !> Nomes de CAMPOS únicos e preenchidos; todo campo usado em TROCAS ou
+  !! em EXPORTACOES.
   subroutine confere_campos()
     integer :: i, j, nrep, nvazio, nsem_uso
 
@@ -127,14 +143,15 @@ contains
           call falha('campo repetido em CAMPOS: '//trim(CAMPOS(i)%nome))
         end if
       end do
-      if (.not. any(TROCAS%campo == CAMPOS(i)%nome)) then
+      if (.not. any(TROCAS%campo == CAMPOS(i)%nome) .and. &
+          .not. any(EXPORTACOES%campo == CAMPOS(i)%nome)) then
         nsem_uso = nsem_uso + 1
-        call falha('campo sem troca: '//trim(CAMPOS(i)%nome))
+        call falha('campo sem troca nem exportacao: '//trim(CAMPOS(i)%nome))
       end if
     end do
     call resultado('CAMPOS: nomes unicos', nrep == 0)
     call resultado('CAMPOS: nome, unidade e descricao preenchidos', nvazio == 0)
-    call resultado('CAMPOS: todo campo aparece em TROCAS', nsem_uso == 0)
+    call resultado('CAMPOS: todo campo aparece em TROCAS ou EXPORTACOES', nsem_uso == 0)
   end subroutine confere_campos
 
   !> MALHAS e ROTAS: nomes únicos; rotas entre malhas do mediador, com
@@ -386,6 +403,105 @@ contains
     call resultado(trim(NOME_CFG(k))//': mediador, exportacao', lista_igual(exp, export_names))
   end subroutine confere_listas_mediador
 
+  !> Cada linha de EXPORTACOES: campo no dicionário, ponto de um modelo,
+  !! condição válida, sem repetição; exportações de cada modelo iguais às
+  !! listas dos caps.
+  subroutine confere_exportacoes()
+    integer :: i, j, nerr
+
+    nerr = 0
+    do i = 1, size(EXPORTACOES)
+      if (cpl_campo_indice(EXPORTACOES(i)%campo) == 0) then
+        nerr = nerr + 1
+        call falha('exportacao fora de CAMPOS: '//trim(EXPORTACOES(i)%campo))
+      end if
+      if (.not. ponto_valido(EXPORTACOES(i)%ponto) .or. &
+          cpl_ponto_componente(EXPORTACOES(i)%ponto) == 'MED') then
+        nerr = nerr + 1
+        call falha('exportacao com ponto invalido: '//descreve_exp(i))
+      end if
+      if (.not. cpl_condicoes_validas(EXPORTACOES(i)%quando)) then
+        nerr = nerr + 1
+        call falha('exportacao com condicao invalida: '//descreve_exp(i))
+      end if
+      do j = i + 1, size(EXPORTACOES)
+        if (EXPORTACOES(i)%campo == EXPORTACOES(j)%campo .and. &
+            EXPORTACOES(i)%ponto == EXPORTACOES(j)%ponto) then
+          nerr = nerr + 1
+          call falha('exportacao repetida: '//descreve_exp(i))
+        end if
+      end do
+    end do
+    call resultado('EXPORTACOES: campos, pontos e condicoes validos, sem repeticao', nerr == 0)
+
+    call resultado('EXPORTACOES: MONAN-A igual a EXP_NAMES do mpas_cap_MONAN', &
+      lista_igual(exportadas('ATM@atm_cap'), mpas_exp_names))
+    call resultado('EXPORTACOES: DATM igual ao anuncio do DATM_cap', &
+      lista_igual(exportadas('ATM@datm'), datm_exp_names))
+    call resultado('EXPORTACOES: MOM6 igual a export_names do mom_cap_MONAN', &
+      lista_igual(exportadas('OCN@ocn_mom6'), mom_export_names))
+    call resultado('EXPORTACOES: DOCN igual a EXP_NAMES do DOCN_cap', &
+      lista_igual(exportadas('OCN@docn'), docn_exp_names))
+    call resultado('EXPORTACOES: SIS2 igual a export_names do sis_cap_MONAN', &
+      lista_igual(exportadas('ICE@ice_sis2'), sis_export_names))
+  end subroutine confere_exportacoes
+
+  !> Na configuração k, todo campo que sai por conector do ponto de um
+  !! modelo é exportado por esse ponto nessa configuração.
+  subroutine confere_exporta_conector(k)
+    integer, intent(in) :: k
+    integer :: i, j, nerr
+    logical :: achou
+
+    nerr = 0
+    do i = 1, size(TROCAS)
+      if (TROCAS(i)%meio /= 'conector' .or. .not. cpl_troca_vale(TROCAS(i), CFG(k))) cycle
+      if (cpl_ponto_componente(TROCAS(i)%de) == 'MED') cycle
+      achou = .false.
+      do j = 1, size(EXPORTACOES)
+        if (EXPORTACOES(j)%campo /= TROCAS(i)%campo .or. EXPORTACOES(j)%ponto /= TROCAS(i)%de) cycle
+        if (exporta_vale(j, CFG(k))) achou = .true.
+      end do
+      if (.not. achou) then
+        nerr = nerr + 1
+        call falha(trim(NOME_CFG(k))//': sai por conector sem ser exportado: '//descreve(i))
+      end if
+    end do
+    call resultado(trim(NOME_CFG(k))//': todo campo que sai de um modelo e exportado por ele', &
+                   nerr == 0)
+  end subroutine confere_exporta_conector
+
+  !> Listas geradas para os caps do MOM6 e do SIS2 (sem chaves: valem em
+  !! qualquer configuração) iguais às que eles anunciavam até a R-FASE11-05;
+  !! a configuração passada não pode mudar o resultado.
+  subroutine confere_listas_caps()
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    logical :: ok_imp_mom, ok_exp_mom, ok_imp_sis, ok_exp_sis
+    integer :: kc
+
+    ok_imp_mom = .true.; ok_exp_mom = .true.; ok_imp_sis = .true.; ok_exp_sis = .true.
+    do kc = 1, NCFG
+      call cpl_chegadas('OCN@ocn_mom6', .true., CFG(kc), '', nomes)
+      ok_imp_mom = ok_imp_mom .and. lista_igual(nomes, mom_import_names)
+      call cpl_exportacoes('OCN@ocn_mom6', CFG(kc), '', nomes)
+      ok_exp_mom = ok_exp_mom .and. lista_igual(nomes, mom_export_names)
+      call cpl_chegadas('ICE@ice_sis2', .true., CFG(kc), '', nomes)
+      ok_imp_sis = ok_imp_sis .and. &
+        lista_igual(nomes, [character(len=32) :: sis_import_names_atm, sis_import_names_ocn])
+      call cpl_exportacoes('ICE@ice_sis2', CFG(kc), '', nomes)
+      ok_exp_sis = ok_exp_sis .and. lista_igual(nomes, sis_export_names)
+    end do
+    call resultado('caps: importacao do MOM6 igual a de antes, em toda configuracao', ok_imp_mom)
+    call resultado('caps: exportacao do MOM6 igual a de antes, em toda configuracao', ok_exp_mom)
+    call resultado('caps: importacao do SIS2 igual a de antes, em toda configuracao', ok_imp_sis)
+    call resultado('caps: exportacao do SIS2 igual a de antes, em toda configuracao', ok_exp_sis)
+    ! Sem nuopc.input, cpl_config_atual dá a configuração padrão; o resultado
+    ! sem chaves é o mesmo.
+    call cpl_chegadas('OCN@ocn_mom6', .true., cpl_config_atual(), '', nomes)
+    call resultado('caps: importacao do MOM6 com cpl_config_atual', &
+      lista_igual(nomes, mom_import_names))
+  end subroutine confere_listas_caps
+
   ! --------------------------------------------------------------------------
   ! Auxiliares
   ! --------------------------------------------------------------------------
@@ -454,6 +570,35 @@ contains
       end if
     end do
   end function todos_exportados
+
+  !> Campos de EXPORTACOES no ponto, na ordem da tabela.
+  function exportadas(ponto) result(lista)
+    character(len=*), intent(in) :: ponto
+    character(len=24), allocatable :: lista(:)
+    integer :: i
+
+    allocate(lista(0))
+    do i = 1, size(EXPORTACOES)
+      if (EXPORTACOES(i)%ponto == ponto) lista = [character(len=24) :: lista, EXPORTACOES(i)%campo]
+    end do
+  end function exportadas
+
+  !> A linha j de EXPORTACOES vale na configuração c.
+  logical function exporta_vale(j, c)
+    integer,            intent(in) :: j
+    type(cpl_config_t), intent(in) :: c
+    type(cpl_troca_t) :: t
+
+    t%quando = EXPORTACOES(j)%quando
+    exporta_vale = cpl_troca_vale(t, c)
+  end function exporta_vale
+
+  function descreve_exp(i) result(txt)
+    integer, intent(in) :: i
+    character(len=:), allocatable :: txt
+    txt = trim(EXPORTACOES(i)%campo)//' '//trim(EXPORTACOES(i)%ponto)// &
+          ' ("'//trim(EXPORTACOES(i)%quando)//'")'
+  end function descreve_exp
 
   logical function lista_igual(a, b) result(ok)
     character(len=*), intent(in) :: a(:), b(:)

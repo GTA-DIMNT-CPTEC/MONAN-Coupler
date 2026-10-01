@@ -72,6 +72,8 @@ module MOM_cap_MONAN_mod
                                mod2med_areacor, med2mod_areacor,          &
                                state_diagnose, ChkErr
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields
+  use cpl_fields_mod, only : CPL_NOME_LEN
+  use cpl_map_mod,    only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
 
   ! esmf2fms_time/fms2esmf_time nao existem em MOM_cap_time.
   ! Conversao ESMF->FMS via ESMF_TimeGet(yy,mm,...) + set_date.
@@ -119,21 +121,14 @@ module MOM_cap_MONAN_mod
   public :: SetVM
 
   ! ── Nomes dos campos NUOPC ────────────────────────────────────────────────
-  ! Campos exportados pelo OCN (→ MED e → MPAS)
-  ! Si_ifrac: fração de gelo do OISST ou derivada da SST e do frazil (ver
+  ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
+  ! OCN@ocn_mom6: a importação são os 14 fluxos e estados que chegam do
+  ! mediador (cpl_chegadas); a exportação, os 7 campos de EXPORTACOES
+  ! (cpl_exportacoes): So_t, So_s, So_u, So_v, So_omask, Fioo_q e Si_ifrac.
+  ! Si_ifrac é a fração de gelo do OISST ou derivada da SST e do frazil (ver
   ! compute_si_ifrac_proxy), porque ocean_public não expõe a fração de gelo.
-  integer, parameter :: n_export = 7
-  character(len=32), parameter :: export_names(n_export) = [ &
-    "So_t    ", "So_s    ", "So_u    ", "So_v    ", &
-    "So_omask", "Fioo_q  ", "Si_ifrac" ]
-
-  ! Campos importados pelo OCN (← MED, 14 fluxos bulk NCAR)
-  integer, parameter :: n_import = 14
-  character(len=32), parameter :: import_names(n_import) = [ &
-    "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", &
-    "Foxx_lwnet    ", "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", &
-    "Foxx_swnet_idf", "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", &
-    "Si_ifrac      ", "So_duu10n     " ]
+  ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
+  character(len=*), parameter :: PONTO_OCN = 'OCN@ocn_mom6'
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -220,22 +215,25 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     integer :: n
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
     ! Anuncia campos importados (fluxos do mediador → OCN)
-    do n = 1, n_import
+    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
       call NUOPC_Advertise(importState,                              &
-           StandardName=trim(import_names(n)),                       &
+           StandardName=trim(nomes(n)),                              &
            TransferOfferGeomObject="cannot provide",                 &
            SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     ! Anuncia campos exportados (SST real, correntes → MED e MPAS)
-    do n = 1, n_export
+    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
       call NUOPC_Advertise(exportState,                              &
-           StandardName=trim(export_names(n)),                       &
+           StandardName=trim(nomes(n)),                              &
            TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
@@ -643,13 +641,16 @@ contains
     type(ESMF_Grid),  intent(in)    :: ocn_grid
     type(ESMF_State), intent(inout) :: importState, exportState
     integer,          intent(out)   :: rc
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
     ! ── 8. Realizar campos de importação e exportação ─────────────────────
-    call cap_realize_fields(importState, ocn_grid, import_names, n_import, rc)
+    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', nomes)
+    call cap_realize_fields(importState, ocn_grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call cap_realize_fields(exportState, ocn_grid, export_names, n_export, rc)
+    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    call cap_realize_fields(exportState, ocn_grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
   end subroutine realize_ocean_fields
@@ -975,6 +976,7 @@ contains
     type(ESMF_Field)        :: field
     integer :: n, localrc
     character(len=256) :: msg
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -984,8 +986,9 @@ contains
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    do n = 1, n_import
-      call ESMF_StateGet(importState, itemName=trim(import_names(n)), &
+    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
+      call ESMF_StateGet(importState, itemName=trim(nomes(n)), &
            field=field, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle   ! campo opcional: ignorar
 
@@ -1000,7 +1003,7 @@ contains
       ! Verifica janela de tolerância ±dt
       if (fldTime < currTime - dt .or. fldTime > currTime + dt) then
         write(msg,'(3A)') 'OCN(MOM6): CheckImport WARNING — timestamp fora ', &
-          'da janela ±dt para campo ', trim(import_names(n))
+          'da janela ±dt para campo ', trim(nomes(n))
         call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_WARNING)
       end if
     end do

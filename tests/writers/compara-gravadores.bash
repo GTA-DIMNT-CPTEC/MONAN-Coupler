@@ -47,10 +47,16 @@ OBJS="mpas_stubs.o coupler_utils.o coupler_constants.o coupler_config.o nc_write
 # depois dela): liga só os que existem no diretório de compilação.
 objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
 
-# Fontes da versão de referência e o seu test_writers.F90, extraídos do git
+# Fontes da versão de referência e o seu test_writers.F90, extraídos do git,
+# com os arquivos incluídos de tests/unit (*.inc), quando REV os tem
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
 git -C "${RAIZ}" archive "${REV}" src tests/writers/test_writers.F90 | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
+mapfile -t incs < <(git -C "${RAIZ}" ls-tree --name-only "${REV}" tests/unit/ | grep '\.inc$')
+if [[ ${#incs[@]} -gt 0 ]]; then
+  git -C "${RAIZ}" archive "${REV}" "${incs[@]}" | tar -x -C "${SAIDA}/fonte_antiga" \
+    || { echo "ERRO: não foi possível extrair os .inc de ${REV}" >&2; exit 2; }
+fi
 
 for versao in antiga nova; do
   if [[ ${versao} == antiga ]]; then src="${SAIDA}/fonte_antiga"; else src="${RAIZ}"; fi

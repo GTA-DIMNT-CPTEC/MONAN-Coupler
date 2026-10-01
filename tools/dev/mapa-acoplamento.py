@@ -2,10 +2,10 @@
 """mapa-acoplamento.py: gera docs/acoplamento.md a partir do mapa de acoplamento.
 
 Lê as tabelas de src/coupling/cpl_fields.F90 (CAMPOS) e
-src/coupling/cpl_map.F90 (MALHAS, TROCAS e ROTAS) e escreve uma versão
-legível do mapa em Markdown: resumo dos conectores por configuração,
-trocas de cada conector, trocas dentro dos componentes, rotas do mediador,
-malhas e dicionário de campos. O Fortran é a fonte; o Markdown é gerado e
+src/coupling/cpl_map.F90 (MALHAS, TROCAS, EXPORTACOES e ROTAS) e escreve
+uma versão legível do mapa em Markdown: resumo dos conectores por
+configuração, trocas de cada conector, trocas dentro dos componentes,
+exportações dos modelos, rotas do mediador, malhas e dicionário de campos. O Fortran é a fonte; o Markdown é gerado e
 não deve ser editado à mão.
 
 Também confere o que o compilador não confere: textos mais longos que o
@@ -210,11 +210,12 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo):
 
 
 def le_mapa(raiz):
-    """Lê CAMPOS, MALHAS, TROCAS e ROTAS dos fontes."""
+    """Lê CAMPOS, MALHAS, TROCAS, EXPORTACOES e ROTAS dos fontes."""
     tabelas = {}
     for arquivo, itens in (('src/coupling/cpl_fields.F90', [('cpl_campo_t', 'CAMPOS')]),
                            ('src/coupling/cpl_map.F90', [('cpl_malha_ref_t', 'MALHAS'),
                                                           ('cpl_troca_t', 'TROCAS'),
+                                                          ('cpl_exporta_t', 'EXPORTACOES'),
                                                           ('cpl_rota_t', 'ROTAS')])):
         caminho = os.path.join(raiz, arquivo)
         try:
@@ -295,6 +296,7 @@ def quando_md(q):
 
 def gera(t):
     trocas, rotas, campos, malhas = t['TROCAS'], t['ROTAS'], t['CAMPOS'], t['MALHAS']
+    exporta = t['EXPORTACOES']
     out = [
         '# Mapa de acoplamento do MONAN-Coupler',
         '',
@@ -304,12 +306,13 @@ def gera(t):
         'conferida por `tests/unit/test_cpl_map.F90`; a arquitetura e o plano',
         'estão em `docs/arquitetura-acoplamento.md`.',
         '',
-        'O mapa descreve o acoplamento que o código faz hoje. Ele ainda não',
-        'comanda nada: os componentes anunciam os campos pelas listas próprias,',
-        'e o mapa passa a ser usado a partir das etapas R-FASE11-03 e R-FASE11-05.',
+        'O mapa descreve o acoplamento que o código faz hoje. O mediador (desde a',
+        'R-FASE11-05) e os caps do MOM6 e do SIS2 (desde a R-FASE11-06) anunciam',
+        'e realizam os campos a partir dele; os caps do MONAN-A, do DATM e do DOCN',
+        'ainda usam listas próprias, que o teste confere contra `EXPORTACOES`.',
         '',
-        '{} campos, {} malhas, {} trocas e {} rotas.'.format(
-            len(campos), len(malhas), len(trocas), len(rotas)),
+        '{} campos, {} malhas, {} trocas, {} exportações e {} rotas.'.format(
+            len(campos), len(malhas), len(trocas), len(exporta), len(rotas)),
         '',
         '## 1. Configurações',
         '',
@@ -361,7 +364,21 @@ def gera(t):
     out += md_tabela(['Campo', 'De', 'Para', 'Meio', 'Quando'],
                      [[codigo(x['campo']), codigo(x['de']), codigo(x['para']),
                        codigo(x['meio']), quando_md(x['quando'])] for x in sel])
-    out += ['', '## 4. Rotas do mediador', '',
+    out += ['', '## 4. Exportações dos modelos', '',
+            'Campos que cada modelo anuncia no estado de exportação, na ordem do',
+            'anúncio. Um campo exportado pode não ter consumidor (o conector só leva',
+            'os que o destino importa); a conferência do mapa os lista como aviso.',
+            '"Consumido em" diz em quais configurações conferidas o campo sai por',
+            'algum conector.', '']
+    linhas = []
+    for e in exporta:
+        usos = [n for n in nomes if vale(e, CONFIGS[n]) and any(
+            x['meio'] == 'conector' and x['campo'] == e['campo'] and x['de'] == e['ponto']
+            and vale(x, CONFIGS[n]) for x in trocas)]
+        linhas.append([codigo(e['campo']), codigo(e['ponto']), quando_md(e['quando']),
+                       ', '.join('`{}`'.format(n) for n in usos) or 'nenhuma'])
+    out += md_tabela(['Campo', 'Ponto', 'Quando', 'Consumido em'], linhas)
+    out += ['', '## 5. Rotas do mediador', '',
             'Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),',
             'interpolar (métodos, reserva, esquema), completar (preenchimento por',
             'vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.',
@@ -381,11 +398,11 @@ def gera(t):
                       'Completar', 'Limitar', 'Criar', 'Campos'], linhas)
     out += ['', 'Esquema de todas as rotas: `{}` (trocável no grupo `&nuopc_regrid`).'.format(
         '`, `'.join(sorted({r['esquema'] for r in rotas}))), '',
-        '## 5. Malhas', '']
+        '## 6. Malhas', '']
     out += md_tabela(['Malha', 'Componente', 'Tipo', 'Descrição'],
                      [[codigo(m['nome']), m['componente'], m['tipo'], m['descricao']]
                       for m in malhas])
-    out += ['', '## 6. Campos', '']
+    out += ['', '## 7. Campos', '']
     out += md_tabela(['Campo', 'Unidade', 'Sinal', 'Descrição'],
                      [[codigo(c['nome']), c['unidade'], c['sinal'], c['descricao']]
                       for c in campos])
