@@ -7,8 +7,9 @@
 !!            depende só da geometria, é chamada uma vez;
 !!   execute  interpola os valores do campo de origem para o de destino;
 !!   release  libera os recursos.
-!! Quem usa o esquema chama apply, que executa a interpolação e, se pedido,
-!! o preenchimento por vizinhança dos pontos sem valor válido.
+!! Quem usa o esquema chama apply, que confere o setup e executa a
+!! interpolação. As etapas seguintes da rota (preenchimento por vizinhança
+!! dos pontos sem valor válido e troca de NaN) são de regrid_manager%apply.
 !!
 !! O comportamento de cada interpolação é descrito por um regrid_spec_t
 !! (esquema, métodos em ordem de preferência, máscaras, preenchimento).
@@ -65,9 +66,12 @@ module regrid_base_mod
     character(len=256) :: weights_file = ''
     !> Classe do campo (esquema 'mpassit'): 'continuous', 'integer', 'accumulated'.
     character(len=NAME_LEN) :: field_class = 'continuous'
+    !> Preenchimento por vizinhança (etapa completar), depois da
+    !! interpolação. Aplicado por regrid_manager%apply. No esquema
+    !! 'mpassit', fill%vfill é também o valor de ausência.
     type(regrid_fill_t) :: fill
-    !> Troca NaN no destino por nan_value depois da interpolação (e do
-    !! preenchimento por vizinhança). Aplicado por regrid_manager%apply.
+    !> Troca NaN no destino por nan_value depois da interpolação e do
+    !! preenchimento por vizinhança. Aplicado por regrid_manager%apply.
     logical :: nan_replace = .false.
     real(ESMF_KIND_R8) :: nan_value = 0.0_ESMF_KIND_R8
   end type regrid_spec_t
@@ -110,16 +114,15 @@ module regrid_base_mod
 
 contains
 
-  !> Interpola src -> dst e aplica o preenchimento por vizinhança, se pedido.
-  !! zero_total, se presente, substitui spec%zero_total nesta chamada.
+  !> Interpola src -> dst. zero_total, se presente, substitui
+  !! spec%zero_total nesta chamada. O preenchimento por vizinhança
+  !! (spec%fill) é feito por regrid_manager%apply, com as opções da rota
+  !! pedida, mesmo quando ela usa a interpolação da reserva.
   subroutine apply(this, src, dst, rc, zero_total)
     class(regridder_t), intent(inout) :: this
     type(ESMF_Field),   intent(inout) :: src, dst
     integer,            intent(out)   :: rc
     logical, optional,  intent(in)    :: zero_total
-
-    real(ESMF_KIND_R8), pointer :: p(:,:)
-    integer :: localDeCount
 
     if (.not. this%ready) then
       call ESMF_LogWrite('regrid: rota '//trim(this%label)//' usada antes do setup', &
@@ -133,13 +136,6 @@ contains
     else
       call this%execute(src, dst, this%spec%zero_total, rc)
     end if
-    if (rc /= ESMF_SUCCESS .or. .not. this%spec%fill%enabled) return
-
-    call ESMF_FieldGet(dst, localDeCount=localDeCount, rc=rc)
-    if (rc /= ESMF_SUCCESS .or. localDeCount == 0) return
-    call ESMF_FieldGet(dst, farrayPtr=p, rc=rc)
-    if (rc /= ESMF_SUCCESS) return
-    call neighbor_fill(p, this%spec%fill)
   end subroutine apply
 
   !> Preenchimento por vizinhança de um campo 2D local (sem troca de halo:

@@ -21,7 +21,8 @@
 module regrid_manager_mod
 
   use ESMF
-  use regrid_base_mod,     only : regridder_t, regrid_spec_t, NAME_LEN, MAX_METHODS
+  use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill, &
+                                  NAME_LEN, MAX_METHODS
   use regrid_registry_mod, only : regrid_create
   use coupler_config_mod,  only : cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
                                   cfg_regrid_weights, cfg_regrid_class
@@ -37,7 +38,8 @@ module regrid_manager_mod
   !> Rota: um esquema próprio (r) ou, se o setup falhou e havia rota de
   !! reserva, um apelido (alias) para outra rota já criada. spec é a
   !! configuração pedida para a rota: mesmo quando ela usa a interpolação da
-  !! reserva, o zero_total e a troca de NaN são os dela, e não os da reserva.
+  !! reserva, o zero_total, a troca de NaN e o preenchimento por vizinhança
+  !! são os dela, e não os da reserva.
   type :: route_t
     character(len=NAME_LEN)         :: name = ''
     class(regridder_t), allocatable :: r
@@ -159,20 +161,34 @@ contains
     call ESMF_LogWrite(line, ESMF_LOGMSG_INFO)
   end subroutine report_route
 
-  !> Interpola pela rota. zero_total, se presente, substitui o da rota. O
-  !! zero_total e a troca de NaN vêm da rota pedida, mesmo quando ela usa a
-  !! interpolação da reserva; o preenchimento por vizinhança é o da rota
-  !! que interpola.
-  subroutine apply(this, name, src, dst, rc, zero_total)
+  !> Interpola pela rota, nesta ordem (a das etapas de ROTAS, em cpl_map):
+  !! interpolação, preenchimento por vizinhança (spec%fill, etapa completar)
+  !! e troca de NaN (spec%nan_replace). As três usam a configuração da rota
+  !! pedida, mesmo quando ela usa a interpolação da reserva.
+  !!
+  !! @param[in]  zero_total  se presente, substitui o da rota
+  !! @param[in]  fill        se presente, substitui o preenchimento da rota
+  !!                         (para completar como outra rota quando ela
+  !!                         ainda não existe)
+  !! @param[out] n_invalid   pontos fora da faixa antes do preenchimento,
+  !!                         somados nos DEs locais; -1 se não houve
+  !!                         preenchimento (desligado, falha ou nenhum DE)
+  !! @param[out] n_left      pontos que ficaram com o valor fixo; -1 idem
+  subroutine apply(this, name, src, dst, rc, zero_total, fill, n_invalid, n_left)
     class(regrid_manager_t), intent(inout) :: this
     character(len=*),        intent(in)    :: name
     type(ESMF_Field),        intent(inout) :: src, dst
     integer,                 intent(out)   :: rc
     logical, optional,       intent(in)    :: zero_total
+    type(regrid_fill_t), optional, intent(in)  :: fill
+    integer,             optional, intent(out) :: n_invalid, n_left
 
-    integer :: k, k_pedida
+    integer :: k, k_pedida, ni, nl
     logical :: zt
+    type(regrid_fill_t) :: completar
 
+    if (present(n_invalid)) n_invalid = -1
+    if (present(n_left))    n_left    = -1
     k_pedida = find(this, name)
     k = resolve(this, name)
     if (k == 0) then
@@ -184,9 +200,43 @@ contains
     if (present(zero_total)) zt = zero_total
     call this%routes(k)%r%apply(src, dst, rc, zt)
     if (rc /= ESMF_SUCCESS) return
+
+    completar = this%routes(k_pedida)%spec%fill
+    if (present(fill)) completar = fill
+    if (completar%enabled) then
+      call complete(dst, completar, ni, nl, rc)
+      if (present(n_invalid)) n_invalid = ni
+      if (present(n_left))    n_left    = nl
+      if (rc /= ESMF_SUCCESS) return
+    end if
     if (this%routes(k_pedida)%spec%nan_replace) &
       call replace_nan(dst, this%routes(k_pedida)%spec%nan_value, rc)
   end subroutine apply
+
+  !> Preenchimento por vizinhança do destino, em cada DE local (sem troca de
+  !! halo), com as contagens somadas nos DEs; -1 nas duas se não há DE local.
+  subroutine complete(dst, opt, n_invalid, n_left, rc)
+    type(ESMF_Field),    intent(inout) :: dst
+    type(regrid_fill_t), intent(in)    :: opt
+    integer,             intent(out)   :: n_invalid, n_left
+    integer,             intent(out)   :: rc
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: lde, ldec, ni, nl
+
+    n_invalid = -1
+    n_left    = -1
+    call ESMF_FieldGet(dst, localDeCount=ldec, rc=rc)
+    if (rc /= ESMF_SUCCESS .or. ldec == 0) return
+    n_invalid = 0
+    n_left    = 0
+    do lde = 0, ldec - 1
+      call ESMF_FieldGet(dst, localDe=lde, farrayPtr=p, rc=rc)
+      if (rc /= ESMF_SUCCESS) return
+      call neighbor_fill(p, opt, n_left=nl, n_invalid=ni)
+      n_invalid = n_invalid + ni
+      n_left    = n_left    + nl
+    end do
+  end subroutine complete
 
   !> Troca os NaN do destino, em cada DE local, por valor.
   subroutine replace_nan(dst, valor, rc)

@@ -11,12 +11,11 @@
 
 module med_export_mod
   use ESMF
-  use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use coupler_config_mod, only: cfg_write_fixdiag
   use NUOPC, only: NUOPC_SetTimestamp
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, cria_rota
+  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, cria_rota, completar_da_rota
   use coupler_constants_mod, only: T_ICE_MIN
 
   implicit none
@@ -246,18 +245,19 @@ contains
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
         call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_store2)
 
+      ! A rota completa por vizinhança os pontos fora de [0, 1] (coluna
+      ! completar da atm2ocn_ice), também com a reserva atm2ocn.
       if (is%regrid%has('atm2ocn_ice')) then
-        call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2)
+        call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
+                             n_invalid=n_invalidos, n_left=n_fixos)
       else
-        call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2)
+        call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
+                             fill=completar_da_rota('atm2ocn_ice'), &
+                             n_invalid=n_invalidos, n_left=n_fixos)
       end if
-      call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
-      if (associated(p_ifrac_exp)) then
-        call neighbor_fill(p_ifrac_exp, regrid_fill_t(enabled=.true., &
-          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8), &
-          n_left=n_fixos, n_invalid=n_invalidos)
+      if (n_invalidos >= 0) &
         call registra_completa(is%run%completa(COMPL_IFRAC_EXP), n_invalidos, n_fixos)
-      end if
+      call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
       if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
           write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
             'FIX-DIAG-ICEREGRID04-01: Si_ifrac(exportState, pos ATM->OCN+' // &

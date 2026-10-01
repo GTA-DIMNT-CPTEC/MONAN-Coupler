@@ -28,6 +28,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/malhas/compara-malhas.bash REV` | as malhas do mediador (fluxo e oceano, com o MOM6 e com o DOCN), a grade do cap atmosférico e a malha do SIS2 têm a mesma decomposição e as mesmas coordenadas, bit a bit, que no commit `REV` (a do SIS2, que a construção de antes), com vários números de processos? |
+| `tests/completar/compara-completar.bash REV` | a SST na malha de fluxo e os campos exportados ao oceano, com os pontos completados por vizinhança, e as contagens do relatório de acoplamento saem iguais, bit a bit, aos do commit `REV`, com vários números de processos? |
 | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
 | `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
 | `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
@@ -40,7 +41,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.13 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.14 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -52,6 +53,7 @@ Resumo (referência: HEAD)
   bulk         OK                              82 s
   grade        OK                              83 s
   malhas       OK                              75 s
+  completar    OK                             100 s
   unitarios    OK                              31 s
   mapa         OK                               0 s
   cplcheck     OK                              45 s
@@ -70,12 +72,13 @@ O que cada linha confere:
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
 | `malhas` | o teste de regressão da seção 2.13 acusa diferença |
+| `completar` | o teste de regressão da seção 2.14 acusa diferença |
 | `unitarios` | algum teste com valor esperado ou o teste de consistência do mapa de acoplamento (seção 2.8) falha |
 | `mapa` | `docs/acoplamento.md` não é o que `tools/dev/mapa-acoplamento.py` gera do mapa (seção 2.11) |
 | `cplcheck` | a conferência do mapa no driver de teste não dá o esperado (seção 2.12) |
 | `supergrid`, `docn` | os testes de regressão das seções 2.9 e 2.10 acusam diferença |
 
-A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de nove minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
+A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de onze minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
 
 Foi conferido ao contrário: uma variável sem uso acrescentada a `nc_writer.F90` faz falhar `avisos` e, com `-i`, `instrucoes`.
 
@@ -203,9 +206,9 @@ Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a 
 
 Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
 
-`test_rotas.F90` (desde a R-FASE11-12) confere a configuração que o mediador lê da tabela `ROTAS` para criar cada uma das seis rotas (`spec_da_rota`, em `med_cap_methods`), campo a campo do `regrid_spec_t` e a rota de reserva, contra a configuração que cada chamada passava até a R-FASE11-11, copiada no teste; e que uma rota fora da tabela é recusada. Desde a R-FASE11-13, a referência inclui o `zero_total` que as chamadas de interpolação passavam (o mesmo em todas as chamadas de cada rota) e a troca de NaN que `RegridOrCopy` fazia. Conferido ao contrário: trocar a reserva de `atm2ocn_ice` na tabela faz o teste falhar.
+`test_rotas.F90` (desde a R-FASE11-12) confere a configuração que o mediador lê da tabela `ROTAS` para criar cada uma das seis rotas (`spec_da_rota`, em `med_cap_methods`), campo a campo do `regrid_spec_t` e a rota de reserva, contra a configuração que cada chamada passava até a R-FASE11-11, copiada no teste; e que uma rota fora da tabela é recusada. Desde a R-FASE11-13, a referência inclui o `zero_total` que as chamadas de interpolação passavam (o mesmo em todas as chamadas de cada rota) e a troca de NaN que `RegridOrCopy` fazia; desde a R-FASE11-14, o preenchimento por vizinhança que `med_ocean` (SST) e `med_export` (fração de gelo exportada) faziam depois da interpolação, e o que `completar_da_rota` devolve (o da SST, que a rota `ocn2atm` usa enquanto a `ocn2atm_sst` não existe). Conferido ao contrário: trocar a reserva de `atm2ocn_ice` na tabela faz o teste falhar.
 
-`test_completa.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; e a acumulação de `registra_completa`.
+`test_completa.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; que, com as opções da SST, `n_invalid` é igual à contagem que `fill_sst_gaps` fazia à parte até a R-FASE11-13 (desde a R-FASE11-14 o relatório usa a de `neighbor_fill`); e a acumulação de `registra_completa`.
 
 Desde a R-FASE11-05, `test_cpl_map.F90` confere também as listas que o mediador anuncia e realiza, geradas do mapa por `cpl_chegadas` com as chaves do mediador, contra as listas que ele usava antes (`tests/unit/listas_mediador.inc`, cópia sem mudança das de `med_cap_types` na tag `fase11-04-fix01`), nome a nome e na mesma ordem, nas cinco configurações.
 
@@ -291,6 +294,16 @@ Desde a R-FASE11-10, o programa também cria o oceano no mediador (`create_ocn_g
 `tests/unit/test_cpl_grids.F90` confere as mesmas funções com valores esperados: a decomposição (`cpl_regdecomp`) nos casos do comentário da rotina e, de 1 a 600 processos, colunas x linhas = processos; os centros e os cantos nas bordas das duas malhas; e que as duas regras de centro dão os mesmos graus, a menos de 180 na longitude.
 
 Desde a R-FASE11-09, o mesmo teste confere as fórmulas de índice e de longitude de `cpl_grids` contra as expressões que elas substituíram, escritas no teste como estavam nas rotinas: o resultado tem de ser igual, bit a bit, em cerca de 820 mil coordenadas (passos de 0,001 entre -400 e 400, os múltiplos de 0,25 entre -720 e 720 e os seus vizinhos imediatos, -0 e valores grandes), cinco passos de grade e quatro tamanhos. Uma comparação de código de máquina (`objdump`) não serviria aqui, porque a fórmula passa de expressão no lugar a chamada de função em outro módulo. Conferido ao contrário: trocar `nint` por `int` no índice por arredondamento faz o teste falhar. O teste mostrou também duas coisas que ficaram registradas em `cpl_grids`: com o limite a [1, n], o índice por piso (`floor`) e o por truncamento (`int`) são sempre iguais, e ficaram uma função só; e somar 360 uma vez não é o mesmo que somar até a longitude ficar em [0, 360) (com -1e-17, um dá 360 e o outro 0), por isso a cópia do cap atmosférico manteve a sua soma única.
+
+### 2.14 Teste dos campos completados
+
+```bash
+tests/completar/compara-completar.bash HEAD
+```
+
+Desde a R-FASE11-14, a SST na malha de fluxo e a fração de gelo exportada ao oceano são completadas por vizinhança pela rota (coluna `completar` de `ROTAS`), e não mais por chamadas à parte em `med_ocean` e `med_export`. Este teste compila a versão do commit `REV` e a da árvore de trabalho, liga a cada uma o programa `tests/completar/test_completar.F90` e o executa com 1, 4, 6 e 8 processos MPI (variável `LISTA_NP`). O programa monta o mediador como na inicialização (anúncio dos campos pelo mapa, `create_atm_grid`, `create_ocn_grid` com o supergrid sintético, `realize_component_fields`, `create_internal_fields`, `idc_create_routes`) e roda três passos de `update_ocean_fields_on_atm_grid` e `export_to_components`, com uma SST que tem pontos abaixo de 270 K, acima de 310 K e NaN, e uma fração de gelo entre -0,2 e 1,2. No passo 1 a máscara do oceano é uniforme, e a SST passa pela rota `ocn2atm`, completada como a `ocn2atm_sst`; nos passos 2 e 3 a máscara tem terra, e a rota `ocn2atm_sst` é criada e usada. Têm de ser idênticos, bit a bit: a SST na malha de fluxo e todos os campos do `exportState`, em cada passo e em cada PET; as contagens de pontos completados; e as mensagens do mediador e do framework de interpolação no log do ESMF, sem data e hora, com as linhas `CPL-REL:` do relatório (`relata_completas`). Conferido ao contrário: tirar o preenchimento da SST no passo da máscara uniforme faz os arquivos e os logs diferirem.
+
+O programa usa só interfaces que existem desde a R-FASE11-12 (tag `fase11-12-validada`). O teste da física bulk (seção 2.5) não passa por esses caminhos: ele chama `calc_bulk_ncar` com os campos já na malha de fluxo.
 
 ## 3. Interfaces mínimas
 

@@ -34,7 +34,7 @@ contains
   procedure(setup_i),   deferred :: setup     ! pesos ou route handle, uma vez
   procedure(execute_i), deferred :: execute   ! interpolação, a cada passo
   procedure(release_i), deferred :: release
-  procedure, non_overridable     :: apply     ! execute + preenchimento por vizinhança
+  procedure, non_overridable     :: apply     ! confere o setup e chama execute
 end type
 ```
 
@@ -55,7 +55,7 @@ call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.tru
 call is%regrid%apply('ocn2atm_sst', sst_ocn, sst_atm, rc)          ! a cada passo
 ```
 
-Cada rota guarda a configuração com que foi criada. Em `apply`, o `zero_total` (zerar o destino inteiro antes da interpolação, ou só os pontos alcançados) e a troca de NaN no destino (`nan_value` em `regrid_spec`, aplicada depois da interpolação e do preenchimento por vizinhança) vêm da rota pedida, mesmo quando ela usa a interpolação da reserva; o argumento opcional `zero_total` de `apply` ainda pode substituir o da rota. No mediador, as rotas são criadas por `cria_rota` (`med_cap_methods`), com a configuração da tabela `ROTAS` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
+Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manager` faz, nesta ordem: a interpolação, com o `zero_total` da rota (zerar o destino inteiro antes, ou só os pontos alcançados); o preenchimento por vizinhança dos pontos fora da faixa válida (`spec%fill`, um `regrid_fill_t`, em cada DE local); e a troca de NaN no destino (`nan_value` em `regrid_spec`). As três usam a configuração da rota pedida, mesmo quando ela usa a interpolação da reserva. Argumentos opcionais de `apply`: `zero_total` e `fill` substituem os da rota nesta chamada; `n_invalid` e `n_left` devolvem quantos pontos estavam fora da faixa antes do preenchimento e quantos ficaram com o valor fixo, somados nos DEs locais (-1 quando não houve preenchimento). Até a R-FASE11-13, o preenchimento era feito por `regridder_t%apply`, com as opções da rota que interpola, só no primeiro DE local e sem contagens; nenhuma rota o usava. No mediador, as rotas são criadas por `cria_rota` (`med_cap_methods`), com a configuração da tabela `ROTAS` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
 
 ## Como acrescentar um esquema
 
@@ -82,4 +82,4 @@ export ESMFMKFILE=...        # esmf.mk do ESMF instalado
 make test NP=2               # na raiz do repositório
 ```
 
-Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha; e, com uma origem regional, que a rota de reserva usa o `zero_total` e a troca de NaN da rota pedida. Passam com 1, 2, 3 e 4 processos.
+Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha; e, com uma origem regional, que a rota de reserva usa o `zero_total`, o preenchimento por vizinhança e a troca de NaN da rota pedida; que o preenchimento pela rota dá, bit a bit, o mesmo campo e as mesmas contagens que `neighbor_fill` chamado à parte depois da interpolação, também com o preenchimento passado na chamada; e que ele vem antes da troca de NaN. Passam com 1, 2, 3 e 4 processos.

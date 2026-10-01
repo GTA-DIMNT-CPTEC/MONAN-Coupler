@@ -12,8 +12,7 @@
 module med_ocean_mod
   use ESMF
   use netcdf
-  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY, T_FREEZE_SEAWATER
-  use regrid_base_mod, only: regrid_fill_t, neighbor_fill
+  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny, cfg_use_docn_ice, &
                                 cfg_write_fixdiag, cfg_docn_ice_init_only, &
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
@@ -22,7 +21,8 @@ module med_ocean_mod
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
   use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: ZeroInternalField, cria_rota, set_ocn_grid_mask
+  use med_cap_methods_mod, only: ZeroInternalField, cria_rota, set_ocn_grid_mask, &
+                                 completar_da_rota
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: indice_trunca
 
@@ -62,6 +62,7 @@ contains
     integer :: rc_diag
     real(ESMF_KIND_R8), pointer :: sst(:,:)
     real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
+    integer :: n_invalid, n_left
     if (is%regrid%has('ocn2atm')) then
       call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
 
@@ -90,20 +91,20 @@ contains
 
 
       ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
-      ! por vizinhança para a costa.
+      ! por vizinhança para a costa (etapa completar da rota ocn2atm_sst).
+      ! Enquanto a máscara é uniforme, a rota ocn2atm interpola e a SST é
+      ! completada como na rota ocn2atm_sst.
       if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
 
       if (is%regrid%has('ocn2atm_sst')) then
-        call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc)
+        call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc, &
+                             n_invalid=n_invalid, n_left=n_left)
       else
-        call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc)
+        call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc, &
+                             fill=completar_da_rota('ocn2atm_sst'), &
+                             n_invalid=n_invalid, n_left=n_left)
       end if
-      call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
-
-      ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
-      if (associated(sst)) then
-        call fill_sst_gaps(sst, is%run%completa(COMPL_SST))
-      end if
+      if (n_invalid >= 0) call registra_sst(is%run%completa(COMPL_SST), n_invalid, n_left)
 
       ! Regrid de correntes oceânicas OCN → ATM.
       ! So_u e So_v são anunciados e realizados no importState do MED
@@ -143,30 +144,27 @@ contains
     end if
   end subroutine update_ocean_fields_on_atm_grid
 
-  !> Preenche a SST na grade ATM onde a interpolação não trouxe valor
-  !! válido (costa, costura tripolar): média dos vizinhos válidos, em até
-  !! 40 passadas; o que sobrar recebe 271,35 K. Valores acima de 310 K
-  !! recebem 271,35 K antes da difusão. Soma os pontos em cont, para o
-  !! relatório de acoplamento.
-  subroutine fill_sst_gaps(sst, cont)
-    real(ESMF_KIND_R8), pointer :: sst(:,:)
+  !> Soma os pontos da SST completados pela rota em cont, para o relatório
+  !! de acoplamento, e os registra no log. O preenchimento (coluna completar
+  !! da rota ocn2atm_sst, em ROTAS): média dos vizinhos válidos, em até 40
+  !! passadas; o que sobrar recebe 271,35 K; valores acima de 310 K recebem
+  !! 271,35 K antes da difusão.
+  !!
+  !! @param[inout] cont       contagem da SST
+  !! @param[in]    n_invalid  pontos fora da faixa antes do preenchimento
+  !! @param[in]    n_left     pontos que ficaram com o valor fixo
+  subroutine registra_sst(cont, n_invalid, n_left)
     type(med_completa_t), intent(inout) :: cont
-    type(regrid_fill_t), parameter :: SST_FILL = regrid_fill_t(enabled=.true.,     &
-    vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=T_FREEZE_SEAWATER, &
-    max_iter=40, skip_fraction=1.0_ESMF_KIND_R8, overflow_to_fill=.true.)
-    integer :: n_invalid, n_left
+    integer,              intent(in)    :: n_invalid, n_left
     character(len=120) :: msg
 
-    n_invalid = count(.not. (sst >= SST_FILL%vmin .and. sst <= SST_FILL%vmax) &
-                      .and. .not. (sst > SST_FILL%vmax))
-    call neighbor_fill(sst, SST_FILL, n_left)
     call registra_completa(cont, n_invalid, n_left)
     if (n_invalid > 0) then
       write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
         ' celulas (', n_left, ' com valor fixo)'
       call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
     end if
-  end subroutine fill_sst_gaps
+  end subroutine registra_sst
 
   subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
     type(MED_InternalState), pointer :: is

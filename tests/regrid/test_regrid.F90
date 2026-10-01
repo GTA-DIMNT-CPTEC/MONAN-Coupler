@@ -24,6 +24,14 @@ program test_regrid
   type(regrid_manager_t) :: mgr
   type(regrid_spec_t)    :: spec
   integer :: rc, localPet, petCount, nfail
+  ! Etapa completar (item 8)
+  type(regrid_fill_t), parameter :: F1 = regrid_fill_t(enabled=.true., vmin=1.0_ESMF_KIND_R8, &
+    vmax=2.5_ESMF_KIND_R8, vfill=1.5_ESMF_KIND_R8, max_iter=5, skip_fraction=1.0_ESMF_KIND_R8, &
+    overflow_to_fill=.true.)
+  type(regrid_fill_t), parameter :: F2 = regrid_fill_t(enabled=.true., vmin=1.0_ESMF_KIND_R8, &
+    vmax=3.0_ESMF_KIND_R8, vfill=-5.0_ESMF_KIND_R8)
+  real(ESMF_KIND_R8), allocatable :: ref1(:,:), ref2(:,:)
+  integer :: ni_ref1, nl_ref1, ni_ref2, nl_ref2, ni, nl
 
   call ESMF_Initialize(defaultLogFileName='test_regrid.log', logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
   call ESMF_VMGetGlobal(vm, rc=rc)
@@ -107,6 +115,44 @@ program test_regrid
   if (rc == 0) call mgr%apply('nan_reserva', freg, fdst3, rc)
   call report('reserva com a troca de NaN da rota pedida', rc == 0 .and. count_nan(fdst3) == 0)
 
+  ! 8. Etapa completar pela rota: o resultado e as contagens são os do
+  !    preenchimento por vizinhança chamado à parte depois da interpolação.
+  !    A origem regional tem um NaN por PET e não alcança as altas latitudes
+  !    (zeros, fora da faixa de F1 e F2); com F2, a fração inválida passa
+  !    do limiar e a difusão é pulada.
+  if (rc == 0) call mgr%apply('regional', freg, fdst3, rc)
+  ref1 = local(fdst3)
+  call neighbor_fill(ref1, F1, n_left=nl_ref1, n_invalid=ni_ref1)
+  ref2 = local(fdst3)
+  call neighbor_fill(ref2, F2, n_left=nl_ref2, n_invalid=ni_ref2)
+  call report('completar: o caso tem NaN, pontos fora da faixa e acima de vmax', &
+              rc == 0 .and. count_nan(fdst3) > 0 .and. soma(ni_ref1) > soma(nl_ref1) .and. &
+              soma(nl_ref1) > 0 .and. soma(count(local(fdst3) > F1%vmax)) > 0)
+  spec = regrid_spec('bilinear')
+  spec%fill = F1
+  call mgr%add('completa', spec, freg, fdst3, rc)
+  if (rc == 0) call mgr%apply('completa', freg, fdst3, rc, n_invalid=ni, n_left=nl)
+  call report('completar pela rota: igual ao preenchimento a parte, com as contagens', &
+              rc == 0 .and. iguais(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
+  spec = regrid_spec('metodo_inexistente')
+  spec%fill = F1
+  call mgr%add('completa_reserva', spec, freg, fdst3, rc, fallback='regional')
+  if (rc == 0) call mgr%apply('completa_reserva', freg, fdst3, rc, n_invalid=ni, n_left=nl)
+  call report('reserva com o preenchimento da rota pedida', &
+              rc == 0 .and. iguais(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
+  spec = regrid_spec('bilinear', nan_value=7.0_ESMF_KIND_R8)
+  spec%fill = F1
+  call mgr%add('completa_nan', spec, freg, fdst3, rc)
+  if (rc == 0) call mgr%apply('completa_nan', freg, fdst3, rc)
+  call report('completar antes da troca de NaN: os NaN sao completados por vizinhanca', &
+              rc == 0 .and. iguais(local(fdst3), ref1))
+  if (rc == 0) call mgr%apply('completa', freg, fdst3, rc, fill=F2, n_invalid=ni, n_left=nl)
+  call report('preenchimento passado na chamada substitui o da rota (difusao pulada)', &
+              rc == 0 .and. iguais(local(fdst3), ref2) .and. ni == ni_ref2 .and. nl == nl_ref2 .and. &
+              soma(nl_ref2) == soma(ni_ref2) .and. soma(ni_ref2) > 0)
+  if (rc == 0) call mgr%apply('regional', freg, fdst3, rc, n_invalid=ni, n_left=nl)
+  call report('rota sem preenchimento: contagens -1', rc == 0 .and. ni == -1 .and. nl == -1)
+
   call mgr%destroy(rc)
   call report('destroy', rc == 0)
 
@@ -184,6 +230,30 @@ contains
     loc = count(p == v)
     call MPI_Allreduce(loc, count_value, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
   end function count_value
+
+  !> Cópia dos valores locais do campo.
+  function local(f) result(a)
+    type(ESMF_Field), intent(inout) :: f
+    real(ESMF_KIND_R8), allocatable :: a(:,:)
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: irc
+    call ESMF_FieldGet(f, farrayPtr=p, rc=irc)
+    a = p
+  end function local
+
+  !> Igualdade bit a bit dos valores (NaN igual a NaN).
+  logical function iguais(a, b)
+    real(ESMF_KIND_R8), intent(in) :: a(:,:), b(:,:)
+    iguais = all(shape(a) == shape(b))
+    if (iguais) iguais = all(transfer(a, 1_8, size(a)) == transfer(b, 1_8, size(b)))
+  end function iguais
+
+  !> Soma de n em todos os PETs.
+  integer function soma(n)
+    integer, intent(in) :: n
+    integer :: ierr
+    call MPI_Allreduce(n, soma, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function soma
 
   !> Contagem global de NaN.
   integer function count_nan(f)

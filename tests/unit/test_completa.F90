@@ -11,6 +11,10 @@
 !!                   nenhum valor preenchido (comparação bit a bit), nem no
 !!                   caminho normal nem quando a fração inválida passa do
 !!                   limiar e a difusão é pulada
+!!   SST             a contagem de neighbor_fill com as opções da SST é a
+!!                   que fill_sst_gaps (med_ocean, até a R-FASE11-13, tag
+!!                   fase11-13-validada) fazia à parte, copiada aqui; desde
+!!                   a R-FASE11-14 a rota ocn2atm_sst usa a de neighbor_fill
 !!   registra_completa  acumula aplicações, pontos fora da faixa e pontos
 !!                   com valor fixo
 !!
@@ -29,8 +33,8 @@ program test_completa
                                                             vmax=1.0_R8, vfill=0.0_R8)
   type(regrid_fill_t), parameter :: SST = regrid_fill_t(enabled=.true., vmin=270.0_R8,   &
     vmax=310.0_R8, vfill=271.35_R8, max_iter=40, skip_fraction=1.0_R8, overflow_to_fill=.true.)
-  real(R8) :: a(6,5), b(6,5), c(3,3), d(3,3)
-  integer :: nfalhas, n_inv, n_fix
+  real(R8) :: a(6,5), b(6,5), c(3,3), d(3,3), e(40,30)
+  integer :: nfalhas, n_inv, n_fix, n_antes, i, j
   type(med_completa_t) :: cont
 
   nfalhas = 0
@@ -62,6 +66,20 @@ program test_completa
   call neighbor_fill(d, FAIXA01)
   call resultado('limiar: 6 fora da faixa, 6 com valor fixo', n_inv == 6 .and. n_fix == 6)
   call resultado('limiar: contagem nao muda os valores', iguais(c, d))
+
+  ! --- SST: contagem de antes (fill_sst_gaps) e de neighbor_fill -----------
+  do j = 1, size(e, 2)
+    do i = 1, size(e, 1)
+      e(i,j) = 285.0_R8 + 12.0_R8 * sin(0.37_R8 * i) * cos(0.21_R8 * j)
+      if (mod(7*i + 3*j, 11) == 0) e(i,j) = 0.0_R8
+      if (mod(i + 2*j, 13) == 0)   e(i,j) = 315.0_R8
+      if (mod(5*i + j, 29) == 0)   e(i,j) = ieee_value(1.0_R8, ieee_quiet_nan)
+    end do
+  end do
+  n_antes = count(.not. (e >= SST%vmin .and. e <= SST%vmax) .and. .not. (e > SST%vmax))
+  call neighbor_fill(e, SST, n_left=n_fix, n_invalid=n_inv)
+  call resultado('SST: n_invalid igual a contagem de fill_sst_gaps', &
+                 n_inv == n_antes .and. n_antes > 0)
 
   ! --- acumulação ---------------------------------------------------------
   call registra_completa(cont, 4, 0)

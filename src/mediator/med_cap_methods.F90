@@ -12,6 +12,7 @@
 !!   RegridOrCopy               regrid ATM→OCN com fallback temporário
 !!   RouteOcnToAtm              exporta campos OCN→ATM via mediador
 !!   spec_da_rota               configuração de uma rota na tabela ROTAS
+!!   completar_da_rota          preenchimento por vizinhança de uma rota de ROTAS
 !!   cria_rota                  cria uma rota com a configuração de ROTAS
 !!   set_ocn_grid_mask          copia So_omask para a máscara da grade OCN
 
@@ -19,7 +20,7 @@ module med_cap_methods_mod
 
   use ESMF
   use regrid_manager_mod, only : regrid_spec, regrid_manager_t
-  use regrid_base_mod,    only : regrid_spec_t
+  use regrid_base_mod,    only : regrid_spec_t, regrid_fill_t
   use cpl_map_mod,        only : ROTAS, cpl_rota_indice, CPL_AUSENTE
   use NUOPC, only: NUOPC_SetTimestamp
 
@@ -40,6 +41,7 @@ module med_cap_methods_mod
   public :: RegridOrCopy
   public :: RouteOcnToAtm
   public :: spec_da_rota
+  public :: completar_da_rota
   public :: cria_rota
   public :: set_ocn_grid_mask
 
@@ -303,7 +305,8 @@ contains
   !! mascara), o que fazer com os pontos do destino que a interpolação não
   !! alcança (sem_valor: 'zerar' zera o destino inteiro antes, zero_total;
   !! 'manter' e 'sentinela' preservam o valor anterior), a troca de NaN no
-  !! destino (nan_para) e a rota de reserva ('' se não tem). ok = .false.
+  !! destino (nan_para), o preenchimento por vizinhança depois da
+  !! interpolação (completar) e a rota de reserva ('' se não tem). ok = .false.
   !! se a rota não está em ROTAS. O grupo &nuopc_regrid do nuopc.input
   !! continua podendo trocar o esquema e os métodos (regrid_manager,
   !! apply_config).
@@ -331,8 +334,25 @@ contains
       spec%nan_replace = .true.
       spec%nan_value   = ROTAS(k)%nan_para
     end if
+    spec%fill = ROTAS(k)%completar
     reserva = ROTAS(k)%reserva
   end subroutine spec_da_rota
+
+  !============================================================================
+  !> @brief Preenchimento por vizinhança (coluna completar de ROTAS) da rota
+  !! nome; desligado se a rota não está em ROTAS. Serve para completar como
+  !! a rota quando ela ainda não existe e outra interpola no lugar dela (a
+  !! SST pela rota ocn2atm enquanto a máscara do oceano é uniforme).
+  !============================================================================
+  function completar_da_rota(nome) result(fill)
+    character(len=*), intent(in) :: nome
+    type(regrid_fill_t) :: fill
+    integer :: k
+
+    fill = regrid_fill_t()
+    k = cpl_rota_indice(nome)
+    if (k > 0) fill = ROTAS(k)%completar
+  end function completar_da_rota
 
   !============================================================================
   !> @brief Cria a rota nome em regrid com a configuração de ROTAS, e com a
