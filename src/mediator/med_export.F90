@@ -12,12 +12,11 @@
 module med_export_mod
   use ESMF
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
-  use regrid_manager_mod, only: regrid_spec
   use coupler_config_mod, only: cfg_write_fixdiag
   use NUOPC, only: NUOPC_SetTimestamp
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy
+  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, cria_rota
   use coupler_constants_mod, only: T_ICE_MIN
 
   implicit none
@@ -245,8 +244,7 @@ contains
       ! Rota conservativa 'atm2ocn_ice', como a 'ocn2atm_ice' na ida, com
       ! 'atm2ocn' como reserva.
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
-        call is%regrid%add('atm2ocn_ice', regrid_spec('conserve,nearest_stod'), &
-          is%ice%ifrac, f_ifrac_exp, rc_store2, fallback='atm2ocn')
+        call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_store2)
 
       if (is%regrid%has('atm2ocn_ice')) then
         call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
@@ -358,8 +356,7 @@ contains
     call ESMF_StateGet(importState, itemName="So_omask", &
       field=omask_src_field, rc=rc_lm)
     if (rc_lm == ESMF_SUCCESS) then
-      call is%regrid%add('ocn2atm_landmask', regrid_spec('nearest_stod'), &
-        omask_src_field, is%ocn%omask, rc_lm)
+      call cria_rota(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
       if (rc_lm == ESMF_SUCCESS) then
         call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm, &
           zero_total=.false.)

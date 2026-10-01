@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6) e na R-FASE11-11 (seções 3.3, 4.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6) e na R-FASE11-12 (seções 3.5, 4.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -260,6 +260,8 @@ type(cpl_exporta_t), parameter :: EXPORTACOES(*) = [          &
   cpl_exporta_t('Si_t_sis2', 'ICE@ice_sis2', 'sis2') ]
 ```
 
+Desde a R-FASE11-12, o mediador cria as rotas por `cria_rota(regrid, nome, src, dst, rc)` (`med_cap_methods`), que lê a linha da rota em `ROTAS` (`spec_da_rota`): os métodos, o esquema, a máscara na origem (se a coluna `mascara` está preenchida) e a rota de reserva. O grupo `&nuopc_regrid` do `nuopc.input` continua podendo trocar o esquema e os métodos de uma rota. A busca na tabela ficou no mediador, e não em `regrid_manager%add`, como o plano previa: o framework de interpolação (`src/regrid`) não depende do mapa de acoplamento e continua testável sozinho (`tests/regrid`). As colunas `sem_valor`, `completar`, `limitar` e `criar` ainda não são lidas: as chamadas de interpolação continuam passando `zero_total`, e o preenchimento e o momento de criação continuam no código (etapas R-FASE11-13 e R-FASE11-14).
+
 O DATM está no mapa como o cap dele anuncia os campos (malha `datm`, condição `datm`), mas o driver não o registra: com `use_datm=.true.` o componente atmosférico continua sendo o MONAN-A. Duas lacunas de hoje ficam registradas no teste do mapa: com o DOCN, `So_omask` não chega ao mediador (o DOCN não a exporta); com o DOCN e o contorno direto do oceano, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A, e o cap atmosférico interrompe a rodada.
 
 `ROTAS` tem uma linha por interpolação do mediador. Toda rota tem as mesmas quatro etapas, na mesma ordem, e as colunas que não aparecem ficam com o valor padrão, que desliga a etapa:
@@ -393,7 +395,7 @@ As etapas estão agrupadas em seis blocos. Os blocos A e B dão visibilidade sem
 
 | Etapa | Conteúdo | Por que não muda resultados | Conferência específica |
 | --- | --- | --- | --- |
-| R-FASE11-12 | `regrid_manager%add(nome, src, dst, rc)` passa a buscar a configuração em `ROTAS`; as chamadas de hoje perdem a configuração, mas continuam nos mesmos pontos; `set_ocn_grid_mask` substitui os dois trechos que copiam a máscara | mesmos métodos, máscaras, reservas e momento de criação | configuração efetiva de cada rota impressa e comparada; relatório de acoplamento igual |
+| R-FASE11-12 | `cria_rota(regrid, nome, src, dst, rc)` (no mediador) cria a rota com a configuração de `ROTAS`; as chamadas de hoje perdem a configuração, mas continuam nos mesmos pontos; `set_ocn_grid_mask` substitui os dois trechos que copiam a máscara. O plano previa a busca dentro de `regrid_manager%add`; ficou fora do framework de interpolação, que não conhece o mapa (seção 3.5) | mesmos métodos, máscaras, reservas e momento de criação | configuração lida da tabela comparada com a de cada chamada de antes (`test_rotas`); relatório de acoplamento igual |
 | R-FASE11-13 | etapas preparar e limitar executadas pela rota: `sem_valor` substitui os `zero_total` passados nas chamadas e as sentinelas; `nan_para` substitui o tratamento em `RegridOrCopy` | mesma sequência de operações sobre cada campo | teste de interpolação; relatório igual |
 | R-FASE11-14 | etapa completar executada pela rota onde segue a interpolação (SST e fração de gelo exportada); no gelo, continua explícita | mesma sequência de operações | teste da física bulk; relatório igual (pontos completados) |
 
@@ -490,7 +492,9 @@ A R-FASE11-10 construiu por `cpl_grids` as malhas do oceano no mediador (`ocn_me
 
 A R-FASE11-11 fechou o bloco C com a grade do cap do MOM6, construída por `cpl_malha_de_blocos` com as mesmas chamadas do ESMF e as coordenadas do modelo. A etapa foi redefinida antes de começar, com a concordância do Daniel: a grade do cap não declara periodicidade e usa índices locais, e construí-la por `cpl_malha_tripolar` mudaria os pesos do conector OCN para MED, mesmo com coordenadas iguais; o diagnóstico na Jaci previsto no plano deixou de ser necessário (seção 3.3). Chamadas `ESMF_GridCreate*` fora de `src/coupling`: de 3 para 2 (DOCN e DATM), a meta do bloco.
 
-Próxima etapa: **R-FASE11-12**, a primeira do bloco D (rotas), conforme a tabela do bloco D: `regrid_manager%add(nome, src, dst, rc)` passa a buscar a configuração em `ROTAS`, e `set_ocn_grid_mask` substitui os dois trechos que copiam a máscara.
+A R-FASE11-12 abriu o bloco D: as seis rotas do mediador, nos sete pontos de criação de hoje, passam a ser criadas por `cria_rota`, com a configuração lida de `ROTAS` (seção 3.5), e `set_ocn_grid_mask` (`med_cap_methods`) substitui os dois trechos que copiavam `So_omask` para a máscara da grade do oceano (`add_ice_route` e `set_ocean_mask_for_sst`). Um teste unitário novo (`test_rotas`) confere, campo a campo, que a configuração lida da tabela é a que cada chamada passava. O indicador de pontos de criação de rota passou a contar as chamadas a `cria_rota` (continua 7 pontos em 5 arquivos).
+
+Próxima etapa: **R-FASE11-13**, conforme a tabela do bloco D: as etapas preparar e limitar executadas pela rota (`sem_valor` no lugar dos `zero_total` passados nas chamadas e das sentinelas; `nan_para` no lugar do tratamento em `RegridOrCopy`).
 
 ---
 

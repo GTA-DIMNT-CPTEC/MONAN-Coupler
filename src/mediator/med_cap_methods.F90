@@ -3,19 +3,24 @@
 !!
 !! Utilitários do mediador separados de MED_cap.F90:
 !!
-!!   CreateInternalField      — cria campo ESMF na grade interna
-!!   ZeroInternalField        — zera campo com guard
-!!   ZeroOcnFluxFields        — zera os fluxos enviados ao oceano
-!!   FillInternalField        — preenche campo com valor constante
-!!   GetFieldPtr              — obtém ponteiro de campo (falha se ausente)
-!!   GetFieldPtrOptional      — obtém ponteiro sem erro de log para campos opcionais
-!!   RegridOrCopy             — regrid ATM→OCN com fallback temporário
-!!   RouteOcnToAtm            — exporta campos OCN→ATM via mediador
+!!   CreateInternalField        cria campo ESMF na grade interna
+!!   ZeroInternalField          zera campo com guard
+!!   ZeroOcnFluxFields          zera os fluxos enviados ao oceano
+!!   FillInternalField          preenche campo com valor constante
+!!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
+!!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
+!!   RegridOrCopy               regrid ATM→OCN com fallback temporário
+!!   RouteOcnToAtm              exporta campos OCN→ATM via mediador
+!!   spec_da_rota               configuração de uma rota na tabela ROTAS
+!!   cria_rota                  cria uma rota com a configuração de ROTAS
+!!   set_ocn_grid_mask          copia So_omask para a máscara da grade OCN
 
 module med_cap_methods_mod
 
   use ESMF
-  use regrid_manager_mod, only : regrid_spec
+  use regrid_manager_mod, only : regrid_spec, regrid_manager_t
+  use regrid_base_mod,    only : regrid_spec_t
+  use cpl_map_mod,        only : ROTAS, cpl_rota_indice
   use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
@@ -34,6 +39,9 @@ module med_cap_methods_mod
   public :: GetFieldPtrOptional
   public :: RegridOrCopy
   public :: RouteOcnToAtm
+  public :: spec_da_rota
+  public :: cria_rota
+  public :: set_ocn_grid_mask
 
 
 
@@ -228,7 +236,7 @@ contains
     ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN); se ainda
     ! não existe, é criada com este par.
     if (.not. is%regrid%has('atm2ocn')) then
-      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), src_field, dst_field, rc)
+      call cria_rota(is%regrid, 'atm2ocn', src_field, dst_field, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
     call is%regrid%apply('atm2ocn', src_field, dst_field, rc, zero_total=.true.)
@@ -289,5 +297,94 @@ contains
   end subroutine RouteOcnToAtm
 
 
+
+  !============================================================================
+  !> @brief Configuração da rota nome na tabela ROTAS (cpl_map): métodos em
+  !! ordem de preferência, esquema, máscara na origem (se a rota tem
+  !! mascara) e rota de reserva ('' se não tem). ok = .false. se a rota não
+  !! está em ROTAS. O grupo &nuopc_regrid do nuopc.input continua podendo
+  !! trocar o esquema e os métodos (regrid_manager, apply_config).
+  !============================================================================
+  subroutine spec_da_rota(nome, spec, reserva, ok)
+    character(len=*),    intent(in)  :: nome
+    type(regrid_spec_t), intent(out) :: spec
+    character(len=*),    intent(out) :: reserva
+    logical,             intent(out) :: ok
+    integer :: k
+
+    reserva = ''
+    k = cpl_rota_indice(nome)
+    ok = k > 0
+    if (.not. ok) return
+    spec = regrid_spec(trim(ROTAS(k)%metodos), scheme=trim(ROTAS(k)%esquema), &
+                       mask_src=len_trim(ROTAS(k)%mascara) > 0)
+    reserva = ROTAS(k)%reserva
+  end subroutine spec_da_rota
+
+  !============================================================================
+  !> @brief Cria a rota nome em regrid com a configuração de ROTAS, e com a
+  !! rota de reserva da tabela, quando houver.
+  !============================================================================
+  subroutine cria_rota(regrid, nome, src, dst, rc)
+    type(regrid_manager_t), intent(inout) :: regrid
+    character(len=*),       intent(in)    :: nome
+    type(ESMF_Field),       intent(inout) :: src, dst
+    integer,                intent(out)   :: rc
+    type(regrid_spec_t) :: spec
+    character(len=32)   :: reserva
+    logical :: ok
+
+    call spec_da_rota(nome, spec, reserva, ok)
+    if (.not. ok) then
+      call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='MED: rota fora de ROTAS: '//trim(nome), &
+        line=__LINE__, file=__FILE__, rcToReturn=rc)
+      return
+    end if
+    if (len_trim(reserva) > 0) then
+      call regrid%add(nome, spec, src, dst, rc, fallback=trim(reserva))
+    else
+      call regrid%add(nome, spec, src, dst, rc)
+    end if
+  end subroutine cria_rota
+
+  !============================================================================
+  !> @brief Copia So_omask (1 = oceano, 0 = terra) do importState para o item
+  !! de máscara de ocn_grid, DE a DE, e conta os pontos de terra e de
+  !! oceano deste PET. É a máscara que as rotas com mascara em ROTAS usam
+  !! na origem (valores excluídos: terra = 0).
+  !!
+  !! achou: So_omask está no importState; copiou: algum DE recebeu a
+  !! máscara.
+  !============================================================================
+  subroutine set_ocn_grid_mask(ocn_grid, importState, n_terra, n_mar, achou, copiou)
+    type(ESMF_Grid),  intent(inout) :: ocn_grid
+    type(ESMF_State), intent(inout) :: importState
+    integer,          intent(out)   :: n_terra, n_mar
+    logical,          intent(out)   :: achou, copiou
+    real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
+    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
+    type(ESMF_Field) :: omask_field
+    integer :: lde, ldec, rc
+
+    n_terra = 0; n_mar = 0; copiou = .false.
+    call ESMF_StateGet(importState, itemName="So_omask", field=omask_field, rc=rc)
+    achou = rc == ESMF_SUCCESS
+    if (.not. achou) return
+    call ESMF_GridGet(ocn_grid, localDeCount=ldec, rc=rc)
+    if (rc /= ESMF_SUCCESS) return
+    do lde = 0, ldec - 1
+      call ESMF_FieldGet(omask_field, localDe=lde, farrayPtr=omask_src, rc=rc)
+      if (rc /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
+      call ESMF_GridGetItem(ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+        staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde, &
+        farrayPtr=maskptr, rc=rc)
+      if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
+        maskptr = nint(omask_src)
+        n_terra = n_terra + count(maskptr == 0)
+        n_mar   = n_mar   + count(maskptr == 1)
+        copiou  = .true.
+      end if
+    end do
+  end subroutine set_ocn_grid_mask
 
 end module med_cap_methods_mod

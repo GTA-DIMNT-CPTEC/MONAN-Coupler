@@ -14,7 +14,6 @@ module med_ocean_mod
   use netcdf
   use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY, T_FREEZE_SEAWATER
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
-  use regrid_manager_mod, only: regrid_spec
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny, cfg_use_docn_ice, &
                                 cfg_write_fixdiag, cfg_docn_ice_init_only, &
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
@@ -23,7 +22,7 @@ module med_ocean_mod
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
   use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: ZeroInternalField
+  use med_cap_methods_mod, only: ZeroInternalField, cria_rota, set_ocn_grid_mask
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: indice_trunca
 
@@ -174,45 +173,21 @@ contains
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_Field), intent(inout) :: sst_ocn   !< So_t na grade do oceano
     integer, intent(inout) :: rc
-    real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
     integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-    type(ESMF_Field) :: omask_field
-    integer :: lde_s, n_land, ldec_ocn, n_sea, rc_omask
+    integer :: lde_s, n_land, ldec_ocn, n_sea
     integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
     type(ESMF_VM) :: vm
-    logical :: got_omask
+    logical :: got_omask, achou
     real(ESMF_KIND_R8), pointer :: sst_src(:,:)
     real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
 
     call ESMF_VMGetCurrent(vm, rc=rc)
-    n_land = 0; n_sea = 0
-    got_omask = .false.
 
-    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra).
-    call ESMF_StateGet(importState, itemName="So_omask", &
-      field=omask_field, rc=rc_omask)
-    if (rc_omask == ESMF_SUCCESS) then
-      call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
-      if (rc == ESMF_SUCCESS) then
-        do lde_s = 0, ldec_ocn - 1
-          call ESMF_FieldGet(omask_field, localDe=lde_s, &
-            farrayPtr=omask_src, rc=rc)
-          if (rc /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
-          call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-            staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-            farrayPtr=maskptr, rc=rc)
-          if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
-            ! So_omask: 1=oceano valido, 0=terra (mesma convencao do
-            ! GRIDITEM_MASK aqui: valores em srcMaskValues sao EXCLUIDOS
-            ! da fonte do regrid, logo terra=0 e' o valor a excluir).
-            maskptr = nint(omask_src)
-            n_land = n_land + count(maskptr == 0)
-            n_sea  = n_sea  + count(maskptr == 1)
-            got_omask = .true.
-          end if
-        end do
-      end if
-    else
+    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra; a
+    ! mesma convencao do GRIDITEM_MASK aqui: valores em srcMaskValues sao
+    ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, achou, got_omask)
+    if (.not. achou) then
       call ESMF_LogWrite( &
         'MED: So_omask indisponivel no importState - usando ' // &
         'fallback por limiar de SST (menos confiavel na costa)', &
@@ -257,8 +232,7 @@ contains
     else
       ! Conservativo contorna a deformação da costura tripolar; bilinear
       ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
-      call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.true.), &
-        sst_ocn, is%ocn%sst, rc, fallback='ocn2atm')
+      call cria_rota(is%regrid, 'ocn2atm_sst', sst_ocn, is%ocn%sst, rc)
     end if
   end subroutine set_ocean_mask_for_sst
 

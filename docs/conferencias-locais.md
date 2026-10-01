@@ -203,6 +203,8 @@ Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a 
 
 Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
 
+`test_rotas.F90` (desde a R-FASE11-12) confere a configuração que o mediador lê da tabela `ROTAS` para criar cada uma das seis rotas (`spec_da_rota`, em `med_cap_methods`), campo a campo do `regrid_spec_t` e a rota de reserva, contra a configuração que cada chamada passava até a R-FASE11-11, copiada no teste; e que uma rota fora da tabela é recusada. Conferido ao contrário: trocar a reserva de `atm2ocn_ice` na tabela faz o teste falhar.
+
 `test_completa.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; e a acumulação de `registra_completa`.
 
 Desde a R-FASE11-05, `test_cpl_map.F90` confere também as listas que o mediador anuncia e realiza, geradas do mapa por `cpl_chegadas` com as chaves do mediador, contra as listas que ele usava antes (`tests/unit/listas_mediador.inc`, cópia sem mudança das de `med_cap_types` na tag `fase11-04-fix01`), nome a nome e na mesma ordem, nas cinco configurações.

@@ -11,7 +11,6 @@
 
 module med_init_mod
   use ESMF
-  use regrid_manager_mod, only: regrid_spec
   use coupler_utils_mod, only: ChkErr
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
@@ -22,7 +21,7 @@ module med_init_mod
   use cpl_grids_mod, only: cpl_malha_latlon, cpl_malha_tripolar, ORIGEM_LESTE0, &
                            ORIGEM_LESTE0_CANTO
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
-                                 ZeroOcnFluxFields, FillInternalField
+                                 ZeroOcnFluxFields, FillInternalField, cria_rota
   use med_ocean_mod, only: regrid_ocean_currents
   use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
 
@@ -382,14 +381,14 @@ contains
     type(ESMF_Field) :: ocn_field
 
     if (.not. is%regrid%has('atm2ocn')) then
-      call is%regrid%add('atm2ocn', regrid_spec('nearest_stod'), is%ocn_flx%taux, exp_field, rc)
+      call cria_rota(is%regrid, 'atm2ocn', is%ocn_flx%taux, exp_field, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
 
     ! So_t está na grade OCN (ver InitializeRealize)
     call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call is%regrid%add('ocn2atm', regrid_spec('bilinear'), ocn_field, is%ocn%sst, rc)
+    call cria_rota(is%regrid, 'ocn2atm', ocn_field, is%ocn%sst, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.

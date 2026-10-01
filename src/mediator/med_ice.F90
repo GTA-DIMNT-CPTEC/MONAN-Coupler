@@ -15,13 +15,13 @@ module med_ice_mod
                                    T_ICE_MAX, ALB_ICE_DEFAULT
   use diag_bitsum_mod, only: diag_bitsum_log
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
-  use regrid_manager_mod, only: regrid_spec, regrid_manager_t
+  use regrid_manager_mod, only: regrid_manager_t
   use coupler_config_mod, only: cfg_write_fixdiag
   use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_ICE_IFRAC, &
                                COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
                                COMPL_ICE_ANIDF, COMPL_ICE_T
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField
+  use med_cap_methods_mod, only: FillInternalField, cria_rota, set_ocn_grid_mask
   use cpl_grids_mod, only: centro_lon_leste0, centro_lat_leste0
 
   implicit none
@@ -127,9 +127,10 @@ contains
   !> @brief Cria a rota 'ocn2atm_ice' (conservativa, com máscara na origem).
   !!
   !! Antes de criar a rota, copia So_omask (1 = oceano, 0 = terra) para a
-  !! máscara de is%ocn_grid, de modo que a rota não dependa de a SST ter
-  !! sido interpolada antes. O método é 'conserve', que conserva a área e
-  !! é o adequado para uma fração; 'bilinear' fica como reserva.
+  !! máscara de is%ocn_grid (set_ocn_grid_mask), de modo que a rota não
+  !! dependa de a SST ter sido interpolada antes. A configuração vem de
+  !! ROTAS: 'conserve', que conserva a área e é o adequado para uma fração,
+  !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
   !!
   !! Com cfg_write_fixdiag, registra quantos pontos de terra e de oceano
   !! este PET viu na máscara (FIX-DIAG-ICEMASK-01), para confirmar que
@@ -139,51 +140,24 @@ contains
     type(MED_InternalState), intent(inout) :: is
     type(ESMF_State),        intent(inout) :: importState
     type(ESMF_Field),        intent(inout) :: f_ifrac_src
-    real(ESMF_KIND_R8), pointer :: omask_src(:,:)
-    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-    type(ESMF_Field) :: omask_field
-    integer :: lde_s
-    integer :: ldec_ocn
-    integer :: rc_omask
     integer :: rc_store
     integer :: n_land_ice
     integer :: n_sea_ice
+    logical :: achou, copiou
     character(len=200) :: diag_msg_mask
 
-    n_land_ice = 0; n_sea_ice = 0
-    call ESMF_StateGet(importState, itemName="So_omask", &
-      field=omask_field, rc=rc_omask)
-    if (rc_omask == ESMF_SUCCESS) then
-      call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc_store)
-      if (rc_store == ESMF_SUCCESS) then
-        do lde_s = 0, ldec_ocn - 1
-          call ESMF_FieldGet(omask_field, localDe=lde_s, &
-            farrayPtr=omask_src, rc=rc_store)
-          if (rc_store /= ESMF_SUCCESS .or. .not. associated(omask_src)) cycle
-          call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-            staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-            farrayPtr=maskptr, rc=rc_store)
-          if (rc_store == ESMF_SUCCESS .and. associated(maskptr)) then
-            maskptr = nint(omask_src)
-            ! conta terra/oceano vistos por
-            ! ESTE PET, para confirmar que So_omask foi de fato
-            ! encontrada e tem uma mistura sensata dos dois
-            ! valores (nao tudo-terra nem tudo-oceano por engano).
-            n_land_ice = n_land_ice + count(maskptr == 0)
-            n_sea_ice  = n_sea_ice  + count(maskptr == 1)
-          end if
-        end do
-      end if
-    end if
+    ! conta terra/oceano vistos por ESTE PET, para confirmar que So_omask
+    ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
+    ! tudo-terra nem tudo-oceano por engano).
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, achou, copiou)
     if (cfg_write_fixdiag) then
         write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
           'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
-          (rc_omask == ESMF_SUCCESS), ' n_land=', n_land_ice, &
+          achou, ' n_land=', n_land_ice, &
           ' n_sea=', n_sea_ice
         call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
     end if
-    call is%regrid%add('ocn2atm_ice', regrid_spec('conserve,bilinear', mask_src=.true.), &
-      f_ifrac_src, is%ice%ifrac, rc_store, fallback='ocn2atm')
+    call cria_rota(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
   end subroutine add_ice_route
 
   !============================================================================
