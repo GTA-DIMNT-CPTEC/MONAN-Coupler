@@ -58,10 +58,8 @@ module MED_cap_MONAN_mod
   use med_flux_mod,        only: get_atm_forcing, gather_atm_forcing,        &
                                   local_atm_bounds, apply_native_fluxes,      &
                                   zero_med_fluxes
-  use med_ocean_mod,       only: update_ocean_fields_on_atm_grid,            &
-                                  regrid_ocean_currents,                      &
-                                  update_ice_fraction_from_docn
-  use med_exchange_mod,    only: entregar
+  use med_ocean_mod,       only: regrid_ocean_currents
+  use med_exchange_mod,    only: ir_para_malha_de_fluxo, entregar
   use med_diag_mod,        only: log_ifrac_export_bitsum, relata_completas
 
   implicit none
@@ -659,8 +657,9 @@ contains
   ! MediatorAdvance - com fallback MPAS -> DATM
   !
   ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
-  ! gather_atm_forcing, local_atm_bounds, update_ocean_fields_on_atm_grid,
-  ! update_ice_fraction_from_docn, calc_bulk_ncar, apply_native_fluxes,
+  ! gather_atm_forcing, local_atm_bounds, ir_para_malha_de_fluxo
+  ! (med_exchange: update_ocean_fields_on_atm_grid e
+  ! update_ice_fraction_from_docn), calc_bulk_ncar, apply_native_fluxes,
   ! entregar (med_exchange: export_to_components e carimbo de tempo),
   ! log_ifrac_export_bitsum e med_write_import_fields.
   !============================================================================
@@ -675,7 +674,6 @@ contains
     ! med_stamp_time).
     type(ESMF_Time)          :: stampTime
     type(ESMF_TimeInterval)  :: dt
-    type(ESMF_Field)         :: field
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
     integer :: localDeCount_med  ! guard para PETs sem DE local
@@ -699,7 +697,6 @@ contains
     real(ESMF_KIND_R8), allocatable :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
     real(ESMF_KIND_R8), allocatable :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
     real(ESMF_KIND_R8), allocatable :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
-    real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
 
     rc = ESMF_SUCCESS
 
@@ -769,35 +766,10 @@ contains
     call local_atm_bounds(is, i1, i2, j1, j2, rc)
 
     !==========================================================================
-    ! 3. SST: regrid OCN -> ATM (So_t esta na grade OCN)
-    !
-    ! Mascara terra/oceano: o mom_cap_methods::state_setexport multiplica a
-    ! SST por ocean_grid%mask2dT antes do export; sobre terra, SST=0 K na
-    ! grade OCN. Um regrid bilinear sem mascara misturaria esses zeros nas
-    ! celulas oceanicas proximas a costa, que cairiam abaixo de 270 K (o
-    ! postproc as marcaria como "fill"). A mascara nao e' adivinhada pelo
-    ! proprio valor da SST: vem de So_omask = nint(mask2dT), exportada pelo
-    ! MOM6 (mom_cap_methods.F90::mom_export). Assim o bilinear so' usa celulas
-    ! OCEANICAS VALIDAS como fonte da interpolacao. O residuo nao mapeado na
-    ! costa (sem vizinho valido) e' tratado pela extrapolacao por vizinhanca.
+    ! 3. Campos do oceano e do gelo na malha de fluxo: fase
+    ! ir_para_malha_de_fluxo (med_exchange)
     !==========================================================================
-    call update_ocean_fields_on_atm_grid(is, importState, field, is%run%raw_sst_diag_done, rc)
-
-    !==========================================================================
-    ! 3b. Si_ifrac do OISST (use_docn_ice)
-    !
-    ! Modos (nuopc.input &nuopc_mode):
-    !   use_docn_ice=T  init_only=F  → fill_ifrac_from_oisst a cada passo
-    !     (campo congelado em OISST).
-    !   use_docn_ice=T  init_only=T  → fill_ifrac_from_oisst apenas na 1ª
-    !     MediatorAdvance (flag is%run%ifrac_init_done); nas demais, o campo
-    !     decai exponencialmente (SI_IFRAC_DECAY, de coupler_constants).
-    !   use_docn_ice=F               → nada a fazer aqui; com SIS2 dinamico,
-    !     Si_ifrac ja' veio do gelo na secao 3.
-    !==========================================================================
-    call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
-    ! init_only=F: field preenchido a cada passo via fill_ifrac_from_oisst
-    ! use_docn_ice=F: is%ice%ifrac fica como saiu da secao 3
+    call ir_para_malha_de_fluxo(is, importState, clock, rc)
 
     !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod

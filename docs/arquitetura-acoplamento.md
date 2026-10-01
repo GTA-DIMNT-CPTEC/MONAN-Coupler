@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6) e na R-FASE11-15 (seções 3.7 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6) e na R-FASE11-16 (seções 3.7 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -324,6 +324,8 @@ call entregar(is, exportState, clock)           ! exportação e carimbo de temp
 
 Desde a R-FASE11-15, `src/mediator/med_exchange.F90` tem a fase `entregar`, chamada no fim do `MediatorAdvance`, depois da física. A assinatura real é `entregar(is, importState, exportState, clock, stampTime, rc)`: a exportação ainda lê `So_omask` do `importState` na primeira vez (`regrid_land_mask`), e o carimbo dos campos usa o instante que rotula o passo (`stampTime`, de `med_stamp_time`), que no modo concorrente é o fim do passo. A fase faz, nesta ordem: a exportação (`export_to_components`, em `med_export`); `stampTime` em cada campo do `exportState` (`stamp_export_fields`, que estava em `med_export`); e, com `use_med_to_mpas`, o tempo atual do relógio no `exportState` inteiro, que prevalece (o que restava de `RouteOcnToAtm`, em `med_cap_methods`). As mensagens do log continuam com o nome `RouteOcnToAtm`, que o pós-processamento procura.
 
+Desde a R-FASE11-16, `med_exchange` tem também a fase `ir_para_malha_de_fluxo(is, importState, clock, rc)`, chamada antes da física: a SST, as correntes e, com o SIS2, os campos do gelo (`update_ocean_fields_on_atm_grid`, em `med_ocean`, que usa `med_ice`), e depois a fração de gelo do OISST, com `use_docn_ice` (`update_ice_fraction_from_docn`). O código das interpolações continua em `med_ocean` e `med_ice`; a fase só fixa a ordem e o lugar das chamadas. As rotas criadas durante o passo (`ocn2atm_sst`, `ocn2atm_ice`, `ocn2atm_landmask`, `atm2ocn_ice` e a `atm2ocn` de `RegridOrCopy`) continuam onde estão; ver a seção 6.
+
 ### 3.8 Esquemas de interpolação
 
 `src/regrid/` continua como está. A migração acrescenta três coisas:
@@ -502,7 +504,9 @@ A R-FASE11-14 fechou o bloco D: a etapa completar passou a ser executada pela ro
 
 A R-FASE11-15 abriu o bloco E: `med_exchange.F90` com a fase `entregar` (seção 3.7). A exportação e o carimbo de tempo dos campos do mediador ficaram num lugar só, e `RouteOcnToAtm` saiu (restava nela só o carimbo pelo relógio). As instruções são as mesmas, conferidas na soma dos quatro arquivos; saiu só código morto (um ponteiro sem uso e o argumento `importState` de `RouteOcnToAtm`). O teste `tests/completar` passou a gravar também o carimbo de tempo de cada campo exportado, com e sem `use_med_to_mpas`. Arquivos que carimbam o tempo dos campos: de 5 para 4 (`cap_common`, `mom_cap_MONAN`, `MED_cap`, na inicialização, e `med_exchange`).
 
-Próxima etapa: **R-FASE11-16**, conforme a tabela do bloco E: a fase `ir_para_malha_de_fluxo`, com as interpolações de `med_ocean` e `med_ice`.
+A R-FASE11-16 acrescentou a fase `ir_para_malha_de_fluxo` a `med_exchange` (seção 3.7), com as duas chamadas que o `MediatorAdvance` fazia entre a reunião dos forçantes e a física, na mesma ordem. O teste `tests/completar` passou a chamar a fase na versão que a tem. Fica uma decisão para a R-FASE11-17: das 7 criações de rota fora de `med_exchange`, 2 são da inicialização e vão com a fase de inicialização; as outras 5 são feitas durante o passo, na primeira vez que a rota é usada ou quando a máscara do oceano passa a ter terra e mar. Levá-las para `med_exchange` exige mover junto as regras de quando criar cada uma (uma etapa própria, guiada pela coluna `criar` de `ROTAS`), ou a meta do indicador passa a ser 5.
+
+Próxima etapa: **R-FASE11-17**, conforme a tabela do bloco E: a fase de inicialização (`cria_rotas`, `aguarda_primeira_sst`), com as rotas de `InitializeDataComplete`.
 
 ---
 

@@ -159,6 +159,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-13 | `sem_valor` e `nan_para` aplicados pela rota; as chamadas de interpolação deixam de passar `zero_total`; a rota de reserva mantém as opções da rota pedida |
 | R-FASE11-14 | etapa completar executada pela rota na SST e na fração de gelo exportada; fim do bloco D; teste de regressão novo `tests/completar` |
 | R-FASE11-15 | `med_exchange.F90` com a fase `entregar` (exportação e carimbo de tempo); `RouteOcnToAtm` sai; arquivos que carimbam o tempo de 5 para 4 |
+| R-FASE11-16 | fase `ir_para_malha_de_fluxo` em `med_exchange` (SST, correntes e gelo na malha de fluxo, e o gelo do OISST) |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

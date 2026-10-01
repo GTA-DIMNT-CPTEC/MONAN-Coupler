@@ -7,8 +7,8 @@
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
 # programa tests/completar/test_completar.F90 da árvore de trabalho (ele só
-# usa interfaces que existem desde a fase11-12-validada; a exportação usa a
-# fase entregar quando a versão tem med_exchange, com -DCOM_ENTREGAR) e o
+# usa interfaces que existem desde a fase11-12-validada; as fases de
+# med_exchange que a versão tiver entram com -DCOM_ENTREGAR e -DCOM_IR_PARA) e o
 # executa com 1, 4, 6 e 8 processos MPI, com um supergrid sintético
 # (tests/supergrid/gera-supergrid.py). Para cada PET, os valores gravados
 # (saida_<PET>.bin: a SST na malha de fluxo e todos os campos exportados ao
@@ -66,8 +66,11 @@ for versao in antiga nova; do
   bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" -a > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
-    # Com med_exchange (desde a R-FASE11-15), a exportação é a fase entregar
-    defs=""; [[ -f med_exchange.o ]] && defs="-DCOM_ENTREGAR"
+    # Fases de med_exchange presentes na versão: entregar (desde a
+    # R-FASE11-15) e ir_para_malha_de_fluxo (desde a R-FASE11-16)
+    defs=""; mx="${src}/src/mediator/med_exchange.F90"
+    grep -qi 'subroutine entregar' "${mx}" 2>/dev/null && defs+=" -DCOM_ENTREGAR"
+    grep -qi 'subroutine ir_para_malha_de_fluxo' "${mx}" 2>/dev/null && defs+=" -DCOM_IR_PARA"
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -cpp ${defs} -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_completar.F90" -o test_completar.o &&

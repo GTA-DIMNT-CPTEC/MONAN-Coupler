@@ -5,6 +5,9 @@
 !! (ver docs/arquitetura-acoplamento.md, seção 3.7). Este módulo reúne as
 !! fases à medida que saem do MediatorAdvance:
 !!
+!!   ir_para_malha_de_fluxo
+!!              antes da física: leva os campos do oceano e do gelo da
+!!              grade do oceano para a malha de fluxo (R-FASE11-16)
 !!   entregar   no fim do passo, depois da física: leva os campos da malha
 !!              de fluxo para o exportState (export_to_components, em
 !!              med_export) e carimba o tempo dos campos exportados
@@ -25,14 +28,58 @@ module med_exchange_mod
   use NUOPC,             only: NUOPC_SetTimestamp
   use med_cap_types_mod, only: MED_InternalState
   use med_export_mod,    only: export_to_components
+  use med_ocean_mod,     only: update_ocean_fields_on_atm_grid, &
+                               update_ice_fraction_from_docn
 
   implicit none
   private
 
+  public :: ir_para_malha_de_fluxo
   public :: entregar
   public :: stamp_export_fields
 
 contains
+
+  !> Fase ir_para_malha_de_fluxo: os campos do oceano e do gelo na malha de
+  !! fluxo, antes da física, nesta ordem:
+  !!
+  !!   1. SST, correntes e, com o SIS2, a fração, os albedos e a temperatura
+  !!      do gelo (update_ocean_fields_on_atm_grid, em med_ocean, que usa
+  !!      med_ice para o gelo).
+  !!      Máscara terra/oceano: o mom_cap_methods::state_setexport multiplica
+  !!      a SST por ocean_grid%mask2dT antes do export; sobre terra, SST=0 K
+  !!      na grade OCN. Um regrid bilinear sem máscara misturaria esses zeros
+  !!      nas células oceânicas próximas à costa, que cairiam abaixo de
+  !!      270 K. A máscara não é adivinhada pelo próprio valor da SST: vem de
+  !!      So_omask = nint(mask2dT), exportada pelo MOM6
+  !!      (mom_cap_methods.F90::mom_export). Assim a interpolação só usa
+  !!      células oceânicas válidas como fonte. O resíduo não mapeado na costa
+  !!      (sem vizinho válido) é completado por vizinhança pela rota.
+  !!   2. Si_ifrac do OISST, com use_docn_ice (update_ice_fraction_from_docn,
+  !!      em med_ocean). Modos (nuopc.input, &nuopc_mode):
+  !!        use_docn_ice=T, init_only=F: fill_ifrac_from_oisst a cada passo
+  !!          (campo congelado no OISST);
+  !!        use_docn_ice=T, init_only=T: fill_ifrac_from_oisst só no primeiro
+  !!          passo (is%run%ifrac_init_done); nos demais, o campo decai
+  !!          exponencialmente (SI_IFRAC_DECAY, de coupler_constants);
+  !!        use_docn_ice=F: nada; com o SIS2 dinâmico, Si_ifrac já veio do
+  !!          gelo no item 1.
+  !!
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] importState  estado de importação do mediador
+  !! @param[inout] clock        relógio do mediador
+  !! @param[inout] rc           código de retorno (o da última operação)
+  subroutine ir_para_malha_de_fluxo(is, importState, clock, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Clock), intent(inout) :: clock
+    integer,          intent(inout) :: rc
+    type(ESMF_Field) :: field
+    real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
+
+    call update_ocean_fields_on_atm_grid(is, importState, field, is%run%raw_sst_diag_done, rc)
+    call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
+  end subroutine ir_para_malha_de_fluxo
 
   !> Fase entregar: exportação dos campos da malha de fluxo e carimbo de
   !! tempo, nesta ordem:

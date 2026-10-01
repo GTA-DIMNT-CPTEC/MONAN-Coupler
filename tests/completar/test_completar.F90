@@ -6,8 +6,10 @@
 !! Monta o mediador como na inicialização (anúncio dos campos como em
 !! InitializeAdvertise, create_atm_grid, create_ocn_grid com o supergrid
 !! sintético hgrid.nc, realize_component_fields,
-!! create_internal_fields, idc_create_routes) e roda três passos de
-!! update_ocean_fields_on_atm_grid (med_ocean) e da exportação com o
+!! create_internal_fields, idc_create_routes) e roda três passos da ida para
+!! a malha de fluxo (desde a R-FASE11-16, a fase ir_para_malha_de_fluxo de
+!! med_exchange; antes, update_ocean_fields_on_atm_grid e
+!! update_ice_fraction_from_docn, de med_ocean) e da exportação com o
 !! carimbo de tempo (desde a R-FASE11-15, a fase entregar de med_exchange;
 !! antes, a sequência de MediatorAdvance), com dados sintéticos:
 !!
@@ -29,11 +31,16 @@
 !!
 !! Usa só interfaces que existem desde a R-FASE11-12 (tag
 !! fase11-12-validada), para que o mesmo programa sirva às duas versões
-!! comparadas por compara-completar.bash. A exceção é a exportação: com
-!! COM_ENTREGAR definido (versão com med_exchange), chama entregar; sem
-!! ele, repete a sequência de MediatorAdvance até a R-FASE11-14 (tag
-!! fase11-14-validada), copiada sem mudança: export_to_components,
-!! stamp_export_fields e, com use_med_to_mpas, RouteOcnToAtm.
+!! comparadas por compara-completar.bash. As exceções são as fases do
+!! mediador, conforme a versão (o script define as macros pelo fonte):
+!!   COM_IR_PARA   chama ir_para_malha_de_fluxo; sem ela, repete as duas
+!!                 chamadas de MediatorAdvance até a R-FASE11-15 (tag
+!!                 fase11-15-validada)
+!!   COM_ENTREGAR  chama entregar; sem ela, repete a sequência de
+!!                 MediatorAdvance até a R-FASE11-14 (tag
+!!                 fase11-14-validada): export_to_components,
+!!                 stamp_export_fields e, com use_med_to_mpas, RouteOcnToAtm
+!! As sequências de antes estão copiadas sem mudança.
 program test_completar
   use ESMF
   use NUOPC,                 only : NUOPC_Advertise, NUOPC_FieldDictionarySetAutoAdd, &
@@ -46,7 +53,12 @@ program test_completar
   use cpl_map_mod,           only : cpl_chegadas, cpl_config_atual
   use med_init_mod,          only : create_atm_grid, create_ocn_grid, realize_component_fields, &
                                     create_internal_fields, idc_create_routes
-  use med_ocean_mod,         only : update_ocean_fields_on_atm_grid
+#ifdef COM_IR_PARA
+  use med_exchange_mod,      only : ir_para_malha_de_fluxo
+#else
+  use med_ocean_mod,         only : update_ocean_fields_on_atm_grid, &
+                                    update_ice_fraction_from_docn
+#endif
 #ifdef COM_ENTREGAR
   use med_exchange_mod,      only : entregar
 #else
@@ -61,7 +73,7 @@ program test_completar
   type(ESMF_State) :: imp, exp
   type(ESMF_Field) :: f, f_taux
   integer :: rc, localPet, petCount, un, nx, ny, passo, k, n_itens
-  logical :: diag_feito
+  real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
   character(len=32) :: arquivo
   character(len=ESMF_MAXSTR), allocatable :: nomes(:)
   character(len=CPL_NOME_LEN), allocatable :: anuncio(:)
@@ -127,12 +139,16 @@ program test_completar
 
   write(arquivo, '(A,I0,A)') 'saida_', localPet, '.bin'
   open(newunit=un, file=trim(arquivo), access='stream', form='unformatted', status='replace')
-  diag_feito = .false.
   do passo = 1, 3
     call preenche_oceano(passo)
     call preenche_internos(passo)
     rc = ESMF_SUCCESS
-    call update_ocean_fields_on_atm_grid(is, imp, f, diag_feito, rc)
+#ifdef COM_IR_PARA
+    call ir_para_malha_de_fluxo(is, imp, relogio, rc)
+#else
+    call update_ocean_fields_on_atm_grid(is, imp, f, is%run%raw_sst_diag_done, rc)
+    call update_ice_fraction_from_docn(is, relogio, ifrac_ptr, rc)
+#endif
     write(un) passo, rc
     call grava(un, is%ocn%sst)
     call ESMF_ClockGet(relogio, currTime=agora, rc=rc)
