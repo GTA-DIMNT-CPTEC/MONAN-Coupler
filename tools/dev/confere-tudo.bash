@@ -19,6 +19,8 @@
 #               entre eles o da consistência do mapa de acoplamento
 #   mapa        docs/acoplamento.md em dia com o mapa de acoplamento
 #               (tools/dev/mapa-acoplamento.py -c)
+#   cplcheck    conferência do mapa num driver NUOPC com as listas de campos
+#               de hoje (tests/cplcheck/confere-cplcheck.bash)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
 #   docn        tests/docn/compara-docn.bash REV (o mais demorado: compila
 #               as duas versões e roda o DOCN num driver NUOPC)
@@ -42,12 +44,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios mapa supergrid docn"
+TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios mapa cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,41p' "$0"; exit 2; }
+uso() { sed -n '2,43p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -183,6 +185,7 @@ quer bulk       && executa bulk tests/bulk/compara-bulk.bash "${REV}" "${SAIDA}/
 quer grade      && executa grade tests/atmgrid/compara-grade-atm.bash "${REV}" "${SAIDA}/atmgrid"
 quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
 quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
+quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"
 

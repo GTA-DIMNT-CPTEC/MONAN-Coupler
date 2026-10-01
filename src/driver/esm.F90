@@ -49,6 +49,7 @@ module ESM_MONAN
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
+  use cpl_check_mod,      only : cpl_check_acoplamento
 
   implicit none
   private
@@ -314,6 +315,10 @@ contains
   !!   termorder=srcseq       soma na ordem do índice de origem
   !!   srcTermProcessing=0    toda a aritmética no destino
   !! Entradas que já tragam a opção não são alteradas.
+  !!
+  !! Depois, com as listas prontas, registra no log o relatório dos conectores
+  !! e a conferência do mapa de acoplamento (cpl_check_acoplamento), que só
+  !! escreve no log e não muda as listas.
   subroutine ModifyCplLists(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
@@ -352,6 +357,12 @@ contains
     call ESMF_LogWrite('ESM: reprodutibilidade dos conectores: termorder=srcseq em '// &
       int_to_str(n_order)//' entrada(s), srcTermProcessing=0 em '//int_to_str(n_src)// &
       ' entrada(s)', ESMF_LOGMSG_INFO)
+
+    call cpl_check_acoplamento(driver,                                               &
+      [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
+      [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
     if (n_full > 0) then
       call ESMF_LogWrite('ESM: '//int_to_str(n_full)//' entrada(s) de CplList sem espaco '// &
         'para as opcoes de reprodutibilidade; aumentar len de cplList', ESMF_LOGMSG_ERROR)

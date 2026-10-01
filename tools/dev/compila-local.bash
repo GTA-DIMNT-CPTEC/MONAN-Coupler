@@ -6,8 +6,9 @@
 # Compila os fontes na ordem do Makefile, com as mesmas opções de aviso e
 # de ponto flutuante, contra um ESMF instalado localmente. Os fontes que
 # dependem do MPAS, do MOM6 ou do FMS são compilados contra as interfaces
-# mínimas de tests/interfaces/, que só garantem tipos e assinaturas; o
-# driver e o programa principal ficam de fora.
+# mínimas de tests/interfaces/, que só garantem tipos e assinaturas. O
+# driver (esm.F90) entra desde a R-FASE11-03, que o fez chamar a conferência
+# do mapa de acoplamento; só o programa principal fica de fora.
 #
 # Uso:
 #   ESMFMKFILE=/caminho/esmf.mk tools/dev/compila-local.bash [-s RAIZ] [-o SAIDA] [-a]
@@ -60,12 +61,12 @@ done
 falhas=0
 for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergrid nc_writer cap_common \
          regrid_base regrid_esmf regrid_weights regrid_mpassit regrid_registry regrid_manager \
-         cpl_fields cpl_map \
+         cpl_fields cpl_map cpl_check \
          mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
          mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_cap_methods mpas_cap_MONAN DATM_cap \
          docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
          med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
-         med_diag med_ice med_ocean med_init med_flux med_export MED_cap; do
+         med_diag med_ice med_ocean med_init med_flux med_export MED_cap esm; do
   f=$(find "${RAIZ}/src" -name "${s}.F90" -not -path '*/upstream/*' | head -1)
   if [[ -z "${f}" ]]; then
     printf '%-24s %s\n' "${s}" "AUSENTE"

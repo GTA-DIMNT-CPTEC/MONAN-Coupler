@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6) e na R-FASE11-03 (seções 3.6 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -246,6 +246,8 @@ Na `ocn2atm_ice`, o preenchimento continua explícito em `med_exchange`, porque 
   - todo campo está em `CAMPOS`.
 
   Enquanto a migração não termina, só registra as diferenças no log; no fim, passa a interromper a rodada com a linha do mapa.
+
+  Desde a R-FASE11-03, `cpl_check_acoplamento` faz essa conferência no fim do `ModifyCplLists` do driver, só no PET 0, e escreve linhas `CPL-REL: DIFERENCA:` e, para campos exportados que ninguém consome (normais, como o `So_s` do MOM6), `CPL-REL: AVISO:`. A conferência é feita nos dois níveis: a CplList de cada conector contra as trocas do mapa entre os dois componentes, e os estados de cada componente contra as trocas que chegam a ele e partem dele. O mesmo módulo escreve o relatório dos conectores (campos e opções de cada CplList).
 - **Relatório de acoplamento, no log.** É uma tabela com cada troca, as malhas, o método que o ESMF aceitou, se a rota caiu na reserva e quantos pontos foram completados. Durante a migração, ele serve também de conferência: o relatório de uma etapa tem de ser igual ao da etapa anterior.
 
 ### 3.7 Mediador por fases
@@ -413,7 +415,9 @@ A R-FASE11-01 trouxe este documento para o repositório, registrou a fase 11 no 
 
 A R-FASE11-02 escreveu o mapa: `src/coupling/cpl_fields.F90` (57 campos) e `src/coupling/cpl_map.F90` (8 malhas, 154 trocas, 6 rotas), o teste `tests/unit/test_cpl_map.F90`, que confere o mapa nas cinco combinações de `&nuopc_mode` e contra as listas do mediador, e `tools/dev/mapa-acoplamento.py`, que gera `docs/acoplamento.md`. Os módulos são compilados e ligados, mas nenhum componente os usa. Com isso, o indicador "trocas sem linha no mapa" vai a 0. Ao escrever o mapa, a coluna `quando` ganhou as condições dos dois valores de cada chave e a lista de condições, e a coluna `criar` ganhou `primeiro_uso` (seção 3.5).
 
-Próxima etapa: **R-FASE11-03**, com `cpl_check`: conferência do mapa contra os campos anunciados, chamada pelo driver, só com registro no log, e o relatório dos conectores, conforme a tabela do bloco A.
+A R-FASE11-03 criou `src/coupling/cpl_check.F90`, chamado pelo `ModifyCplLists` do driver: relatório dos conectores e conferência do mapa no log do PET 0, com o prefixo `CPL-REL:`, sem interromper a rodada (seção 3.6). Na configuração de produção, num driver NUOPC de teste com as listas de hoje, a conferência dá 0 diferenças e 3 avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome). No mesmo teste, a CplList saiu em ordem alfabética, e não na ordem do anúncio; se o log da Jaci confirmar, o cuidado da seção 4.6 sobre a ordem dos campos anunciados vale para os estados, não para os conectores.
+
+Próxima etapa: **R-FASE11-04**, com o relatório das rotas do mediador (método aceito, reserva, pontos completados) e a extração e comparação do relatório em `valida_rodada.bash compara`, conforme a tabela do bloco A.
 
 ---
 

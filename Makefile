@@ -151,7 +151,7 @@ SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
         mom6_supergrid nc_writer cap_common                               \
         regrid_base regrid_esmf regrid_weights regrid_mpassit             \
         regrid_registry regrid_manager                                    \
-        cpl_fields cpl_map                                                \
+        cpl_fields cpl_map cpl_check                                      \
         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
         mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model      \
         mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_cap_methods \
@@ -186,11 +186,12 @@ $(MOM6_SRCS:%=$(OBJDIR)/%.o): $(OBJDIR)/%.o: %.F90 | dirs
 # -----------------------------------------------------------------------------
 $(OBJDIR)/cap_common.o: $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/coupler_config.o: $(OBJDIR)/coupler_utils.o
+$(OBJDIR)/cpl_check.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o
 $(OBJDIR)/cpl_map.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/regrid_base.o
 $(OBJDIR)/DATM_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/DOCN_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/docn_cap_netcdf.o
 $(OBJDIR)/docn_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/nc_writer.o
-$(OBJDIR)/esm.o: $(OBJDIR)/DOCN_cap.o $(OBJDIR)/MED_cap.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/sis_cap_MONAN.o
+$(OBJDIR)/esm.o: $(OBJDIR)/DOCN_cap.o $(OBJDIR)/MED_cap.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_check.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/sis_cap_MONAN.o
 $(OBJDIR)/esmApp.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/esm.o
 $(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_types.o
 $(OBJDIR)/MED_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_export.o $(OBJDIR)/med_flux.o $(OBJDIR)/med_init.o $(OBJDIR)/med_ocean.o $(OBJDIR)/mom6_supergrid.o

@@ -30,6 +30,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
 | `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
 | `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
+| `tests/cplcheck/confere-cplcheck.bash` | num driver NUOPC com as listas de campos de hoje, a conferência do mapa (`cpl_check`) dá 0 diferenças, e acusa os defeitos plantados? |
 
 ### 2.0 Todas as conferências de uma vez
 
@@ -38,7 +39,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.11 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.12 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -51,6 +52,7 @@ Resumo (referência: HEAD)
   grade        OK                              83 s
   unitarios    OK                              31 s
   mapa         OK                               0 s
+  cplcheck     OK                              45 s
   supergrid    OK                               4 s
   docn         OK                             178 s
 ```
@@ -67,6 +69,7 @@ O que cada linha confere:
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
 | `unitarios` | algum teste com valor esperado ou o teste de consistência do mapa de acoplamento (seção 2.8) falha |
 | `mapa` | `docs/acoplamento.md` não é o que `tools/dev/mapa-acoplamento.py` gera do mapa (seção 2.11) |
+| `cplcheck` | a conferência do mapa no driver de teste não dá o esperado (seção 2.12) |
 | `supergrid`, `docn` | os testes de regressão das seções 2.9 e 2.10 acusam diferença |
 
 A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de nove minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
@@ -197,6 +200,8 @@ Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a 
 
 Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
 
+`test_cpl_check.F90` confere as duas rotinas de conferência de `cpl_check` (`cpl_confere_conector` e `cpl_confere_estado`) com as listas de campos que os caps anunciam hoje, escritas no teste a partir dos caps e não do mapa: na produção, nenhuma diferença e três avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome); CplList com um campo a menos e com um a mais; importação fora do mapa e do dicionário; campo previsto e não anunciado na importação e na exportação; e a lacuna conhecida do MONAN-A com o DOCN, que aparece como três diferenças.
+
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
 
 ### 2.9 Teste da leitura do supergrid do MOM6
@@ -243,6 +248,21 @@ tools/dev/mapa-acoplamento.py -c     # só confere se ele está em dia
 ```
 
 O mapa de acoplamento é escrito em Fortran (`src/coupling/cpl_fields.F90` e `cpl_map.F90`), para que os componentes possam usá-lo nas etapas seguintes da fase 11. O script lê as tabelas desses dois fontes e gera `docs/acoplamento.md`, com o resumo dos conectores por configuração, as trocas de cada conector, as trocas dentro dos componentes, as rotas do mediador, as malhas e o dicionário de campos. Toda mudança no mapa é seguida da geração do Markdown; a conferência `mapa` acusa quando ele ficou para trás. O script também acusa um texto mais longo que o campo que o recebe, que o compilador só cortaria com aviso. Escrito para o Python 3.6 da Jaci.
+
+### 2.12 Conferência do mapa num driver NUOPC
+
+```bash
+tests/cplcheck/confere-cplcheck.bash
+```
+
+Desde a R-FASE11-03, o driver chama `cpl_check_acoplamento` (`src/coupling/cpl_check.F90`) no fim do `ModifyCplLists`: o relatório dos conectores e a conferência do mapa saem no log do PET 0, em linhas com o prefixo `CPL-REL:`. Este teste exercita essa rotina num driver NUOPC mínimo, `tests/cplcheck/test_cplcheck_driver.F90`: quatro componentes de teste com os rótulos do driver real (`MPAS`, `MED`, `OCN`, `ICE`) anunciam as listas de campos de hoje e são ligados pelos seis conectores da produção, com um `nuopc.input` da produção (`use_med_to_mpas` e `use_sis2_dynamic`). São dois casos, em 4 processos MPI:
+
+| Caso | O que tem de sair no log do PET 0 |
+| --- | --- |
+| `normal` | os seis conectores com 13, 7, 14, 16, 4 e 6 campos; `conferencia do mapa: 0 diferenca(s), 3 aviso(s)` |
+| `defeito` | o OCN importa `So_teste` e o MED não anuncia `So_omask`: conector OCN para MED com 3 campos e 4 diferenças; a inicialização termina assim mesmo |
+
+O teste confere também que só o PET 0 escreve. Os relatórios ficam em `build-local/cplcheck/relatorio_<caso>.txt`. Leva menos de um minuto. Conferido ao contrário: sem a fase 0 dos componentes de teste, nenhum campo é anunciado, e a conferência acusa todas as trocas da produção.
 
 ## 3. Interfaces mínimas
 
