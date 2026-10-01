@@ -94,9 +94,9 @@ contains
       if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
 
       if (is%regrid%has('ocn2atm_sst')) then
-        call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc, zero_total=.true.)
+        call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc)
       else
-        call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc, zero_total=.true.)
+        call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc)
       end if
       call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
 
@@ -257,7 +257,7 @@ contains
 
       call ESMF_StateGet(importState, itemName=name, field=src, rc=rc_c)
       if (rc_c /= ESMF_SUCCESS) return
-      call is%regrid%apply('ocn2atm', src, dst, rc_c, zero_total=.true.)
+      call is%regrid%apply('ocn2atm', src, dst, rc_c)
       if (rc_c /= ESMF_SUCCESS .and. zero_on_error) call ZeroInternalField(dst, rc_c)
     end subroutine regrid_one
 

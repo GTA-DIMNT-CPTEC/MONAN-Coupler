@@ -55,6 +55,8 @@ call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.tru
 call is%regrid%apply('ocn2atm_sst', sst_ocn, sst_atm, rc)          ! a cada passo
 ```
 
+Cada rota guarda a configuração com que foi criada. Em `apply`, o `zero_total` (zerar o destino inteiro antes da interpolação, ou só os pontos alcançados) e a troca de NaN no destino (`nan_value` em `regrid_spec`, aplicada depois da interpolação e do preenchimento por vizinhança) vêm da rota pedida, mesmo quando ela usa a interpolação da reserva; o argumento opcional `zero_total` de `apply` ainda pode substituir o da rota. No mediador, as rotas são criadas por `cria_rota` (`med_cap_methods`), com a configuração da tabela `ROTAS` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
+
 ## Como acrescentar um esquema
 
 1. Criar um módulo com um tipo que estende `regridder_t` e implementa `setup`, `execute` e `release`.
@@ -80,4 +82,4 @@ export ESMFMKFILE=...        # esmf.mk do ESMF instalado
 make test NP=2               # na raiz do repositório
 ```
 
-Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha. Passam com 1, 2, 3 e 4 processos.
+Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha; e, com uma origem regional, que a rota de reserva usa o `zero_total` e a troca de NaN da rota pedida. Passam com 1, 2, 3 e 4 processos.

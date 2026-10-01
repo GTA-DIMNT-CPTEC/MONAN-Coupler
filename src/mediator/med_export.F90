@@ -247,11 +247,9 @@ contains
         call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_store2)
 
       if (is%regrid%has('atm2ocn_ice')) then
-        call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
-          zero_total=.false.)
+        call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2)
       else
-        call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
-          zero_total=.true.)
+        call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2)
       end if
       call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
       if (associated(p_ifrac_exp)) then
@@ -358,8 +356,7 @@ contains
     if (rc_lm == ESMF_SUCCESS) then
       call cria_rota(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
       if (rc_lm == ESMF_SUCCESS) then
-        call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm, &
-          zero_total=.false.)
+        call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
         call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
           ESMF_LOGMSG_INFO)
       else

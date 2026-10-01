@@ -35,11 +35,14 @@ module regrid_manager_mod
   integer, parameter :: MAX_ROUTES = 32
 
   !> Rota: um esquema próprio (r) ou, se o setup falhou e havia rota de
-  !! reserva, um apelido (alias) para outra rota já criada.
+  !! reserva, um apelido (alias) para outra rota já criada. spec é a
+  !! configuração pedida para a rota: mesmo quando ela usa a interpolação da
+  !! reserva, o zero_total e a troca de NaN são os dela, e não os da reserva.
   type :: route_t
     character(len=NAME_LEN)         :: name = ''
     class(regridder_t), allocatable :: r
     integer                         :: alias = 0
+    type(regrid_spec_t)             :: spec
   end type route_t
 
   type :: regrid_manager_t
@@ -57,16 +60,21 @@ contains
 
   !> Monta um regrid_spec_t a partir de uma lista de métodos separados por
   !! vírgula ('conserve,bilinear').
-  function regrid_spec(methods, scheme, mask_src, zero_total) result(spec)
-    character(len=*), intent(in)           :: methods
-    character(len=*), intent(in), optional :: scheme
-    logical,          intent(in), optional :: mask_src, zero_total
+  function regrid_spec(methods, scheme, mask_src, zero_total, nan_value) result(spec)
+    character(len=*),   intent(in)           :: methods
+    character(len=*),   intent(in), optional :: scheme
+    logical,            intent(in), optional :: mask_src, zero_total
+    real(ESMF_KIND_R8), intent(in), optional :: nan_value
     type(regrid_spec_t) :: spec
 
     call split_methods(methods, spec%methods)
     if (present(scheme))     spec%scheme     = scheme
     if (present(mask_src))   spec%mask_src   = mask_src
     if (present(zero_total)) spec%zero_total = zero_total
+    if (present(nan_value)) then
+      spec%nan_replace = .true.
+      spec%nan_value   = nan_value
+    end if
   end function regrid_spec
 
   !> Cria a rota e calcula a interpolação (pesos ou route handle).
@@ -113,6 +121,7 @@ contains
       rc = ESMF_SUCCESS
     end if
     this%routes(k)%name = name
+    this%routes(k)%spec = final_spec
     this%n = k
     call report_route(this, k, final_spec)
   end subroutine add
@@ -150,7 +159,10 @@ contains
     call ESMF_LogWrite(line, ESMF_LOGMSG_INFO)
   end subroutine report_route
 
-  !> Interpola pela rota. zero_total, se presente, substitui o da rota.
+  !> Interpola pela rota. zero_total, se presente, substitui o da rota. O
+  !! zero_total e a troca de NaN vêm da rota pedida, mesmo quando ela usa a
+  !! interpolação da reserva; o preenchimento por vizinhança é o da rota
+  !! que interpola.
   subroutine apply(this, name, src, dst, rc, zero_total)
     class(regrid_manager_t), intent(inout) :: this
     character(len=*),        intent(in)    :: name
@@ -158,16 +170,40 @@ contains
     integer,                 intent(out)   :: rc
     logical, optional,       intent(in)    :: zero_total
 
-    integer :: k
+    integer :: k, k_pedida
+    logical :: zt
 
+    k_pedida = find(this, name)
     k = resolve(this, name)
     if (k == 0) then
       call ESMF_LogWrite('regrid: rota inexistente: '//trim(name), ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
       return
     end if
-    call this%routes(k)%r%apply(src, dst, rc, zero_total)
+    zt = this%routes(k_pedida)%spec%zero_total
+    if (present(zero_total)) zt = zero_total
+    call this%routes(k)%r%apply(src, dst, rc, zt)
+    if (rc /= ESMF_SUCCESS) return
+    if (this%routes(k_pedida)%spec%nan_replace) &
+      call replace_nan(dst, this%routes(k_pedida)%spec%nan_value, rc)
   end subroutine apply
+
+  !> Troca os NaN do destino, em cada DE local, por valor.
+  subroutine replace_nan(dst, valor, rc)
+    type(ESMF_Field),   intent(inout) :: dst
+    real(ESMF_KIND_R8), intent(in)    :: valor
+    integer,            intent(out)   :: rc
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: lde, ldec
+
+    call ESMF_FieldGet(dst, localDeCount=ldec, rc=rc)
+    if (rc /= ESMF_SUCCESS) return
+    do lde = 0, ldec - 1
+      call ESMF_FieldGet(dst, localDe=lde, farrayPtr=p, rc=rc)
+      if (rc /= ESMF_SUCCESS) return
+      where (p /= p) p = valor
+    end do
+  end subroutine replace_nan
 
   logical function has(this, name)
     class(regrid_manager_t), intent(in) :: this
@@ -200,6 +236,7 @@ contains
       end if
       this%routes(k)%name  = ''
       this%routes(k)%alias = 0
+      this%routes(k)%spec  = regrid_spec_t()
     end do
     this%n = 0
   end subroutine destroy

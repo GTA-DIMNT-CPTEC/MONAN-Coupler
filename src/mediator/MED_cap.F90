@@ -617,8 +617,7 @@ contains
 
     call regrid_ocean_currents(is, importState, zero_on_error=.true.)
 
-    call is%regrid%apply('ocn2atm', ocn_field, is%ocn%sst, localrc, &
-          zero_total=.true.)
+    call is%regrid%apply('ocn2atm', ocn_field, is%ocn%sst, localrc)
     if (localrc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
         'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)

@@ -18,8 +18,8 @@ program test_regrid
   character(len=*),   parameter :: WFILE = 'pesos_teste.nc'
 
   type(ESMF_VM)    :: vm
-  type(ESMF_Grid)  :: gsrc, gdst
-  type(ESMF_Field) :: fsrc, fdst, fdst2, fmesh
+  type(ESMF_Grid)  :: gsrc, gdst, greg
+  type(ESMF_Field) :: fsrc, fdst, fdst2, fmesh, freg, fdst3
   type(ESMF_Mesh)  :: mesh
   type(regrid_manager_t) :: mgr
   type(regrid_spec_t)    :: spec
@@ -78,6 +78,35 @@ program test_regrid
   call report('mpassit: erro < 5e-3 na area coberta, ausencia fora dela', &
               rc == 0 .and. mpassit_ok(fdst2, gdst))
 
+  ! 7. Opções da rota pedida: com reserva, o zero_total e a troca de NaN são
+  !    os da rota pedida, e não os da reserva. Origem regional (40S a 40N):
+  !    fora dela, a interpolação não alcança o destino.
+  greg  = make_regional(180, 40)
+  freg  = ESMF_FieldCreate(greg, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  fdst3 = ESMF_FieldCreate(gdst, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  call set_analytic(freg, greg)
+  call mgr%add('regional', regrid_spec('bilinear'), freg, fdst3, rc)
+  call mgr%add('mantem', regrid_spec('metodo_inexistente', zero_total=.false.), freg, fdst3, rc, &
+               fallback='regional')
+  call fill_field(fdst3, -999.0_ESMF_KIND_R8)
+  if (rc == 0) call mgr%apply('regional', freg, fdst3, rc)
+  call report('rota que zera: fora da origem fica 0', rc == 0 .and. count_value(fdst3, -999.0_ESMF_KIND_R8) == 0)
+  call fill_field(fdst3, -999.0_ESMF_KIND_R8)
+  if (rc == 0) call mgr%apply('mantem', freg, fdst3, rc)
+  call report('reserva com zero_total da rota pedida: fora da origem fica -999', &
+              rc == 0 .and. count_value(fdst3, -999.0_ESMF_KIND_R8) > 0)
+  call set_nan(freg)
+  call mgr%add('com_nan', regrid_spec('bilinear', nan_value=7.0_ESMF_KIND_R8), freg, fdst3, rc)
+  if (rc == 0) call mgr%apply('regional', freg, fdst3, rc)
+  call report('sem troca de NaN: o NaN da origem chega ao destino', rc == 0 .and. count_nan(fdst3) > 0)
+  if (rc == 0) call mgr%apply('com_nan', freg, fdst3, rc)
+  call report('troca de NaN: nenhum NaN no destino', rc == 0 .and. count_nan(fdst3) == 0 .and. &
+              count_value(fdst3, 7.0_ESMF_KIND_R8) > 0)
+  call mgr%add('nan_reserva', regrid_spec('metodo_inexistente', nan_value=7.0_ESMF_KIND_R8), &
+               freg, fdst3, rc, fallback='regional')
+  if (rc == 0) call mgr%apply('nan_reserva', freg, fdst3, rc)
+  call report('reserva com a troca de NaN da rota pedida', rc == 0 .and. count_nan(fdst3) == 0)
+
   call mgr%destroy(rc)
   call report('destroy', rc == 0)
 
@@ -101,6 +130,70 @@ contains
     if (.not. all_ok) nfail = nfail + 1
     if (localPet == 0) write(*,'(A,A)') merge('PASSOU  ', 'FALHOU  ', all_ok), name
   end subroutine report
+
+  !> Grade regular de nx x ny entre 40S e 40N, sem periodicidade.
+  function make_regional(nx, ny) result(g)
+    integer, intent(in) :: nx, ny
+    type(ESMF_Grid) :: g
+    real(ESMF_KIND_R8), pointer :: x(:,:), y(:,:)
+    integer :: i, j, lb(2), ub(2), irc
+    real(ESMF_KIND_R8) :: dx, dy
+
+    g = ESMF_GridCreateNoPeriDim(maxIndex=[nx, ny], indexflag=ESMF_INDEX_GLOBAL, &
+      coordSys=ESMF_COORDSYS_SPH_DEG, rc=irc)
+    call ESMF_GridAddCoord(g, staggerloc=ESMF_STAGGERLOC_CENTER, rc=irc)
+    dx = 360.0_ESMF_KIND_R8 / nx; dy = 80.0_ESMF_KIND_R8 / ny
+    call ESMF_GridGetCoord(g, 1, staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=x, &
+      computationalLBound=lb, computationalUBound=ub, rc=irc)
+    call ESMF_GridGetCoord(g, 2, staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=y, rc=irc)
+    do j = lb(2), ub(2)
+      do i = lb(1), ub(1)
+        x(i,j) = (i - 0.5_ESMF_KIND_R8) * dx
+        y(i,j) = -40.0_ESMF_KIND_R8 + (j - 0.5_ESMF_KIND_R8) * dy
+      end do
+    end do
+  end function make_regional
+
+  subroutine fill_field(f, v)
+    type(ESMF_Field),   intent(inout) :: f
+    real(ESMF_KIND_R8), intent(in)    :: v
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: irc
+    call ESMF_FieldGet(f, farrayPtr=p, rc=irc)
+    p = v
+  end subroutine fill_field
+
+  !> Põe NaN no primeiro ponto local da origem.
+  subroutine set_nan(f)
+    type(ESMF_Field), intent(inout) :: f
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    real(ESMF_KIND_R8) :: zero
+    integer :: irc
+    call ESMF_FieldGet(f, farrayPtr=p, rc=irc)
+    zero = 0.0_ESMF_KIND_R8
+    p(lbound(p,1), lbound(p,2)) = zero / zero
+  end subroutine set_nan
+
+  !> Contagem global de pontos iguais a v.
+  integer function count_value(f, v)
+    type(ESMF_Field),   intent(inout) :: f
+    real(ESMF_KIND_R8), intent(in)    :: v
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: irc, loc, ierr
+    call ESMF_FieldGet(f, farrayPtr=p, rc=irc)
+    loc = count(p == v)
+    call MPI_Allreduce(loc, count_value, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function count_value
+
+  !> Contagem global de NaN.
+  integer function count_nan(f)
+    type(ESMF_Field), intent(inout) :: f
+    real(ESMF_KIND_R8), pointer :: p(:,:)
+    integer :: irc, loc, ierr
+    call ESMF_FieldGet(f, farrayPtr=p, rc=irc)
+    loc = count(p /= p)
+    call MPI_Allreduce(loc, count_nan, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function count_nan
 
   function make_grid(nx, ny) result(g)
     integer, intent(in) :: nx, ny

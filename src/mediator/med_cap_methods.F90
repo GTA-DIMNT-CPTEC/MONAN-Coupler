@@ -20,7 +20,7 @@ module med_cap_methods_mod
   use ESMF
   use regrid_manager_mod, only : regrid_spec, regrid_manager_t
   use regrid_base_mod,    only : regrid_spec_t
-  use cpl_map_mod,        only : ROTAS, cpl_rota_indice
+  use cpl_map_mod,        only : ROTAS, cpl_rota_indice, CPL_AUSENTE
   use NUOPC, only: NUOPC_SetTimestamp
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
@@ -224,7 +224,6 @@ contains
     integer,                 intent(out)   :: rc
 
     type(ESMF_Field) :: dst_field
-    real(ESMF_KIND_R8), pointer :: dst_ptr(:,:)
 
     rc = ESMF_SUCCESS
 
@@ -239,12 +238,12 @@ contains
       call cria_rota(is%regrid, 'atm2ocn', src_field, dst_field, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
-    call is%regrid%apply('atm2ocn', src_field, dst_field, rc, zero_total=.true.)
+    ! A rota zera o destino antes e troca os NaN por zero (ROTAS: sem_valor
+    ! 'zerar', nan_para 0).
+    call is%regrid%apply('atm2ocn', src_field, dst_field, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, &
       msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &
       line=__LINE__, file=__FILE__)) return
-    call ESMF_FieldGet(dst_field, farrayPtr=dst_ptr, rc=rc)
-    where (dst_ptr /= dst_ptr) dst_ptr = 0.0_ESMF_KIND_R8
 
   end subroutine RegridOrCopy
 
@@ -301,9 +300,18 @@ contains
   !============================================================================
   !> @brief Configuração da rota nome na tabela ROTAS (cpl_map): métodos em
   !! ordem de preferência, esquema, máscara na origem (se a rota tem
-  !! mascara) e rota de reserva ('' se não tem). ok = .false. se a rota não
-  !! está em ROTAS. O grupo &nuopc_regrid do nuopc.input continua podendo
-  !! trocar o esquema e os métodos (regrid_manager, apply_config).
+  !! mascara), o que fazer com os pontos do destino que a interpolação não
+  !! alcança (sem_valor: 'zerar' zera o destino inteiro antes, zero_total;
+  !! 'manter' e 'sentinela' preservam o valor anterior), a troca de NaN no
+  !! destino (nan_para) e a rota de reserva ('' se não tem). ok = .false.
+  !! se a rota não está em ROTAS. O grupo &nuopc_regrid do nuopc.input
+  !! continua podendo trocar o esquema e os métodos (regrid_manager,
+  !! apply_config).
+  !!
+  !! 'sentinela' só diz que o destino não é zerado: quem usa a rota
+  !! preenche o destino com a sentinela antes (o gelo, em med_ice e
+  !! med_export), porque o preenchimento vale mesmo quando a rota não é
+  !! aplicada.
   !============================================================================
   subroutine spec_da_rota(nome, spec, reserva, ok)
     character(len=*),    intent(in)  :: nome
@@ -317,7 +325,12 @@ contains
     ok = k > 0
     if (.not. ok) return
     spec = regrid_spec(trim(ROTAS(k)%metodos), scheme=trim(ROTAS(k)%esquema), &
-                       mask_src=len_trim(ROTAS(k)%mascara) > 0)
+                       mask_src=len_trim(ROTAS(k)%mascara) > 0, &
+                       zero_total=ROTAS(k)%sem_valor == 'zerar')
+    if (ROTAS(k)%nan_para /= CPL_AUSENTE) then
+      spec%nan_replace = .true.
+      spec%nan_value   = ROTAS(k)%nan_para
+    end if
     reserva = ROTAS(k)%reserva
   end subroutine spec_da_rota
 

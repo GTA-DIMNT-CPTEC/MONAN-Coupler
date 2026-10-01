@@ -69,8 +69,7 @@ contains
       call log_ice_source(f_ifrac_src)
 
     if (rc_ice == ESMF_SUCCESS) &
-      call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_ice, &
-        zero_total=.false.)
+      call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_ice)
 
     if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) &
       call log_ice_destination(is)
@@ -163,8 +162,8 @@ contains
   !============================================================================
   !> @brief Preenche os seis campos de gelo na grade ATM com a sentinela -999.
   !!
-  !! A interpolação da fração usa zero_total=.false.: só escreve onde a rota
-  !! mapeou algum ponto. As demais células ficam com -999, fora de qualquer
+  !! A rota 'ocn2atm_ice' não zera o destino (sem_valor 'sentinela' em
+  !! ROTAS): só escreve onde a interpolação alcança algum ponto. As demais células ficam com -999, fora de qualquer
   !! faixa válida, e a extrapolação por vizinhança as reconhece como
   !! inválidas. Com zero, que está dentro da faixa [0,1], essas células
   !! passariam por válidas.
@@ -297,8 +296,7 @@ contains
     call ESMF_StateGet(importState, itemName=item_name, &
       field=f_src, rc=rc_ice)
     if (rc_ice == ESMF_SUCCESS) &
-      call regrid%apply('ocn2atm_ice', f_src, dst, rc_ice, &
-        zero_total=.false.)
+      call regrid%apply('ocn2atm_ice', f_src, dst, rc_ice)
   end subroutine regrid_ice_member
 
   !============================================================================

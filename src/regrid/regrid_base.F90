@@ -66,6 +66,10 @@ module regrid_base_mod
     !> Classe do campo (esquema 'mpassit'): 'continuous', 'integer', 'accumulated'.
     character(len=NAME_LEN) :: field_class = 'continuous'
     type(regrid_fill_t) :: fill
+    !> Troca NaN no destino por nan_value depois da interpolação (e do
+    !! preenchimento por vizinhança). Aplicado por regrid_manager%apply.
+    logical :: nan_replace = .false.
+    real(ESMF_KIND_R8) :: nan_value = 0.0_ESMF_KIND_R8
   end type regrid_spec_t
 
   !> Esquema de interpolação.

@@ -459,8 +459,7 @@ contains
       call ESMF_StateGet(importState, itemName="Si_ifrac", &
                          field=f_ifrac_src, rc=rc_if)
       if (rc_if == ESMF_SUCCESS) then
-        call is%regrid%apply('ocn2atm', f_ifrac_src, is%ice%ifrac, rc_if, &
-          zero_total=.true.)
+        call is%regrid%apply('ocn2atm', f_ifrac_src, is%ice%ifrac, rc_if)
         if (rc_if == ESMF_SUCCESS) then
           regrid_ok = .true.
           call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
