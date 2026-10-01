@@ -22,6 +22,7 @@ module med_ice_mod
                                COMPL_ICE_ANIDF, COMPL_ICE_T
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: FillInternalField
+  use cpl_grids_mod, only: centro_lon_leste0, centro_lat_leste0
 
   implicit none
   private
@@ -347,7 +348,7 @@ contains
   !> @brief Alerta de gelo em latitude implausível (FIX-DIAG-ICEGEO-01).
   !!
   !! Calcula a latitude e a longitude de cada célula da grade ATM 360x180
-  !! pela fórmula analítica da grade, sem depender de qual PET cuida de
+  !! pelas fórmulas da malha atm_med (cpl_grids), sem depender de qual PET cuida de
   !! qual parte do domínio. Conta as células com ifrac > 0,05 em
   !! |lat| < 55 graus, onde não existe gelo marinho em nenhuma época do
   !! ano, e registra a primeira encontrada neste PET.
@@ -370,10 +371,8 @@ contains
     do jj_geo = lbound(p_ifrac_out,2), ubound(p_ifrac_out,2)
       do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
         if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
-            lon_here = (real(ii_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                       (360.0_ESMF_KIND_R8/ATM_NX) + 0.5_ESMF_KIND_R8*(360.0_ESMF_KIND_R8/ATM_NX)
-            lat_here = -90.0_ESMF_KIND_R8 + (real(jj_geo,ESMF_KIND_R8)-1.0_ESMF_KIND_R8) * &
-                       (180.0_ESMF_KIND_R8/ATM_NY) + 0.5_ESMF_KIND_R8*(180.0_ESMF_KIND_R8/ATM_NY)
+            lon_here = centro_lon_leste0(ii_geo, ATM_NX)
+            lat_here = centro_lat_leste0(jj_geo, ATM_NY)
             if (abs(lat_here) < LAT_MAX_GELO) then
               n_bad_geo = n_bad_geo + 1
               if (lat_bad < -900.0_ESMF_KIND_R8) then

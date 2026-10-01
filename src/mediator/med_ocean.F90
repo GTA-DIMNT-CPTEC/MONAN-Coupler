@@ -25,6 +25,7 @@ module med_ocean_mod
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: ZeroInternalField
   use med_ice_mod, only: update_ice_fields_on_atm_grid
+  use cpl_grids_mod, only: indice_trunca
 
   implicit none
   private
@@ -517,12 +518,10 @@ contains
 
     do j = lbound(fptr,2), ubound(fptr,2)
       lat_a = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * dy_a
-      j_o   = int((lat_a + 90.0_ESMF_KIND_R8) / dy_o) + 1
-      j_o   = max(1, min(ny_o, j_o))
+      j_o   = indice_trunca(lat_a + 90.0_ESMF_KIND_R8, dy_o, ny_o)
       do i = lbound(fptr,1), ubound(fptr,1)
         lon_a = (real(i,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * dx_a
-        i_o   = int(lon_a / dx_o) + 1
-        i_o   = max(1, min(nx_o, i_o))
+        i_o   = indice_trunca(lon_a, dx_o, nx_o)
         fptr(i,j) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, f0(i_o, j_o)))
       end do
     end do

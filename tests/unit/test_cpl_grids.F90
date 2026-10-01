@@ -12,6 +12,15 @@
 !!   atm_cap       centros de -179,5 a 179,5 graus e de -89,5 a 89,5
 !!   igualdade     as duas regras dão o mesmo centro, em graus, a menos de
 !!                 180 graus na longitude, em todas as colunas e linhas
+!!   indices       as funções de índice e de longitude dão, bit a bit, o
+!!                 mesmo resultado que as expressões que substituíram,
+!!                 escritas aqui como estavam nas rotinas (com o passo 1 como
+!!                 constante, como no cap atmosférico), num conjunto de
+!!                 coordenadas que inclui os múltiplos exatos do passo e os
+!!                 seus vizinhos imediatos, valores negativos, -0 e valores
+!!                 fora de [-360, 360]
+!!   centros_gelo  os centros que check_ice_geography calculava são, bit a
+!!                 bit, os de centro_lon_leste0 e centro_lat_leste0
 !!
 !! Os valores esperados são exatos em binário (múltiplos de 0,5), por isso a
 !! comparação é de igualdade.
@@ -23,9 +32,14 @@ program test_cpl_grids
   use cpl_grids_mod, only : cpl_regdecomp, centro_lon_leste0, centro_lat_leste0, &
                             canto_lon_leste0, canto_lat_leste0, centro_lon_oeste180, &
                             centro_lat_oeste180
+  use cpl_grids_mod, only : indice_trunca, indice_arredonda, lon_0a360_piso, &
+                            lon_m180a180_piso, lon_0a360_laco, lon_m180a180_laco
+  use, intrinsic :: ieee_arithmetic, only : ieee_next_after
+  use, intrinsic :: iso_fortran_env, only : int64
   implicit none
 
   integer, parameter :: r8 = ESMF_KIND_R8
+  real(r8), parameter :: UM = 1.0_r8   !< passo constante, como DLON e DLAT no cap
   integer :: nfalhas, i, j, n
   logical :: ok
 
@@ -73,6 +87,9 @@ program test_cpl_grids
   end do
   call resultado('igualdade: as duas regras dao os mesmos centros', ok)
 
+  call confere_indices()
+  call confere_centros_gelo()
+
   if (nfalhas == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'
   else
@@ -81,6 +98,129 @@ program test_cpl_grids
   end if
 
 contains
+
+  !> Coordenadas de teste: passos de 0,001 entre -400 e 400, os múltiplos de
+  !! 0,25 entre -720 e 720 e os seus vizinhos imediatos, -0, e alguns
+  !! valores grandes.
+  function coordenadas() result(x)
+    real(r8), allocatable :: x(:)
+    integer :: k, m
+    real(r8) :: v
+
+    allocate(x(0))
+    m = 0
+    x = [(real(k, r8) * 0.001_r8, k = -400000, 400000)]
+    do k = -2880, 2880
+      v = real(k, r8) * 0.25_r8
+      x = [x, v, ieee_next_after(v, -huge(v)), ieee_next_after(v, huge(v))]
+    end do
+    x = [x, -0.0_r8, 1.0e4_r8, -1.0e4_r8, 12345.678_r8, -9876.54321_r8]
+  end function coordenadas
+
+  logical function mesmo_bit(a, b)
+    real(r8), intent(in) :: a, b
+    mesmo_bit = transfer(a, 1_int64) == transfer(b, 1_int64)
+  end function mesmo_bit
+
+  !> Cada função contra a expressão que ela substituiu.
+  subroutine confere_indices()
+    real(r8), allocatable :: x(:)
+    real(r8), parameter :: PASSOS(*) = [1.0_r8, 0.5_r8, 0.25_r8, 360.0_r8/1440, 180.0_r8/720]
+    integer,  parameter :: NS(*) = [360, 180, 1440, 720]
+    real(r8) :: d, l, lon_d
+    integer :: k, ip, in, n, e
+    logical :: ok_t, ok_p, ok_a, ok_t1, ok_l1, ok_l2, ok_l3, ok_l4, ok_l5
+
+    x = coordenadas()
+    ok_t = .true.; ok_p = .true.; ok_a = .true.; ok_t1 = .true.
+    do ip = 1, size(PASSOS)
+      d = PASSOS(ip)
+      do in = 1, size(NS)
+        n = NS(in)
+        do k = 1, size(x)
+          ! int(x/d) + 1, limitado como em bin_cells_local e oisst_to_atm_nearest
+          e = int(x(k) / d) + 1
+          e = max(1, min(e, n))
+          ok_t = ok_t .and. indice_trunca(x(k), d, n) == e
+          ! floor(x/d) + 1, limitado como em voronoi_to_grid: com o limite,
+          ! igual ao truncamento
+          e = floor(x(k) / d) + 1
+          e = min(max(e, 1), n)
+          ok_p = ok_p .and. indice_trunca(x(k), d, n) == e
+          ! nint(x/d) + 1, limitado como em voronoi_accum_local
+          e = nint(x(k) / d) + 1
+          e = min(max(e, 1), n)
+          ok_a = ok_a .and. indice_arredonda(x(k), d, n) == e
+        end do
+      end do
+    end do
+    ! passo 1 constante, como DLON e DLAT no cap atmosférico
+    do k = 1, size(x)
+      e = int(x(k) / UM) + 1
+      e = max(1, min(e, 360))
+      ok_t1 = ok_t1 .and. indice_trunca(x(k), UM, 360) == e
+      e = int((x(k) + 90.0_r8) / UM) + 1
+      e = max(1, min(e, 180))
+      ok_t1 = ok_t1 .and. indice_trunca(x(k) + 90.0_r8, UM, 180) == e
+    end do
+    call resultado('indices: int(x/d) + 1, limitado', ok_t)
+    call resultado('indices: floor(x/d) + 1, limitado, igual ao truncamento', ok_p)
+    call resultado('indices: nint(x/d) + 1, limitado', ok_a)
+    call resultado('indices: int(x/1) + 1 com o passo constante do cap', ok_t1)
+
+    ok_l1 = .true.; ok_l2 = .true.; ok_l3 = .true.; ok_l4 = .true.
+    do k = 1, size(x)
+      ! bin_cells_local
+      lon_d = x(k) - floor(x(k) / 360.0_r8) * 360.0_r8
+      ok_l1 = ok_l1 .and. mesmo_bit(lon_0a360_piso(x(k)), lon_d)
+      ! state_get_field_1d
+      lon_d = x(k) - floor((x(k) + 180.0_r8) / 360.0_r8) &
+                     * 360.0_r8
+      ok_l2 = ok_l2 .and. mesmo_bit(lon_m180a180_piso(x(k)), lon_d)
+      ! mom_si_ifrac
+      l = x(k)
+      do while (l <   0.0_r8); l = l + 360.0_r8; end do
+      do while (l >= 360.0_r8); l = l - 360.0_r8; end do
+      ok_l3 = ok_l3 .and. mesmo_bit(lon_0a360_laco(x(k)), l)
+      ! voronoi_to_grid e voronoi_accum_local
+      l = x(k)
+      do while (l >= 180.0_r8);  l = l - 360.0_r8; end do
+      do while (l < -180.0_r8);  l = l + 360.0_r8; end do
+      ok_l4 = ok_l4 .and. mesmo_bit(lon_m180a180_laco(x(k)), l)
+    end do
+    call resultado('longitude: [0, 360) pelo piso', ok_l1)
+    call resultado('longitude: [-180, 180) pelo piso', ok_l2)
+    call resultado('longitude: [0, 360) por laco', ok_l3)
+    call resultado('longitude: [-180, 180) por laco', ok_l4)
+
+    ! copy_to_local_grid: centro da coluna com o passo constante
+    ok_l5 = .true.
+    do k = 1, 360
+      l = -180.0_r8 + (real(k, r8) - 0.5_r8) * UM
+      ok_l5 = ok_l5 .and. mesmo_bit(centro_lon_oeste180(k, 360), l)
+    end do
+    call resultado('centro do cap igual ao de copy_to_local_grid', ok_l5)
+  end subroutine confere_indices
+
+  !> Centros calculados por check_ice_geography (med_ice) até a R-FASE11-08.
+  subroutine confere_centros_gelo()
+    integer :: i, j
+    real(r8) :: lon_here, lat_here
+    logical :: ok
+
+    ok = .true.
+    do i = 1, 360
+      lon_here = (real(i,r8)-1.0_r8) * &
+                 (360.0_r8/360) + 0.5_r8*(360.0_r8/360)
+      ok = ok .and. mesmo_bit(centro_lon_leste0(i, 360), lon_here)
+    end do
+    do j = 1, 180
+      lat_here = -90.0_r8 + (real(j,r8)-1.0_r8) * &
+                 (180.0_r8/180) + 0.5_r8*(180.0_r8/180)
+      ok = ok .and. mesmo_bit(centro_lat_leste0(j, 180), lat_here)
+    end do
+    call resultado('centros_gelo: iguais aos de check_ice_geography', ok)
+  end subroutine confere_centros_gelo
 
   subroutine resultado(nome, ok)
     character(len=*), intent(in) :: nome

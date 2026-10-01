@@ -20,6 +20,7 @@ module mpas_cell_binning_mod
   use mpi
   use mpas_atm_types_mod, only : MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
+  use cpl_grids_mod, only : indice_trunca, lon_0a360_piso, centro_lon_oeste180
   implicit none
   private
 
@@ -235,11 +236,9 @@ contains
     do icell = 1, min(n, size(lon_rad))
       lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
       lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
-      lon_d = lon_d - floor(lon_d / 360.0_ESMF_KIND_R8) * 360.0_ESMF_KIND_R8
-      ig = int(lon_d / DLON) + 1
-      jg = int((lat_d + 90.0_ESMF_KIND_R8) / DLAT) + 1
-      ig = max(1, min(ig, ATM_NX))
-      jg = max(1, min(jg, ATM_NY))
+      lon_d = lon_0a360_piso(lon_d)
+      ig = indice_trunca(lon_d, DLON, ATM_NX)
+      jg = indice_trunca(lat_d + 90.0_ESMF_KIND_R8, DLAT, ATM_NY)
       sum_local(ig, jg)   = sum_local(ig, jg) + real(data(icell), ESMF_KIND_R8)
       count_local(ig, jg) = count_local(ig, jg) + 1.0_ESMF_KIND_R8
     end do
@@ -506,12 +505,10 @@ contains
     do jj = lbound(fptr2d,2), ubound(fptr2d,2)
       do ii = lbound(fptr2d,1), ubound(fptr2d,1)
         if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
-            lon_ii_d   = -180.0_ESMF_KIND_R8 + &
-                         (real(ii, ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * DLON
+            lon_ii_d   = centro_lon_oeste180(ii, ATM_NX)
             lon_0360_d = lon_ii_d
             if (lon_0360_d < 0.0_ESMF_KIND_R8) lon_0360_d = lon_0360_d + 360.0_ESMF_KIND_R8
-            ig_buf = int(lon_0360_d / DLON) + 1
-            ig_buf = max(1, min(ig_buf, ATM_NX))
+            ig_buf     = indice_trunca(lon_0360_d, DLON, ATM_NX)
             fptr2d(ii, jj) = buf_global(ig_buf, jj)
         end if
       end do

@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6) e na R-FASE11-08 (seções 3.3, 4.2 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6) e na R-FASE11-09 (seções 3.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -164,7 +164,18 @@ Como ficou na R-FASE11-08, para as duas malhas regulares do lado atmosférico:
 | decomposição | `cpl_regdecomp(petCount, nx, ny)`, a fatoração em um DE por PET que o mediador e o cap atmosférico já usavam (antes escrita duas vezes) |
 | centros e cantos | `centro_lon_leste0`, `centro_lat_leste0`, `canto_lon_leste0`, `canto_lat_leste0` (as expressões de `atm_med`) e `centro_lon_oeste180`, `centro_lat_oeste180` (as de `atm_cap`) |
 
-O tipo `cpl_malha_t` do esboço acima não foi criado: a descrição de cada malha (nome, componente, tipo) já está na tabela `MALHAS` de `cpl_map`, e a `ESMF_Grid` continua guardada pelo componente que a usa. `create_atm_grid` e `mpas_create_grid` ficaram como rotinas curtas que chamam o construtor, com as mesmas interfaces, o que permite comparar as duas versões com o mesmo programa de teste. As fórmulas de índice (de coordenada para coluna e linha) entram na R-FASE11-09, junto com as rotinas que as usam.
+O tipo `cpl_malha_t` do esboço acima não foi criado: a descrição de cada malha (nome, componente, tipo) já está na tabela `MALHAS` de `cpl_map`, e a `ESMF_Grid` continua guardada pelo componente que a usa. `create_atm_grid` e `mpas_create_grid` ficaram como rotinas curtas que chamam o construtor, com as mesmas interfaces, o que permite comparar as duas versões com o mesmo programa de teste. Na R-FASE11-09 entraram as fórmulas de índice (de coordenada para coluna e linha) e as de longitude numa faixa de 360 graus:
+
+| Função | Expressão | Usada por |
+| --- | --- | --- |
+| `indice_trunca(x, d, n)` | `int(x/d) + 1`, limitado a [1, n] | `bin_cells_local`, `copy_to_local_grid`, `state_get_field_1d`, `oisst_to_atm_nearest`, OISST no cap do MOM6 (`mom_si_ifrac`), diagnóstico da importação (`voronoi_to_grid`, que usava `floor`: com o limite, dá sempre o mesmo índice) |
+| `indice_arredonda(x, d, n)` | `nint(x/d) + 1`, limitado a [1, n] | diagnóstico da exportação (`voronoi_accum_local`) |
+| `lon_0a360_piso(lon)` | `lon - floor(lon/360)*360` | `bin_cells_local` |
+| `lon_m180a180_piso(lon)` | `lon - floor((lon+180)/360)*360` | `state_get_field_1d` |
+| `lon_0a360_laco(lon)` | soma ou subtrai 360 até [0, 360) | `mom_si_ifrac` |
+| `lon_m180a180_laco(lon)` | subtrai ou soma 360 até [-180, 180) | os dois diagnósticos |
+
+Quem chama soma a origem antes (`lat + 90`, `lon + 180`), como as expressões faziam. `check_ice_geography` passou a usar `centro_lon_leste0` e `centro_lat_leste0`, que dão os mesmos valores, bit a bit, que as expressões dela. Ficaram fora, por serem regras próprias e usadas uma vez: a soma única de 360 em `copy_to_local_grid` (que não é o mesmo que o laço, ver `cpl_grids`) e os centros de `oisst_to_atm_nearest`, que recebem os passos como argumento.
 
 ### 3.4 Dicionário de campos
 
@@ -450,7 +461,9 @@ A R-FASE11-07 fechou o bloco B com os caps do MONAN-A, do DOCN e do DATM. Os val
 
 A R-FASE11-08 abriu o bloco C: `src/coupling/cpl_grids.F90` constrói as malhas `atm_med` (malha de fluxo do mediador) e `atm_cap` (grade do cap atmosférico) por `cpl_malha_latlon`, com a decomposição `cpl_regdecomp`, que estava escrita duas vezes, e com as fórmulas de centro e de canto de cada malha numa função cada uma (seção 3.3). As coordenadas e a decomposição ficaram idênticas, bit a bit, com 1, 4, 6 e 8 processos (teste novo `tests/malhas`, conferência `malhas`). Chamadas `ESMF_GridCreate*` fora de `src/coupling`: de 7 para 5.
 
-Próxima etapa: **R-FASE11-09**, com as fórmulas de índice de `bin_cells_local`, `copy_to_local_grid`, `state_get_field_1d`, `check_ice_geography`, `oisst_to_atm_nearest` e dos dois gravadores de diagnóstico vindas de `cpl_grids`, uma função por regra de arredondamento, conforme a tabela do bloco C.
+A R-FASE11-09 levou para `cpl_grids` as fórmulas de índice e de longitude das sete rotinas da tabela do bloco C e do cap do MOM6 (seção 3.3). Como a fórmula passa a ser chamada de função em outro módulo, o `objdump` não se aplica; a conferência foi o teste unitário, que compara cada função com a expressão que ela substituiu em cerca de 820 mil coordenadas, além dos testes `grade` e `gravadores`. O teste mostrou que o índice por piso e o por truncamento são iguais depois do limite a [1, n] (uma função só) e que a soma única de 360 não equivale ao laço (a cópia do cap manteve a sua).
+
+Próxima etapa: **R-FASE11-10**, com `cpl_blocos_t` e `malha_tripolar`, e as malhas `ocn_med` e `ice_sis2` construídas por ele, conforme a tabela do bloco C; a conferência é o teste do supergrid, estendido aos blocos.
 
 ---
 

@@ -15,7 +15,7 @@ module mpas_cap_methods_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
-  use cpl_grids_mod, only : cpl_malha_latlon, ORIGEM_OESTE180
+  use cpl_grids_mod, only : cpl_malha_latlon, ORIGEM_OESTE180, indice_trunca, lon_m180a180_piso
   ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
   ! para rugosidade e SST invalidas (ver fill_invalid_sst).
   use coupler_config_mod, only : cfg_zorl_default,          &
@@ -628,12 +628,9 @@ contains
             ! deslocaria TODA a atribuição em 180° (dado do Atlântico no índice do
             ! Pacífico). Por isso lon é normalizada para [-180, +180) e indexada na
             ! mesma origem da grade.
-            lon_d = lon_d - floor((lon_d + 180.0_ESMF_KIND_R8) / 360.0_ESMF_KIND_R8) &
-                            * 360.0_ESMF_KIND_R8          ! → [-180, +180)
-            ig = int((lon_d + 180.0_ESMF_KIND_R8) / DLON) + 1
-            jg = int((lat_d +  90.0_ESMF_KIND_R8) / DLAT) + 1
-            ig = max(1, min(ig, ATM_NX))
-            jg = max(1, min(jg, ATM_NY))
+            lon_d = lon_m180a180_piso(lon_d)          ! → [-180, +180)
+            ig = indice_trunca(lon_d + 180.0_ESMF_KIND_R8, DLON, ATM_NX)
+            jg = indice_trunca(lat_d +  90.0_ESMF_KIND_R8, DLAT, ATM_NY)
             val = buf2d(ig, jg)
             ! Só sobrescreve com valor VÁLIDO (oceano). Pontos de fill (terra,
             ! ou sem cobertura do regrid MED) preservam o default já em data() —
