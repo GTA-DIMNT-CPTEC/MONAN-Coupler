@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 # =============================================================================
-# compara-malhas.bash: teste de regressão da construção das malhas regulares
-# do lado atmosférico (malha de fluxo do mediador e grade do cap do MONAN-A).
+# compara-malhas.bash: teste de regressão da construção das malhas do
+# mediador (malha de fluxo e oceano, com o MOM6 e com o DOCN) e da grade do
+# cap do MONAN-A.
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
 # programa tests/malhas/test_malhas.F90 da árvore de trabalho (ele só usa
-# create_atm_grid e mpas_create_grid, cujas interfaces não mudam) e o
-# executa com 1, 4, 6 e 8 processos MPI. Para cada PET e cada DE local, os
-# limites computacionais e os vetores de coordenadas dos centros e dos
-# cantos gravados (saida_<PET>.bin) têm de ser idênticos, bit a bit, e as
-# mensagens das duas rotinas no log do ESMF também, sem data e hora.
+# create_atm_grid, create_ocn_grid e mpas_create_grid, cujas interfaces não
+# mudam) e o executa com 1, 4, 6 e 8 processos MPI, com um supergrid
+# sintético (tests/supergrid/gera-supergrid.py). Para cada PET e cada DE
+# local, os limites computacionais e os vetores de coordenadas dos centros e
+# dos cantos e a máscara gravados (saida_<PET>.bin) têm de ser idênticos,
+# bit a bit, e as mensagens das rotinas no log do ESMF também, sem data e
+# hora. Depois, só na árvore de trabalho, tests/malhas/test_malha_gelo.F90
+# confere a malha do SIS2 (ver o cabeçalho do programa) com 4, 6 e 8
+# processos.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/malhas/compara-malhas.bash REV [SAIDA]
@@ -19,8 +24,8 @@
 #
 # Variáveis: MPIRUN (padrão: mpiexec), FC (padrão: mpif90), LISTA_NP
 # (padrão: "1 4 6 8").
-# Ambiente: ESMF, NetCDF-Fortran (nf-config) e MPI; nenhuma biblioteca dos
-# modelos (as interfaces mínimas de tests/interfaces bastam).
+# Ambiente: ESMF, NetCDF-Fortran (nf-config), MPI, python3 e ncgen; nenhuma
+# biblioteca dos modelos (as interfaces mínimas de tests/interfaces bastam).
 # Código de saída: 0 se tudo idêntico; 1 se algo difere; 2 erro de preparo.
 # =============================================================================
 set -uo pipefail
@@ -48,6 +53,9 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_su
 # depois dela): liga só os que existem no diretório de compilação.
 objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
 
+python3 "${RAIZ}/tests/supergrid/gera-supergrid.py" "${SAIDA}/dados" > /dev/null \
+  || { echo "ERRO: geração do supergrid sintético" >&2; exit 2; }
+
 # Fontes da versão de referência, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
 git -C "${RAIZ}" archive "${REV}" src tests/interfaces tools/dev/compila-local.bash \
@@ -72,7 +80,7 @@ for versao in antiga nova; do
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
   for np in ${LISTA_NP}; do
     run="${dir}/run_${np}"
-    rm -rf "${run}"; mkdir -p "${run}"
+    rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
     # shellcheck disable=SC2086
     ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malhas > run.log 2>&1 ) \
       || { tail -20 "${run}/run.log"; echo "ERRO: execução da versão ${versao} com ${np} processos" >&2; exit 2; }
@@ -80,7 +88,7 @@ for versao in antiga nova; do
 done
 
 difere=0
-padrao='MED|mpas_create_grid|cpl_malha|ERROR|WARNING'
+padrao='MED|FIX-DIAG|mpas_create_grid|cpl_malha|ERROR|WARNING'
 for np in ${LISTA_NP}; do
   n=0
   for f in $(cd "${SAIDA}/antiga/run_${np}" && ls saida_*.bin 2>/dev/null); do
@@ -99,5 +107,29 @@ for np in ${LISTA_NP}; do
     fi
   done
 done
+
+# Malha do SIS2: só na árvore de trabalho, contra a construção de antes
+dir="${SAIDA}/nova"
+( cd "${dir}" || exit 2
+  # shellcheck disable=SC2086
+  ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
+    -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malha_gelo.F90" -o test_malha_gelo.o &&
+  # shellcheck disable=SC2086
+  ${FC} -o test_malha_gelo test_malha_gelo.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+) > "${SAIDA}/liga_gelo.txt" 2>&1 \
+  || { cat "${SAIDA}/liga_gelo.txt"; echo "ERRO: ligação de test_malha_gelo" >&2; exit 2; }
+for np in 4 6 8; do
+  run="${dir}/gelo_${np}"
+  rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
+  # shellcheck disable=SC2086
+  if ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malha_gelo > run.log 2>&1 ) \
+     && grep -q 'TODOS OS TESTES PASSARAM' "${run}/run.log"; then
+    echo "  gelo, ${np} PETs: $(grep -c PASSOU "${run}/run.log") caso(s) iguais"
+  else
+    grep 'FALHOU' "${run}/run.log"; tail -5 "${run}/run.log"
+    echo "  gelo DIFERE    ${np} PETs"; difere=1
+  fi
+done
+
 if [[ ${difere} -eq 0 ]]; then echo "RESULTADO: malhas idênticas"; else echo "RESULTADO: há diferenças"; fi
 exit ${difere}

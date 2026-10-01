@@ -1,18 +1,28 @@
 !> @file cpl_grids.F90
-!! @brief Construção das malhas regulares (latitude e longitude) do acoplamento.
+!! @brief Construção das malhas do acoplamento e fórmulas das grades regulares.
 !!
-!! As malhas descritas em MALHAS (cpl_map.F90) são construídas aqui. Por
-!! enquanto, as duas grades regulares do lado atmosférico:
+!! As malhas descritas em MALHAS (cpl_map.F90) são construídas aqui:
 !!
 !!   atm_cap   grade do cap do MONAN-A (mpas_cap_methods::mpas_create_grid),
-!!             centros com longitude a partir de -180 graus, sem cantos
+!!             regular, centros com longitude a partir de -180 graus, sem
+!!             cantos (cpl_malha_latlon)
 !!   atm_med   malha de fluxo do mediador (med_init::create_atm_grid),
-!!             centros com longitude a partir de 0 grau, com cantos (o
-!!             método conservativo exige os cantos)
+!!             regular, centros com longitude a partir de 0 grau, com cantos
+!!             (o método conservativo exige os cantos) (cpl_malha_latlon)
+!!   ocn_med   oceano no mediador (med_init::create_ocn_grid): com o MOM6, a
+!!             grade tripolar lida do supergrid, com cantos
+!!             (cpl_malha_tripolar); com o DOCN, regular, com a longitude do
+!!             centro no canto oeste da célula (cpl_malha_latlon,
+!!             ORIGEM_LESTE0_CANTO)
+!!   ice_sis2  grade do cap do SIS2 (sis_cap_MONAN::create_ice_grid),
+!!             tripolar, nos blocos do domínio do SIS2, sem cantos
+!!             (cpl_malha_tripolar com cpl_blocos_t)
 !!
-!! As duas usam a mesma decomposição (cpl_regdecomp), a mesma chamada
-!! ESMF_GridCreate1PeriDim (periódica em longitude, índices globais,
-!! coordenadas esféricas em graus) e o mesmo laço sobre os DEs locais. As
+!! Todas são periódicas em longitude (periodicDim = 1, o padrão do ESMF),
+!! com índices globais e coordenadas esféricas em graus, sem polo declarado.
+!! Sem blocos, a decomposição é cpl_regdecomp, um DE por PET; com blocos
+!! (cpl_blocos_t, montados por cpl_blocos_de_limites), cada bloco vai ao PET
+!! que o tem no modelo. As
 !! fórmulas de centro e de canto ficam em funções, uma por regra: as duas
 !! malhas calculam o centro com expressões diferentes, e cada função
 !! reproduz a sua expressão sem mudança, para que nenhum bit mude.
@@ -53,16 +63,17 @@ module cpl_grids_mod
 
   use ESMF
   use coupler_utils_mod, only : ChkErr
+  use mom6_supergrid_mod, only : mom6_supergrid_tcoords, mom6_supergrid_corners
 
   implicit none
   private
 
-  public :: cpl_regdecomp, cpl_malha_latlon
+  public :: cpl_regdecomp, cpl_malha_latlon, cpl_malha_tripolar, cpl_blocos_de_limites
   public :: centro_lon_leste0, centro_lat_leste0, canto_lon_leste0, canto_lat_leste0
   public :: centro_lon_oeste180, centro_lat_oeste180
   public :: indice_trunca, indice_arredonda
   public :: lon_0a360_piso, lon_m180a180_piso, lon_0a360_laco, lon_m180a180_laco
-  public :: ORIGEM_LESTE0, ORIGEM_OESTE180
+  public :: ORIGEM_LESTE0, ORIGEM_OESTE180, ORIGEM_LESTE0_CANTO
 
   integer, parameter :: r8 = ESMF_KIND_R8
 
@@ -70,6 +81,19 @@ module cpl_grids_mod
   !! partir de -180 graus.
   character(len=*), parameter :: ORIGEM_LESTE0   = 'leste0'
   character(len=*), parameter :: ORIGEM_OESTE180 = 'oeste180'
+  !> Como ORIGEM_LESTE0, mas com a longitude do centro igual à do canto
+  !! oeste da célula, (i-1)*360/nx, sem a meia célula: é como o mediador
+  !! descreve a grade do DOCN (ocn_med com use_docn). A latitude do centro e
+  !! os cantos são os de ORIGEM_LESTE0.
+  character(len=*), parameter :: ORIGEM_LESTE0_CANTO = 'leste0_canto'
+
+  !> Decomposição em blocos retangulares, um por PET: número de colunas de
+  !! cada coluna de blocos (cntx), de linhas de cada linha de blocos (cnty)
+  !! e o PET dono de cada bloco (pmap(ix, iy, 1)), na forma que
+  !! ESMF_GridCreate1PeriDim recebe (countsPerDEDim1, countsPerDEDim2, petMap).
+  type, public :: cpl_blocos_t
+    integer, allocatable :: cntx(:), cnty(:), pmap(:,:,:)
+  end type cpl_blocos_t
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -107,7 +131,8 @@ contains
 
   !> Cria uma malha regular nx x ny, periódica em longitude, com um DE por
   !! PET (cpl_regdecomp), índices globais e coordenadas dos centros; com
-  !! cantos = .true., também as dos cantos (só na origem ORIGEM_LESTE0).
+  !! cantos = .true., também as dos cantos (só nas origens ORIGEM_LESTE0 e
+  !! ORIGEM_LESTE0_CANTO).
   !!
   !! ESMF_INDEX_GLOBAL: o limite inferior dos vetores de cada PET é o índice
   !! global (61 no segundo PET de 60 colunas, por exemplo), do que dependem
@@ -123,7 +148,7 @@ contains
   !!
   !! @param[in]  nome        nome da malha em MALHAS, para as mensagens
   !! @param[in]  nx, ny      pontos em longitude e em latitude
-  !! @param[in]  origem_lon  ORIGEM_LESTE0 ou ORIGEM_OESTE180
+  !! @param[in]  origem_lon  ORIGEM_LESTE0, ORIGEM_LESTE0_CANTO ou ORIGEM_OESTE180
   !! @param[in]  cantos      cria também as coordenadas dos cantos
   !! @param[in]  petCount    PETs do componente
   !! @param[out] grade       a grade criada
@@ -138,13 +163,14 @@ contains
     integer,          intent(out) :: rc
 
     real(r8), pointer :: coordX(:,:), coordY(:,:)
-    integer :: regDecomp(2), localDeCount, lde, i, j
-    logical :: leste0
+    integer :: localDeCount, lde, i, j
+    logical :: leste0, canto
 
     rc = ESMF_SUCCESS
     nullify(coordX, coordY)
 
-    leste0 = origem_lon == ORIGEM_LESTE0
+    canto  = origem_lon == ORIGEM_LESTE0_CANTO
+    leste0 = origem_lon == ORIGEM_LESTE0 .or. canto
     if (.not. leste0 .and. origem_lon /= ORIGEM_OESTE180) then
       call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='cpl_malha_latlon: '//trim(nome)// &
            ': origem de longitude desconhecida: '//trim(origem_lon), &
@@ -153,38 +179,30 @@ contains
     end if
     if (cantos .and. .not. leste0) then
       call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='cpl_malha_latlon: '//trim(nome)// &
-           ': cantos so com a origem '//ORIGEM_LESTE0, &
+           ': cantos so com as origens '//ORIGEM_LESTE0//' e '//ORIGEM_LESTE0_CANTO, &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
 
-    regDecomp = cpl_regdecomp(petCount, nx, ny)
-    grade = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx, ny/), &
-      regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &
-      coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
+    call cria_grade(grade, nx, ny, petCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    call ESMF_GridAddCoord(grade, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    call prepara_coordenadas(grade, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_GridGet(grade, localDeCount=localDeCount, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-
     do lde = 0, localDeCount - 1
-      call ESMF_GridGetCoord(grade, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
+      call coordenadas_do_de(grade, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordX,2), ubound(coordX,2)
         do i = lbound(coordX,1), ubound(coordX,1)
-          if (leste0) then
+          if (canto) then
+            coordX(i,j) = canto_lon_leste0(i, nx)
+          else if (leste0) then
             coordX(i,j) = centro_lon_leste0(i, nx)
           else
             coordX(i,j) = centro_lon_oeste180(i, nx)
           end if
         end do
       end do
-      call ESMF_GridGetCoord(grade, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordY,2), ubound(coordY,2)
         do i = lbound(coordY,1), ubound(coordY,1)
           if (leste0) then
@@ -200,20 +218,16 @@ contains
 
     ! Cantos: a borda da célula, meia célula antes do centro, por conta
     ! direta (a grade é regular), sem ler arquivo.
-    call ESMF_GridAddCoord(grade, staggerloc=ESMF_STAGGERLOC_CORNER, rc=rc)
+    call prepara_coordenadas(grade, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     do lde = 0, localDeCount - 1
-      call ESMF_GridGetCoord(grade, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordX, rc=rc)
+      call coordenadas_do_de(grade, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordX,2), ubound(coordX,2)
         do i = lbound(coordX,1), ubound(coordX,1)
           coordX(i,j) = canto_lon_leste0(i, nx)
         end do
       end do
-      call ESMF_GridGetCoord(grade, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordY, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordY,2), ubound(coordY,2)
         do i = lbound(coordY,1), ubound(coordY,1)
           coordY(i,j) = canto_lat_leste0(j, ny)
@@ -221,6 +235,236 @@ contains
       end do
     end do
   end subroutine cpl_malha_latlon
+
+
+  !> Cria a grade tripolar do MOM6 com as coordenadas lidas do supergrid
+  !! (ocean_hgrid.nc): os centros das células T (mom6_supergrid_tcoords) e,
+  !! com cantos = .true., os vértices (mom6_supergrid_corners), na porção de
+  !! cada DE local. Periódica em longitude, índices globais, sem polo
+  !! declarado: a linha j = 1 (borda da Antártida) e a dobra norte não são
+  !! pontos geométricos únicos, e declará-las MONOPOLE coincidiu com SIGSEGV
+  !! em core_run do MONAN-A, atribuído a pesos de interpolação corrompidos
+  !! perto dos polos e da dobra. Sem a periodicidade, a interpolação bilinear
+  !! trataria a costura leste-oeste como borda do domínio e deixaria uma
+  !! coluna sem vizinho válido (no MOM6, perto de 60 graus E, onde o
+  !! intervalo nativo -300..60 do supergrid fecha).
+  !!
+  !! A decomposição é a de blocos, quando dada (cada bloco no PET que o tem
+  !! no modelo; nx e ny não são usados), ou cpl_regdecomp.
+  !!
+  !! @param[in]  nome          nome da malha em MALHAS, para as mensagens
+  !! @param[in]  arquivo       supergrid do MOM6
+  !! @param[in]  nx, ny        tamanho da grade T (sem blocos)
+  !! @param[in]  petCount      PETs do componente (sem blocos)
+  !! @param[in]  cantos        cria também as coordenadas dos cantos
+  !! @param[out] grade         a grade criada
+  !! @param[out] rc            ESMF_SUCCESS, ou o código da falha
+  !! @param[in]  blocos        decomposição do modelo (opcional)
+  !! @param[in]  tag           prefixo das mensagens da leitura dos centros
+  !! @param[in]  tag_cantos    prefixo das mensagens da leitura dos cantos
+  subroutine cpl_malha_tripolar(nome, arquivo, nx, ny, petCount, cantos, grade, rc, &
+                                blocos, tag, tag_cantos)
+    character(len=*),   intent(in)  :: nome
+    character(len=*),   intent(in)  :: arquivo
+    integer,            intent(in)  :: nx, ny
+    integer,            intent(in)  :: petCount
+    logical,            intent(in)  :: cantos
+    type(ESMF_Grid),    intent(out) :: grade
+    integer,            intent(out) :: rc
+    type(cpl_blocos_t), intent(in), optional :: blocos
+    character(len=*),   intent(in), optional :: tag, tag_cantos
+
+    real(r8), pointer :: coordX(:,:), coordY(:,:)
+    integer :: localDeCount, lde
+
+    rc = ESMF_SUCCESS
+    nullify(coordX, coordY)
+
+    call cria_grade(grade, nx, ny, petCount, rc, blocos)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
+    call prepara_coordenadas(grade, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    do lde = 0, localDeCount - 1
+      call coordenadas_do_de(grade, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+      call mom6_supergrid_tcoords(trim(arquivo), coordX, coordY, rc, tag=tag)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(nome)// &
+          ': falha ao ler os centros de '//trim(arquivo), line=__LINE__, file=u_FILE_u)) return
+    end do
+
+    if (.not. cantos) return
+
+    call prepara_coordenadas(grade, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    do lde = 0, localDeCount - 1
+      call coordenadas_do_de(grade, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
+      if (ChkErr(rc, __LINE__, u_FILE_u)) return
+      call mom6_supergrid_corners(trim(arquivo), coordX, coordY, rc, tag=tag_cantos)
+      if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(nome)// &
+          ': falha ao ler os cantos de '//trim(arquivo), line=__LINE__, file=u_FILE_u)) return
+    end do
+  end subroutine cpl_malha_tripolar
+
+  ! --------------------------------------------------------------------------
+  ! Partes comuns aos construtores
+  ! --------------------------------------------------------------------------
+
+  !> Cria a grade periódica em longitude, com índices globais e coordenadas
+  !! esféricas em graus: nos blocos dados ou, sem eles, na decomposição
+  !! cpl_regdecomp de nx x ny em petCount PETs.
+  subroutine cria_grade(grade, nx, ny, petCount, rc, blocos)
+    type(ESMF_Grid),    intent(out) :: grade
+    integer,            intent(in)  :: nx, ny, petCount
+    integer,            intent(out) :: rc
+    type(cpl_blocos_t), intent(in), optional :: blocos
+    integer :: regDecomp(2)
+
+    if (present(blocos)) then
+      grade = ESMF_GridCreate1PeriDim(countsPerDEDim1=blocos%cntx, &
+        countsPerDEDim2=blocos%cnty, periodicDim=1, petMap=blocos%pmap, &
+        indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
+    else
+      regDecomp = cpl_regdecomp(petCount, nx, ny)
+      grade = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx, ny/), &
+        regDecomp=regDecomp, periodicDim=1, indexflag=ESMF_INDEX_GLOBAL, &
+        coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
+    end if
+  end subroutine cria_grade
+
+  !> Acrescenta as coordenadas no stagger dado (chamada coletiva, todos os
+  !! PETs) e devolve o número de DEs locais.
+  subroutine prepara_coordenadas(grade, stagger, localDeCount, rc)
+    type(ESMF_Grid),       intent(inout) :: grade
+    type(ESMF_StaggerLoc), intent(in)    :: stagger
+    integer,               intent(out)   :: localDeCount
+    integer,               intent(out)   :: rc
+
+    localDeCount = 0
+    call ESMF_GridAddCoord(grade, staggerloc=stagger, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call ESMF_GridGet(grade, localDeCount=localDeCount, rc=rc)
+  end subroutine prepara_coordenadas
+
+  !> Vetores das duas coordenadas do DE local lde, no stagger dado.
+  !! ESMF_GridGetCoord é local e exige localDE= quando o PET tem mais de um
+  !! DE.
+  subroutine coordenadas_do_de(grade, stagger, lde, coordX, coordY, rc)
+    type(ESMF_Grid),       intent(in)  :: grade
+    type(ESMF_StaggerLoc), intent(in)  :: stagger
+    integer,               intent(in)  :: lde
+    real(r8), pointer                  :: coordX(:,:), coordY(:,:)
+    integer,               intent(out) :: rc
+
+    call ESMF_GridGetCoord(grade, coordDim=1, localDE=lde, &
+      staggerloc=stagger, farrayPtr=coordX, rc=rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call ESMF_GridGetCoord(grade, coordDim=2, localDE=lde, &
+      staggerloc=stagger, farrayPtr=coordY, rc=rc)
+  end subroutine coordenadas_do_de
+
+  !> A partir dos blocos de todos os PETs (início e fim globais em i e em j,
+  !! na ordem dos PETs), monta a decomposição retangular que o ESMF precisa:
+  !! tamanho de cada coluna (cntx), de cada linha (cnty) e o PET dono de cada
+  !! bloco (pmap). Confere que os blocos formam uma grade produto (layout
+  !! nbx x nby), cobrem 1..nx e 1..ny sem buraco nem sobreposição, e que cada
+  !! bloco pertence a exatamente um PET. limites(1:4, p) = (/ is, ie, js, je /)
+  !! do PET p-1. Com ok = .false., msg diz o que não confere.
+  subroutine cpl_blocos_de_limites(limites, npet, nx, ny, blocos, msg, ok)
+    integer,            intent(in)  :: limites(:,:)
+    integer,            intent(in)  :: npet, nx, ny
+    type(cpl_blocos_t), intent(out) :: blocos
+    character(len=*),   intent(out) :: msg
+    logical,            intent(out) :: ok
+
+    integer, allocatable :: xs(:), xe(:), ys(:), ye(:)
+    integer :: p, k, nbx, nby, ix, iy
+    logical :: novo
+
+    ok  = .false.
+    msg = ''
+    allocate(xs(npet), xe(npet), ys(npet), ye(npet))
+    nbx = 0 ; nby = 0
+
+    ! colunas e linhas distintas (pelo início), com o fim correspondente
+    do p = 1, npet
+      novo = .true.
+      do k = 1, nbx
+        if (xs(k) == limites(1,p)) then
+          novo = .false.
+          if (xe(k) /= limites(2,p)) then
+            write(msg,'(a,i0,a)') 'colunas com mesmo inicio e fins diferentes (PET ', p-1, ')'
+            return
+          end if
+        end if
+      end do
+      if (novo) then ; nbx = nbx + 1 ; xs(nbx) = limites(1,p) ; xe(nbx) = limites(2,p) ; end if
+      novo = .true.
+      do k = 1, nby
+        if (ys(k) == limites(3,p)) then
+          novo = .false.
+          if (ye(k) /= limites(4,p)) then
+            write(msg,'(a,i0,a)') 'linhas com mesmo inicio e fins diferentes (PET ', p-1, ')'
+            return
+          end if
+        end if
+      end do
+      if (novo) then ; nby = nby + 1 ; ys(nby) = limites(3,p) ; ye(nby) = limites(4,p) ; end if
+    end do
+
+    if (nbx * nby /= npet) then
+      write(msg,'(a,i0,a,i0,a,i0,a)') 'layout ', nbx, ' x ', nby, ' nao corresponde a ', npet, &
+        ' PETs (blocos mascarados ou decomposicao nao retangular?)'
+      return
+    end if
+
+    call ordena(xs(1:nbx), xe(1:nbx))
+    call ordena(ys(1:nby), ye(1:nby))
+
+    ! cobertura contígua de 1..nx e 1..ny
+    if (xs(1) /= 1 .or. xe(nbx) /= nx .or. ys(1) /= 1 .or. ye(nby) /= ny) then
+      write(msg,'(a,4(i0,a))') 'blocos nao cobrem a grade: i ', xs(1), '..', xe(nbx), &
+        ', j ', ys(1), '..', ye(nby)
+      return
+    end if
+    do k = 1, nbx - 1
+      if (xs(k+1) /= xe(k) + 1) then ; msg = 'colunas com buraco ou sobreposicao' ; return ; end if
+    end do
+    do k = 1, nby - 1
+      if (ys(k+1) /= ye(k) + 1) then ; msg = 'linhas com buraco ou sobreposicao' ; return ; end if
+    end do
+
+    allocate(blocos%cntx(nbx), blocos%cnty(nby), blocos%pmap(nbx, nby, 1))
+    blocos%cntx = xe(1:nbx) - xs(1:nbx) + 1
+    blocos%cnty = ye(1:nby) - ys(1:nby) + 1
+    blocos%pmap = -1
+    do p = 1, npet
+      ix = findloc(xs(1:nbx), limites(1,p), dim=1)
+      iy = findloc(ys(1:nby), limites(3,p), dim=1)
+      if (blocos%pmap(ix, iy, 1) /= -1) then
+        write(msg,'(a,i0,a,i0)') 'bloco atribuido a dois PETs: ', blocos%pmap(ix,iy,1), ' e ', p-1
+        return
+      end if
+      blocos%pmap(ix, iy, 1) = p - 1
+    end do
+    ok = .true.
+
+  contains
+
+    pure subroutine ordena(a, b)
+      integer, intent(inout) :: a(:), b(:)
+      integer :: i, j, ta, tb
+      do i = 2, size(a)
+        ta = a(i) ; tb = b(i) ; j = i - 1
+        do while (j >= 1)
+          if (a(j) <= ta) exit
+          a(j+1) = a(j) ; b(j+1) = b(j) ; j = j - 1
+        end do
+        a(j+1) = ta ; b(j+1) = tb
+      end do
+    end subroutine ordena
+
+  end subroutine cpl_blocos_de_limites
 
   ! --------------------------------------------------------------------------
   ! Fórmulas de centro e de canto. Cada uma é a expressão que a malha usava,

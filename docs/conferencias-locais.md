@@ -27,7 +27,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
 | `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
 | `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
-| `tests/malhas/compara-malhas.bash REV` | a malha de fluxo do mediador e a grade do cap atmosférico têm a mesma decomposição e as mesmas coordenadas, bit a bit, que no commit `REV`, com 1, 4, 6 e 8 processos? |
+| `tests/malhas/compara-malhas.bash REV` | as malhas do mediador (fluxo e oceano, com o MOM6 e com o DOCN), a grade do cap atmosférico e a malha do SIS2 têm a mesma decomposição e as mesmas coordenadas, bit a bit, que no commit `REV` (a do SIS2, que a construção de antes), com vários números de processos? |
 | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
 | `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
 | `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
@@ -272,9 +272,9 @@ Desde a R-FASE11-03, o driver chama `cpl_check_acoplamento` (`src/coupling/cpl_c
 | `defeito` | o OCN importa `So_teste` e o MED não anuncia `So_omask`: conector OCN para MED com 3 campos e 4 diferenças; a inicialização termina assim mesmo |
 | `mediador` | o MED é o mediador real (`MED_cap`), que anuncia os campos a partir do mapa: os mesmos seis conectores, 0 diferenças e 3 avisos; a inicialização para de propósito logo depois da conferência, antes da realização, que precisaria das grades reais |
 
-O teste confere também que só o PET 0 escreve. Os relatórios ficam em `build-local/cplcheck/relatorio_<caso>.txt`. Leva menos de um minuto. Conferido ao contrário: sem a fase 0 dos componentes de teste, nenhum campo é anunciado, e a conferência acusa todas as trocas da produção.
+O teste confere também que só o PET 0 escreve. No caso `mediador`, todos os PETs esperam numa barreira até o PET 0 terminar o relatório, antes da parada de propósito; sem ela, o primeiro PET a sair com erro abortava o MPI e podia cortar o log do PET 0. Os relatórios ficam em `build-local/cplcheck/relatorio_<caso>.txt`. Leva menos de um minuto. Conferido ao contrário: sem a fase 0 dos componentes de teste, nenhum campo é anunciado, e a conferência acusa todas as trocas da produção.
 
-### 2.13 Teste das malhas regulares do lado atmosférico
+### 2.13 Teste das malhas
 
 ```bash
 tests/malhas/compara-malhas.bash HEAD
@@ -283,6 +283,8 @@ tests/malhas/compara-malhas.bash HEAD
 Desde a R-FASE11-08, a malha de fluxo do mediador (`atm_med`, criada por `create_atm_grid` em `med_init`) e a grade do cap atmosférico (`atm_cap`, criada por `mpas_create_grid` em `mpas_cap_methods`) são construídas por `cpl_malha_latlon` (`src/coupling/cpl_grids.F90`). Este teste compila a versão do commit `REV` e a da árvore de trabalho, liga a cada uma o programa `tests/malhas/test_malhas.F90`, que chama as duas rotinas (cujas interfaces não mudaram), e o executa com 1, 4, 6 e 8 processos MPI (variável `LISTA_NP`). Cada processo grava, para cada DE local, os limites computacionais e os vetores de coordenadas dos centros (as duas malhas) e dos cantos (só a do mediador), inteiros, com os seus limites. Têm de ser idênticos, bit a bit, esses arquivos e as mensagens das duas rotinas no log do ESMF, sem data e hora. Com 4 processos, os DEs do norte têm uma linha a mais de cantos (a borda em 90°), e ela entra na comparação.
 
 A rodada da linha de base usa uma só contagem de processos para cada malha (128 no MONAN-A, 20 no mediador); o teste cobre outras decomposições, entre elas a de 1 processo e a de 6 (3 x 2). Leva pouco mais de um minuto, a maior parte compilando. Conferido ao contrário: somar 10^-13 à latitude dos cantos faz todos os arquivos diferirem.
+
+Desde a R-FASE11-10, o programa também cria o oceano no mediador (`create_ocn_grid`) em duas configurações, gravadas por ele mesmo e lidas por `config_read`: com o MOM6, lendo o supergrid sintético `hgrid.nc` de `tests/supergrid/gera-supergrid.py` (grade T de 10 x 7, com longitudes de -329,6° a 93,3° e linhas inclinadas), com centros, cantos e a máscara; e com o DOCN, numa grade de 36 x 18. As mensagens comparadas incluem as da leitura do supergrid e as da conferência dos cantos (`FIX-DIAG-CONSERVE`). A malha do SIS2 não pode ser criada fora da Jaci pelo cap, que precisa do modelo; por isso o script roda depois, só na árvore de trabalho, `tests/malhas/test_malha_gelo.F90`, com 4, 6 e 8 processos, que compara no mesmo programa: `cpl_blocos_de_limites` com uma cópia sem mudança da rotina de antes (`ICE_DecompFromBlocks`, tag `fase11-09-validada`) em onze layouts, válidos e inválidos (mesma resposta, mesma mensagem, mesmos blocos); e a malha de `cpl_malha_tripolar` com blocos com a grade criada como o cap criava, com os blocos em ordem x mais rápido e y mais rápido, bit a bit. Conferido ao contrário: pôr a meia célula na longitude do centro da grade do DOCN faz os arquivos diferirem.
 
 `tests/unit/test_cpl_grids.F90` confere as mesmas funções com valores esperados: a decomposição (`cpl_regdecomp`) nos casos do comentário da rotina e, de 1 a 600 processos, colunas x linhas = processos; os centros e os cantos nas bordas das duas malhas; e que as duas regras de centro dão os mesmos graus, a menos de 180 na longitude.
 

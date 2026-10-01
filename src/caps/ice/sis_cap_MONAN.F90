@@ -40,7 +40,8 @@ module sis_cap_MONAN_mod
 
   use time_utils_mod, only : esmf2fms_time
 
-  use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords
+  use mom6_supergrid_mod, only : mom6_supergrid_dims
+  use cpl_grids_mod, only : cpl_blocos_t, cpl_blocos_de_limites, cpl_malha_tripolar
   use coupler_config_mod, only : cfg_mom6_mesh_ocn
   use cpl_fields_mod, only : CPL_NOME_LEN
   use cpl_map_mod, only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
@@ -328,15 +329,16 @@ contains
   !> @brief Grade ESMF do gelo, com a decomposição escolhida pelo próprio SIS2.
   !!
   !! Cada PET pega os limites globais do seu bloco no domínio do SIS2, os PETs
-  !! trocam essa informação e ICE_DecompFromBlocks monta os tamanhos por
-  !! coluna e por linha e o mapa bloco -> PET, conferindo cobertura e
+  !! trocam essa informação e cpl_blocos_de_limites (cpl_grids) monta os
+  !! tamanhos por coluna e por linha e o mapa bloco -> PET, conferindo cobertura e
   !! unicidade. Uma regra própria (por exemplo, a raiz quadrada do número de
   !! PETs) pode divergir do layout do SIS2 e levar export_si_ifrac a ler fora
   !! do array. Se a decomposição não for representável (blocos de terra
   !! eliminados por máscara, por exemplo), o cap para com mensagem clara.
   !!
-  !! A grade é periódica na direção leste-oeste, sem declarar polo, como a do
-  !! mediador. As coordenadas T vêm do ocean_hgrid.nc (mom6_supergrid_mod). No
+  !! A grade é a malha ice_sis2, construída por cpl_malha_tripolar: periódica
+  !! na direção leste-oeste, sem declarar polo, como a do mediador, com as
+  !! coordenadas T do ocean_hgrid.nc, sem cantos. No
   !! fim, cada PET confere que o seu bloco ESMF é exatamente o bloco do SIS2.
   ! ============================================================================
   subroutine create_ice_grid(is, vm, localPet, petCount, rc)
@@ -349,12 +351,10 @@ contains
     integer :: gis, gie, gjs, gje
     integer :: loc4(4)
     integer, allocatable :: all4(:)
-    integer, allocatable :: cntx(:), cnty(:)
-    integer, allocatable :: pmap(:,:,:)
+    type(cpl_blocos_t) :: blocos
     character(len=256) :: msg_decomp
     logical :: ok_decomp
     real(ESMF_KIND_R8), pointer :: coordX(:,:)
-    real(ESMF_KIND_R8), pointer :: coordY(:,:)
 
     call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, tag='ICE(SIS2)')
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
@@ -367,8 +367,8 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
       'falha ao trocar os blocos do SIS2 entre PETs', line=__LINE__, file=__FILE__)) return
 
-    call ICE_DecompFromBlocks(reshape(all4, (/4, petCount/)), petCount, &
-      nx_ice, ny_ice, cntx, cnty, pmap, msg_decomp, ok_decomp)
+    call cpl_blocos_de_limites(reshape(all4, (/4, petCount/)), petCount, &
+      nx_ice, ny_ice, blocos, msg_decomp, ok_decomp)
     if (.not. ok_decomp) then
       call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
         'decomposicao do SIS2 nao representavel na grade ESMF: ' // &
@@ -378,29 +378,18 @@ contains
 
     if (localPet == 0) then
       write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
-        'segue a decomposicao do SIS2: ', size(cntx), ' x ', size(cnty), ' blocos'
+        'segue a decomposicao do SIS2: ', size(blocos%cntx), ' x ', size(blocos%cnty), ' blocos'
       call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
     end if
 
-    is%ice_grid = ESMF_GridCreate1PeriDim(countsPerDEDim1=cntx, &
-      countsPerDEDim2=cnty, periodicDim=1, petMap=pmap, &
-      indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao criar ' // &
-      'grade ESMF periodica', line=__LINE__, file=__FILE__)) return
-
-    call ESMF_GridAddCoord(is%ice_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    call cpl_malha_tripolar('ice_sis2', cfg_mom6_mesh_ocn, nx_ice, ny_ice, petCount, .false., &
+                            is%ice_grid, rc, blocos=blocos, tag='ICE(SIS2)')
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
+    ! Bloco deste PET (um DE por PET), para conferir com o do SIS2
     call ESMF_GridGetCoord(is%ice_grid, coordDim=1, localDE=0, &
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call ESMF_GridGetCoord(is%ice_grid, coordDim=2, localDE=0, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='ICE(SIS2)')
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
-      'coordenadas T reais de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
     is%isc = lbound(coordX,1); is%iec = ubound(coordX,1)
     is%jsc = lbound(coordX,2); is%jec = ubound(coordX,2)
@@ -790,109 +779,6 @@ contains
     call ESMF_LogWrite('ICE(SIS2): ModelFinalize concluido', ESMF_LOGMSG_INFO)
 
   end subroutine ModelFinalize
-
-  ! > a partir dos blocos de todos os PETs (inicio e fim
-  !! globais em i e em j, na ordem dos PETs), monta a decomposicao retangular
-  !! que o ESMF precisa: tamanho de cada coluna (cntx), de cada linha (cnty) e
-  !! o PET dono de cada bloco (pmap). Valida que os blocos formam uma
-  !! grade produto (layout nbx x nby), cobrem 1..nx e 1..ny sem buraco nem
-  !! sobreposicao, e que cada bloco pertence a exatamente um PET.
-  !! blocos(1:4, p) = (/ is, ie, js, je /) do PET p-1.
-  subroutine ICE_DecompFromBlocks(blocos, npet, nx, ny, cntx, cnty, pmap, msg, ok)
-    integer,              intent(in)  :: blocos(:,:)
-    integer,              intent(in)  :: npet, nx, ny
-    integer, allocatable, intent(out) :: cntx(:), cnty(:), pmap(:,:,:)
-    character(len=*),     intent(out) :: msg
-    logical,              intent(out) :: ok
-
-    integer, allocatable :: xs(:), xe(:), ys(:), ye(:)
-    integer :: p, k, nbx, nby, ix, iy
-    logical :: novo
-
-    ok  = .false.
-    msg = ''
-    allocate(xs(npet), xe(npet), ys(npet), ye(npet))
-    nbx = 0 ; nby = 0
-
-    ! colunas e linhas distintas (pelo inicio), com o fim correspondente
-    do p = 1, npet
-      novo = .true.
-      do k = 1, nbx
-        if (xs(k) == blocos(1,p)) then
-          novo = .false.
-          if (xe(k) /= blocos(2,p)) then
-            write(msg,'(a,i0,a)') 'colunas com mesmo inicio e fins diferentes (PET ', p-1, ')'
-            return
-          end if
-        end if
-      end do
-      if (novo) then ; nbx = nbx + 1 ; xs(nbx) = blocos(1,p) ; xe(nbx) = blocos(2,p) ; end if
-      novo = .true.
-      do k = 1, nby
-        if (ys(k) == blocos(3,p)) then
-          novo = .false.
-          if (ye(k) /= blocos(4,p)) then
-            write(msg,'(a,i0,a)') 'linhas com mesmo inicio e fins diferentes (PET ', p-1, ')'
-            return
-          end if
-        end if
-      end do
-      if (novo) then ; nby = nby + 1 ; ys(nby) = blocos(3,p) ; ye(nby) = blocos(4,p) ; end if
-    end do
-
-    if (nbx * nby /= npet) then
-      write(msg,'(a,i0,a,i0,a,i0,a)') 'layout ', nbx, ' x ', nby, ' nao corresponde a ', npet, &
-        ' PETs (blocos mascarados ou decomposicao nao retangular?)'
-      return
-    end if
-
-    call ordena(xs(1:nbx), xe(1:nbx))
-    call ordena(ys(1:nby), ye(1:nby))
-
-    ! cobertura contigua de 1..nx e 1..ny
-    if (xs(1) /= 1 .or. xe(nbx) /= nx .or. ys(1) /= 1 .or. ye(nby) /= ny) then
-      write(msg,'(a,4(i0,a))') 'blocos nao cobrem a grade: i ', xs(1), '..', xe(nbx), &
-        ', j ', ys(1), '..', ye(nby)
-      return
-    end if
-    do k = 1, nbx - 1
-      if (xs(k+1) /= xe(k) + 1) then ; msg = 'colunas com buraco ou sobreposicao' ; return ; end if
-    end do
-    do k = 1, nby - 1
-      if (ys(k+1) /= ye(k) + 1) then ; msg = 'linhas com buraco ou sobreposicao' ; return ; end if
-    end do
-
-    allocate(cntx(nbx), cnty(nby), pmap(nbx, nby, 1))
-    cntx = xe(1:nbx) - xs(1:nbx) + 1
-    cnty = ye(1:nby) - ys(1:nby) + 1
-    pmap = -1
-    do p = 1, npet
-      ix = findloc(xs(1:nbx), blocos(1,p), dim=1)
-      iy = findloc(ys(1:nby), blocos(3,p), dim=1)
-      if (pmap(ix, iy, 1) /= -1) then
-        write(msg,'(a,i0,a,i0)') 'bloco atribuido a dois PETs: ', pmap(ix,iy,1), ' e ', p-1
-        return
-      end if
-      pmap(ix, iy, 1) = p - 1
-    end do
-    ok = .true.
-
-  contains
-
-    pure subroutine ordena(a, b)
-      integer, intent(inout) :: a(:), b(:)
-      integer :: i, j, ta, tb
-      do i = 2, size(a)
-        ta = a(i) ; tb = b(i) ; j = i - 1
-        do while (j >= 1)
-          if (a(j) <= ta) exit
-          a(j+1) = a(j) ; b(j+1) = b(j) ; j = j - 1
-        end do
-        a(j+1) = ta ; b(j+1) = tb
-      end do
-    end subroutine ordena
-
-  end subroutine ICE_DecompFromBlocks
 
   !> @brief Checksum inteiro de part_size, no mesmo espirito do chksum do SIS2.
   !!

@@ -13,14 +13,14 @@ module med_init_mod
   use ESMF
   use regrid_manager_mod, only: regrid_spec
   use coupler_utils_mod, only: ChkErr
-  use mom6_supergrid_mod, only: mom6_supergrid_tcoords, mom6_supergrid_corners
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
   use med_cap_types_mod, only: MED_InternalState, MED_CHAVES, SST_BULK_FALLBACK
   use cpl_fields_mod, only: CPL_NOME_LEN
   use cpl_map_mod, only: cpl_chegadas, cpl_config_atual, cpl_config_t
-  use cpl_grids_mod, only: cpl_malha_latlon, cpl_regdecomp, ORIGEM_LESTE0
+  use cpl_grids_mod, only: cpl_malha_latlon, cpl_malha_tripolar, ORIGEM_LESTE0, &
+                           ORIGEM_LESTE0_CANTO
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
                                  ZeroOcnFluxFields, FillInternalField
   use med_ocean_mod, only: regrid_ocean_currents
@@ -54,128 +54,59 @@ contains
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
   end subroutine create_atm_grid
 
+  !> Oceano no mediador (ocn_med), construído por cpl_grids: com o MOM6, a
+  !! grade tripolar lida do supergrid (cfg_mom6_mesh_ocn), com centros e
+  !! cantos reais (cpl_malha_tripolar); com o DOCN, a grade regular do OISST
+  !! (cpl_malha_latlon, ORIGEM_LESTE0_CANTO). Os dois com a decomposição
+  !! cpl_regdecomp, um DE por PET, como a malha de fluxo. Os cantos são
+  !! necessários ao método conservativo (peso por sobreposição de área, com
+  !! os quatro cantos de cada célula); o stagger CENTER continua o de
+  !! sempre para as rotas que o usam. Depois da construção, confere os
+  !! cantos (check_corner_coordinates) e acrescenta o item de máscara,
+  !! zerado (terra = SST de preenchimento, perto de 200 K, do MOM6).
   subroutine create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
     integer, intent(in) :: petCount
     integer, intent(in) :: nx_ocn
     integer, intent(in) :: ny_ocn
     type(ESMF_Grid), intent(inout) :: ocn_grid
     integer, intent(inout) :: rc
-    integer :: regDecomp(2)
     real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
-    integer :: i
-    integer :: j
-    integer :: lde
     integer :: lde_m
     integer :: localDeCount_ocn
     integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
     nullify(coordX, coordY)
-    regDecomp = cpl_regdecomp(petCount, nx_ocn, ny_ocn)
-    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
-    ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
-    ! Longitude periodica (periodicDim=1): o ESMF trata a coluna i=nx_ocn
-    ! (longitude ~360) e a coluna i=1 (longitude ~0) como vizinhas. Sem isso,
-    ! o regrid bilinear trata a borda leste/oeste como limite de dominio e
-    ! deixa uma coluna de celulas "sem vizinho valido" na costura (no MOM6,
-    ! uma faixa de valores indefinidos no Oceano Indico, ~60E, onde o
-    ! intervalo nativo -300..60 do supergrid fecha).
-    ! polekindflag fica no padrao do ESMF, como na grade ATM: a linha j=1
-    ! (-78°, borda da Antartida) e a dobra norte NAO sao pontos geometricos
-    ! unicos, e declara-las MONOPOLE e' fisicamente incorreto. Uma tentativa
-    ! de faze-lo coincidiu com SIGSEGV em core_run do MPAS-A, atribuido a
-    ! pesos de regrid corrompidos perto dos polos e da dobra.
-    ocn_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_ocn, ny_ocn/), &
-      regDecomp=regDecomp, periodicDim=1, &
-      indexflag=ESMF_INDEX_GLOBAL, &
-      coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha ao criar grade OCN " // &
-      "periodica (ESMF_GridCreate1PeriDim) - verifique assinatura ESMF 8.9.1", &
-      line=__LINE__, file=__FILE__)) return
 
-    ! ESMF_GridAddCoord: COLETIVA — todos os PETs
-    call ESMF_GridAddCoord(ocn_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
-    call ESMF_GridGet(ocn_grid, localDeCount=localDeCount_ocn, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha GridGet localDeCount OCN', &
-      line=__LINE__, file=__FILE__)) return
-
-    do lde = 0, localDeCount_ocn - 1
-      call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-      call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      if (cfg_use_docn) then
-        ! DOCN/OISST: grade lat/lon regular DE VERDADE - formula uniforme e' exata.
-        do j = lbound(coordX,2), ubound(coordX,2)
-          do i = lbound(coordX,1), ubound(coordX,1)
-            coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_ocn)
-          end do
-        end do
-        do j = lbound(coordY,2), ubound(coordY,2)
-          do i = lbound(coordY,1), ubound(coordY,1)
-            coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_ocn) + &
-                          (180.0_ESMF_KIND_R8/ny_ocn)/2.0_ESMF_KIND_R8
-          end do
-        end do
-      else
-        ! MOM6 tripolar real - le as coordenadas T verdadeiras
-        ! do supergrid ocean_hgrid.nc (NAO uniformes; convergem no polo Norte).
-        ! Sem isso, o conector NUOPC OCN->MED interpola usando posicoes erradas
-        ! e a costa fica sistematicamente deslocada em todo o dominio.
-        call mom6_supergrid_tcoords(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='MED B-OCNGRID-01')
-        if (ESMF_LogFoundError(rcToCheck=rc, &
-          msg="MED: falha ao ler coordenadas T reais de ocean_hgrid.nc " // &
-              "para o DE local - grade OCN do mediador ficara incorreta", &
-          line=__LINE__, file=__FILE__)) return
-      end if
-    end do  ! lde OCN
-
-    ! Stagger CORNER, necessario para
-    ! ESMF_REGRIDMETHOD_CONSERVE (calcula peso por sobreposicao de area,
-    ! exige os 4 cantos de cada celula). Aditivo ao CENTER ja existente —
-    ! nao afeta nenhum RouteHandle ja criado com staggerloc=CENTER (Cd_neut,
-    ! rh_ocn2atm, rh_ocn2atm_sst, rh_ocn2atm_ice, rh_atm2ocn continuam
-    ! lendo exatamente os mesmos dados de CENTER de sempre).
-    call ESMF_GridAddCoord(ocn_grid, staggerloc=ESMF_STAGGERLOC_CORNER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED B-CONSERVE-01: falha ' // &
-      'GridAddCoord CORNER na grade OCN', line=__LINE__, file=__FILE__)) return
-
-    do lde = 0, localDeCount_ocn - 1
-      call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordX, rc=rc)
-      call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordY, rc=rc)
-      if (cfg_use_docn) then
-        ! DOCN/OISST: canto = centro menos meia-celula (grade regular real).
-        do j = lbound(coordX,2), ubound(coordX,2)
-          do i = lbound(coordX,1), ubound(coordX,1)
-            coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_ocn)
-          end do
-        end do
-        do j = lbound(coordY,2), ubound(coordY,2)
-          do i = lbound(coordY,1), ubound(coordY,1)
-            coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_ocn)
-          end do
-        end do
-      else
-        ! MOM6 tripolar real: vertices verdadeiros do supergrid ocean_hgrid.nc.
-        call mom6_supergrid_corners(trim(cfg_mom6_mesh_ocn), coordX, coordY, rc, tag='MED B-CONSERVE-01')
-        if (ESMF_LogFoundError(rcToCheck=rc, &
-          msg="MED B-CONSERVE-01: falha ao ler cantos de ocean_hgrid.nc " // &
-              "para o DE local - regrid conservativo ficara indisponivel", &
-          line=__LINE__, file=__FILE__)) return
-      end if
-    end do  ! lde OCN (CORNER)
+    if (cfg_use_docn) then
+      ! DOCN/OISST: grade lat/lon regular de verdade; fórmula uniforme exata.
+      call cpl_malha_latlon('ocn_med', nx_ocn, ny_ocn, ORIGEM_LESTE0_CANTO, .true., &
+                            petCount, ocn_grid, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    else
+      ! MOM6 tripolar real: coordenadas T e vértices verdadeiros do supergrid
+      ! ocean_hgrid.nc (não uniformes; convergem no polo Norte). Sem isso, o
+      ! conector NUOPC OCN->MED interpola usando posições erradas e a costa
+      ! fica sistematicamente deslocada em todo o domínio.
+      call cpl_malha_tripolar('ocn_med', cfg_mom6_mesh_ocn, nx_ocn, ny_ocn, petCount, .true., &
+                              ocn_grid, rc, tag='MED B-OCNGRID-01', tag_cantos='MED B-CONSERVE-01')
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end if
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade OCN ' // &
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
 
-    ! Sanidade dos cantos lidos — confirma que os
-    ! valores estao numa faixa fisica plausivel (lon em [0,360), lat em
-    ! [-90,90]) e nao sao um bloco de zeros/garbage por leitura silenciosa
-    ! mal-sucedida. Compara tambem com o CENTRO da mesma celula (i1,j1
-    ! deste DE): o canto deve estar a uma fracao de celula de distancia do
-    ! centro, nunca identico nem absurdamente distante.
+    ! Sanidade dos cantos lidos no último DE local: valores numa faixa física
+    ! plausível (lon em [0,360), lat em [-90,90]), e não um bloco de zeros
+    ! por leitura silenciosa malsucedida; o canto deve estar a uma fração de
+    ! célula do centro da mesma célula, nunca idêntico nem muito distante.
+    call ESMF_GridGet(ocn_grid, localDeCount=localDeCount_ocn, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (localDeCount_ocn > 0) then
+      call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=localDeCount_ocn-1, &
+        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordX, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=localDeCount_ocn-1, &
+        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordY, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end if
     if (associated(coordX) .and. associated(coordY)) then
       call check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
     end if

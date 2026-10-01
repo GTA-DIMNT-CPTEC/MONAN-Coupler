@@ -224,11 +224,16 @@ contains
   subroutine ModifyCplLists(driver, rc)
     type(ESMF_GridComp) :: driver
     integer, intent(out) :: rc
+    type(ESMF_VM) :: vm
     call cpl_check_acoplamento(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (mediador_real) then
-      ! para antes da realização do mediador real (ver o cabeçalho)
+      ! para antes da realização do mediador real (ver o cabeçalho); a
+      ! barreira espera o PET 0 terminar o relatório, porque o primeiro PET a
+      ! sair com erro aborta o MPI e cortaria o log do PET 0 no meio
       call ESMF_LogWrite('TESTE: parada depois da conferencia', ESMF_LOGMSG_INFO)
       call ESMF_LogFlush(rc=rc)
+      call ESMF_VMGetCurrent(vm, rc=rc)
+      call ESMF_VMBarrier(vm, rc=rc)
       rc = ESMF_FAILURE
     end if
   end subroutine ModifyCplLists

@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6) e na R-FASE11-09 (seções 3.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6) e na R-FASE11-10 (seções 3.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -176,6 +176,18 @@ O tipo `cpl_malha_t` do esboço acima não foi criado: a descrição de cada mal
 | `lon_m180a180_laco(lon)` | subtrai ou soma 360 até [-180, 180) | os dois diagnósticos |
 
 Quem chama soma a origem antes (`lat + 90`, `lon + 180`), como as expressões faziam. `check_ice_geography` passou a usar `centro_lon_leste0` e `centro_lat_leste0`, que dão os mesmos valores, bit a bit, que as expressões dela. Ficaram fora, por serem regras próprias e usadas uma vez: a soma única de 360 em `copy_to_local_grid` (que não é o mesmo que o laço, ver `cpl_grids`) e os centros de `oisst_to_atm_nearest`, que recebem os passos como argumento.
+
+Na R-FASE11-10 entraram as malhas do oceano no mediador e do SIS2:
+
+| Item | Em `cpl_grids` |
+| --- | --- |
+| construtor | `cpl_malha_tripolar(nome, arquivo, nx, ny, petCount, cantos, grade, rc, blocos, tag, tag_cantos)`: grade periódica em longitude com os centros (e, com `cantos`, os vértices) lidos do supergrid por `mom6_supergrid_tcoords` e `mom6_supergrid_corners`, em cada DE local |
+| blocos | `cpl_blocos_t` (tamanhos por coluna e por linha de blocos e o PET de cada bloco, a forma que `ESMF_GridCreate1PeriDim` recebe) e `cpl_blocos_de_limites`, que os monta a partir dos limites de cada PET e confere cobertura e unicidade (antes `ICE_DecompFromBlocks`, no cap do SIS2); sem blocos, a decomposição é `cpl_regdecomp` |
+| `ocn_med` com o MOM6 | `cpl_malha_tripolar` sem blocos, com cantos |
+| `ocn_med` com o DOCN | `cpl_malha_latlon` com a origem nova `ORIGEM_LESTE0_CANTO` |
+| `ice_sis2` | `cpl_malha_tripolar` com os blocos do domínio do SIS2, sem cantos |
+
+Com o DOCN, o mediador descreve a grade do OISST com a longitude do centro igual à do canto oeste da célula, `(i-1)*360/nx`, sem a meia célula, enquanto a latitude do centro tem a meia célula. O cap do DOCN põe os centros na meia célula; com isso, o conector interpola em vez de copiar, e o campo sai suavizado em longitude. A etapa preservou isso como uma origem própria (`ORIGEM_LESTE0_CANTO`), porque nenhuma etapa da fase 11 muda resultados; fica registrado como ponto a examinar fora da fase (ver `docs/estado-do-projeto.md`, seção 8). A conferência dos cantos e a máscara de `ocn_med` continuam em `med_init`, e a conferência do bloco de cada PET contra o do SIS2 continua no cap do gelo. Todas as malhas de `cpl_grids` passam `periodicDim = 1` explicitamente, que é o padrão do ESMF (`ESMF_Grid.F90`, `ESMF_GridCreate1PeriDim`); as malhas do lado atmosférico o omitiam.
 
 ### 3.4 Dicionário de campos
 
@@ -463,7 +475,9 @@ A R-FASE11-08 abriu o bloco C: `src/coupling/cpl_grids.F90` constrói as malhas 
 
 A R-FASE11-09 levou para `cpl_grids` as fórmulas de índice e de longitude das sete rotinas da tabela do bloco C e do cap do MOM6 (seção 3.3). Como a fórmula passa a ser chamada de função em outro módulo, o `objdump` não se aplica; a conferência foi o teste unitário, que compara cada função com a expressão que ela substituiu em cerca de 820 mil coordenadas, além dos testes `grade` e `gravadores`. O teste mostrou que o índice por piso e o por truncamento são iguais depois do limite a [1, n] (uma função só) e que a soma única de 360 não equivale ao laço (a cópia do cap manteve a sua).
 
-Próxima etapa: **R-FASE11-10**, com `cpl_blocos_t` e `malha_tripolar`, e as malhas `ocn_med` e `ice_sis2` construídas por ele, conforme a tabela do bloco C; a conferência é o teste do supergrid, estendido aos blocos.
+A R-FASE11-10 construiu por `cpl_grids` as malhas do oceano no mediador (`ocn_med`, com o MOM6 e com o DOCN) e do SIS2 (`ice_sis2`), com o construtor `cpl_malha_tripolar` e os blocos `cpl_blocos_t` (seção 3.3). O teste `malhas` passou a comparar também `ocn_med` nas duas configurações, com um supergrid sintético e 1, 4, 6 e 8 processos; como o cap do SIS2 só roda com o modelo, a malha `ice_sis2` foi comparada, no mesmo programa, com uma cópia da construção de antes, com blocos em ordem x mais rápido e y mais rápido, e a montagem dos blocos com a rotina de antes em onze layouts, válidos e inválidos. Chamadas `ESMF_GridCreate*` fora de `src/coupling`: de 5 para 3 (MOM6, DOCN e DATM). Uma peculiaridade apareceu e foi preservada: com o DOCN, a longitude do centro de `ocn_med` está no canto oeste da célula.
+
+Próxima etapa: **R-FASE11-11**, com a malha `ocn_mom6` do cap do MOM6, conforme a tabela do bloco C: por `cpl_malha_tripolar` **somente se** as coordenadas lidas do supergrid forem idênticas, bit a bit, às `geoLonT` e `geoLatT` do MOM6; caso contrário, o construtor recebe as coordenadas do modelo e a etapa só unifica a decomposição. Antes da etapa, um diagnóstico avulso na Jaci compara as duas fontes de coordenadas.
 
 ---
 

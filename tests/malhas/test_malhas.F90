@@ -1,23 +1,33 @@
 !> @file test_malhas.F90
-!! @brief Grava as coordenadas das malhas regulares do lado atmosférico.
+!! @brief Grava as coordenadas das malhas do mediador e do cap atmosférico.
 !!
-!! Cria a malha de fluxo do mediador (create_atm_grid, de med_init) e a
-!! grade do cap do MONAN-A (mpas_create_grid, de mpas_cap_methods), as duas
-!! 360 x 180, e grava, em saida_<PET>.bin, para cada DE local: os limites
-!! computacionais e os limites e valores dos vetores de coordenadas dos
-!! centros (as duas malhas) e dos cantos (só a do mediador). Usa só as
-!! interfaces que essas rotinas tinham antes de cpl_grids, para que o mesmo
-!! programa sirva às duas versões comparadas por compara-malhas.bash.
+!! Cria, e grava em saida_<PET>.bin, para cada DE local, os limites
+!! computacionais e os limites e valores dos vetores de coordenadas:
+!!
+!!   atm_med   malha de fluxo do mediador (create_atm_grid, de med_init),
+!!             360 x 180, centros e cantos
+!!   atm_cap   grade do cap do MONAN-A (mpas_create_grid), 360 x 180, centros
+!!   ocn_med   oceano no mediador (create_ocn_grid, de med_init) com o MOM6,
+!!             lida do supergrid sintético hgrid.nc (grade T de 10 x 7),
+!!             centros, cantos e máscara (configuração mom6.nml)
+!!   ocn_med   o mesmo com o DOCN, grade regular de 36 x 18 (docn.nml)
+!!
+!! Usa só as interfaces que essas rotinas tinham antes de cpl_grids, para
+!! que o mesmo programa sirva às duas versões comparadas por
+!! compara-malhas.bash. O hgrid.nc vem de tests/supergrid/gera-supergrid.py.
 program test_malhas
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use med_init_mod,          only : create_atm_grid
   use mpas_cap_methods_mod,  only : mpas_create_grid
+  use med_init_mod,          only : create_ocn_grid
+  use coupler_config_mod,    only : config_read
+  use mom6_supergrid_mod,    only : mom6_supergrid_dims
   implicit none
 
   type(ESMF_VM)   :: vm
-  type(ESMF_Grid) :: grade_med, grade_cap
-  integer :: rc, localPet, petCount, un
+  type(ESMF_Grid) :: grade_med, grade_cap, grade_ocn, grade_docn
+  integer :: rc, localPet, petCount, un, nx, ny
   character(len=32) :: arquivo
 
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, &
@@ -33,16 +43,78 @@ program test_malhas
   call mpas_create_grid(grade_cap, rc)
   if (rc /= ESMF_SUCCESS) error stop 'mpas_create_grid'
 
+  ! Oceano no mediador com o MOM6 (supergrid sintético) e com o DOCN
+  if (localPet == 0) then
+    call escreve_nml('mom6.nml', '.false.')
+    call escreve_nml('docn.nml', '.true.')
+  end if
+  call ESMF_VMBarrier(vm, rc=rc)
+  call config_read(rc, 'mom6.nml')
+  if (rc /= ESMF_SUCCESS) error stop 'config_read mom6.nml'
+  call mom6_supergrid_dims('hgrid.nc', nx, ny, rc)
+  if (rc /= ESMF_SUCCESS) error stop 'mom6_supergrid_dims'
+  rc = ESMF_SUCCESS
+  call create_ocn_grid(petCount, nx, ny, grade_ocn, rc)
+  if (rc /= ESMF_SUCCESS) error stop 'create_ocn_grid (MOM6)'
+  call config_read(rc, 'docn.nml')
+  if (rc /= ESMF_SUCCESS) error stop 'config_read docn.nml'
+  rc = ESMF_SUCCESS
+  call create_ocn_grid(petCount, 36, 18, grade_docn, rc)
+  if (rc /= ESMF_SUCCESS) error stop 'create_ocn_grid (DOCN)'
+
   write(arquivo, '(A,I0,A)') 'saida_', localPet, '.bin'
   open(newunit=un, file=trim(arquivo), access='stream', form='unformatted', status='replace')
   call grava(un, grade_med, ESMF_STAGGERLOC_CENTER)
   call grava(un, grade_med, ESMF_STAGGERLOC_CORNER)
   call grava(un, grade_cap, ESMF_STAGGERLOC_CENTER)
+  call grava(un, grade_ocn, ESMF_STAGGERLOC_CENTER)
+  call grava(un, grade_ocn, ESMF_STAGGERLOC_CORNER)
+  call grava_mascara(un, grade_ocn)
+  call grava(un, grade_docn, ESMF_STAGGERLOC_CENTER)
+  call grava(un, grade_docn, ESMF_STAGGERLOC_CORNER)
+  call grava_mascara(un, grade_docn)
   close(un)
 
   call ESMF_Finalize(rc=rc)
 
 contains
+
+  !> Configuração com use_docn dado, o supergrid sintético e a grade do DOCN.
+  subroutine escreve_nml(arquivo, use_docn)
+    character(len=*), intent(in) :: arquivo, use_docn
+    integer :: u
+    open(newunit=u, file=arquivo, status='replace', action='write')
+    write(u,'(A)') '&nuopc_mode'
+    write(u,'(2A)') '  use_docn = ', use_docn
+    write(u,'(A)') '/'
+    write(u,'(A)') '&nuopc_docn'
+    write(u,'(A)') '  docn_nx = 36, docn_ny = 18'
+    write(u,'(A)') '/'
+    write(u,'(A)') '&nuopc_ocn'
+    write(u,'(A)') "  mesh_ocn = 'hgrid.nc'"
+    write(u,'(A)') '/'
+    close(u)
+  end subroutine escreve_nml
+
+  !> Para cada DE local: limites e valores do item de máscara (centros).
+  subroutine grava_mascara(un, grade)
+    integer,         intent(in) :: un
+    type(ESMF_Grid), intent(in) :: grade
+    integer(ESMF_KIND_I4), pointer :: m(:,:)
+    integer :: nde, lde, rc
+
+    call ESMF_GridGet(grade, localDeCount=nde, rc=rc)
+    if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGet'
+    write(un) nde
+    do lde = 0, nde - 1
+      nullify(m)
+      call ESMF_GridGetItem(grade, itemflag=ESMF_GRIDITEM_MASK, staggerloc=ESMF_STAGGERLOC_CENTER, &
+                            localDE=lde, farrayPtr=m, rc=rc)
+      if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGetItem'
+      write(un) lde, lbound(m), ubound(m)
+      write(un) m
+    end do
+  end subroutine grava_mascara
 
   !> Para cada DE local: limites computacionais, limites do vetor e valores,
   !! das duas coordenadas.
