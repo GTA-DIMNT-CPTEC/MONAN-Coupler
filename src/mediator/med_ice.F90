@@ -1,9 +1,11 @@
 !> @file med_ice.F90
 !! @brief Gelo do SIS2 na grade da atmosfera.
 !!
-!! update_ice_fields_on_atm_grid e as suas oito etapas: rota mascarada
-!! 'ocn2atm_ice', sentinelas, interpolação da fração, dos albedos e da
-!! temperatura do gelo, extrapolação por vizinhança e diagnósticos do log.
+!! update_ice_fields_on_atm_grid e as suas etapas: sentinelas, interpolação
+!! da fração, dos albedos e da temperatura do gelo pela rota mascarada
+!! 'ocn2atm_ice', extrapolação por vizinhança e diagnósticos do log. A rota
+!! é criada pela fase ir_para_malha_de_fluxo (med_exchange) desde a
+!! R-FASE11-18.
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
 !!
@@ -21,7 +23,7 @@ module med_ice_mod
                                COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
                                COMPL_ICE_ANIDF, COMPL_ICE_T
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField, cria_rota, set_ocn_grid_mask
+  use med_cap_methods_mod, only: FillInternalField
   use cpl_grids_mod, only: centro_lon_leste0, centro_lat_leste0
 
   implicit none
@@ -34,17 +36,17 @@ contains
   !============================================================================
   !> @brief Traz o gelo do SIS2 para a grade ATM: fração, albedos e temperatura.
   !!
-  !! Etapas, nesta ordem:
-  !!   1. cria a rota mascarada 'ocn2atm_ice' na primeira chamada;
-  !!   2. preenche os seis campos de destino com a sentinela -999;
-  !!   3. interpola Si_ifrac_sis2 (com diagnósticos antes e depois);
-  !!   4. interpola os quatro albedos e Si_t_sis2;
-  !!   5. extrapola por vizinhança cada campo, com faixa válida e valor
+  !! Etapas, nesta ordem (a rota mascarada 'ocn2atm_ice' já foi criada pela
+  !! fase ir_para_malha_de_fluxo, em med_exchange):
+  !!   1. preenche os seis campos de destino com a sentinela -999;
+  !!   2. interpola Si_ifrac_sis2 (com diagnósticos antes e depois);
+  !!   3. interpola os quatro albedos e Si_t_sis2;
+  !!   4. extrapola por vizinhança cada campo, com faixa válida e valor
   !!      padrão próprios (com a checagem geográfica da fração de gelo).
   !!
-  !! O código de retorno rc_ice encadeia as etapas 2 e 3: o diagnóstico da
+  !! O código de retorno rc_ice encadeia as etapas 1 e 2: o diagnóstico da
   !! origem e a interpolação da fração dependem do resultado do último
-  !! preenchimento da etapa 2, e o diagnóstico do destino depende do
+  !! preenchimento da etapa 1, e o diagnóstico do destino depende do
   !! resultado da interpolação.
   !============================================================================
   subroutine update_ice_fields_on_atm_grid(is, importState)
@@ -59,9 +61,6 @@ contains
 
     call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
       field=f_ifrac_src, rc=rc_ice)
-
-    if (.not. is%regrid%has('ocn2atm_ice') .and. rc_ice == ESMF_SUCCESS) &
-      call add_ice_route(is, importState, f_ifrac_src)
 
     call fill_ice_sentinels(is, rc_ice)
 
@@ -122,42 +121,6 @@ contains
       ESMF_LOGMSG_INFO)
   end subroutine update_ice_fields_on_atm_grid
 
-  !============================================================================
-  !> @brief Cria a rota 'ocn2atm_ice' (conservativa, com máscara na origem).
-  !!
-  !! Antes de criar a rota, copia So_omask (1 = oceano, 0 = terra) para a
-  !! máscara de is%ocn_grid (set_ocn_grid_mask), de modo que a rota não
-  !! dependa de a SST ter sido interpolada antes. A configuração vem de
-  !! ROTAS: 'conserve', que conserva a área e é o adequado para uma fração,
-  !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
-  !!
-  !! Com cfg_write_fixdiag, registra quantos pontos de terra e de oceano
-  !! este PET viu na máscara (FIX-DIAG-ICEMASK-01), para confirmar que
-  !! So_omask foi encontrada e não está toda em terra ou toda em oceano.
-  !============================================================================
-  subroutine add_ice_route(is, importState, f_ifrac_src)
-    type(MED_InternalState), intent(inout) :: is
-    type(ESMF_State),        intent(inout) :: importState
-    type(ESMF_Field),        intent(inout) :: f_ifrac_src
-    integer :: rc_store
-    integer :: n_land_ice
-    integer :: n_sea_ice
-    logical :: achou, copiou
-    character(len=200) :: diag_msg_mask
-
-    ! conta terra/oceano vistos por ESTE PET, para confirmar que So_omask
-    ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
-    ! tudo-terra nem tudo-oceano por engano).
-    call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, achou, copiou)
-    if (cfg_write_fixdiag) then
-        write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
-          'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
-          achou, ' n_land=', n_land_ice, &
-          ' n_sea=', n_sea_ice
-        call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
-    end if
-    call cria_rota(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
-  end subroutine add_ice_route
 
   !============================================================================
   !> @brief Preenche os seis campos de gelo na grade ATM com a sentinela -999.

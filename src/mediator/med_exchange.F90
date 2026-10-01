@@ -32,9 +32,10 @@ module med_exchange_mod
   use ESMF
   use NUOPC,               only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet, NUOPC_IsAtTime
   use coupler_utils_mod,   only: ChkErr
+  use coupler_config_mod,  only: cfg_use_sis2_dynamic, cfg_write_fixdiag
   use cpl_map_mod,         only: ROTAS
   use med_cap_types_mod,   only: MED_InternalState
-  use med_cap_methods_mod, only: cria_rota, RegridOrCopy
+  use med_cap_methods_mod, only: cria_rota, RegridOrCopy, set_ocn_grid_mask
   use med_export_mod,      only: export_to_components
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
                                  update_ice_fraction_from_docn, regrid_ocean_currents
@@ -503,9 +504,152 @@ contains
     type(ESMF_Field) :: field
     real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
 
+    call garante_rotas_malha_de_fluxo(is, importState)
     call update_ocean_fields_on_atm_grid(is, importState, field, is%run%raw_sst_diag_done, rc)
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
   end subroutine ir_para_malha_de_fluxo
+
+  !> Rotas da ida para a malha de fluxo criadas durante o passo, conforme a
+  !! coluna criar de ROTAS, nesta ordem (a ordem das linhas "rota" no
+  !! relatório de acoplamento):
+  !!   ocn2atm_sst  'mascara_mista': set_ocean_mask_for_sst grava a máscara
+  !!                do oceano na grade e só cria a rota quando ela tem terra
+  !!                e mar; até lá, a SST usa a rota ocn2atm;
+  !!   ocn2atm_ice  'primeiro_uso': com o SIS2, na primeira vez que
+  !!                Si_ifrac_sis2 está no importState (add_ice_route).
+  !! Nada é criado antes da rota ocn2atm (fase A da inicialização), como
+  !! quando a criação ficava em med_ocean e med_ice, até a R-FASE11-18.
+  !!
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] importState  estado de importação do mediador
+  subroutine garante_rotas_malha_de_fluxo(is, importState)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field) :: sst_ocn, f_ifrac_src
+    integer :: rc_rota
+
+    if (.not. is%regrid%has('ocn2atm')) return
+
+    call ESMF_StateGet(importState, itemName="So_t", field=sst_ocn, rc=rc_rota)
+    if (.not. is%regrid%has('ocn2atm_sst')) &
+      call set_ocean_mask_for_sst(is, importState, sst_ocn, rc_rota)
+
+    if (cfg_use_sis2_dynamic) then
+      call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
+        field=f_ifrac_src, rc=rc_rota)
+      if (.not. is%regrid%has('ocn2atm_ice') .and. rc_rota == ESMF_SUCCESS) &
+        call add_ice_route(is, importState, f_ifrac_src)
+    end if
+  end subroutine garante_rotas_malha_de_fluxo
+
+  !> Prepara e cria a rota 'ocn2atm_sst' (coluna criar 'mascara_mista' de
+  !! ROTAS): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
+  !! de um limiar de SST) e cria a rota no primeiro passo em que a máscara
+  !! tem terra e mar no conjunto dos PETs. Até a R-FASE11-18, em med_ocean.
+  subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_Field), intent(inout) :: sst_ocn   !< So_t na grade do oceano
+    integer, intent(inout) :: rc
+    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
+    integer :: lde_s, n_land, ldec_ocn, n_sea
+    integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
+    type(ESMF_VM) :: vm
+    logical :: got_omask, achou
+    real(ESMF_KIND_R8), pointer :: sst_src(:,:)
+    real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
+
+    call ESMF_VMGetCurrent(vm, rc=rc)
+
+    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra; a
+    ! mesma convencao do GRIDITEM_MASK aqui: valores em srcMaskValues sao
+    ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, achou, got_omask)
+    if (.not. achou) then
+      call ESMF_LogWrite( &
+        'MED: So_omask indisponivel no importState - usando ' // &
+        'fallback por limiar de SST (menos confiavel na costa)', &
+        ESMF_LOGMSG_WARNING)
+    end if
+
+    ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
+    ! realizado): mantem o comportamento antigo em vez de travar.
+    if (.not. got_omask) then
+        n_land = 0; n_sea = 0
+        call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
+        if (rc == ESMF_SUCCESS) then
+          do lde_s = 0, ldec_ocn - 1
+            call ESMF_FieldGet(sst_ocn, localDe=lde_s, farrayPtr=sst_src, rc=rc)
+            if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
+            call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
+              staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
+              farrayPtr=maskptr, rc=rc)
+            if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
+              where (sst_src < LAND_FILL_MAX)
+                maskptr = 0
+              elsewhere
+                maskptr = 1
+              end where
+              n_land = n_land + count(maskptr == 0)
+              n_sea  = n_sea  + count(maskptr == 1)
+            end if
+          end do
+        end if
+    end if
+
+    n_land_s(1) = n_land; n_sea_s(1) = n_sea
+    call ESMF_VMAllReduce(vm, n_land_s, n_land_g, 1, ESMF_REDUCE_SUM, rc=rc)
+    if (rc /= ESMF_SUCCESS) n_land_g(1) = n_land
+    call ESMF_VMAllReduce(vm, n_sea_s,  n_sea_g,  1, ESMF_REDUCE_SUM, rc=rc)
+    if (rc /= ESMF_SUCCESS) n_sea_g(1) = n_sea
+    if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
+      ! Máscara ainda uniforme (bootstrap): So_t usa a rota ocn2atm neste
+      ! passo e a rota mascarada é tentada de novo no próximo.
+      call ESMF_LogWrite('MED: mascara oceanica uniforme, rota ocn2atm_sst adiada', &
+        ESMF_LOGMSG_INFO)
+    else
+      ! Conservativo contorna a deformação da costura tripolar; bilinear
+      ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
+      call cria_rota(is%regrid, 'ocn2atm_sst', sst_ocn, is%ocn%sst, rc)
+    end if
+  end subroutine set_ocean_mask_for_sst
+
+  !============================================================================
+  !> @brief Cria a rota 'ocn2atm_ice' (conservativa, com máscara na origem).
+  !!
+  !! Antes de criar a rota, copia So_omask (1 = oceano, 0 = terra) para a
+  !! máscara de is%ocn_grid (set_ocn_grid_mask), de modo que a rota não
+  !! dependa de a SST ter sido interpolada antes. A configuração vem de
+  !! ROTAS: 'conserve', que conserva a área e é o adequado para uma fração,
+  !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
+  !!
+  !! Com cfg_write_fixdiag, registra quantos pontos de terra e de oceano
+  !! este PET viu na máscara (FIX-DIAG-ICEMASK-01), para confirmar que
+  !! So_omask foi encontrada e não está toda em terra ou toda em oceano.
+  !============================================================================
+  subroutine add_ice_route(is, importState, f_ifrac_src)
+    type(MED_InternalState), intent(inout) :: is
+    type(ESMF_State),        intent(inout) :: importState
+    type(ESMF_Field),        intent(inout) :: f_ifrac_src
+    integer :: rc_store
+    integer :: n_land_ice
+    integer :: n_sea_ice
+    logical :: achou, copiou
+    character(len=200) :: diag_msg_mask
+
+    ! conta terra/oceano vistos por ESTE PET, para confirmar que So_omask
+    ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
+    ! tudo-terra nem tudo-oceano por engano).
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, achou, copiou)
+    if (cfg_write_fixdiag) then
+        write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
+          'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
+          achou, ' n_land=', n_land_ice, &
+          ' n_sea=', n_sea_ice
+        call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
+    end if
+    call cria_rota(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
+  end subroutine add_ice_route
 
   !> Fase entregar: exportação dos campos da malha de fluxo e carimbo de
   !! tempo, nesta ordem:
@@ -529,6 +673,7 @@ contains
     integer,          intent(inout) :: rc
     type(ESMF_Field) :: field
 
+    call garante_rotas_exportacao(is, importState, exportState)
     call export_to_components(is, importState, exportState, rc)
     call stamp_export_fields(exportState, field, stampTime, rc)
 
@@ -543,6 +688,40 @@ contains
       end if
     end if
   end subroutine entregar
+
+  !> Rotas da exportação criadas durante o passo, conforme a coluna criar
+  !! de ROTAS ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no
+  !! relatório de acoplamento):
+  !!   ocn2atm_landmask  na primeira exportação (is%ocn%omask_done ainda
+  !!                     falso), se So_omask está no importState;
+  !!                     regrid_land_mask (med_export) a aplica uma vez;
+  !!   atm2ocn_ice       se Si_ifrac está no exportState e a rota de reserva
+  !!                     atm2ocn já existe; export_ice_fraction a aplica.
+  !! Até a R-FASE11-18, cada uma era criada por quem a aplica, em med_export.
+  !!
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] importState  estado de importação do mediador
+  !! @param[inout] exportState  estado de exportação do mediador
+  subroutine garante_rotas_exportacao(is, importState, exportState)
+    type(MED_InternalState), pointer :: is
+    type(ESMF_State), intent(inout) :: importState
+    type(ESMF_State), intent(inout) :: exportState
+    type(ESMF_Field) :: omask_src_field, f_ifrac_exp
+    integer :: rc_rota
+
+    if (.not. is%ocn%omask_done) then
+      call ESMF_StateGet(importState, itemName="So_omask", &
+        field=omask_src_field, rc=rc_rota)
+      if (rc_rota == ESMF_SUCCESS) &
+        call cria_rota(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_rota)
+    end if
+
+    call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_rota)
+    if (rc_rota == ESMF_SUCCESS) then
+      if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
+        call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_rota)
+    end if
+  end subroutine garante_rotas_exportacao
 
   !> Carimba stampTime em cada campo do exportState. field é só a variável
   !! de trabalho do laço.

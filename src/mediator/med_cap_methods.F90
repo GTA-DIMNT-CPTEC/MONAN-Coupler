@@ -9,7 +9,7 @@
 !!   FillInternalField          preenche campo com valor constante
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
-!!   RegridOrCopy               regrid ATM→OCN com fallback temporário
+!!   RegridOrCopy               interpola um campo da malha de fluxo para o exportState
 !!   spec_da_rota               configuração de uma rota na tabela ROTAS
 !!   completar_da_rota          preenchimento por vizinhança de uma rota de ROTAS
 !!   cria_rota                  cria uma rota com a configuração de ROTAS
@@ -209,11 +209,13 @@ contains
   end subroutine GetFieldPtrOptional
 
   !============================================================================
-  !> @brief Regrid ATM→OCN com fallback quando routehandle ainda não foi criado.
+  !> @brief Interpola src_field (malha de fluxo) para o campo dst_name do
+  !! exportState (grade OCN), pela rota 'atm2ocn'.
   !!
-  !! Quando as rotas ainda não foram criadas (1º passo ou erro na IDC), faz
-  !! o regrid com um ESMF_FieldRegridStore temporário, em vez de deixar
-  !! zerados os campos exportados ao OCN.
+  !! A rota existe desde a fase A da inicialização. Até a R-FASE11-18, esta
+  !! rotina a criava quando ainda não existia, caso que nunca ocorre: a fase
+  !! A roda antes de qualquer chamada, e uma falha nela interrompe a
+  !! inicialização.
   !============================================================================
   subroutine RegridOrCopy(src_field, dst_state, dst_name, is, rc)
     type(ESMF_Field),        intent(inout) :: src_field
@@ -231,14 +233,10 @@ contains
       msg="RegridOrCopy: "//trim(dst_name), &
       line=__LINE__, file=__FILE__)) return
 
-    ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN); se ainda
-    ! não existe, é criada com este par.
-    if (.not. is%regrid%has('atm2ocn')) then
-      call cria_rota(is%regrid, 'atm2ocn', src_field, dst_field, rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end if
-    ! A rota zera o destino antes e troca os NaN por zero (ROTAS: sem_valor
-    ! 'zerar', nan_para 0).
+    ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN) e existe
+    ! desde a fase A da inicialização (med_exchange, cria_rotas_inicio),
+    ! que roda antes de qualquer chamada desta rotina. A rota zera o destino
+    ! antes e troca os NaN por zero (ROTAS: sem_valor 'zerar', nan_para 0).
     call is%regrid%apply('atm2ocn', src_field, dst_field, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, &
       msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &

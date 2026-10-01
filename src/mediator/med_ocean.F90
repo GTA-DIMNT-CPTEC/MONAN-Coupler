@@ -21,8 +21,7 @@ module med_ocean_mod
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
   use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: ZeroInternalField, cria_rota, set_ocn_grid_mask, &
-                                 completar_da_rota
+  use med_cap_methods_mod, only: ZeroInternalField, completar_da_rota
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: indice_trunca
 
@@ -92,9 +91,10 @@ contains
 
       ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
       ! por vizinhança para a costa (etapa completar da rota ocn2atm_sst).
-      ! Enquanto a máscara é uniforme, a rota ocn2atm interpola e a SST é
-      ! completada como na rota ocn2atm_sst.
-      if (.not. is%regrid%has('ocn2atm_sst')) call set_ocean_mask_for_sst(is, importState, field, rc)
+      ! A rota ocn2atm_sst é criada pela fase ir_para_malha_de_fluxo
+      ! (med_exchange) no primeiro passo em que a máscara tem terra e mar;
+      ! até lá, a rota ocn2atm interpola e a SST é completada como na rota
+      ! ocn2atm_sst.
 
       if (is%regrid%has('ocn2atm_sst')) then
         call is%regrid%apply('ocn2atm_sst', field, is%ocn%sst, rc, &
@@ -166,73 +166,6 @@ contains
     end if
   end subroutine registra_sst
 
-  subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
-    type(MED_InternalState), pointer :: is
-    type(ESMF_State), intent(inout) :: importState
-    type(ESMF_Field), intent(inout) :: sst_ocn   !< So_t na grade do oceano
-    integer, intent(inout) :: rc
-    integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
-    integer :: lde_s, n_land, ldec_ocn, n_sea
-    integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
-    type(ESMF_VM) :: vm
-    logical :: got_omask, achou
-    real(ESMF_KIND_R8), pointer :: sst_src(:,:)
-    real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
-
-    call ESMF_VMGetCurrent(vm, rc=rc)
-
-    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra; a
-    ! mesma convencao do GRIDITEM_MASK aqui: valores em srcMaskValues sao
-    ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
-    call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, achou, got_omask)
-    if (.not. achou) then
-      call ESMF_LogWrite( &
-        'MED: So_omask indisponivel no importState - usando ' // &
-        'fallback por limiar de SST (menos confiavel na costa)', &
-        ESMF_LOGMSG_WARNING)
-    end if
-
-    ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
-    ! realizado): mantem o comportamento antigo em vez de travar.
-    if (.not. got_omask) then
-        n_land = 0; n_sea = 0
-        call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
-        if (rc == ESMF_SUCCESS) then
-          do lde_s = 0, ldec_ocn - 1
-            call ESMF_FieldGet(sst_ocn, localDe=lde_s, farrayPtr=sst_src, rc=rc)
-            if (rc /= ESMF_SUCCESS .or. .not. associated(sst_src)) cycle
-            call ESMF_GridGetItem(is%ocn_grid, itemflag=ESMF_GRIDITEM_MASK, &
-              staggerloc=ESMF_STAGGERLOC_CENTER, localDE=lde_s, &
-              farrayPtr=maskptr, rc=rc)
-            if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
-              where (sst_src < LAND_FILL_MAX)
-                maskptr = 0
-              elsewhere
-                maskptr = 1
-              end where
-              n_land = n_land + count(maskptr == 0)
-              n_sea  = n_sea  + count(maskptr == 1)
-            end if
-          end do
-        end if
-    end if
-
-    n_land_s(1) = n_land; n_sea_s(1) = n_sea
-    call ESMF_VMAllReduce(vm, n_land_s, n_land_g, 1, ESMF_REDUCE_SUM, rc=rc)
-    if (rc /= ESMF_SUCCESS) n_land_g(1) = n_land
-    call ESMF_VMAllReduce(vm, n_sea_s,  n_sea_g,  1, ESMF_REDUCE_SUM, rc=rc)
-    if (rc /= ESMF_SUCCESS) n_sea_g(1) = n_sea
-    if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
-      ! Máscara ainda uniforme (bootstrap): So_t usa a rota ocn2atm neste
-      ! passo e a rota mascarada é tentada de novo no próximo.
-      call ESMF_LogWrite('MED: mascara oceanica uniforme, rota ocn2atm_sst adiada', &
-        ESMF_LOGMSG_INFO)
-    else
-      ! Conservativo contorna a deformação da costura tripolar; bilinear
-      ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
-      call cria_rota(is%regrid, 'ocn2atm_sst', sst_ocn, is%ocn%sst, rc)
-    end if
-  end subroutine set_ocean_mask_for_sst
 
 
   !> Correntes oceânicas So_u/So_v para a grade ATM (rota ocn2atm).

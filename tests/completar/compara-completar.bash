@@ -10,13 +10,15 @@
 # usa interfaces que existem desde a fase11-12-validada; as fases de
 # med_exchange que a versão tiver entram com -DCOM_ENTREGAR, -DCOM_IR_PARA
 # e -DCOM_INICIO) e o
-# executa com 1, 4, 6 e 8 processos MPI, com um supergrid sintético
+# executa com 1, 4, 6 e 8 processos MPI e, com 4, no caso "mista4" (máscara
+# do oceano com terra desde o passo 1), com um supergrid sintético
 # (tests/supergrid/gera-supergrid.py). Para cada PET, os valores gravados
 # (saida_<PET>.bin: a SST na malha de fluxo e todos os campos exportados ao
 # oceano, com os carimbos de tempo, em três passos, e as contagens de pontos
-# completados) têm de ser idênticos, bit a bit, e as mensagens do mediador
-# e do framework de interpolação no log do ESMF também, sem data e hora,
-# incluindo as linhas do relatório de acoplamento (CPL-REL:).
+# completados) têm de ser idênticos, bit a bit; as linhas do relatório de
+# acoplamento (CPL-REL:) no log do ESMF, sem data e hora, também, na mesma
+# ordem; e as demais mensagens do mediador e do framework de interpolação,
+# as mesmas, em qualquer ordem.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/completar/compara-completar.bash REV [SAIDA]
@@ -32,12 +34,18 @@
 set -uo pipefail
 
 REV=${1:-}
-[[ -n "${REV}" ]] || { sed -n '2,30p' "$0"; exit 2; }
+[[ -n "${REV}" ]] || { sed -n '2,32p' "$0"; exit 2; }
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=$(mkdir -p "${2:-${RAIZ}/build-local/completar}" && cd "${2:-${RAIZ}/build-local/completar}" && pwd)
 MPIRUN=${MPIRUN:-mpiexec}
 FC=${FC:-mpif90}
 LISTA_NP=${LISTA_NP:-1 4 6 8}
+# Casos: um por número de processos e, com 4 processos, o caso "mista4", em
+# que a máscara do oceano já tem terra no passo 1 (todas as rotas do passo
+# criadas no mesmo passo, para conferir a ordem entre elas).
+CASOS="${LISTA_NP} mista4"
+np_do_caso() { if [[ $1 == mista4 ]]; then echo 4; else echo "$1"; fi; }
+arg_do_caso() { if [[ $1 == mista4 ]]; then echo mista; fi; }
 [[ -n "${ESMFMKFILE:-}" && -f "${ESMFMKFILE}" ]] || { echo "ERRO: defina ESMFMKFILE" >&2; exit 2; }
 
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
@@ -81,33 +89,45 @@ for versao in antiga nova; do
     ${FC} -o test_completar test_completar.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
-  for np in ${LISTA_NP}; do
-    run="${dir}/run_${np}"
+  for caso in ${CASOS}; do
+    np=$(np_do_caso "${caso}")
+    run="${dir}/run_${caso}"
     rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
     # shellcheck disable=SC2086
-    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_completar > run.log 2>&1 ) \
-      || { tail -20 "${run}/run.log"; echo "ERRO: execução da versão ${versao} com ${np} processos" >&2; exit 2; }
+    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_completar $(arg_do_caso "${caso}") > run.log 2>&1 ) \
+      || { tail -20 "${run}/run.log"; echo "ERRO: execução da versão ${versao}, caso ${caso}" >&2; exit 2; }
   done
 done
 
 difere=0
 padrao='MED|CPL-REL|regrid|ERROR|WARNING'
-for np in ${LISTA_NP}; do
+for caso in ${CASOS}; do
+  np=$(np_do_caso "${caso}")
   n=0
-  for f in $(cd "${SAIDA}/antiga/run_${np}" && ls saida_*.bin 2>/dev/null); do
+  for f in $(cd "${SAIDA}/antiga/run_${caso}" && ls saida_*.bin 2>/dev/null); do
     n=$((n + 1))
-    if ! cmp -s "${SAIDA}/antiga/run_${np}/${f}" "${SAIDA}/nova/run_${np}/${f}"; then
-      echo "  DIFERE         ${np} PETs: ${f}"; difere=1
+    if ! cmp -s "${SAIDA}/antiga/run_${caso}/${f}" "${SAIDA}/nova/run_${caso}/${f}"; then
+      echo "  DIFERE         caso ${caso}: ${f}"; difere=1
     fi
   done
-  [[ ${n} -eq ${np} ]] || { echo "ERRO: ${np} PETs: esperados ${np} arquivos, gravados ${n}" >&2; exit 2; }
-  linhas=$(grep -h 'CPL-REL: completar' "${SAIDA}/nova/run_${np}"/PET*.teste_completar | wc -l)
-  echo "  ${np} PET(s): ${n} arquivo(s) comparados, ${linhas} linha(s) 'completar' no relatório"
-  for pet in "${SAIDA}/antiga/run_${np}"/PET*.teste_completar; do
+  [[ ${n} -eq ${np} ]] || { echo "ERRO: caso ${caso}: esperados ${np} arquivos, gravados ${n}" >&2; exit 2; }
+  linhas=$(grep -h 'CPL-REL: completar' "${SAIDA}/nova/run_${caso}"/PET*.teste_completar | wc -l)
+  rotas=$(grep -h 'CPL-REL: rota' "${SAIDA}/nova/run_${caso}"/PET0.teste_completar | wc -l)
+  echo "  caso ${caso} (${np} PETs): ${n} arquivo(s) comparados, ${rotas} rota(s) e ${linhas} linha(s) 'completar' no relatório"
+  for pet in "${SAIDA}/antiga/run_${caso}"/PET*.teste_completar; do
     nome=$(basename "${pet}")
-    if ! diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3-) \
-                 <(grep -E "${padrao}" "${SAIDA}/nova/run_${np}/${nome}" | cut -d' ' -f3-) > /dev/null; then
-      echo "  log DIFERE     ${np} PETs: ${nome}"; difere=1
+    novo="${SAIDA}/nova/run_${caso}/${nome}"
+    # Relatório de acoplamento: as mesmas linhas, na mesma ordem
+    if ! diff -q <(grep 'CPL-REL:' "${pet}" | cut -d' ' -f3-) \
+                 <(grep 'CPL-REL:' "${novo}" | cut -d' ' -f3-) > /dev/null; then
+      echo "  relatório DIFERE caso ${caso}: ${nome}"; difere=1
+    fi
+    # Demais mensagens: as mesmas linhas, com as mesmas repetições, em
+    # qualquer ordem (a R-FASE11-18 antecipou a criação de rotas dentro do
+    # passo, e com ela algumas mensagens informativas)
+    if ! diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3- | sort) \
+                 <(grep -E "${padrao}" "${novo}" | cut -d' ' -f3- | sort) > /dev/null; then
+      echo "  log DIFERE     caso ${caso}: ${nome}"; difere=1
     fi
   done
 done

@@ -15,7 +15,7 @@ module med_export_mod
   use coupler_config_mod, only: cfg_write_fixdiag
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
   use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, cria_rota, completar_da_rota
+  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, completar_da_rota
   use coupler_constants_mod, only: T_ICE_MIN
 
   implicit none
@@ -231,7 +231,6 @@ contains
     type(ESMF_Field) :: f_ifrac_exp
     integer :: rc_ifrac2
     real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
-    integer :: rc_store2
     character(len=200) :: diag_msg_ifrac2
     integer :: n_invalidos, n_fixos
 
@@ -240,10 +239,7 @@ contains
       call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
 
       ! Rota conservativa 'atm2ocn_ice', como a 'ocn2atm_ice' na ida, com
-      ! 'atm2ocn' como reserva.
-      if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
-        call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_store2)
-
+      ! 'atm2ocn' como reserva; criada pela fase entregar (med_exchange).
       ! A rota completa por vizinhança os pontos fora de [0, 1] (coluna
       ! completar da atm2ocn_ice), também com a reserva atm2ocn.
       if (is%regrid%has('atm2ocn_ice')) then
@@ -350,11 +346,11 @@ contains
     type(ESMF_Field) :: omask_src_field
     integer :: rc_lm
 
+    ! A rota ocn2atm_landmask é criada pela fase entregar (med_exchange).
     call ESMF_StateGet(importState, itemName="So_omask", &
       field=omask_src_field, rc=rc_lm)
     if (rc_lm == ESMF_SUCCESS) then
-      call cria_rota(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
-      if (rc_lm == ESMF_SUCCESS) then
+      if (is%regrid%has('ocn2atm_landmask')) then
         call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
         call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
           ESMF_LOGMSG_INFO)

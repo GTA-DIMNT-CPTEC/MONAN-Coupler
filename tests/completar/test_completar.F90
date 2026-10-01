@@ -17,15 +17,20 @@
 !!   So_t       SST com pontos abaixo de 270 K (terra), acima de 310 K e NaN
 !!   So_omask   uniforme (só mar) no passo 1, quando a SST passa pela rota
 !!              ocn2atm (a rota ocn2atm_sst ainda não existe), e com terra
-!!              nos passos 2 e 3, pela rota ocn2atm_sst
+!!              nos passos 2 e 3, pela rota ocn2atm_sst; com o argumento
+!!              "mista", com terra já no passo 1, e então todas as rotas do
+!!              passo são criadas no passo 1
+!!   *_sis2     campos do SIS2 na grade do oceano (fração, albedos e
+!!              temperatura do gelo), com valores fora das faixas válidas;
+!!              o SIS2 está ligado, como na produção (desde a R-FASE11-18)
 !!   Si_ifrac   fração de gelo na malha de fluxo com valores fora de [0, 1]
 !!   demais     campos internos com valores determinísticos
 !!   relógio    passo de 1 h; stampTime é o fim do passo, como no modo
 !!              concorrente, para diferir do tempo atual do relógio;
 !!              use_med_to_mpas ligado só no passo 2
 !!
-!! Em cada passo, grava em saida_<PET>.bin os valores locais da SST na
-!! malha de fluxo e de todos os campos do exportState, com o carimbo de
+!! Em cada passo, grava em saida_<PET>.bin os valores locais da SST e dos
+!! campos do gelo na malha de fluxo e de todos os campos do exportState, com o carimbo de
 !! tempo de cada um; no fim, as
 !! contagens de pontos completados de cada campo e o relatório de
 !! acoplamento (relata_completas, linhas CPL-REL: no log do ESMF).
@@ -81,6 +86,8 @@ program test_completar
   type(ESMF_State) :: imp, exp
   type(ESMF_Field) :: f, f_taux
   integer :: rc, localPet, petCount, un, nx, ny, passo, k, n_itens
+  integer :: passo_terra        ! primeiro passo com terra na máscara do oceano
+  character(len=16) :: caso
   real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
   character(len=32) :: arquivo
   character(len=ESMF_MAXSTR), allocatable :: nomes(:)
@@ -95,6 +102,13 @@ program test_completar
   if (rc /= ESMF_SUCCESS) error stop 'ESMF_Initialize'
   call ESMF_VMGetGlobal(vm, rc=rc)
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
+
+  ! Argumento "mista": a máscara do oceano tem terra desde o passo 1, e
+  ! todas as rotas do passo são criadas no mesmo passo
+  caso = ''
+  if (command_argument_count() > 0) call get_command_argument(1, caso)
+  passo_terra = 2
+  if (trim(caso) == 'mista') passo_terra = 1
 
   if (localPet == 0) call escreve_nml('mom6.nml')
   call ESMF_VMBarrier(vm, rc=rc)
@@ -163,6 +177,12 @@ program test_completar
 #endif
     write(un) passo, rc
     call grava(un, is%ocn%sst)
+    call grava(un, is%ice%ifrac)
+    call grava(un, is%ice%alb_vdr)
+    call grava(un, is%ice%alb_vdf)
+    call grava(un, is%ice%alb_idr)
+    call grava(un, is%ice%alb_idf)
+    call grava(un, is%ice%tice)
     call ESMF_ClockGet(relogio, currTime=agora, rc=rc)
     carimbo = agora + dt
     is%use_med_to_mpas = passo == 2
@@ -202,7 +222,7 @@ program test_completar
 
 contains
 
-  !> Configuração com o MOM6 (supergrid sintético), sem o SIS2.
+  !> Configuração com o MOM6 (supergrid sintético) e o SIS2, como na produção.
   subroutine escreve_nml(arq)
     character(len=*), intent(in) :: arq
     integer :: u
@@ -212,6 +232,9 @@ contains
     write(u,'(A)') '/'
     write(u,'(A)') '&nuopc_ocn'
     write(u,'(A)') "  mesh_ocn = 'hgrid.nc'"
+    write(u,'(A)') '/'
+    write(u,'(A)') '&nuopc_petlayout'
+    write(u,'(A)') '  use_sis2_dynamic = .true.'
     write(u,'(A)') '/'
     close(u)
   end subroutine escreve_nml
@@ -236,7 +259,7 @@ contains
         m(i,j) = 1.0_ESMF_KIND_R8
         if (mod(7*i + 3*j, 11) == 0) then
           t(i,j) = 0.0_ESMF_KIND_R8
-          if (passo >= 2) m(i,j) = 0.0_ESMF_KIND_R8
+          if (passo >= passo_terra) m(i,j) = 0.0_ESMF_KIND_R8
         else if (mod(i + 2*j, 13) == 0) then
           t(i,j) = 315.0_ESMF_KIND_R8
         else if (mod(5*i + j, 29) == 0 .and. passo >= 1) then
@@ -246,7 +269,30 @@ contains
         v(i,j) = 0.1_ESMF_KIND_R8 * cos(0.3_ESMF_KIND_R8 * j - passo)
       end do
     end do
+    call preenche_sis2('Si_ifrac_sis2', passo, 0.5_ESMF_KIND_R8, 0.7_ESMF_KIND_R8)
+    call preenche_sis2('Si_avsdr_sis2', passo, 0.6_ESMF_KIND_R8, 0.5_ESMF_KIND_R8)
+    call preenche_sis2('Si_avsdf_sis2', passo, 0.6_ESMF_KIND_R8, 0.45_ESMF_KIND_R8)
+    call preenche_sis2('Si_anidr_sis2', passo, 0.5_ESMF_KIND_R8, 0.55_ESMF_KIND_R8)
+    call preenche_sis2('Si_anidf_sis2', passo, 0.5_ESMF_KIND_R8, 0.5_ESMF_KIND_R8)
+    call preenche_sis2('Si_t_sis2',     passo, 255.0_ESMF_KIND_R8, 30.0_ESMF_KIND_R8)
   end subroutine preenche_oceano
+
+  !> Campo do SIS2 no importState: centro + amplitude * padrão, com valores
+  !! fora da faixa válida de cada campo.
+  subroutine preenche_sis2(nome, passo, centro, amplitude)
+    character(len=*),   intent(in) :: nome
+    integer,            intent(in) :: passo
+    real(ESMF_KIND_R8), intent(in) :: centro, amplitude
+    real(ESMF_KIND_R8), pointer :: q(:,:)
+    integer :: i, j
+    if (.not. ponteiro(imp, nome, q)) return
+    do j = lbound(q, 2), ubound(q, 2)
+      do i = lbound(q, 1), ubound(q, 1)
+        q(i,j) = centro + amplitude * sin(0.43_ESMF_KIND_R8 * i + 0.2_ESMF_KIND_R8 * passo) &
+                                    * cos(0.31_ESMF_KIND_R8 * j)
+      end do
+    end do
+  end subroutine preenche_sis2
 
   !> Campos internos da malha de fluxo (exceto a máscara), no passo dado; a
   !! fração de gelo vai de -0,2 a 1,2.
