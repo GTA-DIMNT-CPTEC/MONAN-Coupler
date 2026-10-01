@@ -15,7 +15,8 @@ module med_export_mod
   use regrid_manager_mod, only: regrid_spec
   use coupler_config_mod, only: cfg_write_fixdiag
   use NUOPC, only: NUOPC_SetTimestamp
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
+  use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy
   use coupler_constants_mod, only: T_ICE_MIN
 
@@ -235,6 +236,7 @@ contains
     real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
     integer :: rc_store2
     character(len=200) :: diag_msg_ifrac2
+    integer :: n_invalidos, n_fixos
 
     call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_ifrac2)
     if (rc_ifrac2 == ESMF_SUCCESS) then
@@ -254,9 +256,12 @@ contains
           zero_total=.true.)
       end if
       call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
-      if (associated(p_ifrac_exp)) &
+      if (associated(p_ifrac_exp)) then
         call neighbor_fill(p_ifrac_exp, regrid_fill_t(enabled=.true., &
-        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
+          vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8), &
+          n_left=n_fixos, n_invalid=n_invalidos)
+        call registra_completa(is%run%completa(COMPL_IFRAC_EXP), n_invalidos, n_fixos)
+      end if
       if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
           write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
             'FIX-DIAG-ICEREGRID04-01: Si_ifrac(exportState, pos ATM->OCN+' // &

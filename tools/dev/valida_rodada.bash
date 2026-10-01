@@ -7,12 +7,20 @@
 #   bash tools/dev/valida_rodada.bash submete NOME   # --check e submissão (152 PETs)
 #   bash tools/dev/valida_rodada.bash compara NOME   # compara com a linha de base
 #
+# O compara também extrai do log do PET 0 o relatório de acoplamento (linhas
+# CPL-REL:, sem data e hora) para exp/NOME/relatorio_acoplamento.txt e o
+# compara com o da rodada aprovada (PASS) mais recente, ou com o de REL_REF.
+# Uma diferença no relatório não reprova a rodada, mas aponta o que mudou no
+# acoplamento antes da comparação dos arquivos.
+#
 # Variáveis (valores padrão entre parênteses):
 #   REF      pasta com baseline/, exp/ e o experimento modelo
 #            (a pasta que contém Coupler-Install/)
 #   MODELO   experimento com as entradas ($REF/exp_monan2xmom6)
 #   BASE     linha de base de referência (R-NOFMA-02)
 #   NPES     número de processos (152)
+#   REL_REF  rodada cujo relatório de acoplamento serve de referência
+#            (a aprovada mais recente)
 # Os diretórios de rodada ficam em $REF/exp/NOME.
 set -u
 COUPLER_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -24,10 +32,67 @@ NPES=${NPES:-152}
 export COUPLER_ROOT
 
 acao=${1:-}; nome=${2:-}
-[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,16p' "$0"; exit 2; }
+[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,24p' "$0"; exit 2; }
 DIR=${REF}/exp/${nome}
 
 falha() { echo "ERRO: $*" >&2; exit 1; }
+
+# relatorio DIR: extrai as linhas CPL-REL: dos logs do ESMF de uma rodada
+# para DIR/relatorio_acoplamento.txt (sem data, hora e PET). Falha se a
+# rodada não tem logs.
+relatorio() {
+  local d=$1
+  compgen -G "${d}/logs/PET*.esmApp.log" > /dev/null || return 1
+  grep -h 'CPL-REL:' "${d}"/logs/PET*.esmApp.log | sed 's/^.*CPL-REL: //' \
+    > "${d}/relatorio_acoplamento.txt"
+}
+
+# referencia_relatorio: diretório da rodada de referência do relatório, ou
+# vazio. REL_REF, se definida; senão a rodada aprovada (PASS no compara.txt)
+# mais recente, fora a atual, que tenha relatório não vazio.
+referencia_relatorio() {
+  local c d
+  if [[ -n "${REL_REF:-}" ]]; then
+    d=${REF}/exp/${REL_REF}
+    [[ -s "${d}/relatorio_acoplamento.txt" ]] || relatorio "${d}"
+    [[ -s "${d}/relatorio_acoplamento.txt" ]] && echo "${d}"
+    return
+  fi
+  for c in $(ls -t "${REF}"/exp/*/compara.txt 2>/dev/null); do
+    d=$(dirname "${c}")
+    [[ "${d}" == "${DIR}" ]] && continue
+    grep -q ' PASS ' "${c}" || continue
+    [[ -s "${d}/relatorio_acoplamento.txt" ]] || relatorio "${d}"
+    if [[ -s "${d}/relatorio_acoplamento.txt" ]]; then echo "${d}"; return; fi
+  done
+}
+
+# compara_relatorio: relatório desta rodada contra o da referência; só informa.
+compara_relatorio() {
+  local ref n
+  if ! relatorio "${DIR}"; then
+    echo " Relatório de acoplamento: rodada sem logs/PET*.esmApp.log"
+    return
+  fi
+  n=$(wc -l < "${DIR}/relatorio_acoplamento.txt")
+  echo " Relatório de acoplamento: ${n} linha(s) em relatorio_acoplamento.txt"
+  ref=$(referencia_relatorio)
+  if [[ -z "${ref}" ]]; then
+    echo "   sem rodada aprovada com relatório para comparar"
+    return
+  fi
+  if diff -q "${ref}/relatorio_acoplamento.txt" "${DIR}/relatorio_acoplamento.txt" > /dev/null; then
+    echo "   igual ao da rodada $(basename "${ref}")"
+    rm -f "${DIR}/relatorio_acoplamento.diff"
+  else
+    diff "${ref}/relatorio_acoplamento.txt" "${DIR}/relatorio_acoplamento.txt" \
+      > "${DIR}/relatorio_acoplamento.diff"
+    echo "   DIFERE do da rodada $(basename "${ref}"): $(grep -c '^<' "${DIR}/relatorio_acoplamento.diff")" \
+         "linha(s) só lá, $(grep -c '^>' "${DIR}/relatorio_acoplamento.diff") só aqui" \
+         "(relatorio_acoplamento.diff); primeiras diferenças:"
+    grep '^[<>]' "${DIR}/relatorio_acoplamento.diff" | head -10 | sed 's/^/     /'
+  fi
+}
 
 case "${acao}" in
 prepara)
@@ -77,6 +142,7 @@ compara)
   grep -m1 'Iniciando'  logs/esmApp_run.log
   grep -m1 'Executável' logs/esmApp_run.log
   grep -m1 -i 'revis'   logs/esmApp_run.log
+  compara_relatorio
   bash -c "source ${COUPLER_ROOT}/tools/dev/set-nccmp-jaci.bash >/dev/null 2>&1 && \
            bash ${COUPLER_ROOT}/tools/dev/compara-linha-base.bash -l ${BASE} -o ${REF}/baseline -e" \
     > compara.txt 2>&1
@@ -116,5 +182,5 @@ compara)
   echo " Relatório completo: ${DIR}/compara.txt"
   exit "${rc_cmp}"
   ;;
-*) sed -n '2,16p' "$0"; exit 2 ;;
+*) sed -n '2,24p' "$0"; exit 2 ;;
 esac

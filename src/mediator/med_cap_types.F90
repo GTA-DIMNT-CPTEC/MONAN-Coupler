@@ -27,6 +27,10 @@ module med_cap_types_mod
   public :: MED_InternalState, MED_InternalStateWrapper
   public :: med_ocn_flux_fields_t, med_ocn_fields_t, med_ice_fields_t, med_sfc_fields_t
   public :: med_par_t, med_diag_config_t, med_run_flags_t
+  ! Contagem dos pontos completados por vizinhança (relatório de acoplamento)
+  public :: med_completa_t, N_COMPLETA, COMPLETA_NOMES
+  public :: COMPL_SST, COMPL_ICE_IFRAC, COMPL_ICE_AVSDR, COMPL_ICE_AVSDF
+  public :: COMPL_ICE_ANIDR, COMPL_ICE_ANIDF, COMPL_ICE_T, COMPL_IFRAC_EXP
   ! Constantes físicas de coupler_constants_mod, re-exportadas
   public :: rho_air, Cp_air, L_evap, T_freeze, eps_q
   public :: es_coef_a, es_coef_b, es_coef_c, sigma_sb
@@ -160,6 +164,31 @@ module med_cap_types_mod
     character(len=256) :: import_dir   = 'diag_import'
   end type med_diag_config_t
 
+  !> Pontos completados por vizinhança num campo, neste PET, ao longo da
+  !! rodada: quantas vezes o preenchimento rodou, quantos pontos estavam fora
+  !! da faixa válida e quantos ficaram com o valor fixo. Só alimentam o
+  !! relatório de acoplamento (med_diag, relata_completas).
+  type :: med_completa_t
+    integer(ESMF_KIND_I8) :: aplicacoes = 0_ESMF_KIND_I8
+    integer(ESMF_KIND_I8) :: invalidos  = 0_ESMF_KIND_I8
+    integer(ESMF_KIND_I8) :: fixos      = 0_ESMF_KIND_I8
+  end type med_completa_t
+
+  !> Campos completados por vizinhança no mediador, com a rota que os traz.
+  integer, parameter :: N_COMPLETA      = 8
+  integer, parameter :: COMPL_SST       = 1   !< So_t na malha de fluxo (med_ocean)
+  integer, parameter :: COMPL_ICE_IFRAC = 2   !< gelo do SIS2 na malha de fluxo (med_ice)
+  integer, parameter :: COMPL_ICE_AVSDR = 3
+  integer, parameter :: COMPL_ICE_AVSDF = 4
+  integer, parameter :: COMPL_ICE_ANIDR = 5
+  integer, parameter :: COMPL_ICE_ANIDF = 6
+  integer, parameter :: COMPL_ICE_T     = 7
+  integer, parameter :: COMPL_IFRAC_EXP = 8   !< Si_ifrac exportado (med_export)
+  character(len=32), parameter :: COMPLETA_NOMES(N_COMPLETA) = [character(len=32) :: &
+    'ocn2atm_sst So_t', 'ocn2atm_ice Si_ifrac_sis2', 'ocn2atm_ice Si_avsdr_sis2',      &
+    'ocn2atm_ice Si_avsdf_sis2', 'ocn2atm_ice Si_anidr_sis2', 'ocn2atm_ice Si_anidf_sis2', &
+    'ocn2atm_ice Si_t_sis2', 'atm2ocn_ice Si_ifrac']
+
   !> Marcas de "primeira vez" e contadores que mudam durante a rodada.
   !! Eram variáveis com save; os valores iniciais são os mesmos.
   type :: med_run_flags_t
@@ -173,6 +202,8 @@ module med_cap_types_mod
     logical :: ifrac_init_done = .false.
     !> primeira gravação de mom6_import_*.nc (registro da fatia de cada PET)
     logical :: first_import_write = .true.
+    !> pontos completados por vizinhança, por campo (índices COMPL_*)
+    type(med_completa_t) :: completa(N_COMPLETA)
   end type med_run_flags_t
 
   type :: MED_InternalState

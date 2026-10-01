@@ -200,6 +200,8 @@ Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a 
 
 Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
 
+`test_completa.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; e a acumulação de `registra_completa`.
+
 `test_cpl_check.F90` confere as duas rotinas de conferência de `cpl_check` (`cpl_confere_conector` e `cpl_confere_estado`) com as listas de campos que os caps anunciam hoje, escritas no teste a partir dos caps e não do mapa: na produção, nenhuma diferença e três avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome); CplList com um campo a menos e com um a mais; importação fora do mapa e do dicionário; campo previsto e não anunciado na importação e na exportação; e a lacuna conhecida do MONAN-A com o DOCN, que aparece como três diferenças.
 
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.

@@ -146,6 +146,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-01 | documento de arquitetura no repositório; fase 11 no roteiro e no estado do projeto; indicadores da fase em `indicadores.py`; testes do supergrid do MOM6 e do DOCN levados para o repositório e para `confere-tudo.bash` |
 | R-FASE11-02 | mapa de acoplamento em `src/coupling/` (`cpl_fields.F90`: 57 campos; `cpl_map.F90`: 8 malhas, 154 trocas e 6 rotas), compilado e ligado, sem uso; teste `test_cpl_map` em `tests/unit`; `tools/dev/mapa-acoplamento.py` gera `docs/acoplamento.md` (conferência `mapa`); trocas sem linha no mapa: 0 |
 | R-FASE11-03 | `cpl_check.F90`: relatório dos conectores e conferência do mapa no log (`CPL-REL:`), chamados pelo driver em `ModifyCplLists`, só registro; testes `test_cpl_check` e `tests/cplcheck` (conferência `cplcheck`); driver em `compila-local.bash` |
+| R-FASE11-04 | relatório das rotas do mediador e dos pontos completados por vizinhança (`CPL-REL:`); `valida_rodada.bash compara` grava e compara o relatório de acoplamento; teste `test_completa`; fim do bloco A |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

@@ -21,7 +21,8 @@ module med_ocean_mod
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST
+  use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: ZeroInternalField
   use med_ice_mod, only: update_ice_fields_on_atm_grid
 
@@ -101,7 +102,7 @@ contains
 
       ! Extrapolação por vizinhança (preenche costa/costura); resíduo → T_FILL.
       if (associated(sst)) then
-        call fill_sst_gaps(sst)
+        call fill_sst_gaps(sst, is%run%completa(COMPL_SST))
       end if
 
       ! Regrid de correntes oceânicas OCN → ATM.
@@ -145,9 +146,11 @@ contains
   !> Preenche a SST na grade ATM onde a interpolação não trouxe valor
   !! válido (costa, costura tripolar): média dos vizinhos válidos, em até
   !! 40 passadas; o que sobrar recebe 271,35 K. Valores acima de 310 K
-  !! recebem 271,35 K antes da difusão.
-  subroutine fill_sst_gaps(sst)
+  !! recebem 271,35 K antes da difusão. Soma os pontos em cont, para o
+  !! relatório de acoplamento.
+  subroutine fill_sst_gaps(sst, cont)
     real(ESMF_KIND_R8), pointer :: sst(:,:)
+    type(med_completa_t), intent(inout) :: cont
     type(regrid_fill_t), parameter :: SST_FILL = regrid_fill_t(enabled=.true.,     &
     vmin=270.0_ESMF_KIND_R8, vmax=310.0_ESMF_KIND_R8, vfill=T_FREEZE_SEAWATER, &
     max_iter=40, skip_fraction=1.0_ESMF_KIND_R8, overflow_to_fill=.true.)
@@ -157,6 +160,7 @@ contains
     n_invalid = count(.not. (sst >= SST_FILL%vmin .and. sst <= SST_FILL%vmax) &
                       .and. .not. (sst > SST_FILL%vmax))
     call neighbor_fill(sst, SST_FILL, n_left)
+    call registra_completa(cont, n_invalid, n_left)
     if (n_invalid > 0) then
       write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
         ' celulas (', n_left, ' com valor fixo)'

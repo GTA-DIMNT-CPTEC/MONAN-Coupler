@@ -12,6 +12,10 @@
 !!     regrid_weights(1) = 'INPUT/pesos_ocn2atm.nc'
 !!   /
 !!
+!! Cada rota criada é registrada no log do PET 0, numa linha do relatório de
+!! acoplamento (prefixo CPL-REL:, ver src/coupling/cpl_check.F90): esquema,
+!! métodos pedidos, máscara na origem e método aceito, ou a reserva usada.
+!!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module regrid_manager_mod
@@ -110,7 +114,41 @@ contains
     end if
     this%routes(k)%name = name
     this%n = k
+    call report_route(this, k, final_spec)
   end subroutine add
+
+  !> Linha do relatório de acoplamento para a rota k, no log do PET 0.
+  subroutine report_route(this, k, spec)
+    class(regrid_manager_t), intent(in) :: this
+    integer,                 intent(in) :: k
+    type(regrid_spec_t),     intent(in) :: spec
+
+    type(ESMF_VM) :: vm
+    integer :: localPet, rc, m
+    character(len=:), allocatable :: line
+
+    call ESMF_VMGetCurrent(vm, rc=rc)
+    if (rc /= ESMF_SUCCESS) return
+    call ESMF_VMGet(vm, localPet=localPet, rc=rc)
+    if (rc /= ESMF_SUCCESS .or. localPet /= 0) return
+
+    line = 'CPL-REL: rota '//trim(this%routes(k)%name)//': esquema '//trim(spec%scheme)// &
+           ', metodos '
+    do m = 1, MAX_METHODS
+      if (len_trim(spec%methods(m)) == 0) exit
+      if (m > 1) line = line//','
+      line = line//trim(spec%methods(m))
+    end do
+    if (len_trim(spec%methods(1)) == 0) line = line//'-'
+    line = line//', mascara '//trim(merge('sim', 'nao', spec%mask_src))
+    if (this%routes(k)%alias > 0) then
+      line = line//', nenhum metodo aceito, usa a reserva '// &
+             trim(this%routes(this%routes(k)%alias)%name)
+    else
+      line = line//', aceito '//trim(this%routes(k)%r%method_used)
+    end if
+    call ESMF_LogWrite(line, ESMF_LOGMSG_INFO)
+  end subroutine report_route
 
   !> Interpola pela rota. zero_total, se presente, substitui o da rota.
   subroutine apply(this, name, src, dst, rc, zero_total)

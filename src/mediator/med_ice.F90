@@ -17,7 +17,10 @@ module med_ice_mod
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_spec, regrid_manager_t
   use coupler_config_mod, only: cfg_write_fixdiag
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_ICE_IFRAC, &
+                               COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
+                               COMPL_ICE_ANIDF, COMPL_ICE_T
+  use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: FillInternalField
 
   implicit none
@@ -51,6 +54,7 @@ contains
     real(ESMF_KIND_R8), pointer :: p_ifrac_out(:,:)
     integer :: rc_nfe
     integer :: rc_bs
+    integer :: n_invalidos, n_fixos
 
     call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
       field=f_ifrac_src, rc=rc_ice)
@@ -81,9 +85,12 @@ contains
     ! Extrapolação por vizinhança: fecha buracos e a costura da região de
     ! deformação tripolar, com o mesmo algoritmo usado para So_t.
     call ESMF_FieldGet(is%ice%ifrac,   farrayPtr=p_ifrac_out, rc=rc_nfe)
-    if (associated(p_ifrac_out)) &
+    if (associated(p_ifrac_out)) then
       call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
-        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8))
+        vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8), &
+        n_left=n_fixos, n_invalid=n_invalidos)
+      call registra_completa(is%run%completa(COMPL_ICE_IFRAC), n_invalidos, n_fixos)
+    end if
 
     ! Checksum exato de is%ice%ifrac depois da extrapolação.
     if (cfg_write_fixdiag) then
@@ -95,15 +102,20 @@ contains
       call check_ice_geography(p_ifrac_out)
 
     call extrapolate_ice_field(is%ice%alb_vdr, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
+      is%run%completa(COMPL_ICE_AVSDR))
     call extrapolate_ice_field(is%ice%alb_vdf, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
+      is%run%completa(COMPL_ICE_AVSDF))
     call extrapolate_ice_field(is%ice%alb_idr, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
+      is%run%completa(COMPL_ICE_ANIDR))
     call extrapolate_ice_field(is%ice%alb_idf, regrid_fill_t(enabled=.true., &
-      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT))
+      vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
+      is%run%completa(COMPL_ICE_ANIDF))
     call extrapolate_ice_field(is%ice%tice, regrid_fill_t(enabled=.true., &
-      vmin=T_ICE_MIN, vmax=T_ICE_MAX, vfill=T_FREEZE_SEAWATER))
+      vmin=T_ICE_MIN, vmax=T_ICE_MAX, vfill=T_FREEZE_SEAWATER), &
+      is%run%completa(COMPL_ICE_T))
 
     call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
       'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &
@@ -317,15 +329,18 @@ contains
   !============================================================================
   !> @brief Extrapola por vizinhança um campo de gelo na grade ATM.
   !============================================================================
-  subroutine extrapolate_ice_field(field, fill)
-    type(ESMF_Field),    intent(in) :: field
-    type(regrid_fill_t), intent(in) :: fill
+  subroutine extrapolate_ice_field(field, fill, cont)
+    type(ESMF_Field),     intent(in)    :: field
+    type(regrid_fill_t),  intent(in)    :: fill
+    type(med_completa_t), intent(inout) :: cont   !< contagem para o relatório
     real(ESMF_KIND_R8), pointer :: p_out(:,:)
-    integer :: rc_nfe
+    integer :: rc_nfe, n_invalidos, n_fixos
 
     call ESMF_FieldGet(field, farrayPtr=p_out, rc=rc_nfe)
-    if (associated(p_out)) &
-      call neighbor_fill(p_out, fill)
+    if (associated(p_out)) then
+      call neighbor_fill(p_out, fill, n_left=n_fixos, n_invalid=n_invalidos)
+      call registra_completa(cont, n_invalidos, n_fixos)
+    end if
   end subroutine extrapolate_ice_field
 
   !============================================================================

@@ -41,11 +41,24 @@ bash $COUPLER_ROOT/tools/dev/valida_rodada.bash compara teste_01
 | --- | --- |
 | `prepara NOME` | confere que `bin/esmApp` existe e não contém código de outra instalação; mostra data e revisão; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da linha de base |
 | `submete NOME` | roda o `--check` e submete com 152 PETs; espera o job terminar |
-| `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados e compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças; se a comparação nem começou (por exemplo, linha de base que não confere com o seu `SHA256SUMS`), diz isso e sai com código 2; sai com o código do `compara-linha-base.bash` (0 PASS, 1 FAIL, 2 comparação não feita) |
+| `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados; extrai o relatório de acoplamento (seção 2.1) e o compara com o da rodada aprovada mais recente; compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças; se a comparação nem começou (por exemplo, linha de base que não confere com o seu `SHA256SUMS`), diz isso e sai com código 2; sai com o código do `compara-linha-base.bash` (0 PASS, 1 FAIL, 2 comparação não feita) |
 
-Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`) e `NPES` (padrão: 152). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
+Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`), `NPES` (padrão: 152) e `REL_REF` (rodada cujo relatório de acoplamento serve de referência; padrão: a aprovada mais recente). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
 
 Não altere o repositório (`git switch`, `git am`, `make`) enquanto o job estiver na fila ou rodando.
+
+### 2.1 Relatório de acoplamento
+
+Desde a fase 11, a rodada escreve no log do PET 0 (`logs/PET000.esmApp.log`) linhas com o prefixo `CPL-REL:`, que descrevem o acoplamento como ele foi montado:
+
+| Linhas | Quando | Desde |
+| --- | --- | --- |
+| `configuracao do mapa`, `conector A -> B: N campo(s)` e um campo por linha, com as opções | inicialização, no `ModifyCplLists` do driver | R-FASE11-03 |
+| `DIFERENCA:`, `AVISO:` e `conferencia do mapa: N diferenca(s), M aviso(s)` | idem; a produção dá 0 diferenças e 3 avisos | R-FASE11-03 |
+| `rota NOME: esquema, metodos, mascara, aceito METODO` (ou `usa a reserva`) | na criação de cada rota do mediador | R-FASE11-04 |
+| `completar ROTA CAMPO: N aplicacao(oes), P ponto(s) fora da faixa, F com valor fixo` | fim da rodada, somando todos os PETs do mediador | R-FASE11-04 |
+
+O `compara` grava essas linhas, sem data e hora, em `relatorio_acoplamento.txt` e as compara com as da rodada aprovada (PASS no `compara.txt`) mais recente, ou com as de `REL_REF`. Igual: o acoplamento foi montado da mesma forma. Diferente: as linhas que mudaram vão para `relatorio_acoplamento.diff` e as primeiras aparecem na tela; a rodada não é reprovada por isso, mas uma diferença não anunciada na etapa aponta o problema antes da comparação dos arquivos. Na primeira rodada de uma etapa que acrescenta linhas ao relatório, a diferença esperada são só as linhas novas.
 
 ## 3. Se der FAIL
 

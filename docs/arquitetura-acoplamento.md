@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6) e na R-FASE11-03 (seções 3.6 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6) na R-FASE11-03 (seções 3.6 e 6) e na R-FASE11-04 (seções 4.2 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -300,7 +300,7 @@ Cada tipo de mudança tem uma forma de confirmar, antes da rodada, que nada mudo
 | chamadas movidas entre módulos | `confere-instrucoes.py` sobre a soma dos arquivos: só estrutura de módulo muda; teste da física bulk | relatório de acoplamento igual |
 | DOCN ou DATM | teste do DOCN num driver NUOPC (`tests/docn/compara-docn.bash`, conferência `docn`); DATM pela compilação | |
 
-A partir da etapa que cria o relatório de acoplamento (R-FASE11-04), `valida_rodada.bash compara` passa a extrair o relatório do log e compará-lo com o da última rodada validada. Uma diferença ali aponta o problema antes da comparação dos arquivos.
+A partir da etapa que cria o relatório de acoplamento (R-FASE11-04), `valida_rodada.bash compara` passa a extrair o relatório do log e compará-lo com o da última rodada validada. Uma diferença ali aponta o problema antes da comparação dos arquivos. O relatório tem quatro partes: configuração e conectores, conferência do mapa (R-FASE11-03), rotas na criação e pontos completados por vizinhança no fim da rodada (R-FASE11-04); o formato está em `docs/validacao-refatoracao.md`, seção 2.1. Os pontos completados são contados onde o preenchimento roda hoje, fora das rotas, com o nome `rota campo`; quando a R-FASE11-14 levar o preenchimento para dentro da rota, as linhas têm de sair iguais.
 
 ### 4.3 Etapas
 
@@ -417,7 +417,9 @@ A R-FASE11-02 escreveu o mapa: `src/coupling/cpl_fields.F90` (57 campos) e `src/
 
 A R-FASE11-03 criou `src/coupling/cpl_check.F90`, chamado pelo `ModifyCplLists` do driver: relatório dos conectores e conferência do mapa no log do PET 0, com o prefixo `CPL-REL:`, sem interromper a rodada (seção 3.6). Na configuração de produção, num driver NUOPC de teste com as listas de hoje, a conferência dá 0 diferenças e 3 avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome). No mesmo teste, a CplList saiu em ordem alfabética, e não na ordem do anúncio; se o log da Jaci confirmar, o cuidado da seção 4.6 sobre a ordem dos campos anunciados vale para os estados, não para os conectores.
 
-Próxima etapa: **R-FASE11-04**, com o relatório das rotas do mediador (método aceito, reserva, pontos completados) e a extração e comparação do relatório em `valida_rodada.bash compara`, conforme a tabela do bloco A.
+A R-FASE11-04 fechou o bloco A: o relatório de acoplamento ganhou uma linha por rota do mediador, escrita na criação (esquema, métodos, máscara, método aceito ou reserva usada), e uma linha por campo completado por vizinhança, escrita no fim da rodada com a soma dos PETs; `valida_rodada.bash compara` grava o relatório em `relatorio_acoplamento.txt` e o compara com o da rodada aprovada mais recente.
+
+Próxima etapa: **R-FASE11-05**, primeira do bloco B: o anúncio dos campos do mediador passa a ser lido de `TROCAS`, nos mesmos nomes, na mesma ordem e nas mesmas fases, conferido nome a nome por teste.
 
 ---
 

@@ -41,6 +41,7 @@ module MED_cap_MONAN_mod
   use NUOPC_Mediator, only: med_label_DataInitialize => label_DataInitialize
   use NUOPC_Mediator, only: med_label_Advance        => label_Advance
   use NUOPC_Mediator, only: med_label_CheckImport    => label_CheckImport
+  use NUOPC_Mediator, only: med_label_Finalize       => label_Finalize
   use NUOPC_Mediator, only: NUOPC_MediatorGet
   ! Módulos especializados do mediador
   use med_cap_types_mod,   only: MED_InternalState,            &
@@ -61,7 +62,7 @@ module MED_cap_MONAN_mod
                                   regrid_ocean_currents,                      &
                                   update_ice_fraction_from_docn
   use med_export_mod,      only: export_to_components, stamp_export_fields
-  use med_diag_mod,        only: log_ifrac_export_bitsum
+  use med_diag_mod,        only: log_ifrac_export_bitsum, relata_completas
 
   implicit none
   private
@@ -106,7 +107,30 @@ contains
       specRoutine=CheckImportNoop, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
+    call NUOPC_CompSpecialize(gcomp, specLabel=med_label_Finalize, &
+      specRoutine=MediatorFinalize, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
   end subroutine SetServices
+
+  !============================================================================
+  !> Fim da rodada: linhas do relatório de acoplamento com os pontos
+  !! completados por vizinhança (relata_completas). Só escreve no log.
+  !============================================================================
+  subroutine MediatorFinalize(gcomp, rc)
+    type(ESMF_GridComp)  :: gcomp
+    integer, intent(out) :: rc
+
+    type(MED_InternalStateWrapper) :: iswrap
+    type(MED_InternalState), pointer :: is
+
+    rc = ESMF_SUCCESS
+    call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    is => iswrap%wrap
+    call relata_completas(is%run%completa, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+  end subroutine MediatorFinalize
 
   !============================================================================
   ! CheckImportNoop

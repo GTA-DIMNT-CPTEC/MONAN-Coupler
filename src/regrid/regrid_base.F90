@@ -140,11 +140,15 @@ contains
 
   !> Preenchimento por vizinhança de um campo 2D local (sem troca de halo:
   !! cada PET enxerga apenas os seus pontos).
-  !! n_left (opcional) devolve quantos pontos receberam o valor fixo vfill.
-  subroutine neighbor_fill(arr, opt, n_left)
+  !! n_left (opcional) devolve quantos pontos receberam o valor fixo vfill;
+  !! n_invalid (opcional), quantos estavam fora da faixa válida antes do
+  !! preenchimento (depois de NaN e, com overflow_to_fill, valores acima de
+  !! vmax tratados). Os dois só contam: não mudam o preenchimento.
+  subroutine neighbor_fill(arr, opt, n_left, n_invalid)
     real(ESMF_KIND_R8),  intent(inout) :: arr(:,:)
     type(regrid_fill_t), intent(in)    :: opt
     integer, optional,   intent(out)   :: n_left
+    integer, optional,   intent(out)   :: n_invalid
 
     real(ESMF_KIND_R8), allocatable :: tmp(:,:)
     logical,            allocatable :: valid(:,:)
@@ -152,6 +156,7 @@ contains
     integer :: ni, nj, i, j, ii, jj, it, nbr
 
     if (present(n_left)) n_left = 0
+    if (present(n_invalid)) n_invalid = 0
     ni = size(arr, 1); nj = size(arr, 2)
     if (ni * nj == 0) return
 
@@ -160,6 +165,7 @@ contains
 
     allocate(valid(ni, nj))
     valid = (arr >= opt%vmin .and. arr <= opt%vmax)
+    if (present(n_invalid)) n_invalid = count(.not. valid)
 
     if (real(count(.not. valid), ESMF_KIND_R8) / real(ni*nj, ESMF_KIND_R8) > &
         opt%skip_fraction) then
