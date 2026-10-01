@@ -206,7 +206,7 @@ $(OBJDIR)/med_ice.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(
 $(OBJDIR)/med_init.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_ocean.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_ocean.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_ice.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/mom_cap_methods.o: $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o
-$(OBJDIR)/mom_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_si_ifrac.o $(OBJDIR)/mom_surface_forcing_nuopc.o $(OBJDIR)/time_utils.o
+$(OBJDIR)/mom_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_si_ifrac.o $(OBJDIR)/mom_surface_forcing_nuopc.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/mom_si_ifrac.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/docn_cap_netcdf.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o
 $(OBJDIR)/mom_ocean_model_nuopc.o: $(OBJDIR)/mom_surface_forcing_nuopc.o
 $(OBJDIR)/mpas_atm_fluxes.o: $(OBJDIR)/mpas_atm_types.o

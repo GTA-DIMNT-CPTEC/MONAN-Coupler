@@ -154,6 +154,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-08 | `cpl_grids`: malha de fluxo do mediador e grade do cap atmosférico por um só construtor, decomposição escrita uma vez; chamadas `ESMF_GridCreate*` fora de `src/coupling` de 7 para 5 |
 | R-FASE11-09 | fórmulas de índice e de longitude das grades regulares em `cpl_grids` (oito rotinas, uma função por regra) |
 | R-FASE11-10 | `cpl_malha_tripolar` e `cpl_blocos_t`: oceano no mediador e malha do SIS2 construídos por `cpl_grids`; chamadas `ESMF_GridCreate*` fora de `src/coupling` de 5 para 3 |
+| R-FASE11-11 | grade do cap do MOM6 por `cpl_malha_de_blocos`, com as chamadas do ESMF de hoje; fim do bloco C; chamadas `ESMF_GridCreate*` fora de `src/coupling` de 3 para 2 (DOCN e DATM) |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

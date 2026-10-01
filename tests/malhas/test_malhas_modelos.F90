@@ -1,10 +1,12 @@
-!> @file test_malha_gelo.F90
-!! @brief Malha do SIS2 (ice_sis2) por cpl_grids, contra a construção de antes.
+!> @file test_malhas_modelos.F90
+!! @brief Malhas dos caps do SIS2 e do MOM6 por cpl_grids, contra as de antes.
 !!
-!! O cap do SIS2 só roda com as bibliotecas do modelo, por isso a comparação
-!! com a versão anterior é feita aqui, no mesmo programa, contra uma cópia
-!! da construção que sis_cap_MONAN::create_ice_grid fazia até a R-FASE11-09
-!! (tag fase11-09-validada):
+!! Os caps do SIS2 e do MOM6 só rodam com as bibliotecas dos modelos, por
+!! isso a comparação com a versão anterior é feita aqui, no mesmo programa,
+!! contra cópias das construções que os caps faziam: a de
+!! sis_cap_MONAN::create_ice_grid até a R-FASE11-09 (tag fase11-09-validada)
+!! e a de mom_cap_MONAN::create_ocean_grid até a R-FASE11-10 (tag
+!! fase11-10-validada):
 !!
 !!   blocos    cpl_blocos_de_limites contra a cópia sem mudança de
 !!             ICE_DecompFromBlocks (ref_decomp, abaixo), em layouts
@@ -16,6 +18,12 @@
 !!             antes (ESMF_GridCreate1PeriDim com countsPerDEDim1/2 e
 !!             petMap, centros lidos por mom6_supergrid_tcoords no DE 0):
 !!             mesmos limites e coordenadas, bit a bit
+!!   mom6      com blocos de cada PET (um layout que não é produto, com 4
+!!             PETs, e layouts produto com o mapa de PETs invertido), a grade
+!!             de cpl_malha_de_blocos contra a criada como antes
+!!             (ESMF_DELayoutCreate, ESMF_DistGridCreate com deBlockList,
+!!             ESMF_GridCreate sem halo, ESMF_GridAddCoord): mesmo número de
+!!             DEs locais e mesmos limites dos vetores de coordenadas
 !!
 !! Roda com 4, 6 ou 8 processos (compara-malhas.bash). Saída: uma linha
 !! PASSOU/FALHOU por caso no PET 0 e, no fim, "TODOS OS TESTES PASSARAM" ou
@@ -127,10 +135,11 @@ contains
 
 end module ref_gelo_mod
 
-program test_malha_gelo
+program test_malhas_modelos
   use ESMF
   use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords
-  use cpl_grids_mod,      only : cpl_blocos_t, cpl_blocos_de_limites, cpl_malha_tripolar
+  use cpl_grids_mod,      only : cpl_blocos_t, cpl_blocos_de_limites, cpl_malha_tripolar, &
+                                 cpl_malha_de_blocos
   use ref_gelo_mod,       only : ref_decomp
   use, intrinsic :: iso_fortran_env, only : int64
   implicit none
@@ -139,7 +148,7 @@ program test_malha_gelo
   integer :: rc, localPet, petCount, nfalhas, nx, ny
 
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, &
-                       defaultLogFileName='teste_malha_gelo', &
+                       defaultLogFileName='teste_malhas_modelos', &
                        logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
   if (rc /= ESMF_SUCCESS) error stop 'ESMF_Initialize'
   call ESMF_VMGetGlobal(vm, rc=rc)
@@ -151,6 +160,7 @@ program test_malha_gelo
   if (rc /= ESMF_SUCCESS) error stop 'mom6_supergrid_dims'
   call confere_malha('x mais rapido', .false.)
   call confere_malha('y mais rapido', .true.)
+  call confere_mom6()
 
   if (localPet == 0) then
     if (nfalhas == 0) then
@@ -269,6 +279,82 @@ contains
     call resultado_todos('malha, '//nome, igual)
   end subroutine confere_malha
 
+  !> Malha do MOM6: blocos de cada PET e mapa de PETs; grade nova contra a
+  !! criada como mom_cap_MONAN::create_ocean_grid criava.
+  subroutine confere_mom6()
+    integer, allocatable :: lim(:,:), pmap(:)
+    integer :: nbx, nby, k, ix, iy
+
+    allocate(lim(4, petCount), pmap(petCount))
+    if (petCount == 4) then
+      ! layout que não é produto: colunas de blocos com cortes em j diferentes
+      lim = reshape([1,5,1,4, 6,10,1,2, 6,10,3,7, 1,5,5,7], [4,4])
+      pmap = [0, 1, 2, 3]
+      call caso_mom6('nao produto', lim, pmap)
+    end if
+    select case (petCount)
+    case (4); nbx = 2; nby = 2
+    case (6); nbx = 3; nby = 2
+    case (8); nbx = 2; nby = 4
+    case default; nbx = petCount; nby = 1
+    end select
+    do k = 1, petCount
+      ix = mod(k - 1, nbx); iy = (k - 1) / nbx
+      lim(:, k) = [faixa_ini(ix, nbx, 10), faixa_fim(ix, nbx, 10), &
+                   faixa_ini(iy, nby, 7), faixa_fim(iy, nby, 7)]
+      pmap(k) = petCount - k   ! mapa invertido
+    end do
+    call caso_mom6('produto, mapa invertido', lim, pmap)
+  end subroutine confere_mom6
+
+  subroutine caso_mom6(nome, lim, pmap)
+    character(len=*), intent(in) :: nome
+    integer,          intent(in) :: lim(:,:), pmap(:)
+    type(ESMF_Grid) :: g_novo, g_ref
+    type(ESMF_DistGrid) :: distGrid
+    type(ESMF_DELayout) :: deLayout
+    integer, allocatable :: deBlockList(:,:,:)
+    integer :: n, rc, nde_n, nde_r, lde, dim, cl(2), cu(2), clr(2), cur(2)
+    real(ESMF_KIND_R8), pointer :: cn(:,:), cr(:,:)
+    logical :: igual
+
+    call cpl_malha_de_blocos('ocn_mom6', 10, 7, lim, pmap, g_novo, rc)
+    if (rc /= ESMF_SUCCESS) error stop 'cpl_malha_de_blocos'
+
+    ! como antes (mom_cap_MONAN::create_ocean_grid, tag fase11-10-validada)
+    allocate(deBlockList(2, 2, size(lim, 2)))
+    do n = 1, size(lim, 2)
+      deBlockList(1, 1, n) = lim(1, n)
+      deBlockList(1, 2, n) = lim(2, n)
+      deBlockList(2, 1, n) = lim(3, n)
+      deBlockList(2, 2, n) = lim(4, n)
+    end do
+    deLayout = ESMF_DELayoutCreate(petMap=pmap, rc=rc)
+    distGrid = ESMF_DistGridCreate(minIndex=(/1, 1/), maxIndex=(/10, 7/), &
+                 deBlockList=deBlockList, delayout=deLayout, rc=rc)
+    g_ref = ESMF_GridCreate(distgrid=distGrid,               &
+              coordSys=ESMF_COORDSYS_SPH_DEG,                &
+              gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
+              rc=rc)
+    call ESMF_GridAddCoord(g_ref, staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    if (rc /= ESMF_SUCCESS) error stop 'grade de referencia do MOM6'
+
+    call ESMF_GridGet(g_novo, localDeCount=nde_n, rc=rc)
+    call ESMF_GridGet(g_ref, localDeCount=nde_r, rc=rc)
+    igual = nde_n == nde_r
+    do lde = 0, min(nde_n, nde_r) - 1
+      do dim = 1, 2
+        call ESMF_GridGetCoord(g_novo, coordDim=dim, localDE=lde, staggerloc=ESMF_STAGGERLOC_CENTER, &
+               computationalLBound=cl, computationalUBound=cu, farrayPtr=cn, rc=rc)
+        call ESMF_GridGetCoord(g_ref, coordDim=dim, localDE=lde, staggerloc=ESMF_STAGGERLOC_CENTER, &
+               computationalLBound=clr, computationalUBound=cur, farrayPtr=cr, rc=rc)
+        igual = igual .and. all(cl == clr) .and. all(cu == cur) .and. &
+                all(lbound(cn) == lbound(cr)) .and. all(ubound(cn) == ubound(cr))
+      end do
+    end do
+    call resultado_todos('mom6, '//nome, igual)
+  end subroutine caso_mom6
+
   !> Início e fim da faixa k (0..nb-1) de n pontos em nb faixas, com o
   !! resto nas primeiras (como o FMS distribui).
   integer function faixa_ini(k, nb, n)
@@ -304,4 +390,4 @@ contains
     end if
   end subroutine resultado
 
-end program test_malha_gelo
+end program test_malhas_modelos

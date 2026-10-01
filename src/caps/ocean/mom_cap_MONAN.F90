@@ -74,6 +74,7 @@ module MOM_cap_MONAN_mod
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields
   use cpl_fields_mod, only : CPL_NOME_LEN
   use cpl_map_mod,    only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
+  use cpl_grids_mod,  only : cpl_malha_de_blocos
 
   ! esmf2fms_time/fms2esmf_time nao existem em MOM_cap_time.
   ! Conversao ESMF->FMS via ESMF_TimeGet(yy,mm,...) + set_date.
@@ -480,16 +481,17 @@ contains
   !!
   !! Passos:
   !!   1. mpp_get_compute_domains: coleta xb/xe/yb/ye de todos os PETs via FMS.
-  !!   2. ESMF_DistGridCreate(minIndex, maxIndex, deBlockList): DistGrid 2D
-  !!      regular com blocos contíguos por PET — aceito por ESMF_GridCreate.
-  !!   3. ESMF_GridCreate(distgrid, gridEdgeLWidth, gridEdgeUWidth): Grid 2D
-  !!      sobre esse DistGrid, sem padding de halo.
-  !!   4. ESMF_GridAddCoord: lon/lat nos centróides para regrid.
-  !!   5. Item de máscara na grade (não fatal se falhar).
+  !!   2. cpl_malha_de_blocos (cpl_grids): DistGrid 2D com a lista de blocos
+  !!      do MOM6 (deBlockList) e Grid 2D sobre ele, sem padding de halo,
+  !!      com o stagger dos centros.
+  !!   3. Coordenadas lon/lat nos centróides, copiadas de geoLonT/geoLatT.
+  !!   4. Item de máscara na grade (não fatal se falhar).
   !!
   !! PETs land-only: mpp_get_compute_domains retorna domínio vazio (lsize=0)
   !! para esses PETs, mas o deBlockList lida com isso naturalmente pois
   !! o DistGrid é definido globalmente pelo espaço de índices [1..ni]×[1..nj].
+  !! A grade não declara periodicidade e usa os índices locais de cada DE,
+  !! diferente da malha ocn_med do mediador (ver o cabeçalho de cpl_grids).
   !!
   !! @param[in]  is          estado interno (domínio MOM6)
   !! @param[in]  ocean_grid  grade MOM6 (coordenadas geoLonT/geoLatT)
@@ -504,11 +506,9 @@ contains
     type(ESMF_Grid),                intent(out) :: ocn_grid
     integer,                        intent(out) :: rc
 
-    type(ESMF_DistGrid) :: distGrid
-    type(ESMF_DELayout) :: deLayout
     integer :: npes_ocn, ntiles, n_2
     integer, allocatable :: xb(:), xe(:), yb(:), ye(:), pe(:)
-    integer, allocatable :: deBlockList(:,:,:)
+    integer, allocatable :: limites(:,:)
     integer, allocatable :: petMap(:)
     real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
     real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
@@ -543,53 +543,25 @@ contains
       ni, nj, isc, jsc
     call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
 
-    ! ── 3. Construir deBlockList e petMap ────────────────────────────────
-    ! deBlockList(dim, start/end, npes): limites de cada bloco por PET.
-    !   dim=1 → índice x (i);  dim=2 → índice y (j)
-    !   start/end=1 → início do bloco;  start/end=2 → fim do bloco
-    ! petMap: para cada DE (bloco), qual PET ESMF é responsável.
-    allocate(deBlockList(2, 2, npes_ocn))
+    ! ── 3. Limites de cada bloco e PET de cada bloco ──────────────────────
+    ! limites(:, n) = (is, ie, js, je) globais do bloco do PET MOM6 n;
+    ! petMap(n): PET ESMF responsável (zero-based, relativo ao pe(1)).
+    allocate(limites(4, npes_ocn))
     allocate(petMap(npes_ocn))
     do n_2 = 1, npes_ocn
-      deBlockList(1, 1, n_2) = xb(n_2)
-      deBlockList(1, 2, n_2) = xe(n_2)
-      deBlockList(2, 1, n_2) = yb(n_2)
-      deBlockList(2, 2, n_2) = ye(n_2)
-      petMap(n_2) = pe(n_2) - pe(1)    ! PET ESMF (zero-based, relativo ao pe(1))
+      limites(:, n_2) = (/ xb(n_2), xe(n_2), yb(n_2), ye(n_2) /)
+      petMap(n_2) = pe(n_2) - pe(1)
     end do
     deallocate(xb, xe, yb, ye, pe)
 
-    ! ── 4. DELayout e DistGrid 2D ─────────────────────────────────────────
-    ! ESMF_DELayoutCreate com petMap associa cada DE ao PET correto.
-    ! ESMF_DistGridCreate com minIndex/maxIndex/deBlockList cria um DistGrid
-    ! logicamente retangular [1..ni] × [1..nj] com blocos definidos pelo
-    ! deBlockList — aceito por ESMF_GridCreate (sem arbSeqIndexList).
-    deLayout = ESMF_DELayoutCreate(petMap=petMap, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DELayoutCreate', &
-      line=__LINE__, file=__FILE__)) return
-    deallocate(petMap)
+    ! ── 4. Grade nos blocos do MOM6, com o stagger dos centros ────────────
+    ! Malha ocn_mom6 (cpl_grids): DistGrid [1..ni] x [1..nj] com a lista de
+    ! blocos, sem halo, sem periodicidade declarada, índices locais por DE.
+    call cpl_malha_de_blocos('ocn_mom6', ni, nj, limites, petMap, ocn_grid, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    deallocate(limites, petMap)
 
-    distGrid = ESMF_DistGridCreate(minIndex=(/1, 1/), maxIndex=(/ni, nj/), &
-                 deBlockList=deBlockList, delayout=deLayout, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha DistGridCreate', &
-      line=__LINE__, file=__FILE__)) return
-    deallocate(deBlockList)
-
-    ! ── 5. Grid 2D sobre o DistGrid ──────────────────────────────────────
-    ! gridEdgeLWidth/gridEdgeUWidth=(/0,0/) → sem padding de halo em x ou y.
-    ocn_grid = ESMF_GridCreate(distgrid=distGrid,               &
-                 coordSys=ESMF_COORDSYS_SPH_DEG,                &
-                 gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
-                 rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridCreate', &
-      line=__LINE__, file=__FILE__)) return
-
-    ! ── 6. Coordenadas lon/lat nos centróides ─────────────────────────────
-    call ESMF_GridAddCoord(ocn_grid, &
-         staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridAddCoord', &
-      line=__LINE__, file=__FILE__)) return
-
+    ! ── 5. Coordenadas lon/lat nos centróides, as do MOM6 ─────────────────
     ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
     ! não necessariamente coincidentes com (isc..iec, jsc..jec).
     ! Usar lbound() para calcular o offset correto, exatamente como faz
@@ -623,7 +595,7 @@ contains
     end if
     nullify(lon_ptr, lat_ptr)
 
-    ! ── 7. Máscara oceânica ───────────────────────────────────────────────
+    ! ── 6. Máscara oceânica ───────────────────────────────────────────────
     call ESMF_GridAddItem(ocn_grid, itemFlag=ESMF_GRIDITEM_MASK,     &
          itemTypeKind=ESMF_TYPEKIND_I4,                               &
          staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)

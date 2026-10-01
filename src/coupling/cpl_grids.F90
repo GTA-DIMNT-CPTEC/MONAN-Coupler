@@ -17,15 +17,27 @@
 !!   ice_sis2  grade do cap do SIS2 (sis_cap_MONAN::create_ice_grid),
 !!             tripolar, nos blocos do domínio do SIS2, sem cantos
 !!             (cpl_malha_tripolar com cpl_blocos_t)
+!!   ocn_mom6  grade do cap do MOM6 (mom_cap_MONAN::create_ocean_grid), nos
+!!             blocos do domínio do MOM6, com as coordenadas que o cap copia
+!!             do modelo (cpl_malha_de_blocos)
 !!
-!! Todas são periódicas em longitude (periodicDim = 1, o padrão do ESMF),
-!! com índices globais e coordenadas esféricas em graus, sem polo declarado.
-!! Sem blocos, a decomposição é cpl_regdecomp, um DE por PET; com blocos
-!! (cpl_blocos_t, montados por cpl_blocos_de_limites), cada bloco vai ao PET
-!! que o tem no modelo. As
-!! fórmulas de centro e de canto ficam em funções, uma por regra: as duas
-!! malhas calculam o centro com expressões diferentes, e cada função
-!! reproduz a sua expressão sem mudança, para que nenhum bit mude.
+!! As quatro primeiras são periódicas em longitude (periodicDim = 1, o
+!! padrão do ESMF), com índices globais e coordenadas esféricas em graus,
+!! sem polo declarado. Sem blocos, a decomposição é cpl_regdecomp, um DE por
+!! PET; com blocos (cpl_blocos_t, montados por cpl_blocos_de_limites), cada
+!! bloco vai ao PET que o tem no modelo.
+!!
+!! A grade do cap do MOM6 é diferente, e continua como era: criada sobre um
+!! DistGrid com a lista de blocos do MOM6 (deBlockList, que aceita
+!! qualquer conjunto de blocos retangulares), sem periodicidade declarada e
+!! com os índices locais de cada DE (o padrão do ESMF). Não pode ser feita
+!! por cpl_malha_tripolar sem mudar resultados: a periodicidade muda os
+!! pesos que o conector OCN para MED calcula, e as coordenadas do MOM6
+!! (geoLonT, geoLatT) não estão na faixa [0, 360) das lidas do supergrid.
+!!
+!! As fórmulas de centro e de canto ficam em funções, uma por regra: as
+!! malhas regulares calculam o centro com expressões diferentes, e cada
+!! função reproduz a sua expressão sem mudança, para que nenhum bit mude.
 !!
 !! Também ficam aqui as fórmulas que levam uma coordenada à coluna ou à linha
 !! de uma grade regular (índice), usadas pelo cap atmosférico, pelos
@@ -69,6 +81,7 @@ module cpl_grids_mod
   private
 
   public :: cpl_regdecomp, cpl_malha_latlon, cpl_malha_tripolar, cpl_blocos_de_limites
+  public :: cpl_malha_de_blocos
   public :: centro_lon_leste0, centro_lat_leste0, canto_lon_leste0, canto_lat_leste0
   public :: centro_lon_oeste180, centro_lat_oeste180
   public :: indice_trunca, indice_arredonda
@@ -305,6 +318,63 @@ contains
           ': falha ao ler os cantos de '//trim(arquivo), line=__LINE__, file=u_FILE_u)) return
     end do
   end subroutine cpl_malha_tripolar
+
+  !> Cria a grade do cap do MOM6 nos blocos do modelo: um DE por bloco,
+  !! no PET dado, sobre um DistGrid [1..ni] x [1..nj] com a lista de blocos
+  !! (deBlockList, que aceita qualquer conjunto de blocos retangulares, até
+  !! um PET sem oceano), sem margem de halo (gridEdgeLWidth e gridEdgeUWidth
+  !! nulos), sem periodicidade declarada e com os índices locais de cada DE;
+  !! acrescenta o stagger dos centros, sem preencher: as coordenadas são as
+  !! do modelo, e quem chama as copia.
+  !!
+  !! @param[in]  nome      nome da malha em MALHAS, para as mensagens
+  !! @param[in]  ni, nj    tamanho global da grade
+  !! @param[in]  limites   (is, ie, js, je) globais de cada bloco
+  !! @param[in]  petMap    PET de cada bloco (base 0)
+  !! @param[out] grade     a grade criada
+  !! @param[out] rc        ESMF_SUCCESS, ou o código da falha
+  subroutine cpl_malha_de_blocos(nome, ni, nj, limites, petMap, grade, rc)
+    character(len=*), intent(in)  :: nome
+    integer,          intent(in)  :: ni, nj
+    integer,          intent(in)  :: limites(:,:)
+    integer,          intent(in)  :: petMap(:)
+    type(ESMF_Grid),  intent(out) :: grade
+    integer,          intent(out) :: rc
+
+    type(ESMF_DistGrid) :: distGrid
+    type(ESMF_DELayout) :: deLayout
+    integer, allocatable :: deBlockList(:,:,:)
+    integer :: n
+
+    ! deBlockList(dim, início/fim, bloco): dim 1 é i, dim 2 é j
+    allocate(deBlockList(2, 2, size(limites, 2)))
+    do n = 1, size(limites, 2)
+      deBlockList(1, 1, n) = limites(1, n)
+      deBlockList(1, 2, n) = limites(2, n)
+      deBlockList(2, 1, n) = limites(3, n)
+      deBlockList(2, 2, n) = limites(4, n)
+    end do
+
+    deLayout = ESMF_DELayoutCreate(petMap=petMap, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(nome)// &
+        ': falha DELayoutCreate', line=__LINE__, file=u_FILE_u)) return
+
+    distGrid = ESMF_DistGridCreate(minIndex=(/1, 1/), maxIndex=(/ni, nj/), &
+                 deBlockList=deBlockList, delayout=deLayout, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(nome)// &
+        ': falha DistGridCreate', line=__LINE__, file=u_FILE_u)) return
+
+    grade = ESMF_GridCreate(distgrid=distGrid,               &
+              coordSys=ESMF_COORDSYS_SPH_DEG,                &
+              gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
+              rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(nome)// &
+        ': falha GridCreate', line=__LINE__, file=u_FILE_u)) return
+
+    call ESMF_GridAddCoord(grade, staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(nome)// &
+        ': falha GridAddCoord', line=__LINE__, file=u_FILE_u)) return
+  end subroutine cpl_malha_de_blocos
 
   ! --------------------------------------------------------------------------
   ! Partes comuns aos construtores

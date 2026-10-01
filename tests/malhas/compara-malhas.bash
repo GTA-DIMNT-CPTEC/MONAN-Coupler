@@ -13,9 +13,9 @@
 # local, os limites computacionais e os vetores de coordenadas dos centros e
 # dos cantos e a máscara gravados (saida_<PET>.bin) têm de ser idênticos,
 # bit a bit, e as mensagens das rotinas no log do ESMF também, sem data e
-# hora. Depois, só na árvore de trabalho, tests/malhas/test_malha_gelo.F90
-# confere a malha do SIS2 (ver o cabeçalho do programa) com 4, 6 e 8
-# processos.
+# hora. Depois, só na árvore de trabalho, tests/malhas/test_malhas_modelos.F90
+# confere as malhas dos caps do SIS2 e do MOM6 (ver o cabeçalho do
+# programa) com 4, 6 e 8 processos.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/malhas/compara-malhas.bash REV [SAIDA]
@@ -108,26 +108,26 @@ for np in ${LISTA_NP}; do
   done
 done
 
-# Malha do SIS2: só na árvore de trabalho, contra a construção de antes
+# Malhas dos caps do SIS2 e do MOM6: só na árvore de trabalho, contra as de antes
 dir="${SAIDA}/nova"
 ( cd "${dir}" || exit 2
   # shellcheck disable=SC2086
   ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
-    -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malha_gelo.F90" -o test_malha_gelo.o &&
+    -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malhas_modelos.F90" -o test_malhas_modelos.o &&
   # shellcheck disable=SC2086
-  ${FC} -o test_malha_gelo test_malha_gelo.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
-) > "${SAIDA}/liga_gelo.txt" 2>&1 \
-  || { cat "${SAIDA}/liga_gelo.txt"; echo "ERRO: ligação de test_malha_gelo" >&2; exit 2; }
+  ${FC} -o test_malhas_modelos test_malhas_modelos.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+) > "${SAIDA}/liga_caps.txt" 2>&1 \
+  || { cat "${SAIDA}/liga_caps.txt"; echo "ERRO: ligação de test_malhas_modelos" >&2; exit 2; }
 for np in 4 6 8; do
-  run="${dir}/gelo_${np}"
+  run="${dir}/caps_${np}"
   rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
   # shellcheck disable=SC2086
-  if ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malha_gelo > run.log 2>&1 ) \
+  if ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malhas_modelos > run.log 2>&1 ) \
      && grep -q 'TODOS OS TESTES PASSARAM' "${run}/run.log"; then
-    echo "  gelo, ${np} PETs: $(grep -c PASSOU "${run}/run.log") caso(s) iguais"
+    echo "  caps, ${np} PETs: $(grep -c PASSOU "${run}/run.log") caso(s) iguais"
   else
     grep 'FALHOU' "${run}/run.log"; tail -5 "${run}/run.log"
-    echo "  gelo DIFERE    ${np} PETs"; difere=1
+    echo "  caps DIFERE    ${np} PETs"; difere=1
   fi
 done
 
