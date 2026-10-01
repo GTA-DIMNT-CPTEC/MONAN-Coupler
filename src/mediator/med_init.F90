@@ -17,9 +17,9 @@ module med_init_mod
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
-  use med_cap_types_mod, only: MED_InternalState, n_import_mpas, import_mpas_names, &
-                               n_import_datm, import_datm_names, n_export, &
-                               export_names, SST_BULK_FALLBACK
+  use med_cap_types_mod, only: MED_InternalState, MED_CHAVES, SST_BULK_FALLBACK
+  use cpl_fields_mod, only: CPL_NOME_LEN
+  use cpl_map_mod, only: cpl_chegadas, cpl_config_atual, cpl_config_t
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
                                  ZeroOcnFluxFields, FillInternalField
   use med_ocean_mod, only: regrid_ocean_currents
@@ -382,6 +382,12 @@ contains
     end if
   end subroutine check_corner_coordinates
 
+  !> Realiza os campos anunciados em InitializeAdvertise, nas listas do mapa
+  !! de acoplamento (cpl_chegadas, chaves MED_CHAVES) e na mesma ordem de
+  !! antes: a importação da malha de fluxo na grade ATM; a importação da
+  !! grade do oceano (So_t, So_u, So_v, So_omask e, com o SIS2, os campos
+  !! *_sis2) na grade OCN, a grade nativa desses campos (o SIS2 usa a mesma
+  !! ocean_hgrid.nc); a exportação na grade OCN. Todos real(8), no centro.
   subroutine realize_component_fields(is, importState, exportState, atm_grid, ocn_grid, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -389,119 +395,45 @@ contains
     type(ESMF_Grid), intent(in) :: atm_grid
     type(ESMF_Grid), intent(in) :: ocn_grid
     integer, intent(inout) :: rc
-    integer :: n
-    type(ESMF_Field) :: tmp_field
-    if (is%use_mpas_atm) then
-      do n = 1, n_import_mpas
-        tmp_field = ESMF_FieldCreate(grid=atm_grid, typekind=ESMF_TYPEKIND_R8, &
-          staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(import_mpas_names(n)), rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-        call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-    else
-      do n = 1, n_import_datm
-        tmp_field = ESMF_FieldCreate(grid=atm_grid, typekind=ESMF_TYPEKIND_R8, &
-          staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(import_datm_names(n)), rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-        call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-    end if
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    type(cpl_config_t) :: cfg
 
-    !--------------------------------------------------------------------------
-    ! Realizar So_t (SST) na grade OCN, a grade nativa do campo. Na atm_grid,
-    ! a rota OCN->ATM teria origem e destino na mesma grade.
-    !--------------------------------------------------------------------------
-    tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name="So_t", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Realize(importState, field=tmp_field, rc=rc)
+    cfg = cpl_config_atual()
+    call cpl_chegadas('MED@atm_med', .true., cfg, MED_CHAVES, nomes)
+    call realize_on_grid(importState, atm_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Realizar So_u e So_v na grade OCN.
-    ! Simétrico ao tratamento de So_t: correntes vêm do OCN, portanto
-    ! devem ser realizadas em ocn_grid para que o rh_ocn2atm funcione.
-    tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name="So_u", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Realize(importState, field=tmp_field, rc=rc)
+    call cpl_chegadas('MED@ocn_med', .true., cfg, MED_CHAVES, nomes)
+    call realize_on_grid(importState, ocn_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name="So_v", rc=rc)
+    call cpl_chegadas('MED@ocn_med', .false., cfg, '', nomes)
+    call realize_on_grid(exportState, ocn_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! realizar So_omask (mascara real mask2dT do MOM6)
-    ! na grade OCN, simetrico a So_t/So_u/So_v.
-    tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name="So_omask", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Realizar Si_ifrac_sis2 (gelo real do
-    ! ICE) na MESMA grade ocn_grid — a grade do componente ICE (ver
-    ! sis_cap_MONAN.F90) foi construída com a mesma geometria (mesma
-    ! ocean_hgrid.nc, mesmas dimensões, mesma periodicidade), então é
-    ! geometricamente equivalente a ocn_grid para fins de realização aqui.
-    if (cfg_use_sis2_dynamic) then
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_ifrac_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      ! mesma ocn_grid, mesmo raciocinio.
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_avsdr_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_avsdf_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_anidr_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_anidf_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-
-      ! mesma ocn_grid.
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name="Si_t_sis2", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(importState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end if
-
-    !--------------------------------------------------------------------------
-    ! Realizar campos de export na grade OCN
-    !--------------------------------------------------------------------------
-    do n = 1, n_export
-      tmp_field = ESMF_FieldCreate(grid=ocn_grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(export_names(n)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Realize(exportState, field=tmp_field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
 
     ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
     ! tolerado acima não interrompe a inicialização).
     rc = ESMF_SUCCESS
   end subroutine realize_component_fields
+
+  !> Cria e realiza no State os campos nomes, real(8) no centro da grade,
+  !! na ordem da lista. Para no primeiro erro.
+  subroutine realize_on_grid(state, grid, nomes, rc)
+    type(ESMF_State), intent(inout) :: state
+    type(ESMF_Grid),  intent(in)    :: grid
+    character(len=*), intent(in)    :: nomes(:)
+    integer,          intent(inout) :: rc
+    integer :: n
+    type(ESMF_Field) :: tmp_field
+
+    do n = 1, size(nomes)
+      tmp_field = ESMF_FieldCreate(grid=grid, typekind=ESMF_TYPEKIND_R8, &
+        staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(nomes(n)), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      call NUOPC_Realize(state, field=tmp_field, rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+  end subroutine realize_on_grid
 
   subroutine create_internal_fields(is, atm_grid, rc)
     type(MED_InternalState), pointer :: is

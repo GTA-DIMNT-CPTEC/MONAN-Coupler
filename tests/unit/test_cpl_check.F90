@@ -21,8 +21,9 @@
 program test_cpl_check
   use cpl_map_mod,       only : cpl_config_t
   use cpl_check_mod,     only : cpl_confere_conector, cpl_confere_estado, CPL_MSG_LEN
-  use med_cap_types_mod, only : import_mpas_names, export_names
   implicit none
+
+  include 'listas_mediador.inc'
 
   type(cpl_config_t), parameter :: PRODUCAO  = cpl_config_t(datm=.false., docn=.false., &
                                                             med_to_mpas=.true., sis2=.true.)
@@ -44,8 +45,6 @@ program test_cpl_check
     'Faxa_coszen', 'So_t', 'So_u', 'So_v']
   character(len=24), parameter :: ICE_EXP(6) = [character(len=24) :: &
     'Si_ifrac_sis2', 'Si_avsdr_sis2', 'Si_avsdf_sis2', 'Si_anidr_sis2', 'Si_anidf_sis2', 'Si_t_sis2']
-  character(len=24), parameter :: MED_IMP_OCN(4) = [character(len=24) :: &
-    'So_t', 'So_u', 'So_v', 'So_omask']
 
   character(len=CPL_MSG_LEN), allocatable :: msgs(:)
   character(len=32), allocatable :: med_imp(:)

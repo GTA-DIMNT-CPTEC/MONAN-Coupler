@@ -51,7 +51,8 @@ contains
   !> @brief Le os campos importados do mediador (forcante ATM + SST/correntes
   !! OCN) e popula is%aib/is%oib.
   !!
-  !! Nomes de campo iguais a med_cap_types.F90::export_names. Mapeamento:
+  !! Nomes de campo iguais aos da exportação do mediador (mapa de
+  !! acoplamento, src/coupling/cpl_map.F90). Mapeamento:
   !! - Fioi_taux/tauy → u_flux/v_flux; Fioi_sen → t_flux (SINAL INVERTIDO,
   !!   ver broadcast_to_cat_neg); Fioi_evap → q_flux;
   !!   Fioi_lwnet → lw_flux; Fioi_swnet_vdr/vdf/idr/idf → sw_flux_*

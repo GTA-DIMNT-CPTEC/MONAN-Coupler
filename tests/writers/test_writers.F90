@@ -7,7 +7,7 @@
 program test_writers
   use ESMF
   use mpi
-  use med_cap_types_mod, only : MED_InternalState, n_export, export_names
+  use med_cap_types_mod, only : MED_InternalState
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
   use mpas_import_diag_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
@@ -19,6 +19,10 @@ program test_writers
   use coupler_config_mod, only : config_read
   use netcdf
   implicit none
+
+  ! export_names e n_export: os 31 campos exportados pelo mediador, na ordem
+  ! de antes da R-FASE11-05 (desde então eles saem do mapa de acoplamento)
+  include '../unit/listas_mediador.inc'
 
   type(ESMF_VM) :: vm
   type(ESMF_Grid) :: grid

@@ -43,6 +43,14 @@
 !! (esm.F90) não o registra hoje: com use_datm=.true. o componente ATM
 !! continua sendo o MONAN-A. O destino do DATM é uma decisão pendente do GT.
 !!
+!! Listas de campos (cpl_chegadas): o que um componente anuncia e realiza
+!! sai do mapa, como os campos que chegam a um ponto. Cada componente decide
+!! o que anuncia por algumas chaves de &nuopc_mode, não por todas (o
+!! mediador, por exemplo, só por use_datm e use_sis2_dynamic, e anuncia
+!! So_omask mesmo com o DOCN, que não a exporta); as demais chaves ficam
+!! livres, e a lista é a união das configurações válidas que concordam com
+!! a atual nas chaves pedidas, na ordem de TROCAS, sem repetição.
+!!
 !! ROTAS: uma linha por interpolação do mediador. Toda rota tem as mesmas
 !! quatro etapas, na mesma ordem; a coluna com o valor padrão desliga a
 !! etapa (ou, no caso de sem_valor, deixa o comportamento padrão do ESMF):
@@ -70,6 +78,8 @@ module cpl_map_mod
 
   use ESMF,                  only : ESMF_KIND_R8
   use coupler_constants_mod, only : T_FREEZE_SEAWATER
+  use coupler_config_mod,    only : cfg_use_datm, cfg_use_docn, cfg_use_med_to_mpas, &
+                                    cfg_use_sis2_dynamic
   use regrid_base_mod,       only : regrid_fill_t
   use cpl_fields_mod,        only : CPL_NOME_LEN
 
@@ -82,6 +92,7 @@ module cpl_map_mod
   public :: cpl_troca_vale, cpl_condicoes_validas
   public :: cpl_rota_indice, cpl_malha_indice
   public :: cpl_ponto_componente, cpl_ponto_malha
+  public :: cpl_config_atual, cpl_config_valida, cpl_chegadas
 
   integer, parameter :: r8 = ESMF_KIND_R8
 
@@ -218,7 +229,7 @@ module cpl_map_mod
     cpl_troca_t('Si_anidf_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2'),                   &
     cpl_troca_t('Si_t_sis2',      'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2'),                   &
     ! 6. Mediador: da malha de fluxo para a grade do oceano (exportState),
-    !    na ordem de export_names (med_cap_types)
+    !    na ordem em que o mediador anuncia e realiza a exportação
     cpl_troca_t('Foxx_taux',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          ''),                       &
     cpl_troca_t('Foxx_tauy',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          ''),                       &
     cpl_troca_t('Foxx_sen',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          ''),                       &
@@ -366,6 +377,90 @@ module cpl_map_mod
                    vmax=1.0_r8, vfill=0.0_r8)) ]
 
 contains
+
+  !> Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
+  !! nuopc.input (coupler_config).
+  function cpl_config_atual() result(cfg)
+    type(cpl_config_t) :: cfg
+
+    cfg%datm        = cfg_use_datm
+    cfg%docn        = cfg_use_docn
+    cfg%med_to_mpas = cfg_use_med_to_mpas
+    cfg%sis2        = cfg_use_sis2_dynamic
+  end function cpl_config_atual
+
+  !> Combinação de chaves aceita por config_read: o SIS2 exige o MOM6.
+  pure logical function cpl_config_valida(cfg) result(ok)
+    type(cpl_config_t), intent(in) :: cfg
+    ok = .not. (cfg%sis2 .and. cfg%docn)
+  end function cpl_config_valida
+
+  !> Campos que chegam a um ponto, na ordem de TROCAS e sem repetição.
+  !!
+  !! A troca conta se vale em alguma configuração válida que concorda com
+  !! cfg nas chaves listadas em chaves ('datm', 'docn', 'med_to_mpas',
+  !! 'sis2', separadas por vírgula; '' deixa todas livres).
+  !!
+  !! @param[in]  ponto         'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
+  !! @param[in]  por_conector  .true.: chegadas por conector (importação);
+  !!                           .false.: por rota ou cap (dentro do componente)
+  !! @param[in]  cfg           configuração atual
+  !! @param[in]  chaves        chaves de cfg que o componente consulta
+  !! @param[out] nomes         campos, na ordem de TROCAS
+  subroutine cpl_chegadas(ponto, por_conector, cfg, chaves, nomes)
+    character(len=*),                         intent(in)  :: ponto
+    logical,                                  intent(in)  :: por_conector
+    type(cpl_config_t),                       intent(in)  :: cfg
+    character(len=*),                         intent(in)  :: chaves
+    character(len=CPL_NOME_LEN), allocatable, intent(out) :: nomes(:)
+
+    type(cpl_config_t) :: c
+    integer :: t, k
+    logical :: vale
+
+    allocate(nomes(0))
+    do t = 1, size(TROCAS)
+      if ((TROCAS(t)%meio == 'conector') .neqv. por_conector) cycle
+      if (index(ponto, '@') > 0) then
+        if (TROCAS(t)%para /= ponto) cycle
+      else
+        if (cpl_ponto_componente(TROCAS(t)%para) /= ponto) cycle
+      end if
+      if (any(nomes == TROCAS(t)%campo)) cycle
+      vale = .false.
+      do k = 0, 15
+        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), &
+                         sis2=btest(k, 3))
+        if (.not. cpl_config_valida(c)) cycle
+        if (.not. concorda(c, cfg, chaves)) cycle
+        if (cpl_troca_vale(TROCAS(t), c)) then
+          vale = .true.
+          exit
+        end if
+      end do
+      if (vale) nomes = [character(len=CPL_NOME_LEN) :: nomes, TROCAS(t)%campo]
+    end do
+  end subroutine cpl_chegadas
+
+  !> c e cfg têm o mesmo valor em cada chave listada.
+  pure logical function concorda(c, cfg, chaves) result(ok)
+    type(cpl_config_t), intent(in) :: c, cfg
+    character(len=*),   intent(in) :: chaves
+    character(len=CPL_QUANDO_LEN) :: resto, chave
+
+    ok = .true.
+    resto = adjustl(chaves)
+    do while (len_trim(resto) > 0 .and. ok)
+      call proxima_condicao(resto, chave)
+      select case (trim(chave))
+      case ('datm');        ok = c%datm .eqv. cfg%datm
+      case ('docn');        ok = c%docn .eqv. cfg%docn
+      case ('med_to_mpas'); ok = c%med_to_mpas .eqv. cfg%med_to_mpas
+      case ('sis2');        ok = c%sis2 .eqv. cfg%sis2
+      case default;         ok = .false.
+      end select
+    end do
+  end function concorda
 
   !> Verdadeiro se a troca vale na configuração cfg (todas as condições da
   !! coluna quando valem; lista vazia vale sempre).

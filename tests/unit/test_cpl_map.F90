@@ -24,7 +24,14 @@
 !!   mediador    campos que chegam ao mediador por conector iguais, na mesma
 !!               ordem, a import_mpas_names e import_datm_names; campos que
 !!               voltam da malha de fluxo para a do oceano iguais, na mesma
-!!               ordem, a export_names (med_cap_types)
+!!               ordem, a export_names (listas de listas_mediador.inc, as
+!!               do med_cap_types até a R-FASE11-04-FIX01)
+!!   listas      as listas que o mediador anuncia e realiza desde a
+!!               R-FASE11-05, geradas por cpl_chegadas com as chaves do
+!!               mediador (MED_CHAVES), iguais nome a nome e na mesma ordem
+!!               às de antes, em cada configuração: importação na malha de
+!!               fluxo, importação na grade do oceano, exportação e a
+!!               importação toda (a ordem do anúncio)
 !!
 !! Configurações conferidas (chaves de &nuopc_mode):
 !!   producao       MONAN-A, MOM6, SIS2, contorno pelo mediador
@@ -46,8 +53,12 @@ program test_cpl_map
   use cpl_map_mod,       only : MALHAS, TROCAS, ROTAS, cpl_config_t, cpl_troca_vale, &
                                 cpl_condicoes_validas, cpl_rota_indice, cpl_malha_indice, &
                                 cpl_ponto_componente, cpl_ponto_malha
-  use med_cap_types_mod, only : import_mpas_names, import_datm_names, export_names
+  use cpl_map_mod,       only : cpl_chegadas
+  use cpl_fields_mod,    only : CPL_NOME_LEN
+  use med_cap_types_mod, only : MED_CHAVES
   implicit none
+
+  include 'listas_mediador.inc'
 
   integer, parameter :: NCFG = 5
   character(len=16), parameter :: NOME_CFG(NCFG) = [character(len=16) :: &
@@ -86,6 +97,9 @@ program test_cpl_map
   end do
   call confere_contagens()
   call confere_mediador()
+  do k = 1, NCFG
+    call confere_listas_mediador(k)
+  end do
 
   if (nfalhas == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'
@@ -339,6 +353,38 @@ contains
     call resultado('mediador: todo campo exportado sai por algum conector', &
       todos_exportados())
   end subroutine confere_mediador
+
+  !> Na configuração k, as listas geradas do mapa para o mediador são as que
+  !! ele anunciava e realizava antes: forçantes do MONAN-A ou do DATM na
+  !! malha de fluxo; So_t, So_u, So_v, So_omask e, com o SIS2, os *_sis2 na
+  !! grade do oceano; as 31 exportações em todas as configurações.
+  subroutine confere_listas_mediador(k)
+    integer, intent(in) :: k
+    character(len=CPL_NOME_LEN), allocatable :: atm(:), ocn(:), tudo(:), exp(:)
+    character(len=32), allocatable :: esp_atm(:), esp_ocn(:)
+
+    if (CFG(k)%datm) then
+      esp_atm = import_datm_names
+    else
+      esp_atm = import_mpas_names
+    end if
+    if (CFG(k)%sis2) then
+      esp_ocn = [character(len=32) :: MED_IMP_OCN, MED_IMP_SIS2]
+    else
+      esp_ocn = MED_IMP_OCN
+    end if
+    call cpl_chegadas('MED@atm_med', .true., CFG(k), MED_CHAVES, atm)
+    call cpl_chegadas('MED@ocn_med', .true., CFG(k), MED_CHAVES, ocn)
+    call cpl_chegadas('MED', .true., CFG(k), MED_CHAVES, tudo)
+    call cpl_chegadas('MED@ocn_med', .false., CFG(k), '', exp)
+    call resultado(trim(NOME_CFG(k))//': mediador, importacao na malha de fluxo', &
+      lista_igual(atm, esp_atm))
+    call resultado(trim(NOME_CFG(k))//': mediador, importacao na grade do oceano', &
+      lista_igual(ocn, esp_ocn))
+    call resultado(trim(NOME_CFG(k))//': mediador, importacao na ordem do anuncio', &
+      lista_igual(tudo, [character(len=32) :: esp_atm, esp_ocn]))
+    call resultado(trim(NOME_CFG(k))//': mediador, exportacao', lista_igual(exp, export_names))
+  end subroutine confere_listas_mediador
 
   ! --------------------------------------------------------------------------
   ! Auxiliares

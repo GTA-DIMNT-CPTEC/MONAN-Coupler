@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6) na R-FASE11-03 (seções 3.6 e 6) e na R-FASE11-04 (seções 4.2 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6) na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6) e na R-FASE11-05 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -202,6 +202,8 @@ type(cpl_troca_t), parameter :: TROCAS(*) = [                                   
 ```
 
 No mediador, o mesmo nome pode existir duas vezes em `MED@ocn_med`: o campo importado e o exportado (`So_t`, `So_u` e `So_v`). A regra de leitura do mapa é que uma rota que parte de `MED@ocn_med` lê o campo importado, e um conector que parte dali leva o exportado, que chegou de `MED@atm_med` pela rota `atm2ocn`.
+
+As listas de campos que um componente anuncia e realiza saem do mapa por `cpl_chegadas(ponto, por_conector, cfg, chaves, nomes)`: os campos que chegam ao ponto (`COMPONENTE@malha`, ou só o componente), por conector (importação) ou por rota e cap (dentro do componente), na ordem de `TROCAS` e sem repetição. O componente diz quais chaves de `&nuopc_mode` consulta; as outras ficam livres, e a lista é a união das configurações válidas que concordam com a atual nessas chaves. O mediador consulta só `datm` e `sis2` (`MED_CHAVES`): por isso anuncia `So_omask` também com o DOCN, como antes. A importação do mediador é a chegada por conector; a exportação, a chegada em `MED@ocn_med` pelas rotas `atm2ocn` e `atm2ocn_ice`, que já estava na ordem de `export_names`.
 
 O DATM está no mapa como o cap dele anuncia os campos (malha `datm`, condição `datm`), mas o driver não o registra: com `use_datm=.true.` o componente atmosférico continua sendo o MONAN-A. Duas lacunas de hoje ficam registradas no teste do mapa: com o DOCN, `So_omask` não chega ao mediador (o DOCN não a exporta); com o DOCN e o contorno direto do oceano, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A, e o cap atmosférico interrompe a rodada.
 
@@ -419,7 +421,9 @@ A R-FASE11-03 criou `src/coupling/cpl_check.F90`, chamado pelo `ModifyCplLists` 
 
 A R-FASE11-04 fechou o bloco A: o relatório de acoplamento ganhou uma linha por rota do mediador, escrita na criação (esquema, métodos, máscara, método aceito ou reserva usada), e uma linha por campo completado por vizinhança, com a soma dos PETs; `valida_rodada.bash compara` grava o relatório em `relatorio_acoplamento.txt` e o compara com o da rodada aprovada mais recente. Na rodada de validação, as três rotas que pedem `conserve,bilinear` ou `conserve,nearest_stod` (`ocn2atm_sst`, `ocn2atm_ice`, `atm2ocn_ice`) aceitaram o conservativo, e nenhuma caiu na reserva; é o que `ROTAS` descreve. As linhas dos pontos completados não saíram, porque a R-FASE11-04 as escrevia na finalização do mediador, que o programa principal não chama (`esmApp.F90` não chama `ESMF_GridCompFinalize`); a R-FASE11-04-FIX01 as passa para o último passo do mediador.
 
-Próxima etapa: **R-FASE11-05**, primeira do bloco B: o anúncio dos campos do mediador passa a ser lido de `TROCAS`, nos mesmos nomes, na mesma ordem e nas mesmas fases, conferido nome a nome por teste.
+A R-FASE11-05 abriu o bloco B: o mediador anuncia e realiza os campos a partir do mapa (`cpl_chegadas`, seção 3.5), e as listas `import_mpas_names`, `import_datm_names` e `export_names` saíram de `med_cap_types`, assim como os anúncios e as realizações escritos um a um em `MED_cap` e `med_init`. As listas geradas são iguais às de antes, nome a nome e na mesma ordem, nas cinco configurações do teste; o mediador real, num driver NUOPC de teste, deu o mesmo relatório de acoplamento antes e depois em quatro configurações. Arquivos com nomes de campos escritos à mão: de 8 para 5 (os caps).
+
+Próxima etapa: **R-FASE11-06**, com as listas dos caps do MOM6 e do SIS2 lidas do mapa, conforme a tabela do bloco B.
 
 ---
 

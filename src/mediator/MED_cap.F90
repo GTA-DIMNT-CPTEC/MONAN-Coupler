@@ -46,9 +46,9 @@ module MED_cap_MONAN_mod
   ! Módulos especializados do mediador
   use med_cap_types_mod,   only: MED_InternalState,            &
                                   MED_InternalStateWrapper,     &
-                                  n_import_mpas, import_mpas_names, &
-                                  n_import_datm, import_datm_names, &
-                                  n_export,      export_names
+                                  MED_CHAVES
+  use cpl_fields_mod,      only: CPL_NOME_LEN
+  use cpl_map_mod,         only: cpl_chegadas, cpl_config_atual
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_methods_mod, only: RegridOrCopy, RouteOcnToAtm
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
@@ -177,6 +177,7 @@ contains
     integer :: n
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
+    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -196,113 +197,28 @@ contains
     if (is%use_med_to_mpas) &
       call ESMF_LogWrite('MED: use_med_to_mpas=true, RouteOcnToAtm ativo', ESMF_LOGMSG_INFO)
 
-    ! Anuncia campos de import conforme a fonte atmosferica configurada.
-    ! CRITICO: o NUOPC aborta em IPDv03p6 se um campo anunciado nao tiver
-    ! conector ativo. Por isso MPAS e DATM sao anunciados exclusivamente.
-    if (is%use_mpas_atm) then
-      ! Modo MPAS: anuncia campos _mpas (fornecidos pelo MPAS_cap)
-      do n = 1, n_import_mpas
-        call NUOPC_Advertise(importState, StandardName=trim(import_mpas_names(n)), &
-          TransferOfferGeomObject="cannot provide", &
-          SharePolicyField="share", rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-    else
-      ! Modo DATM: anuncia campos sem sufixo (fornecidos pelo DATM_cap)
-      ! SharePolicyField="share" evita bondLevel ambiguo para Faxa_rain/snow
-      ! que aparecem tanto no importState quanto no exportState do MED.
-      do n = 1, n_import_datm
-        call NUOPC_Advertise(importState, StandardName=trim(import_datm_names(n)), &
-          TransferOfferGeomObject="cannot provide", &
-          SharePolicyField="share", rc=rc)
-        if (ChkErr(rc, __LINE__, __FILE__)) return
-      end do
-    end if
-
-    ! Advertise So_t (SST do OCN) - sempre presente (conector OCN->MED ativo nos dois modos)
-    call NUOPC_Advertise(importState, StandardName="So_t", &
-      TransferOfferGeomObject="cannot provide", &
-      SharePolicyField="share", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Anuncia So_u e So_v no importState do MED.
-    ! O NUOPC só conecta campos anunciados dos dois lados: sem este anúncio, o
-    ! conector OCN->MED descartaria So_u/So_v exportados pelo OCN, e o
-    ! ESMF_StateGet posterior registraria "ERROR: Not found" a cada passo.
-    ! Com o anúncio, o conector cria a rota para So_u e So_v, que chegam
-    ! prontos ao MED para o cálculo de duu10n = |(V_atm − V_ocn)|².
-    call NUOPC_Advertise(importState, StandardName="So_u", &
-      TransferOfferGeomObject="cannot provide", &
-      SharePolicyField="share", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    call NUOPC_Advertise(importState, StandardName="So_v", &
-      TransferOfferGeomObject="cannot provide", &
-      SharePolicyField="share", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Anuncia So_omask no importState do MED.
-    ! O OCN (mom_cap_methods.F90::mom_export) exporta 'So_omask' = nint(mask2dT)
-    ! (1=oceano, 0=terra). Com ela o MED usa a mascara real do MOM6, em vez de
-    ! inferir terra e oceano pelo proprio valor da SST (limiar SST<270K), o que
-    ! seria inconsistente com o MOM6 e contaminaria a interpolacao bilinear da
-    ! costa com valores de celulas de terra fisicamente irreais.
-    call NUOPC_Advertise(importState, StandardName="So_omask", &
-      TransferOfferGeomObject="cannot provide", &
-      SharePolicyField="share", rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Si_ifrac_sis2 — fração de gelo real vinda do componente ICE (SIS2).
-    !
-    ! O nome é deliberadamente diferente de "Si_ifrac" para evitar que os dois
-    ! conectores automáticos, OCN->MED e ICE->MED, apontem para o mesmo nome de
-    ! campo: nesse caso o resultado dependeria da ordem de execução. Sem este
-    ! advertise, o conector ICE->MED não tem o que casar do lado do MED, o
-    ! campo aparece como "Connected: false" no Compliance Checker e a leitura
-    ! feita em RouteOcnToAtm (med_cap_methods.F90) falha sem alarde.
-    if (cfg_use_sis2_dynamic) then
-      ! SharePolicyField="share" é mantido aqui por consistência: todos os
-      ! demais campos de IMPORTAÇÃO do mediador (So_t, Sa_*, etc.) usam a
-      ! mesma política e funcionam. A anomalia corrigida estava do lado do
-      ! EXPORTADOR: o cap do gelo era o único do sistema a usar share numa
-      ! exportação, e com isso o conector aparentemente pulava a
-      ! transferência real e entregava zeros ao mediador (a origem tinha
-      ! máximo 0,997 e o destino chegava com mínimo e máximo iguais a zero).
-      ! Ver sis_cap_MONAN.F90::InitializeAdvertise.
-      call NUOPC_Advertise(importState, StandardName="Si_ifrac_sis2", &
+    ! Importação e exportação lidas do mapa de acoplamento (cpl_chegadas),
+    ! com as chaves de MED_CHAVES, na ordem do mapa, que é a de antes:
+    !   - forçantes do MONAN-A (_mpas) ou do DATM, nunca os dois: o NUOPC
+    !     aborta em IPDv03p6 se um campo anunciado não tiver conector ativo;
+    !   - So_t, So_u, So_v e So_omask, do oceano. Sem o anúncio de So_u e
+    !     So_v, o conector OCN -> MED descartaria as correntes; So_omask é a
+    !     máscara real do MOM6, usada no lugar de um limiar de SST;
+    !   - com o SIS2, os seis campos *_sis2. O sufixo evita que os conectores
+    !     OCN -> MED e ICE -> MED cheguem ao mesmo nome (Si_ifrac).
+    ! A importação usa SharePolicyField="share", como antes; a exportação
+    ! oferece a grade ("will provide").
+    call cpl_chegadas('MED', .true., cpl_config_atual(), MED_CHAVES, nomes)
+    do n = 1, size(nomes)
+      call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
 
-      ! albedo do gelo por banda. Mesmo padrão
-      ! de Si_ifrac_sis2 acima (nome próprio para não colidir com um
-      ! eventual conector automático; mesma política de share).
-      call NUOPC_Advertise(importState, StandardName="Si_avsdr_sis2", &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Advertise(importState, StandardName="Si_avsdf_sis2", &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Advertise(importState, StandardName="Si_anidr_sis2", &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_Advertise(importState, StandardName="Si_anidf_sis2", &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      ! temperatura de pele real do gelo.
-      call NUOPC_Advertise(importState, StandardName="Si_t_sis2", &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end if
-
-    ! Advertise campos de export para o OCN
-    do n = 1, n_export
-      call NUOPC_Advertise(exportState, StandardName=trim(export_names(n)), &
+    call cpl_chegadas('MED@ocn_med', .false., cpl_config_atual(), '', nomes)
+    do n = 1, size(nomes)
+      call NUOPC_Advertise(exportState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do

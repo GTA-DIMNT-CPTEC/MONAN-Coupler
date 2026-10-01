@@ -6,7 +6,8 @@
 !!   agrupado nos subtipos med_ocn_flux_fields_t, med_ocn_fields_t,
 !!   med_ice_fields_t, med_sfc_fields_t, med_par_t e med_diag_config_t
 !!   Constantes físicas Large & Yeager (2009) — usadas pelo bulk NCAR
-!!   Listas de campos import/export — usadas em Advertise e Advance
+!!   MED_CHAVES: chaves de configuração que escolhem os campos anunciados,
+!!   cujas listas saem do mapa de acoplamento (cpl_map)
 !!
 !! O módulo não tem variáveis: o que muda durante a rodada (comunicador MPI,
 !! PET local e configuração do diagnóstico de importação) fica no estado
@@ -38,10 +39,8 @@ module med_cap_types_mod
   public :: Cd_neut, Ch_neut, Ce_neut, albedo_ocn
   public :: SST_BULK_FALLBACK, SHUM_OCEAN_DEFAULT
   public :: f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif
-  ! Listas de campos
-  public :: n_import_mpas, import_mpas_names
-  public :: n_import_datm, import_datm_names
-  public :: n_export, export_names
+  ! Chaves de configuração que escolhem os campos do mediador
+  public :: MED_CHAVES
 
   !----------------------------------------------------------------------------
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
@@ -241,50 +240,23 @@ module med_cap_types_mod
   end type MED_InternalStateWrapper
 
   !----------------------------------------------------------------------------
-  ! Listas de campos — usadas em InitializeAdvertise e MediatorAdvance
+  ! Campos anunciados e realizados pelo mediador
   !----------------------------------------------------------------------------
 
-  !> Campos de import do MPAS (primário) — com sufixo _mpas.
-  integer, parameter :: n_import_mpas = 13
-  character(len=32), parameter :: import_mpas_names(n_import_mpas) = [ &
-    "Sa_u10m_mpas  ", "Sa_v10m_mpas  ", "Sa_tbot_mpas  ", "Sa_pslv_mpas  ", &
-    "Faxa_swdn_mpas", "Faxa_lwdn_mpas", "Faxa_rain_mpas", &
-    "Sa_shum_mpas  ", "Faxa_snow_mpas", &
-    "Faxa_sen_mpas ", "Faxa_lat_mpas ", "Faxa_taux_mpas", "Faxa_tauy_mpas" ]
-
-  !> Campos de import do DATM (fallback) — sem sufixo.
-  integer, parameter :: n_import_datm = 9
-  character(len=32), parameter :: import_datm_names(n_import_datm) = [ &
-    "Sa_u10m   ", "Sa_v10m   ", "Sa_tbot   ", "Sa_shum   ", "Sa_pslv   ", &
-    "Faxa_swdn ", "Faxa_lwdn ", "Faxa_rain ", "Faxa_snow "]
-
-  !> Campos de export: 14 fluxos e estados para o OCN e o ICE, So_t, So_u,
-  !! So_v e Sf_zorl para o MPAS, Faxa_coszen (angulo zenital solar real,
-  !! para is%aib%coszen do SIS2), Sf_albedo, os fluxos Fioi_* do gelo,
-  !! Sx_tsfc e Sx_omask.
-  !! Sx_omask e' a mascara terra/oceano REAL do MOM6 (ocean_grid%mask2dT,
-  !! importada como So_omask e interpolada para a grade ATM em
-  !! is%ocn%omask). Tem StandardName proprio, como o Sx_tsfc: e' um campo
-  !! produzido pelo MED para o lado atmosferico e o diagnostico, e reusar o
-  !! nome So_omask no exportState criaria um par import/export homonimo no
-  !! mesmo componente. Serve a dois consumidores: (a) a variavel de mascara
-  !! gravada em mom6_import_*.nc (med_cap_netcdf.F90) e (b) o cap do MPAS,
-  !! que a recebe pelo conector MED->MPAS e mascara os continentes em
-  !! monan2_import_*.nc.
-  integer, parameter :: n_export = 31
-  character(len=32), parameter :: export_names(n_export) = [ &
-    "Foxx_taux     ", "Foxx_tauy     ", "Foxx_sen      ", "Foxx_evap     ", "Foxx_lwnet    ", &
-    "Foxx_swnet_vdr", "Foxx_swnet_vdf", "Foxx_swnet_idr", "Foxx_swnet_idf", &
-    "Faxa_rain     ", "Faxa_snow     ", "Sa_pslv       ", "Si_ifrac      ", "So_duu10n     ", &
-    "So_t          ",                                                                          &
-    "So_u          ", "So_v          ",  &
-    "Sf_zorl       ", &  ! rugosidade Charnock → MPAS
-    "Faxa_coszen   ", &                      ! angulo zenital solar → SIS2
-    "Sf_albedo     ", &                      ! albedo de banda larga → MPAS
-    "Fioi_taux     ", "Fioi_tauy     ", "Fioi_sen      ", "Fioi_evap     ", &  ! fluxos do gelo
-    "Fioi_lwnet    ", &                      ! fluxos calc. c/ T_gelo → SIS2
-    "Fioi_swnet_vdr", "Fioi_swnet_vdf", "Fioi_swnet_idr", "Fioi_swnet_idf", &  ! onda curta do gelo
-    "Sx_tsfc       ", &  ! composto p/ MPAS-A
-    "Sx_omask      " ]  ! mascara terra/oceano MOM6 → diag + MPAS
+  !> Chaves de &nuopc_mode que o mediador consulta para anunciar e realizar
+  !! os campos: a fonte atmosférica (use_datm) e o gelo do SIS2
+  !! (use_sis2_dynamic). As listas saem do mapa de acoplamento, com
+  !! cpl_chegadas (src/coupling/cpl_map.F90):
+  !!   importação, malha de fluxo (MED@atm_med): forçantes do MONAN-A
+  !!     (sufixo _mpas) ou do DATM;
+  !!   importação, grade do oceano (MED@ocn_med): So_t, So_u, So_v, So_omask
+  !!     e, com o SIS2, os seis campos *_sis2; So_omask é anunciada mesmo com
+  !!     o DOCN, que não a exporta (as chaves do oceano ficam livres);
+  !!   exportação (MED@ocn_med): os campos que voltam da malha de fluxo pelas
+  !!     rotas atm2ocn e atm2ocn_ice.
+  !! Sx_omask é a máscara do MOM6 interpolada para a malha de fluxo, com nome
+  !! próprio para não formar um par importação e exportação homônimo com
+  !! So_omask; vai para o diagnóstico mom6_import_*.nc e para o MONAN-A.
+  character(len=*), parameter :: MED_CHAVES = 'datm,sis2'
 
 end module med_cap_types_mod

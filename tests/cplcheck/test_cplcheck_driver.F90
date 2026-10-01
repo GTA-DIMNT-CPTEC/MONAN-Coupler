@@ -14,6 +14,13 @@
 !! diferenças. Os campos são realizados só se conectados, numa grade
 !! regular de 36 x 18, para que a inicialização termine.
 !!
+!! Com o argumento "mediador", o componente MED é o mediador real
+!! (MED_cap_MONAN_mod): a conferência compara com o mapa o que ele de fato
+!! anuncia. A inicialização para logo depois da conferência (ModifyCplLists
+!! devolve falha de propósito), antes da realização, que precisaria das
+!! grades reais; o programa então termina com "FALHA em initialize", o que
+!! nesse caso é o esperado.
+!!
 !! Usado por tests/cplcheck/confere-cplcheck.bash; não entra no executável.
 module tcomp_mod
   use ESMF
@@ -163,9 +170,12 @@ module tdrv_mod
   use NUOPC_Connector, only: cplSS => SetServices
   use tcomp_mod,       only: compSS => SetServices
   use cpl_check_mod,   only: cpl_check_acoplamento
+  use MED_cap_MONAN_mod, only: medSS => SetServices
   implicit none
   private
-  public :: SetServices
+  public :: SetServices, mediador_real
+
+  logical :: mediador_real = .false.   !< MED é o mediador real (modo "mediador")
   character(len=4), parameter :: ROTULOS(4) = ['MPAS', 'MED ', 'OCN ', 'ICE ']
 contains
   subroutine SetServices(driver, rc)
@@ -186,7 +196,11 @@ contains
     type(ESMF_Clock) :: clock
     integer :: i
     do i = 1, 4
-      call NUOPC_DriverAddComp(driver, trim(ROTULOS(i)), compSS, comp=child, rc=rc)
+      if (mediador_real .and. ROTULOS(i) == 'MED') then
+        call NUOPC_DriverAddComp(driver, 'MED', medSS, comp=child, rc=rc)
+      else
+        call NUOPC_DriverAddComp(driver, trim(ROTULOS(i)), compSS, comp=child, rc=rc)
+      end if
       if (rc /= ESMF_SUCCESS) return
     end do
     call liga('MPAS', 'MED', rc); call liga('OCN', 'MED', rc); call liga('MED', 'OCN', rc)
@@ -211,6 +225,12 @@ contains
     type(ESMF_GridComp) :: driver
     integer, intent(out) :: rc
     call cpl_check_acoplamento(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
+    if (mediador_real) then
+      ! para antes da realização do mediador real (ver o cabeçalho)
+      call ESMF_LogWrite('TESTE: parada depois da conferencia', ESMF_LOGMSG_INFO)
+      call ESMF_LogFlush(rc=rc)
+      rc = ESMF_FAILURE
+    end if
   end subroutine ModifyCplLists
 end module tdrv_mod
 
@@ -219,7 +239,7 @@ program test_cplcheck_driver
   use NUOPC
   use coupler_config_mod, only: config_read
   use tcomp_mod, only: defeito
-  use tdrv_mod,  only: tdrvSS => SetServices
+  use tdrv_mod,  only: tdrvSS => SetServices, mediador_real
   implicit none
   type(ESMF_GridComp) :: drv
   integer :: rc, urc
@@ -231,6 +251,7 @@ program test_cplcheck_driver
   if (rc /= ESMF_SUCCESS) call falha('config_read')
   call get_command_argument(1, modo)
   defeito = trim(modo) == 'defeito'
+  mediador_real = trim(modo) == 'mediador'
   call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
   drv = ESMF_GridCompCreate(name='drv', rc=rc)
   call ESMF_GridCompSetServices(drv, tdrvSS, userRc=urc, rc=rc)

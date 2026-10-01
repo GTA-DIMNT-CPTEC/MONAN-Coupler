@@ -202,6 +202,8 @@ Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas orige
 
 `test_completa.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; e a acumulação de `registra_completa`.
 
+Desde a R-FASE11-05, `test_cpl_map.F90` confere também as listas que o mediador anuncia e realiza, geradas do mapa por `cpl_chegadas` com as chaves do mediador, contra as listas que ele usava antes (`tests/unit/listas_mediador.inc`, cópia sem mudança das de `med_cap_types` na tag `fase11-04-fix01`), nome a nome e na mesma ordem, nas cinco configurações.
+
 `test_cpl_check.F90` confere as duas rotinas de conferência de `cpl_check` (`cpl_confere_conector` e `cpl_confere_estado`) com as listas de campos que os caps anunciam hoje, escritas no teste a partir dos caps e não do mapa: na produção, nenhuma diferença e três avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome); CplList com um campo a menos e com um a mais; importação fora do mapa e do dicionário; campo previsto e não anunciado na importação e na exportação; e a lacuna conhecida do MONAN-A com o DOCN, que aparece como três diferenças.
 
 Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
@@ -263,6 +265,7 @@ Desde a R-FASE11-03, o driver chama `cpl_check_acoplamento` (`src/coupling/cpl_c
 | --- | --- |
 | `normal` | os seis conectores com 13, 7, 14, 16, 4 e 6 campos; `conferencia do mapa: 0 diferenca(s), 3 aviso(s)` |
 | `defeito` | o OCN importa `So_teste` e o MED não anuncia `So_omask`: conector OCN para MED com 3 campos e 4 diferenças; a inicialização termina assim mesmo |
+| `mediador` | o MED é o mediador real (`MED_cap`), que anuncia os campos a partir do mapa: os mesmos seis conectores, 0 diferenças e 3 avisos; a inicialização para de propósito logo depois da conferência, antes da realização, que precisaria das grades reais |
 
 O teste confere também que só o PET 0 escreve. Os relatórios ficam em `build-local/cplcheck/relatorio_<caso>.txt`. Leva menos de um minuto. Conferido ao contrário: sem a fase 0 dos componentes de teste, nenhum campo é anunciado, e a conferência acusa todas as trocas da produção.
 

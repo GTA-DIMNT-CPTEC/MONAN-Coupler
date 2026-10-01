@@ -590,19 +590,13 @@ contains
       case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
       case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
       case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
-      ! So_u, So_v e Sf_zorl faziam parte de export_names e
-      ! portanto ganhavam variavel no arquivo, mas nao apareciam em
-      ! NENHUM dos dois select case desta rotina. Caiam no case default,
-      ! saiam com long_name generico e, pior, com o 'cycle' do select
-      ! case de DADOS mais abaixo, nunca eram preenchidas: ficavam com
-      ! _FillValue e o GrADS as mostrava como 'all undefined values'.
+      ! Todo campo exportado pelo mediador precisa de um caso aqui e no
+      ! select case de dados abaixo: sem ele, a variavel sai com
+      ! metadados genericos e, pelo 'cycle' do select case de dados,
+      ! fica so com _FillValue.
       case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
       case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
       case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
-      ! (mesma causa raiz do acima):
-      ! campos das Fases 2.5/2.6/3, presentes em export_names mas
-      ! ausentes dos dois select case desta rotina — mesmo sintoma
-      ! (GrADS "Entire Grid Undefined").
       case ('Sf_albedo');      f_units='1';           f_long='Albedo de banda larga efetivo (agua+gelo)'; f_std='surface_albedo'
       case ('Faxa_coszen');    f_units='1';           f_long='Cosseno do angulo zenital solar'; f_std='cosine_of_solar_zenith_angle'
       case ('Fioi_taux');      f_units='Pa';          f_long='Tensao cisalhamento zonal (gelo, T_gelo)';     f_std='surface_downward_eastward_stress'

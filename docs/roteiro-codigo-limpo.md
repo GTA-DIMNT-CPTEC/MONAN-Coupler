@@ -148,6 +148,7 @@ O plano completo, com as 25 etapas (R-FASE11-01 a R-FASE11-25, em seis blocos), 
 | R-FASE11-03 | `cpl_check.F90`: relatório dos conectores e conferência do mapa no log (`CPL-REL:`), chamados pelo driver em `ModifyCplLists`, só registro; testes `test_cpl_check` e `tests/cplcheck` (conferência `cplcheck`); driver em `compila-local.bash` |
 | R-FASE11-04 | relatório das rotas do mediador e dos pontos completados por vizinhança (`CPL-REL:`); `valida_rodada.bash compara` grava e compara o relatório de acoplamento; teste `test_completa`; fim do bloco A |
 | R-FASE11-04-FIX01 | linhas dos pontos completados no último passo do mediador (a finalização dos componentes não é chamada) |
+| R-FASE11-05 | o mediador anuncia e realiza os campos a partir do mapa; arquivos com nomes de campos escritos à mão de 8 para 5 (só os caps) |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

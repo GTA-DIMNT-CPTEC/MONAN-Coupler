@@ -81,7 +81,8 @@ module sis_cap_MONAN_mod
   end type ice_internal_state_wrapper
 
   ! ── Nomes de campo trocados com o mediador ────────────────────────────────
-  ! Os nomes seguem med_cap_types.F90::export_names. O conector "MED -> ICE"
+  ! Os nomes seguem a exportação do mediador (mapa de acoplamento,
+  ! src/coupling/cpl_map.F90). O conector "MED -> ICE"
   ! (registrado em esm.F90) casa por StandardName, então os campos que o MED
   ! exporta alimentam o ICE sem mudança em MED_cap.F90. Um nome que o MED
   ! não exporta produz "NUOPC INCOMPATIBILITY: Import Fields not all

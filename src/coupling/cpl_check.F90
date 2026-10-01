@@ -32,17 +32,15 @@ module cpl_check_mod
   use ESMF
   use NUOPC,              only : NUOPC_CompAttributeGet, NUOPC_GetStateMemberLists
   use NUOPC_Driver,       only : NUOPC_DriverGetComp
-  use coupler_config_mod, only : cfg_use_datm, cfg_use_docn, cfg_use_med_to_mpas, &
-                                 cfg_use_sis2_dynamic
   use coupler_utils_mod,  only : int_to_str
   use cpl_fields_mod,     only : cpl_campo_indice
-  use cpl_map_mod,        only : TROCAS, cpl_config_t, cpl_troca_vale, cpl_ponto_componente
+  use cpl_map_mod,        only : TROCAS, cpl_config_t, cpl_troca_vale, cpl_ponto_componente, &
+                                 cpl_config_atual
 
   implicit none
   private
 
   public :: cpl_check_acoplamento
-  public :: cpl_config_atual
   public :: cpl_confere_conector, cpl_confere_estado
   public :: CPL_PREFIXO, CPL_MSG_LEN
 
@@ -50,16 +48,6 @@ module cpl_check_mod
   integer,          parameter :: CPL_MSG_LEN = 200
 
 contains
-
-  !> Configuração do mapa correspondente às chaves de &nuopc_mode.
-  function cpl_config_atual() result(cfg)
-    type(cpl_config_t) :: cfg
-
-    cfg%datm        = cfg_use_datm
-    cfg%docn        = cfg_use_docn
-    cfg%med_to_mpas = cfg_use_med_to_mpas
-    cfg%sis2        = cfg_use_sis2_dynamic
-  end function cpl_config_atual
 
   !> Relatório dos conectores e conferência do mapa, no log do PET 0.
   !!
