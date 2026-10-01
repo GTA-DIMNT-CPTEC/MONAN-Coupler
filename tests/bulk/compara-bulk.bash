@@ -37,9 +37,16 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writer.o
-      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
-      med_cap_types.o med_bulk_ncar.o"
+# Todos os objetos do mediador: desde a R-FASE11-19 o programa da árvore de
+# trabalho chama também uma fase de med_exchange. A versão de referência pode
+# não ter algum deles; liga só os que existem.
+OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_supergrid.o
+      nc_writer.o cap_common.o regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o
+      regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o mpas_stubs.o
+      mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
+      med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
+      med_ice.o med_ocean.o med_init.o med_export.o med_exchange.o"
+objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
 
 # Fontes da versão de referência e o seu test_bulk_ncar.F90, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
@@ -60,7 +67,7 @@ for versao in antiga nova; do
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${src}/tests/bulk/test_bulk_ncar.F90" -o test_bulk_ncar.o &&
     # shellcheck disable=SC2086
-    ${FC} -o test_bulk_ncar test_bulk_ncar.o ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
+    ${FC} -o test_bulk_ncar test_bulk_ncar.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
   echo "--- versão ${versao}: executando com ${NP} processos"

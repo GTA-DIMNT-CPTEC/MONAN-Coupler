@@ -132,6 +132,8 @@ Funciona como o teste dos gravadores. O programa `tests/bulk/test_bulk_ncar.F90`
 
 Os dados cobrem os casos que mudam o caminho do cálculo: vento nulo, ar mais quente e mais frio que a superfície (os dois ramos do fator de estabilidade), temperatura do gelo fora da faixa física, fração de gelo abaixo do limiar dos fluxos sobre o gelo, máscara de terra e forçantes ausentes. Como compara bit a bit, o teste confirma que mudar código de lugar, por exemplo para uma função, não alterou nenhuma operação de ponto flutuante. O teste foi conferido ao contrário também: alterar um parâmetro do fator de estabilidade faz o resultado diferir.
 
+Sem o SIS2, que é o padrão do teste, `calc_bulk_ncar` terminava recalculando a fração de gelo pelo limiar de SST. Desde a R-FASE11-19, esse cálculo é a fase `fracao_de_gelo_sem_sis2`, de `med_exchange`, e o programa da árvore de trabalho a chama logo depois de `calc_bulk_ncar`, como o `MediatorAdvance`; por isso o script liga todos os objetos do mediador que a versão compilada tiver. Conferido ao contrário: chamar a fase antes da física faz os campos diferirem.
+
 Ficam de fora o caminho do DOCN e o caminho com `cfg_use_sis2_dynamic = .true.`, porque o teste usa os valores padrão da configuração. Com o padrão, `calc_bulk_ncar` também calcula a fração de gelo pelo limiar de SST (`legacy_ice_fraction`), que fica coberta.
 
 ### 2.6 Teste da grade do cap atmosférico

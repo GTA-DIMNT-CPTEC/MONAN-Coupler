@@ -162,6 +162,7 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-16 | fase `ir_para_malha_de_fluxo` em `med_exchange` (SST, correntes e gelo na malha de fluxo, e o gelo do OISST) |
 | R-FASE11-17 | fase de inicialização em `med_exchange`, com as rotas de `criar='inicio'` pela tabela; arquivos que carimbam o tempo de 4 para 3; criações de rota fora de `med_exchange` de 7 para 5; etapa R-FASE11-18 acrescentada ao plano |
 | R-FASE11-18 | rotas criadas durante o passo pelas fases de `med_exchange`, guiadas pela coluna `criar`; criações de rota fora de `med_exchange` de 5 para 0 (meta); `tests/completar` com o SIS2 e o caso `mista4` |
+| R-FASE11-19 | fração de gelo sem o SIS2 fora da física bulk (fase `fracao_de_gelo_sem_sis2`, logo depois de `calc_bulk_ncar`); chamadas de rota em módulos de física de 1 para 0 (meta); nenhum arquivo com mais de 1000 linhas |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

@@ -12,6 +12,10 @@
 !!   ir_para_malha_de_fluxo
 !!              antes da física: leva os campos do oceano e do gelo da
 !!              grade do oceano para a malha de fluxo (R-FASE11-16)
+!!   fracao_de_gelo_sem_sis2
+!!              logo depois da física, sem o SIS2: a fração de gelo na malha
+!!              de fluxo (OISST ou limiar de SST) para a exportação e para o
+!!              passo seguinte (R-FASE11-19)
 !!   entregar   no fim do passo, depois da física: leva os campos da malha
 !!              de fluxo para o exportState (export_to_components, em
 !!              med_export) e carimba o tempo dos campos exportados
@@ -38,7 +42,8 @@ module med_exchange_mod
   use med_cap_methods_mod, only: cria_rota, RegridOrCopy, set_ocn_grid_mask
   use med_export_mod,      only: export_to_components
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
-                                 update_ice_fraction_from_docn, regrid_ocean_currents
+                                 update_ice_fraction_from_docn, regrid_ocean_currents, &
+                                 legacy_ice_fraction
 
   implicit none
   private
@@ -46,6 +51,7 @@ module med_exchange_mod
   public :: inicializar_dados
   public :: prepara_inicio        ! também para tests/completar
   public :: ir_para_malha_de_fluxo
+  public :: fracao_de_gelo_sem_sis2
   public :: entregar
   public :: stamp_export_fields
 
@@ -688,6 +694,31 @@ contains
       end if
     end if
   end subroutine entregar
+
+  !> Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
+  !! gelo na malha de fluxo (legacy_ice_fraction, em med_ocean). A física
+  !! deste passo já usou a fração que estava em is%ice%ifrac; a nova vai
+  !! para a exportação (Si_ifrac) e para o passo seguinte. Até a
+  !! R-FASE11-19, a mesma chamada era a última de calc_bulk_ncar, e a
+  !! física bulk ficou sem rotas nem estados.
+  !!
+  !! @param[inout] is           estado interno do mediador
+  !! @param[inout] importState  estado de importação do mediador
+  !! @param[in]    i1, i2, j1, j2  limites locais da DE na malha de fluxo
+  subroutine fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)
+    type(MED_InternalState), intent(inout) :: is
+    type(ESMF_State),        intent(inout) :: importState
+    integer,                 intent(in)    :: i1, i2, j1, j2
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: sst(:,:)
+    integer :: rc
+
+    if (cfg_use_sis2_dynamic) return
+    nullify(fptr, sst)
+    call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
+    if (rc /= ESMF_SUCCESS) nullify(sst)
+    call legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
+  end subroutine fracao_de_gelo_sem_sis2
 
   !> Rotas da exportação criadas durante o passo, conforme a coluna criar
   !! de ROTAS ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no

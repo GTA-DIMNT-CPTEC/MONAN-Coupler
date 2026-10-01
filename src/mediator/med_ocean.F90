@@ -12,14 +12,14 @@
 module med_ocean_mod
   use ESMF
   use netcdf
-  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY
+  use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY, T_FREEZE_SEAWATER
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny, cfg_use_docn_ice, &
                                 cfg_write_fixdiag, cfg_docn_ice_init_only, &
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
-  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST
+  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST, SST_BULK_FALLBACK
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: ZeroInternalField, completar_da_rota
   use med_ice_mod, only: update_ice_fields_on_atm_grid
@@ -31,6 +31,7 @@ module med_ocean_mod
   public :: update_ocean_fields_on_atm_grid
   public :: regrid_ocean_currents
   public :: update_ice_fraction_from_docn
+  public :: legacy_ice_fraction
 
   ! ── Si_ifrac do OISST ──────────────────────────────────────────────────
   !
@@ -227,6 +228,107 @@ contains
           ESMF_LOGMSG_INFO)
     end if
   end subroutine update_ice_fraction_from_docn
+
+  !============================================================================
+  !> @brief Fração de gelo na malha de fluxo sem o SIS2 dinâmico (até a
+  !! R-FASE11-19, no fim de calc_bulk_ncar, em med_bulk_ncar).
+  !!
+  !! Com use_docn_ice, is%ice%ifrac já tem o OISST (fill_ifrac_from_oisst).
+  !! Sem ele, lê "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2")
+  !! pela rota genérica 'ocn2atm', SEM máscara, e aplica a máscara
+  !! SST~=T_FILL_LAND, que zera ifrac também em água aberta próxima da borda
+  !! do gelo (SST no congelamento é esperada ali, não é sinal de terra). O
+  !! mediador não anuncia "Si_ifrac", então a busca falha, e a fração sai
+  !! do limiar de SST (docs/estado-do-projeto.md, seção 8).
+  !============================================================================
+  subroutine legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
+    type(MED_InternalState), intent(inout) :: is
+    type(ESMF_State), intent(inout) :: importState
+    integer, intent(in) :: j1
+    integer, intent(in) :: j2
+    integer, intent(in) :: i1
+    integer, intent(in) :: i2
+    real(ESMF_KIND_R8), pointer :: fptr(:,:)
+    real(ESMF_KIND_R8), pointer :: sst(:,:)
+    integer :: i
+    integer :: j
+    type(ESMF_Field) :: f_ifrac_src
+    integer          :: rc_if
+    logical          :: regrid_ok
+    real(ESMF_KIND_R8), parameter :: TOL_LAND = 1.0e-6_ESMF_KIND_R8
+    integer :: n_ifrac_land
+    character(len=160) :: logmsg
+    real(ESMF_KIND_R8) :: sst_eff_if
+
+    ! Fonte de Si_ifrac por modo (nuopc.input &nuopc_mode):
+    !   use_docn_ice=T  init_only=F  → is%ice%ifrac já preenchida
+    !     com OISST por fill_ifrac_from_oisst.
+    !     regrid_ok=T pula o regrid e o fallback SST.
+    !   use_docn_ice=T  init_only=T  → idem: is%ice%ifrac guarda o OISST
+    !     de t=0 (com decaimento) de fill_ifrac_from_oisst.
+    !   use_docn_ice=F               → Si_ifrac do OCN via importState,
+    !     pela rota 'ocn2atm'.
+    if (cfg_use_docn_ice) then
+      regrid_ok = .true.   ! is%ice%ifrac de fill_ifrac_from_oisst
+    else
+      regrid_ok = .false.  ! Si_ifrac do OCN via importState
+    end if
+
+    if (.not. regrid_ok .and. is%regrid%has('ocn2atm')) then
+      call ESMF_StateGet(importState, itemName="Si_ifrac", &
+                         field=f_ifrac_src, rc=rc_if)
+      if (rc_if == ESMF_SUCCESS) then
+        call is%regrid%apply('ocn2atm', f_ifrac_src, is%ice%ifrac, rc_if)
+        if (rc_if == ESMF_SUCCESS) then
+          regrid_ok = .true.
+          call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
+          if (rc_if == ESMF_SUCCESS .and. associated(fptr)) then
+            where (fptr < 0.0_ESMF_KIND_R8) fptr = 0.0_ESMF_KIND_R8
+            where (fptr > 1.0_ESMF_KIND_R8) fptr = 1.0_ESMF_KIND_R8
+            where (fptr /= fptr)            fptr = 0.0_ESMF_KIND_R8  ! NaN
+            ! 5.2: defesa em profundidade — zera ifrac onde sst = T_FILL_LAND
+              if (associated(sst)) then
+                n_ifrac_land = count(abs(sst - T_FREEZE_SEAWATER) < TOL_LAND &
+                                     .and. fptr > 0.0_ESMF_KIND_R8)
+                where (abs(sst - T_FREEZE_SEAWATER) < TOL_LAND) fptr = 0.0_ESMF_KIND_R8
+                if (n_ifrac_land > 0) then
+                    write(logmsg,'(A,I0,A)') &
+                      'MED Sprint A.5.2: Si_ifrac zerado em ', &
+                      n_ifrac_land, ' celulas terra (mascara T_FILL_LAND)'
+                    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+                end if
+              end if
+          end if
+          call ESMF_LogWrite( &
+            'MED: Si_ifrac regridado do SIS2 + mascara terra (A.5.2)', &
+            ESMF_LOGMSG_INFO)
+        end if
+      end if
+    end if
+
+    ! Fallback: limiar de SST (.5.2 — condicao mais restritiva)
+    if (.not. regrid_ok) then
+      call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
+      if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
+        ! SST efetiva de cada celula em sst_eff_if, com clamp.
+          do j = j1, j2
+            do i = i1, i2
+              ! Clamp: valores fora de [271, 308] K são inválidos ou terra.
+              sst_eff_if = merge(sst(i,j), SST_BULK_FALLBACK,          &
+                sst(i,j) > 271.0_ESMF_KIND_R8 .and.                    &
+                sst(i,j) < 308.0_ESMF_KIND_R8)
+              ! Limiar 271.34 K < 271.35 K (marcador de terra):
+              ! garante que células terrestres não sejam classificadas como gelo.
+              fptr(i,j) = merge(1.0_ESMF_KIND_R8, 0.0_ESMF_KIND_R8,   &
+                sst_eff_if < 271.34_ESMF_KIND_R8)
+            end do
+          end do
+        call ESMF_LogWrite( &
+          'MED: Si_ifrac calculado via limiar SST (fallback — Sprint A.5.2)', &
+          ESMF_LOGMSG_INFO)
+      end if
+    end if
+  end subroutine legacy_ice_fraction
 
 
   !============================================================================
