@@ -167,7 +167,8 @@ module med_cap_types_mod
   !> Pontos completados por vizinhança num campo, neste PET, ao longo da
   !! rodada: quantas vezes o preenchimento rodou, quantos pontos estavam fora
   !! da faixa válida e quantos ficaram com o valor fixo. Só alimentam o
-  !! relatório de acoplamento (med_diag, relata_completas).
+  !! relatório de acoplamento (med_diag, relata_completas, chamada no último
+  !! passo por MediatorAdvanceRelatorio).
   type :: med_completa_t
     integer(ESMF_KIND_I8) :: aplicacoes = 0_ESMF_KIND_I8
     integer(ESMF_KIND_I8) :: invalidos  = 0_ESMF_KIND_I8

@@ -56,7 +56,7 @@ Desde a fase 11, a rodada escreve no log do PET 0 (`logs/PET000.esmApp.log`) lin
 | `configuracao do mapa`, `conector A -> B: N campo(s)` e um campo por linha, com as opções | inicialização, no `ModifyCplLists` do driver | R-FASE11-03 |
 | `DIFERENCA:`, `AVISO:` e `conferencia do mapa: N diferenca(s), M aviso(s)` | idem; a produção dá 0 diferenças e 3 avisos | R-FASE11-03 |
 | `rota NOME: esquema, metodos, mascara, aceito METODO` (ou `usa a reserva`) | na criação de cada rota do mediador | R-FASE11-04 |
-| `completar ROTA CAMPO: N aplicacao(oes), P ponto(s) fora da faixa, F com valor fixo` | fim da rodada, somando todos os PETs do mediador | R-FASE11-04 |
+| `completar ROTA CAMPO: N aplicacao(oes), P ponto(s) fora da faixa, F com valor fixo` | último passo da rodada, somando todos os PETs do mediador | R-FASE11-04 (saída corrigida na R-FASE11-04-FIX01) |
 
 O `compara` grava essas linhas, sem data e hora, em `relatorio_acoplamento.txt` e as compara com as da rodada aprovada (PASS no `compara.txt`) mais recente, ou com as de `REL_REF`. Igual: o acoplamento foi montado da mesma forma. Diferente: as linhas que mudaram vão para `relatorio_acoplamento.diff` e as primeiras aparecem na tela; a rodada não é reprovada por isso, mas uma diferença não anunciada na etapa aponta o problema antes da comparação dos arquivos. Na primeira rodada de uma etapa que acrescenta linhas ao relatório, a diferença esperada são só as linhas novas.
 

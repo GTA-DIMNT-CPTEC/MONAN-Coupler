@@ -32,7 +32,8 @@ module MED_cap_MONAN_mod
                                   cfg_use_datm, cfg_use_med_to_mpas, &
                                   cfg_use_sis2_dynamic,             & ! gelo dinamico do SIS2
                                   cfg_coupling_mode,                &
-                                  cfg_seq_repro                       ! seq_repro (reprodutibilidade)
+                                  cfg_seq_repro,                    & ! seq_repro (reprodutibilidade)
+                                  cfg_stop_date, config_parse_date
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -41,7 +42,6 @@ module MED_cap_MONAN_mod
   use NUOPC_Mediator, only: med_label_DataInitialize => label_DataInitialize
   use NUOPC_Mediator, only: med_label_Advance        => label_Advance
   use NUOPC_Mediator, only: med_label_CheckImport    => label_CheckImport
-  use NUOPC_Mediator, only: med_label_Finalize       => label_Finalize
   use NUOPC_Mediator, only: NUOPC_MediatorGet
   ! Módulos especializados do mediador
   use med_cap_types_mod,   only: MED_InternalState,            &
@@ -100,37 +100,60 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_Advance, &
-      specRoutine=MediatorAdvance, rc=rc)
+      specRoutine=MediatorAdvanceRelatorio, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_CheckImport, &
       specRoutine=CheckImportNoop, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call NUOPC_CompSpecialize(gcomp, specLabel=med_label_Finalize, &
-      specRoutine=MediatorFinalize, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
   end subroutine SetServices
 
   !============================================================================
-  !> Fim da rodada: linhas do relatório de acoplamento com os pontos
-  !! completados por vizinhança (relata_completas). Só escreve no log.
+  !> Passo do mediador (MediatorAdvance) e, no último passo da rodada, as
+  !! linhas do relatório de acoplamento com os pontos completados por
+  !! vizinhança (relata_completas), que só escrevem no log.
+  !!
+  !! O relatório não pode ficar na finalização do componente: o programa
+  !! principal não chama ESMF_GridCompFinalize (esmApp.F90). O último passo
+  !! é aquele em que currTime + timeStep alcança stop_date do nuopc.input; o
+  !! relógio do próprio mediador não serve, porque o NUOPC o faz parar no fim
+  !! de cada passo. Todos os PETs do mediador chegam aqui, inclusive os que
+  !! saem cedo de MediatorAdvance, porque relata_completas é coletiva.
   !============================================================================
-  subroutine MediatorFinalize(gcomp, rc)
+  subroutine MediatorAdvanceRelatorio(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
 
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
+    type(ESMF_Clock)        :: clock
+    type(ESMF_Time)         :: currTime, stopTime
+    type(ESMF_TimeInterval) :: dt
+    integer :: yy, mm, dd
 
-    rc = ESMF_SUCCESS
+    call MediatorAdvance(gcomp, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+
+    call NUOPC_MediatorGet(gcomp, mediatorClock=clock, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call config_parse_date(cfg_stop_date, yy, mm, dd, rc)
+    if (rc /= 0) then
+      rc = ESMF_SUCCESS   ! data já conferida por config_read; sem relatório
+      return
+    end if
+    call ESMF_TimeSet(stopTime, yy=yy, mm=mm, dd=dd, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (currTime + dt < stopTime) return
+
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
     call relata_completas(is%run%completa, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine MediatorFinalize
+  end subroutine MediatorAdvanceRelatorio
 
   !============================================================================
   ! CheckImportNoop

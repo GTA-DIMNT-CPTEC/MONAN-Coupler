@@ -7,8 +7,8 @@
 !!
 !! Também a contagem dos pontos completados por vizinhança
 !! (registra_completa, a cada preenchimento) e as linhas do relatório de
-!! acoplamento que a resumem no fim da rodada (relata_completas, prefixo
-!! CPL-REL:, ver src/coupling/cpl_check.F90).
+!! acoplamento que a resumem no último passo da rodada (relata_completas,
+!! prefixo CPL-REL:, ver src/coupling/cpl_check.F90).
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
 !!
@@ -117,7 +117,7 @@ contains
     c%fixos      = c%fixos      + int(n_left,    ESMF_KIND_I8)
   end subroutine registra_completa
 
-  !> Relatório dos pontos completados, no fim da rodada: soma as contagens
+  !> Relatório dos pontos completados, no último passo: soma as contagens
   !! de todos os PETs do mediador e o PET 0 escreve uma linha CPL-REL: por
   !! campo que foi completado alguma vez. Coletiva: todos os PETs do
   !! mediador chamam.
