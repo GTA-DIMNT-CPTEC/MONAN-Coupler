@@ -20,6 +20,7 @@ module med_init_mod
   use med_cap_types_mod, only: MED_InternalState, MED_CHAVES, SST_BULK_FALLBACK
   use cpl_fields_mod, only: CPL_NOME_LEN
   use cpl_map_mod, only: cpl_chegadas, cpl_config_atual, cpl_config_t
+  use cpl_grids_mod, only: cpl_malha_latlon, cpl_regdecomp, ORIGEM_LESTE0
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
                                  ZeroOcnFluxFields, FillInternalField
   use med_ocean_mod, only: regrid_ocean_currents
@@ -36,115 +37,21 @@ module med_init_mod
 
 contains
 
-  !> Decomposição regular (colunas x linhas) de uma grade nx x ny em petCount
-  !! DEs, um por PET: linhas = o maior divisor de petCount que não passe de
-  !! sqrt(petCount) nem de ny, com colunas <= nx/2 (cada DE com pelo menos 2
-  !! colunas); colunas = petCount / linhas. Garante colunas x linhas = petCount.
-  function grid_regdecomp(petCount, nx, ny) result(regDecomp)
-    integer, intent(in) :: petCount, nx, ny
-    integer :: regDecomp(2)
-    integer :: nrows, n
-
-    nrows = 1
-    do n = max(1, int(sqrt(real(petCount)))), 1, -1
-      if (mod(petCount, n) == 0 .and. n <= ny .and. (petCount / n) <= nx / 2) then
-        nrows = n
-        exit
-      end if
-    end do
-    regDecomp(1) = petCount / nrows   ! colunas (lon)
-    regDecomp(2) = nrows              ! linhas (lat)
-  end function grid_regdecomp
-
+  !> Malha de fluxo do mediador (atm_med): grade regular nx_atm x ny_atm,
+  !! longitude a partir de 0 grau, com cantos para o método conservativo,
+  !! construída por cpl_malha_latlon (cpl_grids).
   subroutine create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     integer, intent(in) :: petCount
     integer, intent(in) :: nx_atm
     integer, intent(in) :: ny_atm
     type(ESMF_Grid), intent(inout) :: atm_grid
     integer, intent(inout) :: rc
-    integer :: regDecomp(2)
-    real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
-    integer :: i
-    integer :: j
-    integer :: lde
-    integer :: localDeCount_atm
-    nullify(coordX, coordY)
-    regDecomp = grid_regdecomp(petCount, nx_atm, ny_atm)
-    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
-    ! ESMF_INDEX_GLOBAL: necessário para mapeamento global em med_write_import_fields.
-    ! Loops bulk usam lbound/ubound - agnósticos ao indexflag do MPAS.
-    ! polekindflag fica no padrao do ESMF. As linhas extremas desta grade
-    ! regular (±89.5°) NAO sao um ponto geometrico unico, e declara-las
-    ! MONOPOLE e' fisicamente incorreto. Uma tentativa de faze-lo coincidiu
-    ! com SIGSEGV em core_run do MPAS-A, atribuido a pesos de regrid
-    ! corrompidos perto dos polos, que alimentavam valores invalidos na malha
-    ! Voronoi.
-    atm_grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx_atm, ny_atm/), &
-      regDecomp=regDecomp, indexflag=ESMF_INDEX_GLOBAL, &
-      coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg="MED: falha ao criar grade ATM", &
-      line=__LINE__, file=__FILE__)) return
 
-    ! ESMF_GridAddCoord: COLETIVA — todos os PETs
-    call ESMF_GridAddCoord(atm_grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    call cpl_malha_latlon('atm_med', nx_atm, ny_atm, ORIGEM_LESTE0, .true., petCount, &
+                          atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! verificar localDeCount antes de ESMF_GridGetCoord (chamada LOCAL)
-    call ESMF_GridGet(atm_grid, localDeCount=localDeCount_atm, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha GridGet localDeCount ATM', &
-      line=__LINE__, file=__FILE__)) return
-
-    ! ): loop sobre DEs locais — com regDecomp 2D alguns PETs têm
-    ! localDeCount=2; ESMF_GridGetCoord exige localDE= quando localDeCount > 1.
-    do lde = 0, localDeCount_atm - 1
-      call ESMF_GridGetCoord(atm_grid, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
-      do j = lbound(coordX,2), ubound(coordX,2)
-        do i = lbound(coordX,1), ubound(coordX,1)
-          coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_atm) + &
-                        (360.0_ESMF_KIND_R8/nx_atm) * 0.5_ESMF_KIND_R8
-        end do
-      end do
-      call ESMF_GridGetCoord(atm_grid, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY, rc=rc)
-      do j = lbound(coordY,2), ubound(coordY,2)
-        do i = lbound(coordY,1), ubound(coordY,1)
-          coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_atm) + &
-                        (180.0_ESMF_KIND_R8/ny_atm)/2.0_ESMF_KIND_R8
-        end do
-      end do
-    end do  ! lde ATM
-
-    ! stagger CORNER na grade ATM, necessario
-    ! para ESMF_REGRIDMETHOD_CONSERVE em conjunto com o CORNER do ocn_grid
-    ! acima. Grade ATM e' regular lat-lon -> canto sai de conta direta
-    ! (borda da celula, meia-celula ANTES do centro), sem ler arquivo.
-    call ESMF_GridAddCoord(atm_grid, staggerloc=ESMF_STAGGERLOC_CORNER, rc=rc)
-    if (ESMF_LogFoundError(rcToCheck=rc, msg='MED B-CONSERVE-01: falha ' // &
-      'GridAddCoord CORNER na grade ATM', line=__LINE__, file=__FILE__)) return
-
-    do lde = 0, localDeCount_atm - 1
-      call ESMF_GridGetCoord(atm_grid, coordDim=1, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordX, rc=rc)
-      do j = lbound(coordX,2), ubound(coordX,2)
-        do i = lbound(coordX,1), ubound(coordX,1)
-          coordX(i,j) = (i-1) * (360.0_ESMF_KIND_R8/nx_atm)
-        end do
-      end do
-      call ESMF_GridGetCoord(atm_grid, coordDim=2, localDE=lde, &
-        staggerloc=ESMF_STAGGERLOC_CORNER, farrayPtr=coordY, rc=rc)
-      do j = lbound(coordY,2), ubound(coordY,2)
-        do i = lbound(coordY,1), ubound(coordY,1)
-          coordY(i,j) = -90.0_ESMF_KIND_R8 + (j-1)*(180.0_ESMF_KIND_R8/ny_atm)
-        end do
-      end do
-    end do  ! lde ATM (CORNER)
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade ATM ' // &
       'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
-
-    ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
-    ! tolerado acima não interrompe a inicialização).
-    rc = ESMF_SUCCESS
   end subroutine create_atm_grid
 
   subroutine create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
@@ -162,7 +69,7 @@ contains
     integer :: localDeCount_ocn
     integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
     nullify(coordX, coordY)
-    regDecomp = grid_regdecomp(petCount, nx_ocn, ny_ocn)
+    regDecomp = cpl_regdecomp(petCount, nx_ocn, ny_ocn)
     ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
     ! ESMF_INDEX_GLOBAL: consistência com atm_grid para med_write_import_fields.
     ! Longitude periodica (periodicDim=1): o ESMF trata a coluna i=nx_ocn

@@ -71,7 +71,7 @@ MONAN-Coupler/
 │   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit)
-│   ├── coupling/    mapa de acoplamento: dicionário de campos (cpl_fields), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
+│   ├── coupling/    mapa de acoplamento: malhas regulares (cpl_grids), dicionário de campos (cpl_fields), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash
@@ -98,6 +98,7 @@ Convenções para código novo:
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente |
 | Campos trocados | todo campo novo ganha uma linha em `CAMPOS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `TROCAS` (`src/coupling/cpl_map.F90`); campo que um modelo exporta, a linha em `EXPORTACOES`, na ordem do anúncio; rota nova ou alterada, a linha em `ROTAS`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
+| Malhas regulares | grade latitude e longitude criada por `cpl_malha_latlon` (`src/coupling/cpl_grids.F90`), com a decomposição de `cpl_regdecomp`; fórmula de centro ou de canto nova vira função em `cpl_grids`, uma por regra de arredondamento |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
 | Constantes físicas e da grade | em `src/shared/coupler_constants.F90`; não redeclarar localmente |
 | Etapas de uma rotina longa | procedimento de módulo com argumentos explícitos e `intent` declarado, em vez de procedimento interno (`contains` dentro da rotina), que enxerga todas as variáveis da rotina hospedeira |

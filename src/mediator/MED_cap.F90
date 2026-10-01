@@ -256,7 +256,7 @@ contains
     is => iswrap%wrap
 
 
-    ! petCount define a decomposicao das duas grades (grid_regdecomp): um DE
+    ! petCount define a decomposicao das duas grades (cpl_regdecomp): um DE
     ! por PET, sem DEs vazios nem de largura 1, que o conector bilinear
     ! automatico do NUOPC nao aceita.
     call ESMF_VMGetCurrent(vm, rc=rc)
@@ -304,14 +304,8 @@ contains
     !--------------------------------------------------------------------------
     ! Criar grade ATM regular (ATM_NX x ATM_NY)
     !--------------------------------------------------------------------------
-    ! grid_regdecomp fatora petCount EXATAMENTE em colunas x linhas, um DE por
-    ! PET, no par mais proximo de quadrado com colunas <= nx/2 e linhas <= ny.
-    ! Com mais DEs que PETs, alguns PETs ficariam com dois DEs; o gather de
-    ! med_write_import_fields usa lbound/ubound do primeiro DE local e perderia
-    ! o segundo, zerando linhas de latitude inteiras no campo global (o MOM6
-    ! aborta com "extreme surface values"). A grade do cap MPAS
-    ! (mpas_cap_methods) usa a mesma fatoracao.
-    !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
+    ! Malha atm_med, construida por cpl_malha_latlon (cpl_grids), com a
+    ! decomposicao de cpl_regdecomp: um DE por PET, como a grade do cap MPAS.
     call create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -730,7 +724,7 @@ contains
 
     stampTime = med_stamp_time(currTime, nextTime)
 
-    ! O atm_grid do MED tem um DE por PET (grid_regdecomp); a guarda abaixo
+    ! O atm_grid do MED tem um DE por PET (cpl_regdecomp); a guarda abaixo
     ! protege PETs sem DE local, que não podem acessar campos internos via
     ! farrayPtr.
     call ESMF_FieldGet(is%ocn_flx%taux, localDeCount=localDeCount_med, rc=rc)

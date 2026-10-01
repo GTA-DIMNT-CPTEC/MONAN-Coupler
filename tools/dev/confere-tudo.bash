@@ -15,6 +15,8 @@
 #   gravadores  tests/writers/compara-gravadores.bash REV
 #   bulk        tests/bulk/compara-bulk.bash REV
 #   grade       tests/atmgrid/compara-grade-atm.bash REV
+#   malhas      tests/malhas/compara-malhas.bash REV (malha de fluxo do
+#               mediador e grade do cap atmosférico, com 1, 4, 6 e 8 PETs)
 #   unitarios   testes com valor esperado (tests/unit/roda-unitarios.bash),
 #               entre eles o da consistência do mapa de acoplamento
 #   mapa        docs/acoplamento.md em dia com o mapa de acoplamento
@@ -44,12 +46,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid gravadores bulk grade unitarios mapa cplcheck supergrid docn"
+TODAS="compilacao avisos literais regrid gravadores bulk grade malhas unitarios mapa cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,43p' "$0"; exit 2; }
+uso() { sed -n '2,45p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -183,6 +185,7 @@ quer regrid     && executa regrid teste_regrid
 quer gravadores && executa gravadores tests/writers/compara-gravadores.bash "${REV}" "${SAIDA}/writers"
 quer bulk       && executa bulk tests/bulk/compara-bulk.bash "${REV}" "${SAIDA}/bulk"
 quer grade      && executa grade tests/atmgrid/compara-grade-atm.bash "${REV}" "${SAIDA}/atmgrid"
+quer malhas     && executa malhas tests/malhas/compara-malhas.bash "${REV}" "${SAIDA}/malhas"
 quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
 quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
 quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"

@@ -15,6 +15,7 @@ module mpas_cap_methods_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
+  use cpl_grids_mod, only : cpl_malha_latlon, ORIGEM_OESTE180
   ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
   ! para rugosidade e SST invalidas (ver fill_invalid_sst).
   use coupler_config_mod, only : cfg_zorl_default,          &
@@ -408,116 +409,29 @@ contains
   !! MPI num estado incompativel com o MOAB. ESMF_Grid nao usa MOAB, e os
   !! conectores ficam Grid->Grid.
   !!
-  !! Grade de 64800 celulas, periodica em longitude (ESMF_GridCreate1PeriDim),
-  !! coordenadas lon/lat nos centros (ESMF_STAGGERLOC_CENTER) e um DE por PET
-  !! (fatoracao exata de petCount, abaixo).
+  !! A grade e' a malha atm_cap do mapa de acoplamento, construida por
+  !! cpl_malha_latlon (cpl_grids): 64800 celulas, periodica em longitude,
+  !! centros de -179.5 a +179.5 graus em longitude e de -89.5 a +89.5 em
+  !! latitude, um DE por PET, com a mesma decomposicao da malha de fluxo do
+  !! mediador.
   subroutine mpas_create_grid(grid, rc)
     type(ESMF_Grid), intent(out) :: grid
     integer,         intent(out) :: rc
 
-    real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
-    real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
-
-    real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
-    integer  :: i, j, clbX(2), cubX(2), clbY(2), cubY(2)
-    integer  :: petCount, regDecomp(2), localDeCount
-    integer  :: nx_max, ny_tiles, lde
-    integer  :: nx_tiles_target
+    integer  :: petCount
     type(ESMF_VM) :: vm
     character(len=*), parameter :: subname = '(mpas_create_grid)'
 
     rc = ESMF_SUCCESS
 
-    ! Decomposicao: fatorar petCount EXATAMENTE em colunas x linhas, um DE por
-    ! PET, no par mais proximo de quadrado (linhas = maior divisor <= sqrt(N);
-    ! colunas = cofator), com colunas <= NLON/2 e linhas <= NLAT. Com mais DEs
-    ! que PETs, alguns PETs ficariam com dois DEs, e o ESMF_FieldGather
-    ! reuniria no PET 0 so' um DE por PET: o resto do campo ficaria no valor
-    ! de preenchimento, com buracos na forcante atmosferica (o MOM6 aborta com
-    ! "extreme surface values"). Tiles quase quadradas tambem evitam faixas
-    ! muito estreitas, que travavam o ESMF_FieldBundleRegridStore. Casos:
-    !   N=16→(4,4)  N=32→(8,4)  N=64→(8,8)  N=128→(16,8)  N=512→(32,16)
-    ! Um primo grande degenera para faixa (N=17→17x1), com cobertura total.
-    ! -------------------------------------------------------------------------
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! Fatoração exata: maior divisor de petCount que seja <= sqrt(petCount) e
-    ! caiba em NLAT dá o número de LINHAS (nrow); o cofator dá as COLUNAS (ncol).
-    ! Atribui o maior fator a lon (grade 360x180 é 2:1), aproximando tiles
-    ! quadradas. Sempre existe solução (nrow=1 no pior caso, para petCount primo).
-    nx_tiles_target = max(1, int(sqrt(real(petCount))))
-    ny_tiles = 1
-    do j = nx_tiles_target, 1, -1
-      if (mod(petCount, j) == 0) then
-        if (j <= ATM_NY .and. (petCount / j) <= ATM_NX / 2) then
-          ny_tiles = j            ! linhas (lat) = menor fator
-          exit
-        end if
-      end if
-    end do
-    nx_max = petCount / ny_tiles  ! colunas (lon) = maior fator = cofator
-    regDecomp(1) = nx_max         ! lon tiles
-    regDecomp(2) = ny_tiles       ! lat tiles
-    ! Invariante: regDecomp(1)*regDecomp(2) == petCount (1 DE por PET).
-
-    ! Grade regular 1 grau, periódica em lon.
-    ! Pré-condição: indexflag=ESMF_INDEX_GLOBAL garante que
-    ! lbound(fptr2d,1) seja o índice global real do PET (e.g., 61 para o segundo
-    ! PET de 60 colunas), não 1. Sem isso, state_set_field_1d não consegue calcular
-    ! a longitude geográfica correta para o deslocamento buf_global→fptr2d.
-    grid = ESMF_GridCreate1PeriDim( &
-      minIndex   = (/1, 1/),           &
-      maxIndex   = (/ATM_NX, ATM_NY/),     &
-      regDecomp  = regDecomp,          &
-      indexflag  = ESMF_INDEX_GLOBAL,  &
-      coordSys   = ESMF_COORDSYS_SPH_DEG, &
-      rc         = rc)
+    call cpl_malha_latlon('atm_cap', ATM_NX, ATM_NY, ORIGEM_OESTE180, .false., petCount, &
+                          grid, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-
-    ! ESMF_GridAddCoord é COLETIVA — todos os PETs devem chamá-la.
-    call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-
-    ! guard localDeCount>0 — com regDecomp 2D e DEs>petCount,
-    ! todos os PETs têm ≥1 DE; guard mantido por segurança para N > nx_max*ny_tiles.
-    call ESMF_GridGet(grid, localDeCount=localDeCount, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-
-    ! Laco explicito sobre cada DE local: ESMF_GridGetCoord sem localDE= falha
-    ! ("must provide localDe argument for localDeCount > 1") se um PET tiver
-    ! mais de um DE.
-    do lde = 0, localDeCount - 1
-
-      ! Coordenada X (longitude): centros de células (-179.5° a +179.5°)
-      nullify(coordX)
-      call ESMF_GridGetCoord(grid, coordDim=1, localDE=lde, &
-                             staggerloc=ESMF_STAGGERLOC_CENTER, &
-                             computationalLBound=clbX, computationalUBound=cubX, &
-                             farrayPtr=coordX, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      do j = clbX(2), cubX(2)
-        do i = clbX(1), cubX(1)
-          coordX(i,j) = -180.0_ESMF_KIND_R8 + (real(i,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8)*DLON
-        end do
-      end do
-
-      ! Coordenada Y (latitude): centros de células (-89.5° a +89.5°)
-      nullify(coordY)
-      call ESMF_GridGetCoord(grid, coordDim=2, localDE=lde, &
-                             staggerloc=ESMF_STAGGERLOC_CENTER, &
-                             computationalLBound=clbY, computationalUBound=cubY, &
-                             farrayPtr=coordY, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      do j = clbY(2), cubY(2)
-        do i = clbY(1), cubY(1)
-          coordY(i,j) = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8)*DLAT
-        end do
-      end do
-
-    end do  ! lde = 0, localDeCount-1
 
     call ESMF_LogWrite(subname//': ESMF_Grid 360x180 criada (sem MOAB)', ESMF_LOGMSG_INFO)
 

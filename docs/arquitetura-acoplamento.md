@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6) e na R-FASE11-07 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6) e na R-FASE11-08 (seções 3.3, 4.2 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -156,6 +156,16 @@ function malha_tripolar(nome, arquivo_hgrid, blocos, rc) result(m)
 
 As fórmulas de centro e de índice das grades regulares ficam em `cpl_grids`. Onde duas rotinas usam regras de arredondamento diferentes, ficam duas funções, com nomes que dizem a diferença, para que nada mude.
 
+Como ficou na R-FASE11-08, para as duas malhas regulares do lado atmosférico:
+
+| Item | Em `cpl_grids` |
+| --- | --- |
+| construtor | `cpl_malha_latlon(nome, nx, ny, origem_lon, cantos, petCount, grade, rc)`, uma sub-rotina que devolve a `ESMF_Grid`; `atm_med` com `ORIGEM_LESTE0` e cantos, `atm_cap` com `ORIGEM_OESTE180` e sem cantos |
+| decomposição | `cpl_regdecomp(petCount, nx, ny)`, a fatoração em um DE por PET que o mediador e o cap atmosférico já usavam (antes escrita duas vezes) |
+| centros e cantos | `centro_lon_leste0`, `centro_lat_leste0`, `canto_lon_leste0`, `canto_lat_leste0` (as expressões de `atm_med`) e `centro_lon_oeste180`, `centro_lat_oeste180` (as de `atm_cap`) |
+
+O tipo `cpl_malha_t` do esboço acima não foi criado: a descrição de cada malha (nome, componente, tipo) já está na tabela `MALHAS` de `cpl_map`, e a `ESMF_Grid` continua guardada pelo componente que a usa. `create_atm_grid` e `mpas_create_grid` ficaram como rotinas curtas que chamam o construtor, com as mesmas interfaces, o que permite comparar as duas versões com o mesmo programa de teste. As fórmulas de índice (de coordenada para coluna e linha) entram na R-FASE11-09, junto com as rotinas que as usam.
+
 ### 3.4 Dicionário de campos
 
 ```fortran
@@ -307,7 +317,7 @@ Cada tipo de mudança tem uma forma de confirmar, antes da rodada, que nada mudo
 | só documentação | nenhuma compilação muda | não precisa de rodada; tag depois do `git am` |
 | código novo que só registra no log | compilação; teste unitário das tabelas; literais novos declarados | relatório de acoplamento presente e coerente |
 | nomes de campos saindo das listas dos caps para o mapa | `confere-literais.py`: os nomes só mudam de arquivo; ordem idêntica conferida por teste | log do conector (`CplList`) igual ao da etapa anterior |
-| fórmula movida para `cpl_grids` | código de máquina comparado (`objdump`), como na R-FASE9-02: só números de linha diferem; testes `grade` e unitários | |
+| fórmula movida para `cpl_grids` | código de máquina comparado (`objdump`), como na R-FASE9-02: só números de linha diferem; testes `grade`, `malhas` e unitários. Quando a expressão muda de texto sem mudar de valor (na R-FASE11-08, o tamanho da célula do cap atmosférico passou da constante 1 para 360/nx, que dá exatamente 1), o `objdump` não serve, e vale o teste `malhas`, que compara as coordenadas bit a bit em várias decomposições | |
 | construção de malha movida | teste do supergrid (`tests/supergrid/compara-supergrid.bash`, conferência `supergrid`): dimensões, coordenadas e mensagens idênticas bit a bit; a partir da R-FASE11-10, estendido aos blocos | relatório de acoplamento igual |
 | configuração de rota movida para `ROTAS` | teste de interpolação (`tests/regrid`); comparação da configuração efetiva de cada rota, antes e depois | relatório de acoplamento igual (métodos, reservas, pontos completados) |
 | chamadas movidas entre módulos | `confere-instrucoes.py` sobre a soma dos arquivos: só estrutura de módulo muda; teste da física bulk | relatório de acoplamento igual |
@@ -438,7 +448,9 @@ A R-FASE11-06 fez o mesmo nos caps do MOM6 e do SIS2. Para a exportação dos mo
 
 A R-FASE11-07 fechou o bloco B com os caps do MONAN-A, do DOCN e do DATM. Os valores iniciais da importação do MONAN-A, que dependiam da posição de cada campo em `IMP_NAMES`, e os da exportação do DOCN passaram a ser escolhidos pelo nome do campo. O teste do DOCN, que roda o cap num driver NUOPC, deu resultado idêntico. Arquivos com nomes de campos escritos à mão: de 3 para 0, a meta do bloco.
 
-Próxima etapa: **R-FASE11-08**, a primeira do bloco C (malhas): `cpl_grids` com `malha_latlon` e as fórmulas de centro e de índice, e as malhas `atm_med` e `atm_cap` construídas por ele, conforme a tabela do bloco C.
+A R-FASE11-08 abriu o bloco C: `src/coupling/cpl_grids.F90` constrói as malhas `atm_med` (malha de fluxo do mediador) e `atm_cap` (grade do cap atmosférico) por `cpl_malha_latlon`, com a decomposição `cpl_regdecomp`, que estava escrita duas vezes, e com as fórmulas de centro e de canto de cada malha numa função cada uma (seção 3.3). As coordenadas e a decomposição ficaram idênticas, bit a bit, com 1, 4, 6 e 8 processos (teste novo `tests/malhas`, conferência `malhas`). Chamadas `ESMF_GridCreate*` fora de `src/coupling`: de 7 para 5.
+
+Próxima etapa: **R-FASE11-09**, com as fórmulas de índice de `bin_cells_local`, `copy_to_local_grid`, `state_get_field_1d`, `check_ice_geography`, `oisst_to_atm_nearest` e dos dois gravadores de diagnóstico vindas de `cpl_grids`, uma função por regra de arredondamento, conforme a tabela do bloco C.
 
 ---
 
