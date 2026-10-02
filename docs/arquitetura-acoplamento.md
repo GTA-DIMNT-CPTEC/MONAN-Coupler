@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6) e na R-FASE11-19 (seções 3.7, 4.3 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6) e na R-FASE11-20 (seções 3.7 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -334,6 +334,8 @@ Desde a R-FASE11-16, `med_exchange` tem também a fase `ir_para_malha_de_fluxo(i
 | `entregar` | `ocn2atm_landmask` | `primeiro_uso` | na primeira exportação, se `So_omask` está no `importState` |
 | `entregar` | `atm2ocn_ice` | `primeiro_uso` | se `Si_ifrac` está no `exportState` e a reserva `atm2ocn` existe |
 
+Desde a R-FASE11-20, a física é a fase `calcula_fluxos`, de `med_exchange`: ela associa os arrays de `med_fluxo_t` (`med_cap_types`, um ponteiro para os valores de cada campo interno que a física lê ou escreve, nulo se o ESMF não o entrega) e chama `calc_bulk_ncar(fluxo, forçantes, limites, relógio, rc)`. `med_bulk_ncar` não conhece mais o estado interno, os campos do ESMF nem as rotas; o plano previa `calcula_fluxos(is%fluxo, clock)`, e os arrays ficaram locais à fase, associados a cada passo, sem um componente novo no estado interno.
+
 Desde a R-FASE11-19, uma fase curta roda logo depois da física: `fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)`, que, sem o SIS2 dinâmico, recalcula a fração de gelo na malha de fluxo (`legacy_ice_fraction`, agora em `med_ocean`) para a exportação e para o passo seguinte. Ela não pode ir para `ir_para_malha_de_fluxo`, antes da física, porque a física deste passo usa a fração que já estava em `is%ice%ifrac`.
 
 A `atm2ocn` deixou de ser criada por `RegridOrCopy` como reserva: ela existe desde a fase A, que roda antes de qualquer chamada, e uma falha ali interrompe a inicialização.
@@ -529,7 +531,9 @@ A R-FASE11-18 levou as cinco criações de rota feitas durante o passo para as f
 
 A R-FASE11-19 tirou de `calc_bulk_ncar` a última chamada de rota da física: a fração de gelo sem o SIS2 (`legacy_ice_fraction`) foi para `med_ocean`, sem mudar instruções, e passou a ser chamada pela fase `fracao_de_gelo_sem_sis2`, de `med_exchange`, logo depois da física. O plano dizia "imediatamente antes"; isso mudaria resultados sem o SIS2, porque a física lê `is%ice%ifrac` (albedo e fluxos sobre o gelo) antes de o trecho recalculá-la, e a etapa seguiu a posição de hoje. Chamadas de rota em módulos de física: de 1 para 0, a meta; o maior arquivo deixou de passar de 1000 linhas.
 
-Próxima etapa: **R-FASE11-20**, conforme a tabela do bloco E: física em arrays (tipo `med_fluxo_t`; `med_bulk_ncar` sem estados nem rotas).
+A R-FASE11-20 passou a física bulk para arrays: o tipo `med_fluxo_t` reúne os 35 campos que `med_bulk_ncar` lê ou escreve, a fase `calcula_fluxos` (`med_exchange`) os associa e chama `calc_bulk_ncar`, e as 43 chamadas a `ESMF_FieldGet` da física viraram associações de ponteiro. As expressões e a ordem das operações não mudaram, e o teste da física bulk deu resultado idêntico, bit a bit. Com isso fecha o bloco E.
+
+Próxima etapa: **R-FASE11-21**, conforme a tabela do bloco F: o driver escolhe os conectores a partir de `TROCAS` e da coluna `quando`.
 
 ---
 

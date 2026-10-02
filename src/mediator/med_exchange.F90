@@ -12,6 +12,10 @@
 !!   ir_para_malha_de_fluxo
 !!              antes da física: leva os campos do oceano e do gelo da
 !!              grade do oceano para a malha de fluxo (R-FASE11-16)
+!!   calcula_fluxos
+!!              a física bulk (calc_bulk_ncar, em med_bulk_ncar) sobre os
+!!              arrays da malha de fluxo (med_fluxo_t), associados aqui aos
+!!              campos internos (R-FASE11-20)
 !!   fracao_de_gelo_sem_sis2
 !!              logo depois da física, sem o SIS2: a fração de gelo na malha
 !!              de fluxo (OISST ou limiar de SST) para a exportação e para o
@@ -38,7 +42,8 @@ module med_exchange_mod
   use coupler_utils_mod,   only: ChkErr
   use coupler_config_mod,  only: cfg_use_sis2_dynamic, cfg_write_fixdiag
   use cpl_map_mod,         only: ROTAS
-  use med_cap_types_mod,   only: MED_InternalState
+  use med_cap_types_mod,   only: MED_InternalState, med_fluxo_t
+  use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_methods_mod, only: cria_rota, RegridOrCopy, set_ocn_grid_mask
   use med_export_mod,      only: export_to_components
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
@@ -51,6 +56,7 @@ module med_exchange_mod
   public :: inicializar_dados
   public :: prepara_inicio        ! também para tests/completar
   public :: ir_para_malha_de_fluxo
+  public :: calcula_fluxos
   public :: fracao_de_gelo_sem_sis2
   public :: entregar
   public :: stamp_export_fields
@@ -694,6 +700,93 @@ contains
       end if
     end if
   end subroutine entregar
+
+  !> Fase da física bulk: associa os arrays de med_fluxo_t aos campos
+  !! internos da malha de fluxo (associa_fluxo) e chama calc_bulk_ncar com
+  !! eles e com os forçantes atmosféricos reunidos na grade global. Até a
+  !! R-FASE11-20, calc_bulk_ncar recebia o estado interno e pedia cada campo
+  !! ao ESMF.
+  !!
+  !! @param[in]    is             estado interno do mediador
+  !! @param[in]    uas..snow_g    forçantes atmosféricos na grade ATM global
+  !! @param[in]    i1, i2, j1, j2 limites locais da DE na malha de fluxo
+  !! @param[in]    clock          relógio do mediador (hora solar)
+  !! @param[out]   rc             código de retorno de calc_bulk_ncar
+  subroutine calcula_fluxos(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
+                            i1, i2, j1, j2, clock, rc)
+    type(MED_InternalState), intent(in)  :: is
+    real(ESMF_KIND_R8),      intent(in)  :: uas(:,:), vas(:,:), tas(:,:)
+    real(ESMF_KIND_R8),      intent(in)  :: psl(:,:), swdn(:,:), lwdn(:,:)
+    real(ESMF_KIND_R8),      intent(in)  :: rain(:,:), shum(:,:)
+    real(ESMF_KIND_R8),      intent(in)  :: snow_g(:,:)
+    integer,                 intent(in)  :: i1, i2, j1, j2
+    type(ESMF_Clock),        intent(in)  :: clock
+    integer,                 intent(out) :: rc
+    type(med_fluxo_t) :: fluxo
+
+    call associa_fluxo(is, fluxo)
+    call calc_bulk_ncar(fluxo, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
+                        i1, i2, j1, j2, clock, rc)
+  end subroutine calcula_fluxos
+
+  !> Associa cada array de med_fluxo_t aos valores do campo interno
+  !! correspondente, no DE local; um campo que o ESMF não entrega deixa o
+  !! array nulo, que a física trata como indisponível.
+  !!
+  !! @param[in]  is     estado interno do mediador
+  !! @param[out] fluxo  arrays da física
+  subroutine associa_fluxo(is, fluxo)
+    type(MED_InternalState), intent(in)  :: is
+    type(med_fluxo_t),       intent(out) :: fluxo
+
+    call aponta(is%ocn%sst,       fluxo%sst)
+    call aponta(is%ocn%u,         fluxo%uocn)
+    call aponta(is%ocn%v,         fluxo%vocn)
+    call aponta(is%ocn%omask,     fluxo%omask)
+    call aponta(is%ice%ifrac,     fluxo%ifrac)
+    call aponta(is%ice%tice,      fluxo%tice)
+    call aponta(is%ice%alb_vdr,   fluxo%alb_vdr)
+    call aponta(is%ice%alb_vdf,   fluxo%alb_vdf)
+    call aponta(is%ice%alb_idr,   fluxo%alb_idr)
+    call aponta(is%ice%alb_idf,   fluxo%alb_idf)
+    call aponta(is%ocn_flx%taux,  fluxo%taux)
+    call aponta(is%ocn_flx%tauy,  fluxo%tauy)
+    call aponta(is%ocn_flx%sen,   fluxo%sen)
+    call aponta(is%ocn_flx%evap,  fluxo%evap)
+    call aponta(is%ocn_flx%lwnet, fluxo%lwnet)
+    call aponta(is%ocn_flx%swvdr, fluxo%swvdr)
+    call aponta(is%ocn_flx%swvdf, fluxo%swvdf)
+    call aponta(is%ocn_flx%swidr, fluxo%swidr)
+    call aponta(is%ocn_flx%swidf, fluxo%swidf)
+    call aponta(is%ocn_flx%rain,  fluxo%rain)
+    call aponta(is%ocn_flx%snow,  fluxo%snow)
+    call aponta(is%ocn_flx%pslv,  fluxo%pslv)
+    call aponta(is%ocn_flx%duu10n, fluxo%duu10n)
+    call aponta(is%ice%taux,      fluxo%taux_ice)
+    call aponta(is%ice%tauy,      fluxo%tauy_ice)
+    call aponta(is%ice%sen,       fluxo%sen_ice)
+    call aponta(is%ice%evap,      fluxo%evap_ice)
+    call aponta(is%ice%lwnet,     fluxo%lwnet_ice)
+    call aponta(is%ice%swvdr,     fluxo%swvdr_ice)
+    call aponta(is%ice%swvdf,     fluxo%swvdf_ice)
+    call aponta(is%ice%swidr,     fluxo%swidr_ice)
+    call aponta(is%ice%swidf,     fluxo%swidf_ice)
+    call aponta(is%sfc%zorl,      fluxo%zorl)
+    call aponta(is%sfc%coszen,    fluxo%coszen)
+    call aponta(is%sfc%albedo,    fluxo%albedo)
+
+  contains
+
+    subroutine aponta(campo, p)
+      type(ESMF_Field),            intent(in)  :: campo
+      real(ESMF_KIND_R8), pointer, intent(out) :: p(:,:)
+      integer :: rc_p
+      nullify(p)
+      call ESMF_FieldGet(campo, farrayPtr=p, rc=rc_p)
+      if (rc_p /= ESMF_SUCCESS) nullify(p)
+    end subroutine aponta
+
+  end subroutine associa_fluxo
 
   !> Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
   !! gelo na malha de fluxo (legacy_ice_fraction, em med_ocean). A física

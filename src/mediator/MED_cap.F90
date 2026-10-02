@@ -47,7 +47,6 @@ module MED_cap_MONAN_mod
                                   MED_CHAVES
   use cpl_fields_mod,      only: CPL_NOME_LEN
   use cpl_map_mod,         only: cpl_chegadas, cpl_config_atual
-  use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
   use med_init_mod,        only: create_atm_grid, create_ocn_grid,           &
                                   realize_component_fields,                   &
@@ -56,7 +55,7 @@ module MED_cap_MONAN_mod
                                   local_atm_bounds, apply_native_fluxes,      &
                                   zero_med_fluxes
   use med_exchange_mod,    only: inicializar_dados, ir_para_malha_de_fluxo, &
-                                  fracao_de_gelo_sem_sis2, entregar
+                                  calcula_fluxos, fracao_de_gelo_sem_sis2, entregar
   use med_diag_mod,        only: log_ifrac_export_bitsum, relata_completas
 
   implicit none
@@ -399,8 +398,8 @@ contains
   ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
   ! gather_atm_forcing, local_atm_bounds, ir_para_malha_de_fluxo
   ! (med_exchange: update_ocean_fields_on_atm_grid e
-  ! update_ice_fraction_from_docn), calc_bulk_ncar, fracao_de_gelo_sem_sis2
-  ! (med_exchange), apply_native_fluxes,
+  ! update_ice_fraction_from_docn), calcula_fluxos (med_exchange:
+  ! calc_bulk_ncar), fracao_de_gelo_sem_sis2 (med_exchange), apply_native_fluxes,
   ! entregar (med_exchange: export_to_components e carimbo de tempo),
   ! log_ifrac_export_bitsum e med_write_import_fields.
   !============================================================================
@@ -515,7 +514,7 @@ contains
     !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
     !==========================================================================
-    call calc_bulk_ncar(is, importState, &
+    call calcula_fluxos(is, &
                         uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
                         i1, i2, j1, j2, clock, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: calc_bulk_ncar falhou', &

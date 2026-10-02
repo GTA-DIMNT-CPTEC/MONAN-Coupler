@@ -30,6 +30,7 @@ module med_cap_types_mod
   public :: med_par_t, med_diag_config_t, med_run_flags_t
   ! Contagem dos pontos completados por vizinhança (relatório de acoplamento)
   public :: med_completa_t, N_COMPLETA, COMPLETA_NOMES
+  public :: med_fluxo_t
   public :: COMPL_SST, COMPL_ICE_IFRAC, COMPL_ICE_AVSDR, COMPL_ICE_AVSDF
   public :: COMPL_ICE_ANIDR, COMPL_ICE_ANIDF, COMPL_ICE_T, COMPL_IFRAC_EXP
   ! Constantes físicas de coupler_constants_mod, re-exportadas
@@ -168,6 +169,54 @@ module med_cap_types_mod
   !! da faixa válida e quantos ficaram com o valor fixo. Só alimentam o
   !! relatório de acoplamento (med_diag, relata_completas, chamada no último
   !! passo por MediatorAdvanceRelatorio).
+  !> Arrays da física bulk (med_bulk_ncar), na malha de fluxo, com os
+  !! limites locais da DE: ponteiros para os valores dos campos internos,
+  !! associados pela fase calcula_fluxos (med_exchange) a cada passo. Um
+  !! ponteiro nulo é um campo indisponível, como antes da R-FASE11-20, quando
+  !! a física pedia cada campo ao ESMF. A física lê e escreve só por aqui,
+  !! sem conhecer o estado interno, os campos do ESMF nem as rotas.
+  type :: med_fluxo_t
+    ! Entradas: oceano e gelo (is%ocn, is%ice)
+    real(ESMF_KIND_R8), pointer :: sst(:,:)     => null()
+    real(ESMF_KIND_R8), pointer :: uocn(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: vocn(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: omask(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: ifrac(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: tice(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: alb_vdr(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: alb_vdf(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: alb_idr(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: alb_idf(:,:) => null()
+    ! Saídas para o oceano: Foxx_* e Faxa_*, Sa_pslv, So_duu10n (is%ocn_flx)
+    real(ESMF_KIND_R8), pointer :: taux(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: tauy(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: sen(:,:)     => null()
+    real(ESMF_KIND_R8), pointer :: evap(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: lwnet(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: swvdr(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: swvdf(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: swidr(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: swidf(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: rain(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: snow(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: pslv(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: duu10n(:,:)  => null()
+    ! Saídas para o gelo: Fioi_* (is%ice)
+    real(ESMF_KIND_R8), pointer :: taux_ice(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: tauy_ice(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: sen_ice(:,:)   => null()
+    real(ESMF_KIND_R8), pointer :: evap_ice(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: lwnet_ice(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: swvdr_ice(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: swvdf_ice(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: swidr_ice(:,:) => null()
+    real(ESMF_KIND_R8), pointer :: swidf_ice(:,:) => null()
+    ! Saídas para a superfície: rugosidade, cosseno zenital e albedo (is%sfc)
+    real(ESMF_KIND_R8), pointer :: zorl(:,:)    => null()
+    real(ESMF_KIND_R8), pointer :: coszen(:,:)  => null()
+    real(ESMF_KIND_R8), pointer :: albedo(:,:)  => null()
+  end type med_fluxo_t
+
   type :: med_completa_t
     integer(ESMF_KIND_I8) :: aplicacoes = 0_ESMF_KIND_I8
     integer(ESMF_KIND_I8) :: invalidos  = 0_ESMF_KIND_I8

@@ -16,6 +16,10 @@
 !! lwdn < 1 W/m2). O gerador aleatório tem semente fixa e é chamado na
 !! mesma sequência em todos os PETs, que assim veem a mesma grade global.
 !!
+!! Desde a R-FASE11-20, a física recebe arrays (med_fluxo_t) em vez do estado
+!! interno; o programa chama a fase calcula_fluxos, de med_exchange, que os
+!! associa aos mesmos campos e chama calc_bulk_ncar.
+!!
 !! Sem o SIS2 (o padrão aqui), calc_bulk_ncar terminava recalculando a
 !! fração de gelo pelo limiar de SST (legacy_ice_fraction). Desde a
 !! R-FASE11-19, esse cálculo é a fase fracao_de_gelo_sem_sis2, de
@@ -24,8 +28,7 @@
 program test_bulk_ncar
   use ESMF
   use med_cap_types_mod, only: MED_InternalState
-  use med_bulk_ncar_mod, only: calc_bulk_ncar
-  use med_exchange_mod,  only: fracao_de_gelo_sem_sis2
+  use med_exchange_mod,  only: calcula_fluxos, fracao_de_gelo_sem_sis2
   implicit none
 
   integer, parameter :: NX = 360, NY = 180, NCHAMADAS = 3
@@ -129,7 +132,7 @@ program test_bulk_ncar
 
     call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=p, rc=rc)
     i1 = lbound(p,1); i2 = ubound(p,1); j1 = lbound(p,2); j2 = ubound(p,2)
-    call calc_bulk_ncar(is, importState, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
+    call calcula_fluxos(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                         i1, i2, j1, j2, clock, rc)
     if (rc == ESMF_SUCCESS) call fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)
     write(u) rc
