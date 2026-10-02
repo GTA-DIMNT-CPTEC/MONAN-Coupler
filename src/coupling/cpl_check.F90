@@ -16,7 +16,7 @@
 !!
 !!   cpl_write_methods      escreve em cada entrada da CplList a opção
 !!                          remapmethod com o método da troca no mapa
-!!                          (coluna metodo de EXCHANGES); desde a R-FASE11-22;
+!!                          (coluna method de EXCHANGES); desde a R-FASE11-22;
 !!   cpl_check_coupling     só escreve no log do PET 0, com o prefixo
 !!                          CPL-REL:, duas coisas:
 !!     relatório dos conectores  para cada conector do driver, os campos da

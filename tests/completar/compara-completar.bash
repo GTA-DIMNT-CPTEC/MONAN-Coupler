@@ -6,7 +6,7 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
-# programa tests/completar/test_completar.F90 da árvore de trabalho (ele só
+# programa tests/completar/test_fill.F90 da árvore de trabalho (ele só
 # usa interfaces que existem desde a fase11-12-validada; as fases de
 # med_exchange que a versão tiver entram com -DCOM_ENTREGAR, -DCOM_IR_PARA
 # e -DCOM_INICIO) e o
@@ -80,18 +80,18 @@ for versao in antiga nova; do
   bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" -a > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
-    # Fases de med_exchange presentes na versão: entregar (desde a
-    # R-FASE11-15), ir_para_malha_de_fluxo (desde a R-FASE11-16) e a fase A
-    # da inicialização, prepara_inicio (desde a R-FASE11-17)
+    # Fases de med_exchange presentes na versão: deliver (desde a
+    # R-FASE11-15), go_to_flux_grid (desde a R-FASE11-16) e a fase A
+    # da inicialização, prepare_start (desde a R-FASE11-17)
     defs=""; mx="${src}/src/mediator/med_exchange.F90"
-    grep -qi 'subroutine entregar' "${mx}" 2>/dev/null && defs+=" -DCOM_ENTREGAR"
-    grep -qi 'subroutine ir_para_malha_de_fluxo' "${mx}" 2>/dev/null && defs+=" -DCOM_IR_PARA"
-    grep -qi 'subroutine prepara_inicio' "${mx}" 2>/dev/null && defs+=" -DCOM_INICIO"
+    grep -qi 'subroutine deliver' "${mx}" 2>/dev/null && defs+=" -DCOM_ENTREGAR"
+    grep -qi 'subroutine go_to_flux_grid' "${mx}" 2>/dev/null && defs+=" -DCOM_IR_PARA"
+    grep -qi 'subroutine prepare_start' "${mx}" 2>/dev/null && defs+=" -DCOM_INICIO"
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -cpp ${defs} -ffree-line-length-none -fallow-argument-mismatch \
-      -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_completar.F90" -o test_completar.o &&
+      -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_fill.F90" -o test_fill.o &&
     # shellcheck disable=SC2086
-    ${FC} -o test_completar test_completar.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+    ${FC} -o test_fill test_fill.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
   for caso in ${CASOS}; do
@@ -99,7 +99,7 @@ for versao in antiga nova; do
     run="${dir}/run_${caso}"
     rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
     # shellcheck disable=SC2086
-    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_completar $(arg_do_caso "${caso}") > run.log 2>&1 ) \
+    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_fill $(arg_do_caso "${caso}") > run.log 2>&1 ) \
       || { tail -20 "${run}/run.log"; echo "ERRO: execução da versão ${versao}, caso ${caso}" >&2; exit 2; }
   done
 done

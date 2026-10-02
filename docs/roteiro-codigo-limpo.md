@@ -146,7 +146,7 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-01 | documento de arquitetura no repositório; fase 11 no roteiro e no estado do projeto; indicadores da fase em `indicadores.py`; testes do supergrid do MOM6 e do DOCN levados para o repositório e para `confere-tudo.bash` |
 | R-FASE11-02 | mapa de acoplamento em `src/coupling/` (`cpl_fields.F90`: 57 campos; `cpl_map.F90`: 8 malhas, 154 trocas e 6 rotas), compilado e ligado, sem uso; teste `test_cpl_map` em `tests/unit`; `tools/dev/mapa-acoplamento.py` gera `docs/acoplamento.md` (conferência `mapa`); trocas sem linha no mapa: 0 |
 | R-FASE11-03 | `cpl_check.F90`: relatório dos conectores e conferência do mapa no log (`CPL-REL:`), chamados pelo driver em `ModifyCplLists`, só registro; testes `test_cpl_check` e `tests/cplcheck` (conferência `cplcheck`); driver em `compila-local.bash` |
-| R-FASE11-04 | relatório das rotas do mediador e dos pontos completados por vizinhança (`CPL-REL:`); `valida_rodada.bash compara` grava e compara o relatório de acoplamento; teste `test_completa`; fim do bloco A |
+| R-FASE11-04 | relatório das rotas do mediador e dos pontos completados por vizinhança (`CPL-REL:`); `valida_rodada.bash compara` grava e compara o relatório de acoplamento; teste `test_fill_counts`; fim do bloco A |
 | R-FASE11-04-FIX01 | linhas dos pontos completados no último passo do mediador (a finalização dos componentes não é chamada) |
 | R-FASE11-05 | o mediador anuncia e realiza os campos a partir do mapa; arquivos com nomes de campos escritos à mão de 8 para 5 (só os caps) |
 | R-FASE11-06 | os caps do MOM6 e do SIS2 anunciam e realizam os campos a partir do mapa (tabela nova `EXPORTS`); arquivos com nomes de campos escritos à mão de 5 para 3 |
@@ -155,15 +155,15 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-09 | fórmulas de índice e de longitude das grades regulares em `cpl_grids` (oito rotinas, uma função por regra) |
 | R-FASE11-10 | `cpl_tripolar_grid` e `cpl_blocks_t`: oceano no mediador e malha do SIS2 construídos por `cpl_grids`; chamadas `ESMF_GridCreate*` fora de `src/coupling` de 5 para 3 |
 | R-FASE11-11 | grade do cap do MOM6 por `cpl_block_grid`, com as chamadas do ESMF de hoje; fim do bloco C; chamadas `ESMF_GridCreate*` fora de `src/coupling` de 3 para 2 (DOCN e DATM) |
-| R-FASE11-12 | rotas do mediador criadas por `cria_rota`, com a configuração de `ROUTES`; cópia da máscara do oceano numa rotina só (`set_ocn_grid_mask`); teste `test_rotas` |
+| R-FASE11-12 | rotas do mediador criadas por `create_route`, com a configuração de `ROUTES`; cópia da máscara do oceano numa rotina só (`set_ocn_grid_mask`); teste `test_routes` |
 | R-FASE11-13 | `no_value` e `nan_to` aplicados pela rota; as chamadas de interpolação deixam de passar `zero_total`; a rota de reserva mantém as opções da rota pedida |
 | R-FASE11-14 | etapa completar executada pela rota na SST e na fração de gelo exportada; fim do bloco D; teste de regressão novo `tests/completar` |
-| R-FASE11-15 | `med_exchange.F90` com a fase `entregar` (exportação e carimbo de tempo); `RouteOcnToAtm` sai; arquivos que carimbam o tempo de 5 para 4 |
-| R-FASE11-16 | fase `ir_para_malha_de_fluxo` em `med_exchange` (SST, correntes e gelo na malha de fluxo, e o gelo do OISST) |
+| R-FASE11-15 | `med_exchange.F90` com a fase `deliver` (exportação e carimbo de tempo); `RouteOcnToAtm` sai; arquivos que carimbam o tempo de 5 para 4 |
+| R-FASE11-16 | fase `go_to_flux_grid` em `med_exchange` (SST, correntes e gelo na malha de fluxo, e o gelo do OISST) |
 | R-FASE11-17 | fase de inicialização em `med_exchange`, com as rotas de `criar='inicio'` pela tabela; arquivos que carimbam o tempo de 4 para 3; criações de rota fora de `med_exchange` de 7 para 5; etapa R-FASE11-18 acrescentada ao plano |
 | R-FASE11-18 | rotas criadas durante o passo pelas fases de `med_exchange`, guiadas pela coluna `create`; criações de rota fora de `med_exchange` de 5 para 0 (meta); `tests/completar` com o SIS2 e o caso `mista4` |
-| R-FASE11-19 | fração de gelo sem o SIS2 fora da física bulk (fase `fracao_de_gelo_sem_sis2`, logo depois de `calc_bulk_ncar`); chamadas de rota em módulos de física de 1 para 0 (meta); nenhum arquivo com mais de 1000 linhas |
-| R-FASE11-20 | física bulk em arrays (`med_fluxo_t`, fase `calcula_fluxos`): `med_bulk_ncar` sem estado interno, campos do ESMF nem rotas; fim do bloco E |
+| R-FASE11-19 | fração de gelo sem o SIS2 fora da física bulk (fase `ice_fraction_without_sis2`, logo depois de `calc_bulk_ncar`); chamadas de rota em módulos de física de 1 para 0 (meta); nenhum arquivo com mais de 1000 linhas |
+| R-FASE11-20 | física bulk em arrays (`med_flux_t`, fase `compute_fluxes`): `med_bulk_ncar` sem estado interno, campos do ESMF nem rotas; fim do bloco E |
 | R-FASE11-21 | conectores registrados pelo mapa (`cpl_driver_connectors`), no lugar das condições do driver; teste `test_connectors`; início do bloco F |
 | R-FASE11-22 | método de cada campo dos conectores pelo mapa (coluna `method`, `remapmethod=bilinear` escrito na `CplList` por `cpl_write_methods`) e conferido pela conferência do mapa |
 | R-FASE11-23 | base dos esquemas de pesos, opções em texto, lista de esquemas (`regrid_schemes.F90`), modelo `idw` e `compara-esquema.bash`; esquema novo passa a ser um arquivo e uma linha na lista |

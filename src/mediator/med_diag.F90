@@ -6,8 +6,8 @@
 !! exportada. Não alteram campos.
 !!
 !! Também a contagem dos pontos completados por vizinhança
-!! (registra_completa, a cada preenchimento) e as linhas do relatório de
-!! acoplamento que a resumem no último passo da rodada (relata_completas,
+!! (record_fill, a cada preenchimento) e as linhas do relatório de
+!! acoplamento que a resumem no último passo da rodada (report_fills,
 !! prefixo CPL-REL:, ver src/coupling/cpl_check.F90).
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
@@ -18,14 +18,14 @@ module med_diag_mod
   use ESMF
   use coupler_constants_mod, only: ATM_NX, ATM_NY
   use diag_bitsum_mod, only: diag_bitsum_log
-  use med_cap_types_mod, only: med_completa_t, N_COMPLETA, COMPLETA_NOMES
+  use med_cap_types_mod, only: med_fill_count_t, N_FILL, FILL_NAMES
 
   implicit none
   private
 
   public :: log_atm_forcing_summary
   public :: log_ifrac_export_bitsum
-  public :: registra_completa, relata_completas
+  public :: record_fill, report_fills
 
 contains
 
@@ -108,14 +108,14 @@ contains
   !! @param[inout] c          contagem do campo
   !! @param[in]    n_invalid  pontos fora da faixa válida antes do preenchimento
   !! @param[in]    n_left     pontos que ficaram com o valor fixo
-  subroutine registra_completa(c, n_invalid, n_left)
-    type(med_completa_t), intent(inout) :: c
+  subroutine record_fill(c, n_invalid, n_left)
+    type(med_fill_count_t), intent(inout) :: c
     integer,              intent(in)    :: n_invalid, n_left
 
-    c%aplicacoes = c%aplicacoes + 1_ESMF_KIND_I8
-    c%invalidos  = c%invalidos  + int(n_invalid, ESMF_KIND_I8)
-    c%fixos      = c%fixos      + int(n_left,    ESMF_KIND_I8)
-  end subroutine registra_completa
+    c%n_applied = c%n_applied + 1_ESMF_KIND_I8
+    c%n_invalid_pts = c%n_invalid_pts + int(n_invalid, ESMF_KIND_I8)
+    c%n_fixed_pts = c%n_fixed_pts + int(n_left,    ESMF_KIND_I8)
+  end subroutine record_fill
 
   !> Relatório dos pontos completados, no último passo: soma as contagens
   !! de todos os PETs do mediador e o PET 0 escreve uma linha CPL-REL: por
@@ -124,14 +124,14 @@ contains
   !!
   !! @param[in]  completa  contagens deste PET (índices COMPL_*)
   !! @param[out] rc        ESMF_SUCCESS, ou o código da redução que falhou
-  subroutine relata_completas(completa, rc)
-    type(med_completa_t), intent(in)  :: completa(N_COMPLETA)
+  subroutine report_fills(fill_counts, rc)
+    type(med_fill_count_t), intent(in) :: fill_counts(N_FILL)
     integer,              intent(out) :: rc
 
     type(ESMF_VM) :: vm
     integer :: localPet, k
-    integer(ESMF_KIND_I8) :: soma_loc(2*N_COMPLETA), soma(2*N_COMPLETA)
-    integer(ESMF_KIND_I8) :: apl_loc(N_COMPLETA), apl(N_COMPLETA)
+    integer(ESMF_KIND_I8) :: totals_loc(2*N_FILL), totals(2*N_FILL)
+    integer(ESMF_KIND_I8) :: apl_loc(N_FILL), apl(N_FILL)
     character(len=24) :: b1, b2, b3
 
     call ESMF_VMGetCurrent(vm, rc=rc)
@@ -139,23 +139,23 @@ contains
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
     if (rc /= ESMF_SUCCESS) return
 
-    soma_loc(1:N_COMPLETA)  = completa%invalidos
-    soma_loc(N_COMPLETA+1:) = completa%fixos
-    apl_loc = completa%aplicacoes
-    call ESMF_VMAllReduce(vm, soma_loc, soma, 2*N_COMPLETA, ESMF_REDUCE_SUM, rc=rc)
+    totals_loc(1:N_FILL)    = fill_counts%n_invalid_pts
+    totals_loc(N_FILL+1:) = fill_counts%n_fixed_pts
+    apl_loc = fill_counts%n_applied
+    call ESMF_VMAllReduce(vm, totals_loc, totals, 2*N_FILL, ESMF_REDUCE_SUM, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    call ESMF_VMAllReduce(vm, apl_loc, apl, N_COMPLETA, ESMF_REDUCE_MAX, rc=rc)
+    call ESMF_VMAllReduce(vm, apl_loc, apl, N_FILL, ESMF_REDUCE_MAX, rc=rc)
     if (rc /= ESMF_SUCCESS .or. localPet /= 0) return
 
-    do k = 1, N_COMPLETA
+    do k = 1, N_FILL
       if (apl(k) == 0) cycle
       write(b1, '(I0)') apl(k)
-      write(b2, '(I0)') soma(k)
-      write(b3, '(I0)') soma(N_COMPLETA + k)
-      call ESMF_LogWrite('CPL-REL: completar '//trim(COMPLETA_NOMES(k))//': '//trim(b1)// &
+      write(b2, '(I0)') totals(k)
+      write(b3, '(I0)') totals(N_FILL + k)
+      call ESMF_LogWrite('CPL-REL: completar '//trim(FILL_NAMES(k))//': '//trim(b1)// &
         ' aplicacao(oes), '//trim(b2)//' ponto(s) fora da faixa, '//trim(b3)// &
         ' com valor fixo (soma dos PETs)', ESMF_LOGMSG_INFO)
     end do
-  end subroutine relata_completas
+  end subroutine report_fills
 
 end module med_diag_mod

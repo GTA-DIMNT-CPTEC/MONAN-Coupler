@@ -10,9 +10,9 @@
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
 !!   RegridOrCopy               interpola um campo da malha de fluxo para o exportState
-!!   spec_da_rota               configuração de uma rota na tabela ROUTES
-!!   completar_da_rota          preenchimento por vizinhança de uma rota de ROUTES
-!!   cria_rota                  cria uma rota com a configuração de ROUTES
+!!   route_spec                 configuração de uma rota na tabela ROUTES
+!!   route_fill                 preenchimento por vizinhança de uma rota de ROUTES
+!!   create_route               cria uma rota com a configuração de ROUTES
 !!   set_ocn_grid_mask          copia So_omask para a máscara da grade OCN
 
 module med_cap_methods_mod
@@ -37,9 +37,9 @@ module med_cap_methods_mod
   public :: GetFieldPtr
   public :: GetFieldPtrOptional
   public :: RegridOrCopy
-  public :: spec_da_rota
-  public :: completar_da_rota
-  public :: cria_rota
+  public :: route_spec
+  public :: route_fill
+  public :: create_route
   public :: set_ocn_grid_mask
 
 
@@ -234,7 +234,7 @@ contains
       line=__LINE__, file=__FILE__)) return
 
     ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN) e existe
-    ! desde a fase A da inicialização (med_exchange, cria_rotas_inicio),
+    ! desde a fase A da inicialização (med_exchange, create_start_routes),
     ! que roda antes de qualquer chamada desta rotina. A rota zera o destino
     ! antes e troca os NaN por zero (ROUTES: no_value 'zerar', nan_to 0).
     call is%regrid%apply('atm2ocn', src_field, dst_field, rc)
@@ -261,7 +261,7 @@ contains
   !! med_export), porque o preenchimento vale mesmo quando a rota não é
   !! aplicada.
   !============================================================================
-  subroutine spec_da_rota(name, spec, fallback, ok)
+  subroutine route_spec(name, spec, fallback, ok)
     character(len=*),    intent(in)  :: name
     type(regrid_spec_t), intent(out) :: spec
     character(len=*),    intent(out) :: fallback
@@ -281,15 +281,15 @@ contains
     end if
     spec%fill = ROUTES(k)%fill
     fallback = ROUTES(k)%fallback
-  end subroutine spec_da_rota
+  end subroutine route_spec
 
   !============================================================================
-  !> @brief Preenchimento por vizinhança (coluna completar de ROUTES) da rota
+  !> @brief Preenchimento por vizinhança (coluna fill de ROUTES) da rota
   !! nome; desligado se a rota não está em ROUTES. Serve para completar como
   !! a rota quando ela ainda não existe e outra interpola no lugar dela (a
   !! SST pela rota ocn2atm enquanto a máscara do oceano é uniforme).
   !============================================================================
-  function completar_da_rota(name) result(fill)
+  function route_fill(name) result(fill)
     character(len=*), intent(in) :: name
     type(regrid_fill_t) :: fill
     integer :: k
@@ -297,13 +297,13 @@ contains
     fill = regrid_fill_t()
     k = cpl_route_index(name)
     if (k > 0) fill = ROUTES(k)%fill
-  end function completar_da_rota
+  end function route_fill
 
   !============================================================================
   !> @brief Cria a rota nome em regrid com a configuração de ROUTES, e com a
   !! rota de reserva da tabela, quando houver.
   !============================================================================
-  subroutine cria_rota(regrid, name, src, dst, rc)
+  subroutine create_route(regrid, name, src, dst, rc)
     type(regrid_manager_t), intent(inout) :: regrid
     character(len=*),       intent(in)    :: name
     type(ESMF_Field),       intent(inout) :: src, dst
@@ -312,7 +312,7 @@ contains
     character(len=32)   :: fallback
     logical :: ok
 
-    call spec_da_rota(name, spec, fallback, ok)
+    call route_spec(name, spec, fallback, ok)
     if (.not. ok) then
       call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='MED: rota fora de ROTAS: '//trim(name), &
         line=__LINE__, file=__FILE__, rcToReturn=rc)
@@ -323,7 +323,7 @@ contains
     else
       call regrid%add(name, spec, src, dst, rc)
     end if
-  end subroutine cria_rota
+  end subroutine create_route
 
   !============================================================================
   !> @brief Copia So_omask (1 = oceano, 0 = terra) do importState para o item
@@ -334,20 +334,20 @@ contains
   !! achou: So_omask está no importState; copiou: algum DE recebeu a
   !! máscara.
   !============================================================================
-  subroutine set_ocn_grid_mask(ocn_grid, importState, n_terra, n_mar, achou, copiou)
+  subroutine set_ocn_grid_mask(ocn_grid, importState, n_land_pts, n_sea_pts, found, copied)
     type(ESMF_Grid),  intent(inout) :: ocn_grid
     type(ESMF_State), intent(inout) :: importState
-    integer,          intent(out)   :: n_terra, n_mar
-    logical,          intent(out)   :: achou, copiou
+    integer,          intent(out)   :: n_land_pts, n_sea_pts
+    logical,          intent(out)   :: found, copied
     real(ESMF_KIND_R8), pointer    :: omask_src(:,:)
     integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
     type(ESMF_Field) :: omask_field
     integer :: lde, ldec, rc
 
-    n_terra = 0; n_mar = 0; copiou = .false.
+    n_land_pts = 0; n_sea_pts = 0; copied = .false.
     call ESMF_StateGet(importState, itemName="So_omask", field=omask_field, rc=rc)
-    achou = rc == ESMF_SUCCESS
-    if (.not. achou) return
+    found = rc == ESMF_SUCCESS
+    if (.not. found) return
     call ESMF_GridGet(ocn_grid, localDeCount=ldec, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     do lde = 0, ldec - 1
@@ -358,9 +358,9 @@ contains
         farrayPtr=maskptr, rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(maskptr)) then
         maskptr = nint(omask_src)
-        n_terra = n_terra + count(maskptr == 0)
-        n_mar   = n_mar   + count(maskptr == 1)
-        copiou  = .true.
+        n_land_pts = n_land_pts + count(maskptr == 0)
+        n_sea_pts = n_sea_pts + count(maskptr == 1)
+        copied  = .true.
       end if
     end do
   end subroutine set_ocn_grid_mask

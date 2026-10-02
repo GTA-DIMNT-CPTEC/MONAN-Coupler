@@ -16,22 +16,22 @@
 !! lwdn < 1 W/m2). O gerador aleatório tem semente fixa e é chamado na
 !! mesma sequência em todos os PETs, que assim veem a mesma grade global.
 !!
-!! Desde a R-FASE11-20, a física recebe arrays (med_fluxo_t) em vez do estado
-!! interno; o programa chama a fase calcula_fluxos, de med_exchange, que os
+!! Desde a R-FASE11-20, a física recebe arrays (med_flux_t) em vez do estado
+!! interno; o programa chama a fase compute_fluxes, de med_exchange, que os
 !! associa aos mesmos campos e chama calc_bulk_ncar.
 !!
 !! Sem o SIS2 (o padrão aqui), calc_bulk_ncar terminava recalculando a
 !! fração de gelo pelo limiar de SST (legacy_ice_fraction). Desde a
-!! R-FASE11-19, esse cálculo é a fase fracao_de_gelo_sem_sis2, de
+!! R-FASE11-19, esse cálculo é a fase ice_fraction_without_sis2, de
 !! med_exchange, chamada logo depois; o teste a chama no mesmo ponto, e os
 !! campos gravados continuam os de antes.
 program test_bulk_ncar
   use ESMF
   use med_cap_types_mod, only: MED_InternalState
-  use med_exchange_mod,  only: calcula_fluxos, fracao_de_gelo_sem_sis2
+  use med_exchange_mod,  only: compute_fluxes, ice_fraction_without_sis2
   implicit none
 
-  integer, parameter :: NX = 360, NY = 180, NCHAMADAS = 3
+  integer, parameter :: NX = 360, NY = 180, NCALLS = 3
   type(MED_InternalState) :: is
   type(ESMF_Grid)  :: grid
   type(ESMF_VM)    :: vm
@@ -39,13 +39,13 @@ program test_bulk_ncar
   type(ESMF_Clock) :: clock
   type(ESMF_Time)  :: t0, t1
   type(ESMF_TimeInterval) :: dt
-  type(ESMF_Field), allocatable :: todos(:)
+  type(ESMF_Field), allocatable :: all_fields(:)
   real(ESMF_KIND_R8), allocatable :: uas(:,:), vas(:,:), tas(:,:), psl(:,:), swdn(:,:)
   real(ESMF_KIND_R8), allocatable :: lwdn(:,:), rain(:,:), shum(:,:), snow(:,:)
   real(ESMF_KIND_R8), pointer :: p(:,:)
-  integer, allocatable :: semente(:)
+  integer, allocatable :: seed(:)
   integer :: rc, pet, npet, ns, k, n, u, i1, i2, j1, j2
-  character(len=64) :: nome
+  character(len=64) :: name
 
   call ESMF_Initialize(defaultLogFileName='teste_bulk', logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
   if (rc /= ESMF_SUCCESS) stop 2
@@ -60,19 +60,19 @@ program test_bulk_ncar
     indexflag=ESMF_INDEX_GLOBAL, rc=rc)
 
   ! Todos os campos que calc_bulk_ncar usa, entradas e saídas
-  call cria(is%ocn_flx%taux);   call cria(is%ocn_flx%tauy);   call cria(is%ocn_flx%sen)
-  call cria(is%ocn_flx%evap);   call cria(is%ocn_flx%lwnet);  call cria(is%ocn_flx%swvdr)
-  call cria(is%ocn_flx%swvdf);  call cria(is%ocn_flx%swidr);  call cria(is%ocn_flx%swidf)
-  call cria(is%ocn_flx%rain);   call cria(is%ocn_flx%snow);   call cria(is%ocn_flx%pslv)
-  call cria(is%ice%ifrac);  call cria(is%ocn_flx%duu10n); call cria(is%ocn%sst)
-  call cria(is%ocn%u);   call cria(is%ocn%v);   call cria(is%sfc%zorl)
-  call cria(is%sfc%coszen); call cria(is%sfc%albedo); call cria(is%ice%tice)
-  call cria(is%ice%taux);   call cria(is%ice%tauy);   call cria(is%ice%sen)
-  call cria(is%ice%evap);   call cria(is%ice%lwnet);  call cria(is%ice%swvdr)
-  call cria(is%ice%swvdf);  call cria(is%ice%swidr);  call cria(is%ice%swidf)
-  call cria(is%ocn%omask);  call cria(is%ice%alb_vdr); call cria(is%ice%alb_vdf)
-  call cria(is%ice%alb_idr); call cria(is%ice%alb_idf)
-  todos = [is%ocn_flx%taux, is%ocn_flx%tauy, is%ocn_flx%sen, is%ocn_flx%evap, is%ocn_flx%lwnet, &
+  call create_field(is%ocn_flx%taux); call create_field(is%ocn_flx%tauy); call create_field(is%ocn_flx%sen)
+  call create_field(is%ocn_flx%evap); call create_field(is%ocn_flx%lwnet); call create_field(is%ocn_flx%swvdr)
+  call create_field(is%ocn_flx%swvdf); call create_field(is%ocn_flx%swidr); call create_field(is%ocn_flx%swidf)
+  call create_field(is%ocn_flx%rain); call create_field(is%ocn_flx%snow); call create_field(is%ocn_flx%pslv)
+  call create_field(is%ice%ifrac); call create_field(is%ocn_flx%duu10n); call create_field(is%ocn%sst)
+  call create_field(is%ocn%u); call create_field(is%ocn%v); call create_field(is%sfc%zorl)
+  call create_field(is%sfc%coszen); call create_field(is%sfc%albedo); call create_field(is%ice%tice)
+  call create_field(is%ice%taux); call create_field(is%ice%tauy); call create_field(is%ice%sen)
+  call create_field(is%ice%evap); call create_field(is%ice%lwnet); call create_field(is%ice%swvdr)
+  call create_field(is%ice%swvdf); call create_field(is%ice%swidr); call create_field(is%ice%swidf)
+  call create_field(is%ocn%omask); call create_field(is%ice%alb_vdr); call create_field(is%ice%alb_vdf)
+  call create_field(is%ice%alb_idr); call create_field(is%ice%alb_idf)
+  all_fields = [is%ocn_flx%taux, is%ocn_flx%tauy, is%ocn_flx%sen, is%ocn_flx%evap, is%ocn_flx%lwnet, &
            is%ocn_flx%swvdr, is%ocn_flx%swvdf, is%ocn_flx%swidr, is%ocn_flx%swidf,           &
            is%ocn_flx%rain, is%ocn_flx%snow, is%ocn_flx%pslv, is%ice%ifrac,              &
            is%ocn_flx%duu10n, is%ocn%sst, is%ocn%u, is%ocn%v,              &
@@ -91,37 +91,37 @@ program test_bulk_ncar
   allocate(uas(NX,NY), vas(NX,NY), tas(NX,NY), psl(NX,NY), swdn(NX,NY), &
            lwdn(NX,NY), rain(NX,NY), shum(NX,NY), snow(NX,NY))
   call random_seed(size=ns)
-  allocate(semente(ns)); semente = 20260927
-  call random_seed(put=semente)
+  allocate(seed(ns)); seed = 20260927
+  call random_seed(put=seed)
 
-  write(nome,'(A,I0,A)') 'saida_', pet, '.bin'
-  open(newunit=u, file=nome, access='stream', form='unformatted', status='replace')
-  do k = 1, NCHAMADAS
+  write(name,'(A,I0,A)') 'saida_', pet, '.bin'
+  open(newunit=u, file=name, access='stream', form='unformatted', status='replace')
+  do k = 1, NCALLS
     ! Forçantes atmosféricos, na grade global
-    call sorteia(uas, -30.0d0, 30.0d0);   call sorteia(vas, -30.0d0, 30.0d0)
+    call draw_random(uas, -30.0d0, 30.0d0); call draw_random(vas, -30.0d0, 30.0d0)
     uas(1:20,1:5) = 0.0d0;                vas(1:20,1:5) = 0.0d0
-    call sorteia(tas, 50.0d0, 320.0d0);   call sorteia(psl, 4.0d4, 1.05d5)
-    call sorteia(swdn, -10.0d0, 1100.0d0); call sorteia(lwdn, -5.0d0, 450.0d0)
-    call sorteia(rain, -1.0d-4, 1.0d-3);  call sorteia(shum, 0.0d0, 2.0d-2)
-    call sorteia(snow, -1.0d-4, 1.0d-3)
+    call draw_random(tas, 50.0d0, 320.0d0); call draw_random(psl, 4.0d4, 1.05d5)
+    call draw_random(swdn, -10.0d0, 1100.0d0); call draw_random(lwdn, -5.0d0, 450.0d0)
+    call draw_random(rain, -1.0d-4, 1.0d-3); call draw_random(shum, 0.0d0, 2.0d-2)
+    call draw_random(snow, -1.0d-4, 1.0d-3)
 
     ! Campos do estado interno: primeiro valores quaisquer em todos...
-    do n = 1, size(todos)
-      call preenche(todos(n), -1.0d3, 1.0d3)
+    do n = 1, size(all_fields)
+      call fill_random(all_fields(n), -1.0d3, 1.0d3)
     end do
     ! ...depois as entradas, em faixas plausíveis
-    call preenche(is%ocn%sst, 260.0d0, 310.0d0)
-    call preenche(is%ocn%u, -1.0d0, 1.0d0)
-    call preenche(is%ocn%v, -1.0d0, 1.0d0)
-    call preenche(is%ice%tice, 150.0d0, 290.0d0)
-    call preenche(is%ice%ifrac, -0.5d0, 1.0d0)
-    call preenche(is%ocn%omask, -0.5d0, 1.0d0)
-    call preenche(is%ocn_flx%taux, -1.0d0, 1.0d0)
-    call preenche(is%ocn_flx%tauy, -1.0d0, 1.0d0)
-    call preenche(is%ice%alb_vdr, 0.0d0, 1.0d0)
-    call preenche(is%ice%alb_vdf, 0.0d0, 1.0d0)
-    call preenche(is%ice%alb_idr, 0.0d0, 1.0d0)
-    call preenche(is%ice%alb_idf, 0.0d0, 1.0d0)
+    call fill_random(is%ocn%sst, 260.0d0, 310.0d0)
+    call fill_random(is%ocn%u, -1.0d0, 1.0d0)
+    call fill_random(is%ocn%v, -1.0d0, 1.0d0)
+    call fill_random(is%ice%tice, 150.0d0, 290.0d0)
+    call fill_random(is%ice%ifrac, -0.5d0, 1.0d0)
+    call fill_random(is%ocn%omask, -0.5d0, 1.0d0)
+    call fill_random(is%ocn_flx%taux, -1.0d0, 1.0d0)
+    call fill_random(is%ocn_flx%tauy, -1.0d0, 1.0d0)
+    call fill_random(is%ice%alb_vdr, 0.0d0, 1.0d0)
+    call fill_random(is%ice%alb_vdf, 0.0d0, 1.0d0)
+    call fill_random(is%ice%alb_idr, 0.0d0, 1.0d0)
+    call fill_random(is%ice%alb_idf, 0.0d0, 1.0d0)
     call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p, rc=rc)
     where (p < 0.0d0) p = 0.0d0                      ! um terço sem gelo
     p(lbound(p,1):lbound(p,1)+3, :) = 5.0d-4         ! abaixo do limiar dos Fioi_*
@@ -132,12 +132,12 @@ program test_bulk_ncar
 
     call ESMF_FieldGet(is%ocn_flx%taux, farrayPtr=p, rc=rc)
     i1 = lbound(p,1); i2 = ubound(p,1); j1 = lbound(p,2); j2 = ubound(p,2)
-    call calcula_fluxos(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
+    call compute_fluxes(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                         i1, i2, j1, j2, clock, rc)
-    if (rc == ESMF_SUCCESS) call fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)
+    if (rc == ESMF_SUCCESS) call ice_fraction_without_sis2(is, importState, i1, i2, j1, j2)
     write(u) rc
-    do n = 1, size(todos)
-      call ESMF_FieldGet(todos(n), farrayPtr=p, rc=rc)
+    do n = 1, size(all_fields)
+      call ESMF_FieldGet(all_fields(n), farrayPtr=p, rc=rc)
       write(u) p
     end do
     call ESMF_ClockAdvance(clock, rc=rc)
@@ -147,30 +147,30 @@ program test_bulk_ncar
 
 contains
 
-  subroutine cria(campo)
-    type(ESMF_Field), intent(out) :: campo
-    campo = ESMF_FieldCreate(grid, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  subroutine create_field(field)
+    type(ESMF_Field), intent(out) :: field
+    field = ESMF_FieldCreate(grid, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)
-  end subroutine cria
+  end subroutine create_field
 
-  subroutine sorteia(a, lo, hi)
+  subroutine draw_random(a, lo, hi)
     real(ESMF_KIND_R8), intent(out) :: a(:,:)
     real(ESMF_KIND_R8), intent(in)  :: lo, hi
     call random_number(a)
     a = lo + (hi - lo) * a
-  end subroutine sorteia
+  end subroutine draw_random
 
   !> Sorteia a grade global inteira (mesma sequência em todos os PETs) e
   !! copia para o campo o bloco local.
-  subroutine preenche(campo, lo, hi)
-    type(ESMF_Field),   intent(in) :: campo
+  subroutine fill_random(field, lo, hi)
+    type(ESMF_Field),   intent(in) :: field
     real(ESMF_KIND_R8), intent(in) :: lo, hi
     real(ESMF_KIND_R8), allocatable :: g(:,:)
     real(ESMF_KIND_R8), pointer :: q(:,:)
     allocate(g(NX,NY))
-    call sorteia(g, lo, hi)
-    call ESMF_FieldGet(campo, farrayPtr=q, rc=rc)
+    call draw_random(g, lo, hi)
+    call ESMF_FieldGet(field, farrayPtr=q, rc=rc)
     q = g(lbound(q,1):ubound(q,1), lbound(q,2):ubound(q,2))
-  end subroutine preenche
+  end subroutine fill_random
 
 end program test_bulk_ncar

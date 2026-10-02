@@ -6,7 +6,7 @@
 !!   agrupado nos subtipos med_ocn_flux_fields_t, med_ocn_fields_t,
 !!   med_ice_fields_t, med_sfc_fields_t, med_par_t e med_diag_config_t
 !!   Constantes físicas Large & Yeager (2009) — usadas pelo bulk NCAR
-!!   MED_CHAVES: chaves de configuração que escolhem os campos anunciados,
+!!   MED_KEYS: chaves de configuração que escolhem os campos anunciados,
 !!   cujas listas saem do mapa de acoplamento (cpl_map)
 !!
 !! O módulo não tem variáveis: o que muda durante a rodada (comunicador MPI,
@@ -29,8 +29,8 @@ module med_cap_types_mod
   public :: med_ocn_flux_fields_t, med_ocn_fields_t, med_ice_fields_t, med_sfc_fields_t
   public :: med_par_t, med_diag_config_t, med_run_flags_t
   ! Contagem dos pontos completados por vizinhança (relatório de acoplamento)
-  public :: med_completa_t, N_COMPLETA, COMPLETA_NOMES
-  public :: med_fluxo_t
+  public :: med_fill_count_t, N_FILL, FILL_NAMES
+  public :: med_flux_t
   public :: COMPL_SST, COMPL_ICE_IFRAC, COMPL_ICE_AVSDR, COMPL_ICE_AVSDF
   public :: COMPL_ICE_ANIDR, COMPL_ICE_ANIDF, COMPL_ICE_T, COMPL_IFRAC_EXP
   ! Constantes físicas de coupler_constants_mod, re-exportadas
@@ -41,7 +41,7 @@ module med_cap_types_mod
   public :: SST_BULK_FALLBACK, SHUM_OCEAN_DEFAULT
   public :: f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif
   ! Chaves de configuração que escolhem os campos do mediador
-  public :: MED_CHAVES
+  public :: MED_KEYS
 
   !----------------------------------------------------------------------------
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
@@ -167,15 +167,15 @@ module med_cap_types_mod
   !> Pontos completados por vizinhança num campo, neste PET, ao longo da
   !! rodada: quantas vezes o preenchimento rodou, quantos pontos estavam fora
   !! da faixa válida e quantos ficaram com o valor fixo. Só alimentam o
-  !! relatório de acoplamento (med_diag, relata_completas, chamada no último
-  !! passo por MediatorAdvanceRelatorio).
+  !! relatório de acoplamento (med_diag, report_fills, chamada no último
+  !! passo por mediatoradvancereport).
   !> Arrays da física bulk (med_bulk_ncar), na malha de fluxo, com os
   !! limites locais da DE: ponteiros para os valores dos campos internos,
-  !! associados pela fase calcula_fluxos (med_exchange) a cada passo. Um
+  !! associados pela fase compute_fluxes (med_exchange) a cada passo. Um
   !! ponteiro nulo é um campo indisponível, como antes da R-FASE11-20, quando
   !! a física pedia cada campo ao ESMF. A física lê e escreve só por aqui,
   !! sem conhecer o estado interno, os campos do ESMF nem as rotas.
-  type :: med_fluxo_t
+  type :: med_flux_t
     ! Entradas: oceano e gelo (is%ocn, is%ice)
     real(ESMF_KIND_R8), pointer :: sst(:,:)     => null()
     real(ESMF_KIND_R8), pointer :: uocn(:,:)    => null()
@@ -215,16 +215,16 @@ module med_cap_types_mod
     real(ESMF_KIND_R8), pointer :: zorl(:,:)    => null()
     real(ESMF_KIND_R8), pointer :: coszen(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: albedo(:,:)  => null()
-  end type med_fluxo_t
+  end type med_flux_t
 
-  type :: med_completa_t
-    integer(ESMF_KIND_I8) :: aplicacoes = 0_ESMF_KIND_I8
-    integer(ESMF_KIND_I8) :: invalidos  = 0_ESMF_KIND_I8
-    integer(ESMF_KIND_I8) :: fixos      = 0_ESMF_KIND_I8
-  end type med_completa_t
+  type :: med_fill_count_t
+    integer(ESMF_KIND_I8) :: n_applied = 0_ESMF_KIND_I8
+    integer(ESMF_KIND_I8) :: n_invalid_pts = 0_ESMF_KIND_I8
+    integer(ESMF_KIND_I8) :: n_fixed_pts = 0_ESMF_KIND_I8
+  end type med_fill_count_t
 
   !> Campos completados por vizinhança no mediador, com a rota que os traz.
-  integer, parameter :: N_COMPLETA      = 8
+  integer, parameter :: N_FILL          = 8
   integer, parameter :: COMPL_SST       = 1   !< So_t na malha de fluxo (med_ocean)
   integer, parameter :: COMPL_ICE_IFRAC = 2   !< gelo do SIS2 na malha de fluxo (med_ice)
   integer, parameter :: COMPL_ICE_AVSDR = 3
@@ -233,7 +233,7 @@ module med_cap_types_mod
   integer, parameter :: COMPL_ICE_ANIDF = 6
   integer, parameter :: COMPL_ICE_T     = 7
   integer, parameter :: COMPL_IFRAC_EXP = 8   !< Si_ifrac exportado (med_export)
-  character(len=32), parameter :: COMPLETA_NOMES(N_COMPLETA) = [character(len=32) :: &
+  character(len=32), parameter :: FILL_NAMES(N_FILL) = [character(len=32) :: &
     'ocn2atm_sst So_t', 'ocn2atm_ice Si_ifrac_sis2', 'ocn2atm_ice Si_avsdr_sis2',      &
     'ocn2atm_ice Si_avsdf_sis2', 'ocn2atm_ice Si_anidr_sis2', 'ocn2atm_ice Si_anidf_sis2', &
     'ocn2atm_ice Si_t_sis2', 'atm2ocn_ice Si_ifrac']
@@ -252,7 +252,7 @@ module med_cap_types_mod
     !> primeira gravação de mom6_import_*.nc (registro da fatia de cada PET)
     logical :: first_import_write = .true.
     !> pontos completados por vizinhança, por campo (índices COMPL_*)
-    type(med_completa_t) :: completa(N_COMPLETA)
+    type(med_fill_count_t) :: fill_counts(N_FILL)
   end type med_run_flags_t
 
   type :: MED_InternalState
@@ -306,6 +306,6 @@ module med_cap_types_mod
   !! Sx_omask é a máscara do MOM6 interpolada para a malha de fluxo, com nome
   !! próprio para não formar um par importação e exportação homônimo com
   !! So_omask; vai para o diagnóstico mom6_import_*.nc e para o MONAN-A.
-  character(len=*), parameter :: MED_CHAVES = 'datm,sis2'
+  character(len=*), parameter :: MED_KEYS = 'datm,sis2'
 
 end module med_cap_types_mod

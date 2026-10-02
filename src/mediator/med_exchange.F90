@@ -5,22 +5,22 @@
 !! inicialização e a cada passo (ver docs/arquitetura-acoplamento.md, seção
 !! 3.7). Este módulo reúne as fases à medida que saem de MED_cap:
 !!
-!!   inicializar_dados
+!!   initialize_data
 !!              InitializeDataComplete: rotas de inicialização (coluna
-!!              criar='inicio' de ROUTES), espera da primeira SST do oceano e
+!!              create='inicio' de ROUTES), espera da primeira SST do oceano e
 !!              valores de t=0 no exportState (R-FASE11-17)
-!!   ir_para_malha_de_fluxo
+!!   go_to_flux_grid
 !!              antes da física: leva os campos do oceano e do gelo da
 !!              grade do oceano para a malha de fluxo (R-FASE11-16)
-!!   calcula_fluxos
+!!   compute_fluxes
 !!              a física bulk (calc_bulk_ncar, em med_bulk_ncar) sobre os
-!!              arrays da malha de fluxo (med_fluxo_t), associados aqui aos
+!!              arrays da malha de fluxo (med_flux_t), associados aqui aos
 !!              campos internos (R-FASE11-20)
-!!   fracao_de_gelo_sem_sis2
+!!   ice_fraction_without_sis2
 !!              logo depois da física, sem o SIS2: a fração de gelo na malha
 !!              de fluxo (OISST ou limiar de SST) para a exportação e para o
 !!              passo seguinte (R-FASE11-19)
-!!   entregar   no fim do passo, depois da física: leva os campos da malha
+!!   deliver    no fim do passo, depois da física: leva os campos da malha
 !!              de fluxo para o exportState (export_to_components, em
 !!              med_export) e carimba o tempo dos campos exportados
 !!              (R-FASE11-15)
@@ -42,9 +42,9 @@ module med_exchange_mod
   use coupler_utils_mod,   only: ChkErr
   use coupler_config_mod,  only: cfg_use_sis2_dynamic, cfg_write_fixdiag
   use cpl_map_mod,         only: ROUTES
-  use med_cap_types_mod,   only: MED_InternalState, med_fluxo_t
+  use med_cap_types_mod,   only: MED_InternalState, med_flux_t
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
-  use med_cap_methods_mod, only: cria_rota, RegridOrCopy, set_ocn_grid_mask
+  use med_cap_methods_mod, only: create_route, RegridOrCopy, set_ocn_grid_mask
   use med_export_mod,      only: export_to_components
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
                                  update_ice_fraction_from_docn, regrid_ocean_currents, &
@@ -53,12 +53,12 @@ module med_exchange_mod
   implicit none
   private
 
-  public :: inicializar_dados
-  public :: prepara_inicio        ! também para tests/completar
-  public :: ir_para_malha_de_fluxo
-  public :: calcula_fluxos
-  public :: fracao_de_gelo_sem_sis2
-  public :: entregar
+  public :: initialize_data
+  public :: prepare_start         ! também para tests/completar
+  public :: go_to_flux_grid
+  public :: compute_fluxes
+  public :: ice_fraction_without_sis2
+  public :: deliver
   public :: stamp_export_fields
 
 contains
@@ -84,10 +84,10 @@ contains
   !!
   !! Três partes:
   !!   fase A   (só na primeira passagem) rotas de inicialização, correntes e
-  !!            valores iniciais do exportState (prepara_inicio). O
+  !!            valores iniciais do exportState (prepare_start). O
   !!            FieldRegridStore depende só da GEOMETRIA dos campos, nunca
   !!            dos valores; é caro e não deve repetir.
-  !!   portão   So_t já chegou com valor físico (aguarda_primeira_sst)?
+  !!   portão   So_t já chegou com valor físico (wait_first_sst)?
   !!            Se não, pede outra passagem e retorna.
   !!   fase B   SST de t=0 publicada, carimbo de startTime nos campos
   !!            exportados e InitializeDataComplete declarado.
@@ -98,7 +98,7 @@ contains
   !! @param[inout] exportState  estado de exportação do mediador
   !! @param[inout] clock        relógio do mediador
   !! @param[inout] rc           ESMF_SUCCESS ou o código do erro
-  subroutine inicializar_dados(gcomp, is, importState, exportState, clock, rc)
+  subroutine initialize_data(gcomp, is, importState, exportState, clock, rc)
     type(ESMF_GridComp)              :: gcomp
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout)  :: importState
@@ -119,12 +119,12 @@ contains
 
     ! Fase A (só na primeira passagem)
     if (.not. is%regrid%has('ocn2atm')) then
-      call prepara_inicio(is, importState, exportState, exp_field, rc)
+      call prepare_start(is, importState, exportState, exp_field, rc)
       if (rc /= ESMF_SUCCESS) return
     end if
 
     ! Portão: So_t já chegou com valor físico?
-    call aguarda_primeira_sst(gcomp, is, importState, clock, ocn_field, startTime, &
+    call wait_first_sst(gcomp, is, importState, clock, ocn_field, startTime, &
                               sst_ready, rc)
     if (.not. sst_ready) return
 
@@ -137,9 +137,9 @@ contains
 
     call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED (So_t em t=0)', &
       ESMF_LOGMSG_INFO)
-  end subroutine inicializar_dados
+  end subroutine initialize_data
 
-  !> Cria, na ordem de ROUTES, as rotas com criar='inicio', cada uma com o
+  !> Cria, na ordem de ROUTES, as rotas com create='inicio', cada uma com o
   !! seu par de campos: atm2ocn de is%ocn_flx%taux (malha de fluxo) para
   !! exp_field (Foxx_taux, grade OCN), se ainda não existe; ocn2atm de So_t
   !! (grade OCN) para is%ocn%sst (malha de fluxo). Uma rota 'inicio' sem par
@@ -149,7 +149,7 @@ contains
   !! @param[inout] importState  estado de importação (So_t)
   !! @param[inout] exp_field    Foxx_taux no exportState
   !! @param[inout] rc           ESMF_SUCCESS ou o código do erro
-  subroutine cria_rotas_inicio(is, importState, exp_field, rc)
+  subroutine create_start_routes(is, importState, exp_field, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_Field), intent(inout) :: exp_field
@@ -162,14 +162,14 @@ contains
       select case (trim(ROUTES(k)%name))
       case ('atm2ocn')
         if (.not. is%regrid%has('atm2ocn')) then
-          call cria_rota(is%regrid, 'atm2ocn', is%ocn_flx%taux, exp_field, rc)
+          call create_route(is%regrid, 'atm2ocn', is%ocn_flx%taux, exp_field, rc)
           if (ChkErr(rc, __LINE__, __FILE__)) return
         end if
       case ('ocn2atm')
         ! So_t está na grade OCN (ver InitializeRealize)
         call ESMF_StateGet(importState, itemName="So_t", field=ocn_field, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
-        call cria_rota(is%regrid, 'ocn2atm', ocn_field, is%ocn%sst, rc)
+        call create_route(is%regrid, 'ocn2atm', ocn_field, is%ocn%sst, rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
       case default
         call ESMF_LogSetError(ESMF_RC_NOT_IMPL, &
@@ -178,20 +178,20 @@ contains
         return
       end select
     end do
-  end subroutine cria_rotas_inicio
+  end subroutine create_start_routes
 
-  !> Fase A da inicialização: cria as rotas da coluna criar='inicio' de
-  !! ROUTES (cria_rotas_inicio), interpola as correntes e preenche o
+  !> Fase A da inicialização: cria as rotas da coluna create='inicio' de
+  !! ROUTES (create_start_routes), interpola as correntes e preenche o
   !! exportState com valores iniciais. Roda uma unica vez (enquanto a rota
   !! 'ocn2atm' nao existe).
-  subroutine prepara_inicio(is, importState, exportState, exp_field, rc)
+  subroutine prepare_start(is, importState, exportState, exp_field, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_State), intent(inout) :: exportState
     type(ESMF_Field), intent(inout) :: exp_field
     integer, intent(inout) :: rc
 
-    call cria_rotas_inicio(is, importState, exp_field, rc)
+    call create_start_routes(is, importState, exp_field, rc)
     if (rc /= ESMF_SUCCESS) return
 
     ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
@@ -205,7 +205,7 @@ contains
     ! de update_ice_fields_on_atm_grid.
 
     call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
-  end subroutine prepara_inicio
+  end subroutine prepare_start
 
   !> Espera da primeira SST (portão de dados da inicialização): So_t já foi
   !! escrito pelo oceano?
@@ -226,19 +226,19 @@ contains
   !! @param[out] startTime  início da simulação, no relógio do mediador
   !! @param[out] pronta     .true. se So_t chegou com valor físico; .false.
   !!                        se ainda não chegou ou se houve erro (rc)
-  subroutine aguarda_primeira_sst(gcomp, is, importState, clock, ocn_field, startTime, &
-                                  pronta, rc)
+  subroutine wait_first_sst(gcomp, is, importState, clock, ocn_field, startTime, &
+                                  ready, rc)
     type(ESMF_GridComp)              :: gcomp
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout)  :: importState
     type(ESMF_Clock), intent(inout)  :: clock
     type(ESMF_Field), intent(out)    :: ocn_field
     type(ESMF_Time),  intent(out)    :: startTime
-    logical,          intent(out)    :: pronta
+    logical,          intent(out)    :: ready
     integer,          intent(inout)  :: rc
     logical :: sst_ready
 
-    pronta = .false.
+    ready = .false.
     call ESMF_ClockGet(clock, startTime=startTime, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -259,8 +259,8 @@ contains
       return
     end if
 
-    pronta = .true.
-  end subroutine aguarda_primeira_sst
+    ready = .true.
+  end subroutine wait_first_sst
 
   !> Confere que o campo de referencia da grade ATM existe no importState:
   !! Sa_u10m_mpas no modo MPAS, Sa_u10m no modo DATM (is%use_mpas_atm, lido
@@ -479,7 +479,7 @@ contains
   ! Fases de cada passo
   ! ---------------------------------------------------------------------------
 
-  !> Fase ir_para_malha_de_fluxo: os campos do oceano e do gelo na malha de
+  !> Fase go_to_flux_grid: os campos do oceano e do gelo na malha de
   !! fluxo, antes da física, nesta ordem:
   !!
   !!   1. SST, correntes e, com o SIS2, a fração, os albedos e a temperatura
@@ -508,7 +508,7 @@ contains
   !! @param[inout] importState  estado de importação do mediador
   !! @param[inout] clock        relógio do mediador
   !! @param[inout] rc           código de retorno (o da última operação)
-  subroutine ir_para_malha_de_fluxo(is, importState, clock, rc)
+  subroutine go_to_flux_grid(is, importState, clock, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_Clock), intent(inout) :: clock
@@ -516,13 +516,13 @@ contains
     type(ESMF_Field) :: field
     real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
 
-    call garante_rotas_malha_de_fluxo(is, importState)
+    call ensure_flux_grid_routes(is, importState)
     call update_ocean_fields_on_atm_grid(is, importState, field, is%run%raw_sst_diag_done, rc)
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
-  end subroutine ir_para_malha_de_fluxo
+  end subroutine go_to_flux_grid
 
   !> Rotas da ida para a malha de fluxo criadas durante o passo, conforme a
-  !! coluna criar de ROUTES, nesta ordem (a ordem das linhas "rota" no
+  !! coluna create de ROUTES, nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_sst  'mascara_mista': set_ocean_mask_for_sst grava a máscara
   !!                do oceano na grade e só cria a rota quando ela tem terra
@@ -534,27 +534,27 @@ contains
   !!
   !! @param[in]    is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
-  subroutine garante_rotas_malha_de_fluxo(is, importState)
+  subroutine ensure_flux_grid_routes(is, importState)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_Field) :: sst_ocn, f_ifrac_src
-    integer :: rc_rota
+    integer :: rc_route
 
     if (.not. is%regrid%has('ocn2atm')) return
 
-    call ESMF_StateGet(importState, itemName="So_t", field=sst_ocn, rc=rc_rota)
+    call ESMF_StateGet(importState, itemName="So_t", field=sst_ocn, rc=rc_route)
     if (.not. is%regrid%has('ocn2atm_sst')) &
-      call set_ocean_mask_for_sst(is, importState, sst_ocn, rc_rota)
+      call set_ocean_mask_for_sst(is, importState, sst_ocn, rc_route)
 
     if (cfg_use_sis2_dynamic) then
       call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
-        field=f_ifrac_src, rc=rc_rota)
-      if (.not. is%regrid%has('ocn2atm_ice') .and. rc_rota == ESMF_SUCCESS) &
+        field=f_ifrac_src, rc=rc_route)
+      if (.not. is%regrid%has('ocn2atm_ice') .and. rc_route == ESMF_SUCCESS) &
         call add_ice_route(is, importState, f_ifrac_src)
     end if
-  end subroutine garante_rotas_malha_de_fluxo
+  end subroutine ensure_flux_grid_routes
 
-  !> Prepara e cria a rota 'ocn2atm_sst' (coluna criar 'mascara_mista' de
+  !> Prepara e cria a rota 'ocn2atm_sst' (coluna create 'mascara_mista' de
   !! ROUTES): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
   !! de um limiar de SST) e cria a rota no primeiro passo em que a máscara
   !! tem terra e mar no conjunto dos PETs. Até a R-FASE11-18, em med_ocean.
@@ -567,7 +567,7 @@ contains
     integer :: lde_s, n_land, ldec_ocn, n_sea
     integer :: n_land_g(1), n_land_s(1), n_sea_g(1), n_sea_s(1)
     type(ESMF_VM) :: vm
-    logical :: got_omask, achou
+    logical :: got_omask, found
     real(ESMF_KIND_R8), pointer :: sst_src(:,:)
     real(ESMF_KIND_R8), parameter :: LAND_FILL_MAX = 270.0_ESMF_KIND_R8
 
@@ -576,8 +576,8 @@ contains
     ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra; a
     ! mesma convencao do GRIDITEM_MASK aqui: valores em srcMaskValues sao
     ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
-    call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, achou, got_omask)
-    if (.not. achou) then
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, found, got_omask)
+    if (.not. found) then
       call ESMF_LogWrite( &
         'MED: So_omask indisponivel no importState - usando ' // &
         'fallback por limiar de SST (menos confiavel na costa)', &
@@ -622,7 +622,7 @@ contains
     else
       ! Conservativo contorna a deformação da costura tripolar; bilinear
       ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
-      call cria_rota(is%regrid, 'ocn2atm_sst', sst_ocn, is%ocn%sst, rc)
+      call create_route(is%regrid, 'ocn2atm_sst', sst_ocn, is%ocn%sst, rc)
     end if
   end subroutine set_ocean_mask_for_sst
 
@@ -646,24 +646,24 @@ contains
     integer :: rc_store
     integer :: n_land_ice
     integer :: n_sea_ice
-    logical :: achou, copiou
+    logical :: found, copied
     character(len=200) :: diag_msg_mask
 
     ! conta terra/oceano vistos por ESTE PET, para confirmar que So_omask
     ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
     ! tudo-terra nem tudo-oceano por engano).
-    call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, achou, copiou)
+    call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, found, copied)
     if (cfg_write_fixdiag) then
         write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
           'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
-          achou, ' n_land=', n_land_ice, &
+          found, ' n_land=', n_land_ice, &
           ' n_sea=', n_sea_ice
         call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
     end if
-    call cria_rota(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
+    call create_route(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
   end subroutine add_ice_route
 
-  !> Fase entregar: exportação dos campos da malha de fluxo e carimbo de
+  !> Fase deliver: exportação dos campos da malha de fluxo e carimbo de
   !! tempo, nesta ordem:
   !!   1. export_to_components (med_export);
   !!   2. stampTime em cada campo do exportState (stamp_export_fields);
@@ -676,7 +676,7 @@ contains
   !! @param[in]    clock        relógio do mediador
   !! @param[inout] stampTime    instante que rotula o resultado do passo
   !! @param[inout] rc           código de retorno (o da última operação)
-  subroutine entregar(is, importState, exportState, clock, stampTime, rc)
+  subroutine deliver(is, importState, exportState, clock, stampTime, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_State), intent(inout) :: exportState
@@ -685,7 +685,7 @@ contains
     integer,          intent(inout) :: rc
     type(ESMF_Field) :: field
 
-    call garante_rotas_exportacao(is, importState, exportState)
+    call ensure_export_routes(is, importState, exportState)
     call export_to_components(is, importState, exportState, rc)
     call stamp_export_fields(exportState, field, stampTime, rc)
 
@@ -699,10 +699,10 @@ contains
         rc = ESMF_SUCCESS
       end if
     end if
-  end subroutine entregar
+  end subroutine deliver
 
-  !> Fase da física bulk: associa os arrays de med_fluxo_t aos campos
-  !! internos da malha de fluxo (associa_fluxo) e chama calc_bulk_ncar com
+  !> Fase da física bulk: associa os arrays de med_flux_t aos campos
+  !! internos da malha de fluxo (associate_fluxes) e chama calc_bulk_ncar com
   !! eles e com os forçantes atmosféricos reunidos na grade global. Até a
   !! R-FASE11-20, calc_bulk_ncar recebia o estado interno e pedia cada campo
   !! ao ESMF.
@@ -712,7 +712,7 @@ contains
   !! @param[in]    i1, i2, j1, j2 limites locais da DE na malha de fluxo
   !! @param[in]    clock          relógio do mediador (hora solar)
   !! @param[out]   rc             código de retorno de calc_bulk_ncar
-  subroutine calcula_fluxos(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
+  subroutine compute_fluxes(is, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
                             i1, i2, j1, j2, clock, rc)
     type(MED_InternalState), intent(in)  :: is
     real(ESMF_KIND_R8),      intent(in)  :: uas(:,:), vas(:,:), tas(:,:)
@@ -722,71 +722,71 @@ contains
     integer,                 intent(in)  :: i1, i2, j1, j2
     type(ESMF_Clock),        intent(in)  :: clock
     integer,                 intent(out) :: rc
-    type(med_fluxo_t) :: fluxo
+    type(med_flux_t) :: fluxes
 
-    call associa_fluxo(is, fluxo)
-    call calc_bulk_ncar(fluxo, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
+    call associate_fluxes(is, fluxes)
+    call calc_bulk_ncar(fluxes, uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
                         i1, i2, j1, j2, clock, rc)
-  end subroutine calcula_fluxos
+  end subroutine compute_fluxes
 
-  !> Associa cada array de med_fluxo_t aos valores do campo interno
+  !> Associa cada array de med_flux_t aos valores do campo interno
   !! correspondente, no DE local; um campo que o ESMF não entrega deixa o
   !! array nulo, que a física trata como indisponível.
   !!
   !! @param[in]  is     estado interno do mediador
   !! @param[out] fluxo  arrays da física
-  subroutine associa_fluxo(is, fluxo)
+  subroutine associate_fluxes(is, fluxes)
     type(MED_InternalState), intent(in)  :: is
-    type(med_fluxo_t),       intent(out) :: fluxo
+    type(med_flux_t),        intent(out) :: fluxes
 
-    call aponta(is%ocn%sst,       fluxo%sst)
-    call aponta(is%ocn%u,         fluxo%uocn)
-    call aponta(is%ocn%v,         fluxo%vocn)
-    call aponta(is%ocn%omask,     fluxo%omask)
-    call aponta(is%ice%ifrac,     fluxo%ifrac)
-    call aponta(is%ice%tice,      fluxo%tice)
-    call aponta(is%ice%alb_vdr,   fluxo%alb_vdr)
-    call aponta(is%ice%alb_vdf,   fluxo%alb_vdf)
-    call aponta(is%ice%alb_idr,   fluxo%alb_idr)
-    call aponta(is%ice%alb_idf,   fluxo%alb_idf)
-    call aponta(is%ocn_flx%taux,  fluxo%taux)
-    call aponta(is%ocn_flx%tauy,  fluxo%tauy)
-    call aponta(is%ocn_flx%sen,   fluxo%sen)
-    call aponta(is%ocn_flx%evap,  fluxo%evap)
-    call aponta(is%ocn_flx%lwnet, fluxo%lwnet)
-    call aponta(is%ocn_flx%swvdr, fluxo%swvdr)
-    call aponta(is%ocn_flx%swvdf, fluxo%swvdf)
-    call aponta(is%ocn_flx%swidr, fluxo%swidr)
-    call aponta(is%ocn_flx%swidf, fluxo%swidf)
-    call aponta(is%ocn_flx%rain,  fluxo%rain)
-    call aponta(is%ocn_flx%snow,  fluxo%snow)
-    call aponta(is%ocn_flx%pslv,  fluxo%pslv)
-    call aponta(is%ocn_flx%duu10n, fluxo%duu10n)
-    call aponta(is%ice%taux,      fluxo%taux_ice)
-    call aponta(is%ice%tauy,      fluxo%tauy_ice)
-    call aponta(is%ice%sen,       fluxo%sen_ice)
-    call aponta(is%ice%evap,      fluxo%evap_ice)
-    call aponta(is%ice%lwnet,     fluxo%lwnet_ice)
-    call aponta(is%ice%swvdr,     fluxo%swvdr_ice)
-    call aponta(is%ice%swvdf,     fluxo%swvdf_ice)
-    call aponta(is%ice%swidr,     fluxo%swidr_ice)
-    call aponta(is%ice%swidf,     fluxo%swidf_ice)
-    call aponta(is%sfc%zorl,      fluxo%zorl)
-    call aponta(is%sfc%coszen,    fluxo%coszen)
-    call aponta(is%sfc%albedo,    fluxo%albedo)
+    call point_to(is%ocn%sst,     fluxes%sst)
+    call point_to(is%ocn%u,       fluxes%uocn)
+    call point_to(is%ocn%v,       fluxes%vocn)
+    call point_to(is%ocn%omask,   fluxes%omask)
+    call point_to(is%ice%ifrac,   fluxes%ifrac)
+    call point_to(is%ice%tice,    fluxes%tice)
+    call point_to(is%ice%alb_vdr, fluxes%alb_vdr)
+    call point_to(is%ice%alb_vdf, fluxes%alb_vdf)
+    call point_to(is%ice%alb_idr, fluxes%alb_idr)
+    call point_to(is%ice%alb_idf, fluxes%alb_idf)
+    call point_to(is%ocn_flx%taux, fluxes%taux)
+    call point_to(is%ocn_flx%tauy, fluxes%tauy)
+    call point_to(is%ocn_flx%sen, fluxes%sen)
+    call point_to(is%ocn_flx%evap, fluxes%evap)
+    call point_to(is%ocn_flx%lwnet, fluxes%lwnet)
+    call point_to(is%ocn_flx%swvdr, fluxes%swvdr)
+    call point_to(is%ocn_flx%swvdf, fluxes%swvdf)
+    call point_to(is%ocn_flx%swidr, fluxes%swidr)
+    call point_to(is%ocn_flx%swidf, fluxes%swidf)
+    call point_to(is%ocn_flx%rain, fluxes%rain)
+    call point_to(is%ocn_flx%snow, fluxes%snow)
+    call point_to(is%ocn_flx%pslv, fluxes%pslv)
+    call point_to(is%ocn_flx%duu10n, fluxes%duu10n)
+    call point_to(is%ice%taux,    fluxes%taux_ice)
+    call point_to(is%ice%tauy,    fluxes%tauy_ice)
+    call point_to(is%ice%sen,     fluxes%sen_ice)
+    call point_to(is%ice%evap,    fluxes%evap_ice)
+    call point_to(is%ice%lwnet,   fluxes%lwnet_ice)
+    call point_to(is%ice%swvdr,   fluxes%swvdr_ice)
+    call point_to(is%ice%swvdf,   fluxes%swvdf_ice)
+    call point_to(is%ice%swidr,   fluxes%swidr_ice)
+    call point_to(is%ice%swidf,   fluxes%swidf_ice)
+    call point_to(is%sfc%zorl,    fluxes%zorl)
+    call point_to(is%sfc%coszen,  fluxes%coszen)
+    call point_to(is%sfc%albedo,  fluxes%albedo)
 
   contains
 
-    subroutine aponta(field, p)
+    subroutine point_to(field, p)
       type(ESMF_Field),            intent(in)  :: field
       real(ESMF_KIND_R8), pointer, intent(out) :: p(:,:)
       integer :: rc_p
       nullify(p)
       call ESMF_FieldGet(field, farrayPtr=p, rc=rc_p)
       if (rc_p /= ESMF_SUCCESS) nullify(p)
-    end subroutine aponta
+    end subroutine point_to
 
-  end subroutine associa_fluxo
+  end subroutine associate_fluxes
 
   !> Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
   !! gelo na malha de fluxo (legacy_ice_fraction, em med_ocean). A física
@@ -798,7 +798,7 @@ contains
   !! @param[inout] is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
   !! @param[in]    i1, i2, j1, j2  limites locais da DE na malha de fluxo
-  subroutine fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)
+  subroutine ice_fraction_without_sis2(is, importState, i1, i2, j1, j2)
     type(MED_InternalState), intent(inout) :: is
     type(ESMF_State),        intent(inout) :: importState
     integer,                 intent(in)    :: i1, i2, j1, j2
@@ -811,9 +811,9 @@ contains
     call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
     if (rc /= ESMF_SUCCESS) nullify(sst)
     call legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
-  end subroutine fracao_de_gelo_sem_sis2
+  end subroutine ice_fraction_without_sis2
 
-  !> Rotas da exportação criadas durante o passo, conforme a coluna criar
+  !> Rotas da exportação criadas durante o passo, conforme a coluna create
   !! de ROUTES ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_landmask  na primeira exportação (is%ocn%omask_done ainda
@@ -826,26 +826,26 @@ contains
   !! @param[in]    is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
   !! @param[inout] exportState  estado de exportação do mediador
-  subroutine garante_rotas_exportacao(is, importState, exportState)
+  subroutine ensure_export_routes(is, importState, exportState)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_State), intent(inout) :: exportState
     type(ESMF_Field) :: omask_src_field, f_ifrac_exp
-    integer :: rc_rota
+    integer :: rc_route
 
     if (.not. is%ocn%omask_done) then
       call ESMF_StateGet(importState, itemName="So_omask", &
-        field=omask_src_field, rc=rc_rota)
-      if (rc_rota == ESMF_SUCCESS) &
-        call cria_rota(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_rota)
+        field=omask_src_field, rc=rc_route)
+      if (rc_route == ESMF_SUCCESS) &
+        call create_route(is%regrid, 'ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_route)
     end if
 
-    call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_rota)
-    if (rc_rota == ESMF_SUCCESS) then
+    call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_route)
+    if (rc_route == ESMF_SUCCESS) then
       if (.not. is%regrid%has('atm2ocn_ice') .and. is%regrid%has('atm2ocn')) &
-        call cria_rota(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_rota)
+        call create_route(is%regrid, 'atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_route)
     end if
-  end subroutine garante_rotas_exportacao
+  end subroutine ensure_export_routes
 
   !> Carimba stampTime em cada campo do exportState. field é só a variável
   !! de trabalho do laço.

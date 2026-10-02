@@ -1,0 +1,101 @@
+# R-FASE12-03: nomes em inglês no mediador (src/mediator) e nos seus
+# testes. Formato em tools/dev/renomeia-identificadores.py.
+
+# constantes, tipos e componentes públicos
+MED_CHAVES                  MED_KEYS
+N_COMPLETA                  N_FILL
+COMPLETA_NOMES              FILL_NAMES
+med_fluxo_t                 med_flux_t
+med_completa_t              med_fill_count_t
+completa                    fill_counts
+aplicacoes                  n_applied
+invalidos                   n_invalid_pts
+fixos                       n_fixed_pts
+
+# rotinas públicas
+MediatorAdvanceRelatorio    MediatorAdvanceReport
+inicializar_dados           initialize_data
+prepara_inicio              prepare_start
+ir_para_malha_de_fluxo      go_to_flux_grid
+calcula_fluxos              compute_fluxes
+fracao_de_gelo_sem_sis2     ice_fraction_without_sis2
+entregar                    deliver
+cria_rota                   create_route
+spec_da_rota                route_spec
+completar_da_rota           route_fill
+registra_completa           record_fill
+relata_completas            report_fills
+
+# rotinas e variáveis internas do mediador e dos seus testes
+cria_rotas_inicio           create_start_routes  src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+garante_rotas_malha_de_fluxo ensure_flux_grid_routes src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+garante_rotas_exportacao    ensure_export_routes src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+aguarda_primeira_sst        wait_first_sst       src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+associa_fluxo               associate_fluxes     src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+aponta                      point_to             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+pronta                      ready                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+rc_rota                     rc_route             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+registra_sst                record_sst_fill      src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+lat_max_gelo                lat_max_ice          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+fluxo                       fluxes               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+soma                        totals               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+soma_loc                    totals_loc           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+nomes                       names                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+achou                       found                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+copiou                      copied               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_terra                     n_land_pts           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_mar                       n_sea_pts            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_invalidos                 n_invalid_pts        src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_fixos                     n_fixed_pts          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+
+# só nos testes
+agora                       now_time             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+antes                       before               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+anuncio                     advertised           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+arq                         nc_file              src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+arquivo                     file_name            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+campo                       field                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+carimbo                     stamp                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+caso                        test_case            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+centro                      center               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+com_fill                    with_fill            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+confere                     check                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+cria                        create_field         src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+escreve_nml                 write_nml            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+esperado                    expected             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+faixa01                     range01              src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+fator                       factor               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+fill_igual                  same_fill            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+grava                       write_field          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+grava_carimbo               write_stamp          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+iguais                      equal                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+igual                       same                 src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_antes                     n_before             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+n_itens                     n_items              src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+nchamadas                   ncalls               src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+nfalhas                     nfailures            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+nome                        name                 src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+obtido                      obtained             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+passo                       step                 src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+passo_terra                 land_step            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+ponteiro                    ptr_field            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+preenche                    fill_random          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+preenche_internos           fill_internal        src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+preenche_oceano             fill_ocean           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+preenche_sis2               fill_sis2            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+relogio                     test_clock           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+reserva                     fallback             src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+reserva_agora               fallback_now         src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+reserva_antes               fallback_before      src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+resultado                   outcome              src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+semente                     seed                 src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+sorteia                     draw_random          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+todos                       all_fields           src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+valido                      valid                src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+test_completa               test_fill_counts     src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+test_completar              test_fill            src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+test_rotas                  test_routes          src/mediator/,tests/bulk/,tests/completar/,tests/unit/test_rotas,tests/unit/test_routes,tests/unit/test_completa,tests/unit/test_fill_counts,tests/unit/test_formulas_bulk,tests/unit/listas_mediador
+
+@arquivo  tests/unit/test_completa.F90      tests/unit/test_fill_counts.F90
+@arquivo  tests/unit/test_rotas.F90         tests/unit/test_routes.F90
+@arquivo  tests/completar/test_completar.F90 tests/completar/test_fill.F90

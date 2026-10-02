@@ -10,7 +10,7 @@
 !!   Smith (1988) — rugosidade Charnock + viscosa
 !!
 !! A sub-rotina recebe os campos ATM globais reunidos por MPI_Allreduce e lê e
-!! escreve só arrays (med_fluxo_t), associados pela fase calcula_fluxos de
+!! escreve só arrays (med_flux_t), associados pela fase compute_fluxes de
 !! med_exchange: desde a R-FASE11-20, a física não conhece o estado interno
 !! do mediador, os campos do ESMF nem as rotas.
 
@@ -22,7 +22,7 @@ module med_bulk_ncar_mod
 
   use coupler_config_mod, only: cfg_docn_ice_init_only,   &  ! 1
                                 cfg_write_fixdiag
-  use med_cap_types_mod, only: med_fluxo_t,          &
+  use med_cap_types_mod, only: med_flux_t,           &
                                 rho_air,              &
                                 Cd_neut,              &
                                 Ch_neut,              &
@@ -64,7 +64,7 @@ contains
   !> @brief Calcula fluxos superficiais bulk NCAR + rugosidade Charnock/Smith.
   !!
   !! Executa as seções 4 (bulk NCAR) e Charnock do MediatorAdvance.
-  !! Os resultados são escritos nos arrays de `fluxo` (med_fluxo_t).
+  !! Os resultados são escritos nos arrays de `fluxo` (med_flux_t).
   !!
   !! Inputs atmosféricos (grade ATM global 360×180, após MPI_Allreduce):
   !!   uas, vas  — vento zonal/meridional a 10 m  [m/s]
@@ -88,9 +88,9 @@ contains
   !!   fluxo%zorl: rugosidade Charnock+Smith [m]
   !!   fluxo%coszen, fluxo%albedo: cosseno zenital e albedo de banda larga
   !!   (fluxo%ifrac é lida, não escrita: sem o SIS2, a fase
-  !!   fracao_de_gelo_sem_sis2, de med_exchange, a recalcula logo depois)
+  !!   ice_fraction_without_sis2, de med_exchange, a recalcula logo depois)
   !!
-  !! @param[in]   fluxo       Arrays da física (med_fluxo_t); os valores
+  !! @param[in]   fluxo       Arrays da física (med_flux_t); os valores
   !!                          apontados são lidos e escritos
   !! @param[in]   uas, vas    Vento zonal/meridional [m/s]
   !! @param[in]   tas         Temperatura do ar [K]
@@ -103,10 +103,10 @@ contains
   !! @param[in]   i1,i2,j1,j2 Limites locais da DE na grade ATM
   !! @param[out]  rc          Código de retorno ESMF
   !============================================================================
-  subroutine calc_bulk_ncar(fluxo, &
+  subroutine calc_bulk_ncar(fluxes, &
                              uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
                              i1, i2, j1, j2, clock, rc)
-    type(med_fluxo_t),       intent(in)    :: fluxo
+    type(med_flux_t),        intent(in)    :: fluxes
     real(ESMF_KIND_R8),      intent(in)    :: uas(:,:), vas(:,:), tas(:,:)
     real(ESMF_KIND_R8),      intent(in)    :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8),      intent(in)    :: rain(:,:), shum(:,:)
@@ -132,15 +132,15 @@ contains
     call solar_time_and_declination(clock, utc_hour, decl, rc)
 
     ! SST da grade ATM interna (preenchida na seção 3 por regrid OCN→ATM)
-    sst => fluxo%sst
+    sst => fluxes%sst
 
     ! Correntes oceânicas na grade ATM (preenchidas na seção 3 ou zeros)
-    uocn => fluxo%uocn
-    vocn => fluxo%vocn
+    uocn => fluxes%uocn
+    vocn => fluxes%vocn
     rc = ESMF_SUCCESS
 
     ! Tensao, calor sensivel, evaporacao e balanco LW sobre agua aberta
-    call compute_ocean_fluxes(fluxo, sst, uas, vas, tas, psl, lwdn, shum, &
+    call compute_ocean_fluxes(fluxes, sst, uas, vas, tas, psl, lwdn, shum, &
                               i1, i2, j1, j2)
 
     !==========================================================================
@@ -155,7 +155,7 @@ contains
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
     !==========================================================================
-    call blend_albedo_with_ice(fluxo, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
+    call blend_albedo_with_ice(fluxes, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
 
     !==========================================================================
     ! Fluxos Fioi_*: mesma forma bulk NCAR de acima, mas com a temperatura
@@ -190,22 +190,22 @@ contains
     ! Emissividade do gelo/neve (0,99) e' ligeiramente maior que a de agua
     ! aberta (0,97) usada acima — valor padrao bem estabelecido na
     ! literatura, nao e' erro de digitacao.
-    call compute_ice_fluxes(fluxo, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
+    call compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
 
     !==========================================================================
     ! Rain, snow, pslv — cópia direta (pass-through para o OCN)
     !==========================================================================
-    fptr => fluxo%rain
+    fptr => fluxes%rain
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(rain(i,j), 0.0_ESMF_KIND_R8)  ! clamp ≥ 0 (artefato bilinear)
     end do; end do
 
-    fptr => fluxo%snow
+    fptr => fluxes%snow
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(snow_g(i,j), 0.0_ESMF_KIND_R8)
     end do; end do
 
-    fptr => fluxo%pslv
+    fptr => fluxes%pslv
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = psl(i,j)
     end do; end do
@@ -222,12 +222,12 @@ contains
     ! nu    = 1.5e-5 m²/s  (viscosidade cinemática do ar a 20 °C)
     ! u*    = sqrt( |tau| / rho_ar )
     !==========================================================================
-    call compute_roughness_length(fluxo, j1, j2, i1, i2)
+    call compute_roughness_length(fluxes, j1, j2, i1, i2)
 
     !==========================================================================
     ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS)
     !==========================================================================
-    fptr => fluxo%duu10n
+    fptr => fluxes%duu10n
     if (associated(uocn) .and. associated(vocn)) then
       do j=j1,j2; do i=i1,i2
         fptr(i,j) = (uas(i,j) - uocn(i,j))**2 + (vas(i,j) - vocn(i,j))**2
@@ -243,7 +243,7 @@ contains
     end if
 
     ! Sem o SIS2 dinâmico, a fração de gelo da malha de fluxo é recalculada
-    ! logo depois desta rotina, pela fase fracao_de_gelo_sem_sis2
+    ! logo depois desta rotina, pela fase ice_fraction_without_sis2
     ! (med_exchange; até a R-FASE11-19, aqui, em legacy_ice_fraction). Os
     ! fluxos deste passo usam a fração que já estava em fluxo%ifrac.
 
@@ -310,9 +310,9 @@ contains
   !! @param[in]    sst     SST na grade ATM (pode estar desassociado)
   !! @param[in]    uas..shum  campos atmosfericos na grade ATM
   !! @param[in]    i1,i2,j1,j2  limites locais da DE
-  subroutine compute_ocean_fluxes(fluxo, sst, uas, vas, tas, psl, lwdn, shum, &
+  subroutine compute_ocean_fluxes(fluxes, sst, uas, vas, tas, psl, lwdn, shum, &
                                   i1, i2, j1, j2)
-    type(med_fluxo_t),  intent(in)    :: fluxo
+    type(med_flux_t),   intent(in)    :: fluxes
     real(ESMF_KIND_R8), pointer, intent(in) :: sst(:,:)
     real(ESMF_KIND_R8), intent(in)    :: uas(:,:), vas(:,:), tas(:,:)
     real(ESMF_KIND_R8), intent(in)    :: psl(:,:), lwdn(:,:), shum(:,:)
@@ -327,7 +327,7 @@ contains
     !==========================================================================
     ! Taux = rho * Cd * |V| * u10
     !==========================================================================
-    fptr => fluxo%taux
+    fptr => fluxes%taux
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
@@ -338,7 +338,7 @@ contains
     !==========================================================================
     ! Tauy = rho * Cd * |V| * v10
     !==========================================================================
-    fptr => fluxo%tauy
+    fptr => fluxes%tauy
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
@@ -348,7 +348,7 @@ contains
     !==========================================================================
     ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
     !==========================================================================
-    fptr => fluxo%sen
+    fptr => fluxes%sen
     do j=j1,j2; do i=i1,i2
       ! pular células sem tas físico (tas < 100 K = sem dado)
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
@@ -363,7 +363,7 @@ contains
     !==========================================================================
     ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
     !==========================================================================
-    fptr => fluxo%evap
+    fptr => fluxes%evap
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
       ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
@@ -397,7 +397,7 @@ contains
     !==========================================================================
     ! Balanço LW = lwdn − emissividade·σ·SST⁴
     !==========================================================================
-    fptr => fluxo%lwnet
+    fptr => fluxes%lwnet
     do j=j1,j2; do i=i1,i2
       ! pular células sem lwdn real (lwdn=0 indica ausência)
       if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
@@ -410,8 +410,8 @@ contains
   end subroutine compute_ocean_fluxes
 
 
-  subroutine compute_roughness_length(fluxo, j1, j2, i1, i2)
-    type(med_fluxo_t), intent(in) :: fluxo
+  subroutine compute_roughness_length(fluxes, j1, j2, i1, i2)
+    type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
     integer, intent(in) :: j2
     integer, intent(in) :: i1
@@ -431,13 +431,13 @@ contains
     real(ESMF_KIND_R8), pointer :: p_omask_z(:,:)
     real(ESMF_KIND_R8) :: tau_mag, ustar, z0_charnock, z0_smith, z0_total
 
-    p_taux => fluxo%taux
-    p_tauy => fluxo%tauy
-    p_zorl => fluxo%zorl
+    p_taux => fluxes%taux
+    p_tauy => fluxes%tauy
+    p_zorl => fluxes%zorl
     ! mascara real (So_omask regridada), nao mais
     ! heuristica de SST~=T_FILL_LAND (colidia com agua aberta genuina no
     ! ponto de congelamento, perto da borda do gelo).
-    p_omask_z => fluxo%omask
+    p_omask_z => fluxes%omask
 
     if (associated(p_taux) .and. associated(p_tauy) .and. associated(p_zorl)) then
       do j = j1, j2
@@ -476,8 +476,8 @@ contains
   !!
   !! Sem fluxo%tice associado, os Fioi_* ficam com o valor inicial.
   !============================================================================
-  subroutine compute_ice_fluxes(fluxo, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
-    type(med_fluxo_t), intent(in) :: fluxo
+  subroutine compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
+    type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
     integer, intent(in) :: j2
     integer, intent(in) :: i1
@@ -496,39 +496,39 @@ contains
     real(ESMF_KIND_R8), pointer :: f_sen_ocn(:,:), f_evap_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: f_lwnet_ocn(:,:)
 
-    tice        => fluxo%tice
-    ifr_g       => fluxo%ifrac
-    f_taux_ocn  => fluxo%taux
-    f_tauy_ocn  => fluxo%tauy
-    f_sen_ocn   => fluxo%sen
-    f_evap_ocn  => fluxo%evap
-    f_lwnet_ocn => fluxo%lwnet
+    tice        => fluxes%tice
+    ifr_g       => fluxes%ifrac
+    f_taux_ocn  => fluxes%taux
+    f_tauy_ocn  => fluxes%tauy
+    f_sen_ocn   => fluxes%sen
+    f_evap_ocn  => fluxes%evap
+    f_lwnet_ocn => fluxes%lwnet
 
     if (associated(tice)) then
 
-      fptr_ice => fluxo%taux_ice
+      fptr_ice => fluxes%taux_ice
       call ice_wind_stress(fptr_ice, f_taux_ocn, ifr_g, tice, uas, vas, tas, uas, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxo%tauy_ice
+      fptr_ice => fluxes%tauy_ice
       call ice_wind_stress(fptr_ice, f_tauy_ocn, ifr_g, tice, uas, vas, tas, vas, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxo%sen_ice
+      fptr_ice => fluxes%sen_ice
       call ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
                              i1, i2, j1, j2)
 
-      fptr_ice => fluxo%evap_ice
+      fptr_ice => fluxes%evap_ice
       call ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxo%lwnet_ice
+      fptr_ice => fluxes%lwnet_ice
       call ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
 
       call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
         'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
 
-      if (cfg_write_fixdiag) call log_ice_flux_check(fluxo, tice)
+      if (cfg_write_fixdiag) call log_ice_flux_check(fluxes, tice)
     else
       call ESMF_LogWrite('MED(Fase3-ICE): f_tice_atm nao associado — ' // &
         'Fioi_* permanecem no fallback inicial', ESMF_LOGMSG_WARNING)
@@ -749,17 +749,17 @@ contains
   !! Compara, no DE local, a temperatura do gelo e o calor sensível sobre o
   !! gelo com o calor sensível da água aberta, calculado com a SST.
   !============================================================================
-  subroutine log_ice_flux_check(fluxo, tice)
-    type(med_fluxo_t), intent(in) :: fluxo
+  subroutine log_ice_flux_check(fluxes, tice)
+    type(med_flux_t), intent(in) :: fluxes
     real(ESMF_KIND_R8), pointer, intent(in) :: tice(:,:)
     real(ESMF_KIND_R8), pointer :: p_sen_ice(:,:)
     real(ESMF_KIND_R8), pointer :: p_sen_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: p_lwnet_ice(:,:)
     character(len=250) :: diag_msg9
 
-    p_sen_ice   => fluxo%sen_ice
-    p_sen_ocn   => fluxo%sen
-    p_lwnet_ice => fluxo%lwnet_ice
+    p_sen_ice   => fluxes%sen_ice
+    p_sen_ocn   => fluxes%sen
+    p_lwnet_ice => fluxes%lwnet_ice
     if (associated(p_sen_ice) .and. associated(p_sen_ocn) .and. &
         associated(p_lwnet_ice)) then
       write(diag_msg9,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
@@ -787,8 +787,8 @@ contains
   !!
   !! Sem a fracao ou os albedos do gelo, usa albedo_ocn constante em toda
   !! celula (sw_band_fallback).
-  subroutine blend_albedo_with_ice(fluxo, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
-    type(med_fluxo_t), intent(in) :: fluxo
+  subroutine blend_albedo_with_ice(fluxes, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
+    type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
     integer, intent(in) :: j2
     integer, intent(in) :: i1
@@ -802,24 +802,24 @@ contains
     real(ESMF_KIND_R8), pointer :: alb_idr(:,:), alb_idf(:,:)
     real(ESMF_KIND_R8), pointer :: fptr_alb(:,:)
 
-    ifr     => fluxo%ifrac
-    alb_vdr => fluxo%alb_vdr
-    alb_vdf => fluxo%alb_vdf
-    alb_idr => fluxo%alb_idr
-    alb_idf => fluxo%alb_idf
+    ifr     => fluxes%ifrac
+    alb_vdr => fluxes%alb_vdr
+    alb_vdf => fluxes%alb_vdf
+    alb_idr => fluxes%alb_idr
+    alb_idf => fluxes%alb_idf
 
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
       ! Ordem das bandas: a primeira atribui o albedo de banda larga, as
       ! demais somam; a ultima deixa em fluxo%albedo o albedo efetivo
       ! completo (soma das 4 contribuicoes ponderadas).
-      call sw_band(fluxo, fluxo%swvdr, fluxo%swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdr, f_vis_dir, .true., .true., utc_hour, decl, rc)
-      call sw_band(fluxo, fluxo%swvdf, fluxo%swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdf, f_vis_dif, .false., .false., utc_hour, decl, rc)
-      call sw_band(fluxo, fluxo%swidr, fluxo%swidr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, ifr, &
                    alb_idr, f_nir_dir, .true., .false., utc_hour, decl, rc)
-      call sw_band(fluxo, fluxo%swidf, fluxo%swidf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%swidf, fluxes%swidf_ice, j1, j2, i1, i2, swdn, ifr, &
                    alb_idf, f_nir_dif, .false., .false., utc_hour, decl, rc)
     else
       ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
@@ -828,13 +828,13 @@ contains
       call ESMF_LogWrite('MED(bulk_ncar): f_ifrac_atm/f_alb_*_ice nao ' // &
         'associados — SW usa albedo_ocn constante (sem Fase 2/4)', &
         ESMF_LOGMSG_WARNING)
-      call sw_band_fallback(fluxo%swvdr, fluxo%swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir)
-      call sw_band_fallback(fluxo%swvdf, fluxo%swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif)
-      call sw_band_fallback(fluxo%swidr, fluxo%swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir)
-      call sw_band_fallback(fluxo%swidf, fluxo%swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif)
+      call sw_band_fallback(fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir)
+      call sw_band_fallback(fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif)
+      call sw_band_fallback(fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir)
+      call sw_band_fallback(fluxes%swidf, fluxes%swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif)
       ! Sem dado de gelo nem de zenite, exporta a constante tambem como
       ! albedo de banda larga (degrada de forma consistente).
-      fptr_alb => fluxo%albedo
+      fptr_alb => fluxes%albedo
       if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
     end if
     rc = ESMF_SUCCESS
@@ -848,9 +848,9 @@ contains
   !! constante albedo_ocn. A banda visivel direta tambem grava o cosseno do
   !! zenite (fluxo%coszen). Na primeira banda (first), o albedo de banda
   !! larga recebe a contribuicao; nas demais, soma-se a ela.
-  subroutine sw_band(fluxo, f_sw, f_sw_ice, j1, j2, i1, i2, swdn, ifr, alb_ice, frac, &
+  subroutine sw_band(fluxes, f_sw, f_sw_ice, j1, j2, i1, i2, swdn, ifr, alb_ice, frac, &
                      direct, first, utc_hour, decl, rc)
-    type(med_fluxo_t), intent(in) :: fluxo
+    type(med_flux_t), intent(in) :: fluxes
     real(ESMF_KIND_R8), pointer, intent(in) :: f_sw(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: f_sw_ice(:,:)
     integer, intent(in) :: j1
@@ -879,8 +879,8 @@ contains
 
     nullify(fptr_cz)
     fptr => f_sw
-    if (direct .and. first) fptr_cz => fluxo%coszen
-    fptr_alb => fluxo%albedo
+    if (direct .and. first) fptr_cz => fluxes%coszen
+    fptr_alb => fluxes%albedo
     fptr_ice2 => f_sw_ice
     do j=j1,j2; do i=i1,i2
       fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))

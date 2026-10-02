@@ -20,8 +20,10 @@ Regras da troca, nos fontes Fortran (.F90 e .inc de src/ e tests/):
   - textos entre aspas nunca mudam (mensagens, nomes de campos, valores das
     tabelas do mapa, opções);
   - nos comentários, só os nomes que não se confundem com palavras comuns:
-    os que têm sublinhado e, escritos em maiúsculas, os que a tabela traz em
-    maiúsculas (os nomes das tabelas do mapa, como TROCAS).
+    os que têm sublinhado, os escritos em CamelCase e, escritos em
+    maiúsculas, os que a tabela traz em maiúsculas (os nomes das tabelas do
+    mapa, como TROCAS). Um nome de uma palavra só, como entregar, fica como
+    está no comentário e é revisto à mão.
 Nos scripts (.py, .bash, .sh) e Makefiles, só os nomes com sublinhado, em
 todo o arquivo (nomes em maiúsculas ali podem ser variáveis do script ou
 textos de saída). Nos textos (.md, .txt), também, e, entre crases, os nomes sem
@@ -193,7 +195,9 @@ def styled(original, new):
 
 
 def wanted_in_prose(token, upper=True):
-    return '_' in token or (upper and token.isupper() and token.lower() in UPPER_IN_PROSE)
+    camel = any(c.isupper() for c in token[1:]) and any(c.islower() for c in token)
+    return '_' in token or camel or \
+        (upper and token.isupper() and token.lower() in UPPER_IN_PROSE)
 
 
 PROSE_IDENT = re.compile(r'(?<![-A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*(?![-A-Za-z0-9_])')

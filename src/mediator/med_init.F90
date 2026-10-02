@@ -16,7 +16,7 @@ module med_init_mod
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
-  use med_cap_types_mod, only: MED_InternalState, MED_CHAVES, SST_BULK_FALLBACK
+  use med_cap_types_mod, only: MED_InternalState, MED_KEYS, SST_BULK_FALLBACK
   use cpl_fields_mod, only: CPL_NAME_LEN
   use cpl_map_mod, only: cpl_arrivals, cpl_current_config, cpl_config_t
   use cpl_grids_mod, only: cpl_latlon_grid, cpl_tripolar_grid, ORIGIN_EAST0, &
@@ -219,7 +219,7 @@ contains
   end subroutine check_corner_coordinates
 
   !> Realiza os campos anunciados em InitializeAdvertise, nas listas do mapa
-  !! de acoplamento (cpl_arrivals, chaves MED_CHAVES) e na mesma ordem de
+  !! de acoplamento (cpl_arrivals, chaves MED_KEYS) e na mesma ordem de
   !! antes: a importação da malha de fluxo na grade ATM; a importação da
   !! grade do oceano (So_t, So_u, So_v, So_omask e, com o SIS2, os campos
   !! *_sis2) na grade OCN, a grade nativa desses campos (o SIS2 usa a mesma
@@ -231,20 +231,20 @@ contains
     type(ESMF_Grid), intent(in) :: atm_grid
     type(ESMF_Grid), intent(in) :: ocn_grid
     integer, intent(inout) :: rc
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
     type(cpl_config_t) :: cfg
 
     cfg = cpl_current_config()
-    call cpl_arrivals('MED@atm_med', .true., cfg, MED_CHAVES, nomes)
-    call realize_on_grid(importState, atm_grid, nomes, rc)
+    call cpl_arrivals('MED@atm_med', .true., cfg, MED_KEYS, names)
+    call realize_on_grid(importState, atm_grid, names, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call cpl_arrivals('MED@ocn_med', .true., cfg, MED_CHAVES, nomes)
-    call realize_on_grid(importState, ocn_grid, nomes, rc)
+    call cpl_arrivals('MED@ocn_med', .true., cfg, MED_KEYS, names)
+    call realize_on_grid(importState, ocn_grid, names, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call cpl_arrivals('MED@ocn_med', .false., cfg, '', nomes)
-    call realize_on_grid(exportState, ocn_grid, nomes, rc)
+    call cpl_arrivals('MED@ocn_med', .false., cfg, '', names)
+    call realize_on_grid(exportState, ocn_grid, names, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Fim normal da etapa: rc volta a indicar sucesso (um rc de falha
@@ -254,17 +254,17 @@ contains
 
   !> Cria e realiza no State os campos nomes, real(8) no centro da grade,
   !! na ordem da lista. Para no primeiro erro.
-  subroutine realize_on_grid(state, grid, nomes, rc)
+  subroutine realize_on_grid(state, grid, names, rc)
     type(ESMF_State), intent(inout) :: state
     type(ESMF_Grid),  intent(in)    :: grid
-    character(len=*), intent(in)    :: nomes(:)
+    character(len=*), intent(in)    :: names(:)
     integer,          intent(inout) :: rc
     integer :: n
     type(ESMF_Field) :: tmp_field
 
-    do n = 1, size(nomes)
+    do n = 1, size(names)
       tmp_field = ESMF_FieldCreate(grid=grid, typekind=ESMF_TYPEKIND_R8, &
-        staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(nomes(n)), rc=rc)
+        staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(names(n)), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_Realize(state, field=tmp_field, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return

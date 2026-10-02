@@ -21,7 +21,7 @@
 !!
 !! Meios:
 !!   'conector'  conector NUOPC entre dois componentes; a interpolação é a
-!!               da coluna metodo, que o driver escreve na CplList como
+!!               da coluna method, que o driver escreve na CplList como
 !!               remapmethod (desde a R-FASE11-22; antes, o conector usava
 !!               o seu padrão, bilinear, sem a opção escrita);
 !!   'cap'       código próprio do cap, dentro do mesmo componente;
@@ -33,11 +33,11 @@
 !! MED@ocn_med lê o campo importado; um conector que parte de MED@ocn_med
 !! leva o campo exportado, que chegou de MED@atm_med pela rota 'atm2ocn'.
 !!
-!! Método (coluna metodo): só nas trocas por conector, um dos valores de
+!! Método (coluna method): só nas trocas por conector, um dos valores de
 !! CONNECTOR_METHODS; vazio nas demais. Hoje todas usam 'bilinear', o padrão
 !! do conector NUOPC, que era o que valia antes de a opção ser escrita.
 !!
-!! Condições (coluna quando): lista separada por vírgulas; a troca vale se
+!! Condições (coluna when): lista separada por vírgulas; a troca vale se
 !! todas as condições da lista valem. Lista vazia: vale sempre.
 !!   mpas / datm               componente atmosférico (use_datm)
 !!   mom6 / docn               componente oceânico (use_docn)
@@ -90,7 +90,7 @@
 !!                  no grupo &nuopc_regrid do nuopc.input)
 !!   3. completar   completar: preenchimento por vizinhança (regrid_fill_t)
 !!   4. limitar     min_limit, max_limit e nan_to; CPL_UNSET desliga
-!! E a coluna criar, que não é etapa: o momento em que a rota é criada.
+!! E a coluna create, que não é etapa: o momento em que a rota é criada.
 !!   'inicio'         em InitializeDataComplete
 !!   'primeiro_uso'   na primeira vez que o mediador precisa dela
 !!   'mascara_mista'  no primeiro passo em que a máscara do oceano tem terra
@@ -130,7 +130,7 @@ module cpl_map_mod
   integer, parameter :: CPL_WHEN_LEN = 32     !< lista de condições
   integer, parameter :: CPL_METHOD_LEN = 16   !< método de um conector
 
-  !> Métodos aceitos na coluna metodo: os valores da opção remapmethod do
+  !> Métodos aceitos na coluna method: os valores da opção remapmethod do
   !! conector NUOPC (NUOPC_Connector, ESMF 8.9.1).
   character(len=CPL_METHOD_LEN), parameter :: CONNECTOR_METHODS(*) =                &
     [character(len=CPL_METHOD_LEN) :: 'bilinear', 'patch', 'nearest_stod',          &
@@ -139,7 +139,7 @@ module cpl_map_mod
   !> Valor que desliga as colunas min_limit, max_limit e nan_to.
   real(r8), parameter :: CPL_UNSET = huge(1.0_r8)
 
-  !> Condições aceitas na coluna quando.
+  !> Condições aceitas na coluna when.
   character(len=12), parameter :: CONDITIONS(*) = [character(len=12) ::             &
     'mpas', 'datm', 'mom6', 'docn', 'med_to_mpas', 'ocn_to_mpas', 'sis2' ]
 
@@ -653,7 +653,7 @@ contains
   end function cpl_is_gap
 
   !> Verdadeiro se a troca vale na configuração cfg (todas as condições da
-  !! coluna quando valem; lista vazia vale sempre).
+  !! coluna when valem; lista vazia vale sempre).
   pure logical function cpl_exchange_applies(xchg, cfg) result(applies)
     type(cpl_exchange_t), intent(in) :: xchg
     type(cpl_config_t), intent(in) :: cfg
@@ -690,7 +690,7 @@ contains
   end function cpl_connector_applies
 
   !> Método da troca por conector do campo, do componente de para o
-  !! componente para (coluna metodo), ou vazio se o mapa não tem essa troca.
+  !! componente para (coluna method), ou vazio se o mapa não tem essa troca.
   !! Não depende da configuração: as trocas por conector do mesmo campo entre
   !! os mesmos dois componentes têm o mesmo método em todas as linhas de
   !! EXCHANGES (conferido por tests/unit/test_cpl_map.F90). É o método que o
@@ -853,7 +853,7 @@ contains
     end if
   end subroutine next_condition
 
-  !> Uma condição da coluna quando, na configuração cfg.
+  !> Uma condição da coluna when, na configuração cfg.
   pure logical function condition_holds(cond, cfg) result(applies)
     character(len=*),   intent(in) :: cond
     type(cpl_config_t), intent(in) :: cfg

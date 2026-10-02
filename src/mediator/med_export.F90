@@ -3,7 +3,7 @@
 !!
 !! Fluxos, temperatura de superfície e fração de gelo levados da grade ATM
 !! interna para os campos do exportState, com a zeragem sobre terra. Chamado
-!! pela fase entregar (med_exchange), que carimba o tempo dos campos
+!! pela fase deliver (med_exchange), que carimba o tempo dos campos
 !! exportados (até a R-FASE11-15, stamp_export_fields ficava aqui).
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
@@ -14,8 +14,8 @@ module med_export_mod
   use ESMF
   use coupler_config_mod, only: cfg_write_fixdiag
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
-  use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, completar_da_rota
+  use med_diag_mod, only: record_fill
+  use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, route_fill
   use coupler_constants_mod, only: T_ICE_MIN
 
   implicit none
@@ -232,26 +232,26 @@ contains
     integer :: rc_ifrac2
     real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
     character(len=200) :: diag_msg_ifrac2
-    integer :: n_invalidos, n_fixos
+    integer :: n_invalid_pts, n_fixed_pts
 
     call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_ifrac2)
     if (rc_ifrac2 == ESMF_SUCCESS) then
       call FillInternalField(f_ifrac_exp, -999.0_ESMF_KIND_R8, rc_ifrac2)
 
       ! Rota conservativa 'atm2ocn_ice', como a 'ocn2atm_ice' na ida, com
-      ! 'atm2ocn' como reserva; criada pela fase entregar (med_exchange).
+      ! 'atm2ocn' como reserva; criada pela fase deliver (med_exchange).
       ! A rota completa por vizinhança os pontos fora de [0, 1] (coluna
       ! completar da atm2ocn_ice), também com a reserva atm2ocn.
       if (is%regrid%has('atm2ocn_ice')) then
         call is%regrid%apply('atm2ocn_ice', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
-                             n_invalid=n_invalidos, n_left=n_fixos)
+                             n_invalid=n_invalid_pts, n_left=n_fixed_pts)
       else
         call is%regrid%apply('atm2ocn', is%ice%ifrac, f_ifrac_exp, rc_ifrac2, &
-                             fill=completar_da_rota('atm2ocn_ice'), &
-                             n_invalid=n_invalidos, n_left=n_fixos)
+                             fill=route_fill('atm2ocn_ice'), &
+                             n_invalid=n_invalid_pts, n_left=n_fixed_pts)
       end if
-      if (n_invalidos >= 0) &
-        call registra_completa(is%run%completa(COMPL_IFRAC_EXP), n_invalidos, n_fixos)
+      if (n_invalid_pts >= 0) &
+        call record_fill(is%run%fill_counts(COMPL_IFRAC_EXP), n_invalid_pts, n_fixed_pts)
       call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
       if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
           write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
@@ -346,7 +346,7 @@ contains
     type(ESMF_Field) :: omask_src_field
     integer :: rc_lm
 
-    ! A rota ocn2atm_landmask é criada pela fase entregar (med_exchange).
+    ! A rota ocn2atm_landmask é criada pela fase deliver (med_exchange).
     call ESMF_StateGet(importState, itemName="So_omask", &
       field=omask_src_field, rc=rc_lm)
     if (rc_lm == ESMF_SUCCESS) then

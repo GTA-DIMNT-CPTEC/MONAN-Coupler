@@ -4,7 +4,7 @@
 !! update_ice_fields_on_atm_grid e as suas etapas: sentinelas, interpolação
 !! da fração, dos albedos e da temperatura do gelo pela rota mascarada
 !! 'ocn2atm_ice', extrapolação por vizinhança e diagnósticos do log. A rota
-!! é criada pela fase ir_para_malha_de_fluxo (med_exchange) desde a
+!! é criada pela fase go_to_flux_grid (med_exchange) desde a
 !! R-FASE11-18.
 !!
 !! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
@@ -19,10 +19,10 @@ module med_ice_mod
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_manager_t
   use coupler_config_mod, only: cfg_write_fixdiag
-  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_ICE_IFRAC, &
+  use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_ICE_IFRAC, &
                                COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
                                COMPL_ICE_ANIDF, COMPL_ICE_T
-  use med_diag_mod, only: registra_completa
+  use med_diag_mod, only: record_fill
   use med_cap_methods_mod, only: FillInternalField
   use cpl_grids_mod, only: center_lon_east0, center_lat_east0
 
@@ -37,7 +37,7 @@ contains
   !> @brief Traz o gelo do SIS2 para a grade ATM: fração, albedos e temperatura.
   !!
   !! Etapas, nesta ordem (a rota mascarada 'ocn2atm_ice' já foi criada pela
-  !! fase ir_para_malha_de_fluxo, em med_exchange):
+  !! fase go_to_flux_grid, em med_exchange):
   !!   1. preenche os seis campos de destino com a sentinela -999;
   !!   2. interpola Si_ifrac_sis2 (com diagnósticos antes e depois);
   !!   3. interpola os quatro albedos e Si_t_sis2;
@@ -57,7 +57,7 @@ contains
     real(ESMF_KIND_R8), pointer :: p_ifrac_out(:,:)
     integer :: rc_nfe
     integer :: rc_bs
-    integer :: n_invalidos, n_fixos
+    integer :: n_invalid_pts, n_fixed_pts
 
     call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
       field=f_ifrac_src, rc=rc_ice)
@@ -87,8 +87,8 @@ contains
     if (associated(p_ifrac_out)) then
       call neighbor_fill(p_ifrac_out, regrid_fill_t(enabled=.true., &
         vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=0.0_ESMF_KIND_R8), &
-        n_left=n_fixos, n_invalid=n_invalidos)
-      call registra_completa(is%run%completa(COMPL_ICE_IFRAC), n_invalidos, n_fixos)
+        n_left=n_fixed_pts, n_invalid=n_invalid_pts)
+      call record_fill(is%run%fill_counts(COMPL_ICE_IFRAC), n_invalid_pts, n_fixed_pts)
     end if
 
     ! Checksum exato de is%ice%ifrac depois da extrapolação.
@@ -102,19 +102,19 @@ contains
 
     call extrapolate_ice_field(is%ice%alb_vdr, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
-      is%run%completa(COMPL_ICE_AVSDR))
+      is%run%fill_counts(COMPL_ICE_AVSDR))
     call extrapolate_ice_field(is%ice%alb_vdf, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
-      is%run%completa(COMPL_ICE_AVSDF))
+      is%run%fill_counts(COMPL_ICE_AVSDF))
     call extrapolate_ice_field(is%ice%alb_idr, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
-      is%run%completa(COMPL_ICE_ANIDR))
+      is%run%fill_counts(COMPL_ICE_ANIDR))
     call extrapolate_ice_field(is%ice%alb_idf, regrid_fill_t(enabled=.true., &
       vmin=0.0_ESMF_KIND_R8, vmax=1.0_ESMF_KIND_R8, vfill=ALB_ICE_DEFAULT), &
-      is%run%completa(COMPL_ICE_ANIDF))
+      is%run%fill_counts(COMPL_ICE_ANIDF))
     call extrapolate_ice_field(is%ice%tice, regrid_fill_t(enabled=.true., &
       vmin=T_ICE_MIN, vmax=T_ICE_MAX, vfill=T_FREEZE_SEAWATER), &
-      is%run%completa(COMPL_ICE_T))
+      is%run%fill_counts(COMPL_ICE_T))
 
     call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
       'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &
@@ -268,14 +268,14 @@ contains
   subroutine extrapolate_ice_field(field, fill, cont)
     type(ESMF_Field),     intent(in)    :: field
     type(regrid_fill_t),  intent(in)    :: fill
-    type(med_completa_t), intent(inout) :: cont   !< contagem para o relatório
+    type(med_fill_count_t), intent(inout) :: cont !< contagem para o relatório
     real(ESMF_KIND_R8), pointer :: p_out(:,:)
-    integer :: rc_nfe, n_invalidos, n_fixos
+    integer :: rc_nfe, n_invalid_pts, n_fixed_pts
 
     call ESMF_FieldGet(field, farrayPtr=p_out, rc=rc_nfe)
     if (associated(p_out)) then
-      call neighbor_fill(p_out, fill, n_left=n_fixos, n_invalid=n_invalidos)
-      call registra_completa(cont, n_invalidos, n_fixos)
+      call neighbor_fill(p_out, fill, n_left=n_fixed_pts, n_invalid=n_invalid_pts)
+      call record_fill(cont, n_invalid_pts, n_fixed_pts)
     end if
   end subroutine extrapolate_ice_field
 
@@ -290,7 +290,7 @@ contains
   !============================================================================
   subroutine check_ice_geography(p_ifrac_out)
     real(ESMF_KIND_R8), pointer, intent(in) :: p_ifrac_out(:,:)
-    real(ESMF_KIND_R8), parameter :: LAT_MAX_GELO = 55.0_ESMF_KIND_R8
+    real(ESMF_KIND_R8), parameter :: LAT_MAX_ICE = 55.0_ESMF_KIND_R8
     integer :: ii_geo
     integer :: jj_geo
     integer :: n_bad_geo
@@ -308,7 +308,7 @@ contains
         if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
             lon_here = center_lon_east0(ii_geo, ATM_NX)
             lat_here = center_lat_east0(jj_geo, ATM_NY)
-            if (abs(lat_here) < LAT_MAX_GELO) then
+            if (abs(lat_here) < LAT_MAX_ICE) then
               n_bad_geo = n_bad_geo + 1
               if (lat_bad < -900.0_ESMF_KIND_R8) then
                 lat_bad = lat_here; lon_bad = lon_here

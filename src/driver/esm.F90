@@ -147,7 +147,7 @@ contains
     end if
 
     ! ---- Conectores ---------------------------------------------------------
-    ! Escolhidos pelo mapa de acoplamento (EXCHANGES, coluna quando), na ordem
+    ! Escolhidos pelo mapa de acoplamento (EXCHANGES, coluna when), na ordem
     ! de CONNECTOR_SRC/CONNECTOR_DST.
     call add_connectors(driver, driverClock, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -342,7 +342,7 @@ contains
   !! Entradas que já tragam a opção não são alteradas.
   !!
   !! Em seguida, escreve em cada entrada o método de interpolação do mapa de
-  !! acoplamento (remapmethod, coluna metodo de EXCHANGES; cpl_write_methods).
+  !! acoplamento (remapmethod, coluna method de EXCHANGES; cpl_write_methods).
   !! Hoje é bilinear em todas, o padrão que o conector usava sem a opção.
   !!
   !! Depois, com as listas prontas, registra no log o relatório dos conectores

@@ -19,9 +19,9 @@ module med_ocean_mod
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
-  use med_cap_types_mod, only: MED_InternalState, med_completa_t, COMPL_SST, SST_BULK_FALLBACK
-  use med_diag_mod, only: registra_completa
-  use med_cap_methods_mod, only: ZeroInternalField, completar_da_rota
+  use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_SST, SST_BULK_FALLBACK
+  use med_diag_mod, only: record_fill
+  use med_cap_methods_mod, only: ZeroInternalField, route_fill
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: index_trunc
 
@@ -92,7 +92,7 @@ contains
 
       ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
       ! por vizinhança para a costa (etapa completar da rota ocn2atm_sst).
-      ! A rota ocn2atm_sst é criada pela fase ir_para_malha_de_fluxo
+      ! A rota ocn2atm_sst é criada pela fase go_to_flux_grid
       ! (med_exchange) no primeiro passo em que a máscara tem terra e mar;
       ! até lá, a rota ocn2atm interpola e a SST é completada como na rota
       ! ocn2atm_sst.
@@ -102,10 +102,10 @@ contains
                              n_invalid=n_invalid, n_left=n_left)
       else
         call is%regrid%apply('ocn2atm', field, is%ocn%sst, rc, &
-                             fill=completar_da_rota('ocn2atm_sst'), &
+                             fill=route_fill('ocn2atm_sst'), &
                              n_invalid=n_invalid, n_left=n_left)
       end if
-      if (n_invalid >= 0) call registra_sst(is%run%completa(COMPL_SST), n_invalid, n_left)
+      if (n_invalid >= 0) call record_sst_fill(is%run%fill_counts(COMPL_SST), n_invalid, n_left)
 
       ! Regrid de correntes oceânicas OCN → ATM.
       ! So_u e So_v são anunciados e realizados no importState do MED
@@ -146,7 +146,7 @@ contains
   end subroutine update_ocean_fields_on_atm_grid
 
   !> Soma os pontos da SST completados pela rota em cont, para o relatório
-  !! de acoplamento, e os registra no log. O preenchimento (coluna completar
+  !! de acoplamento, e os registra no log. O preenchimento (coluna fill
   !! da rota ocn2atm_sst, em ROUTES): média dos vizinhos válidos, em até 40
   !! passadas; o que sobrar recebe 271,35 K; valores acima de 310 K recebem
   !! 271,35 K antes da difusão.
@@ -154,18 +154,18 @@ contains
   !! @param[inout] cont       contagem da SST
   !! @param[in]    n_invalid  pontos fora da faixa antes do preenchimento
   !! @param[in]    n_left     pontos que ficaram com o valor fixo
-  subroutine registra_sst(cont, n_invalid, n_left)
-    type(med_completa_t), intent(inout) :: cont
+  subroutine record_sst_fill(cont, n_invalid, n_left)
+    type(med_fill_count_t), intent(inout) :: cont
     integer,              intent(in)    :: n_invalid, n_left
     character(len=120) :: msg
 
-    call registra_completa(cont, n_invalid, n_left)
+    call record_fill(cont, n_invalid, n_left)
     if (n_invalid > 0) then
       write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
         ' celulas (', n_left, ' com valor fixo)'
       call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
     end if
-  end subroutine registra_sst
+  end subroutine record_sst_fill
 
 
 

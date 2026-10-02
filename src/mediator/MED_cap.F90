@@ -44,7 +44,7 @@ module MED_cap_MONAN_mod
   ! Módulos especializados do mediador
   use med_cap_types_mod,   only: MED_InternalState,            &
                                   MED_InternalStateWrapper,     &
-                                  MED_CHAVES
+                                  MED_KEYS
   use cpl_fields_mod,      only: CPL_NAME_LEN
   use cpl_map_mod,         only: cpl_arrivals, cpl_current_config
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
@@ -54,9 +54,9 @@ module MED_cap_MONAN_mod
   use med_flux_mod,        only: get_atm_forcing, gather_atm_forcing,        &
                                   local_atm_bounds, apply_native_fluxes,      &
                                   zero_med_fluxes
-  use med_exchange_mod,    only: inicializar_dados, ir_para_malha_de_fluxo, &
-                                  calcula_fluxos, fracao_de_gelo_sem_sis2, entregar
-  use med_diag_mod,        only: log_ifrac_export_bitsum, relata_completas
+  use med_exchange_mod,    only: initialize_data, go_to_flux_grid, &
+                                  compute_fluxes, ice_fraction_without_sis2, deliver
+  use med_diag_mod,        only: log_ifrac_export_bitsum, report_fills
 
   implicit none
   private
@@ -94,7 +94,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_Advance, &
-      specRoutine=MediatorAdvanceRelatorio, rc=rc)
+      specRoutine=mediatoradvancereport, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call NUOPC_CompSpecialize(gcomp, specLabel=med_label_CheckImport, &
@@ -106,16 +106,16 @@ contains
   !============================================================================
   !> Passo do mediador (MediatorAdvance) e, no último passo da rodada, as
   !! linhas do relatório de acoplamento com os pontos completados por
-  !! vizinhança (relata_completas), que só escrevem no log.
+  !! vizinhança (report_fills), que só escrevem no log.
   !!
   !! O relatório não pode ficar na finalização do componente: o programa
   !! principal não chama ESMF_GridCompFinalize (esmApp.F90). O último passo
   !! é aquele em que currTime + timeStep alcança stop_date do nuopc.input; o
   !! relógio do próprio mediador não serve, porque o NUOPC o faz parar no fim
   !! de cada passo. Todos os PETs do mediador chegam aqui, inclusive os que
-  !! saem cedo de MediatorAdvance, porque relata_completas é coletiva.
+  !! saem cedo de MediatorAdvance, porque report_fills é coletiva.
   !============================================================================
-  subroutine MediatorAdvanceRelatorio(gcomp, rc)
+  subroutine mediatoradvancereport(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
 
@@ -145,9 +145,9 @@ contains
     call ESMF_GridCompGetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
-    call relata_completas(is%run%completa, rc)
+    call report_fills(is%run%fill_counts, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine MediatorAdvanceRelatorio
+  end subroutine mediatoradvancereport
 
   !============================================================================
   ! CheckImportNoop
@@ -171,7 +171,7 @@ contains
     integer :: n
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
@@ -192,7 +192,7 @@ contains
       call ESMF_LogWrite('MED: use_med_to_mpas=true, RouteOcnToAtm ativo', ESMF_LOGMSG_INFO)
 
     ! Importação e exportação lidas do mapa de acoplamento (cpl_arrivals),
-    ! com as chaves de MED_CHAVES, na ordem do mapa, que é a de antes:
+    ! com as chaves de MED_KEYS, na ordem do mapa, que é a de antes:
     !   - forçantes do MONAN-A (_mpas) ou do DATM, nunca os dois: o NUOPC
     !     aborta em IPDv03p6 se um campo anunciado não tiver conector ativo;
     !   - So_t, So_u, So_v e So_omask, do oceano. Sem o anúncio de So_u e
@@ -202,17 +202,17 @@ contains
     !     OCN -> MED e ICE -> MED cheguem ao mesmo nome (Si_ifrac).
     ! A importação usa SharePolicyField="share", como antes; a exportação
     ! oferece a grade ("will provide").
-    call cpl_arrivals('MED', .true., cpl_current_config(), MED_CHAVES, nomes)
-    do n = 1, size(nomes)
-      call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
+    call cpl_arrivals('MED', .true., cpl_current_config(), MED_KEYS, names)
+    do n = 1, size(names)
+      call NUOPC_Advertise(importState, StandardName=trim(names(n)), &
         TransferOfferGeomObject="cannot provide", &
         SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call cpl_arrivals('MED@ocn_med', .false., cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
-      call NUOPC_Advertise(exportState, StandardName=trim(nomes(n)), &
+    call cpl_arrivals('MED@ocn_med', .false., cpl_current_config(), '', names)
+    do n = 1, size(names)
+      call NUOPC_Advertise(exportState, StandardName=trim(names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
@@ -365,7 +365,7 @@ contains
   ! InitializeDataComplete - fase de inicialização do mediador
   ! importState/exportState vem de NUOPC_MediatorGet, a API propria dos
   ! mediadores NUOPC. O resto (rotas de inicialização, espera da primeira
-  ! SST, valores de t=0) é a fase inicializar_dados, em med_exchange.
+  ! SST, valores de t=0) é a fase initialize_data, em med_exchange.
   !============================================================================
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -389,18 +389,18 @@ contains
 
     ! Fase de inicialização (med_exchange): rotas, espera da primeira SST e
     ! valores de t=0 no exportState.
-    call inicializar_dados(gcomp, is, importState, exportState, clock, rc)
+    call initialize_data(gcomp, is, importState, exportState, clock, rc)
   end subroutine InitializeDataComplete
 
   !============================================================================
   ! MediatorAdvance - com fallback MPAS -> DATM
   !
   ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
-  ! gather_atm_forcing, local_atm_bounds, ir_para_malha_de_fluxo
+  ! gather_atm_forcing, local_atm_bounds, go_to_flux_grid
   ! (med_exchange: update_ocean_fields_on_atm_grid e
-  ! update_ice_fraction_from_docn), calcula_fluxos (med_exchange:
-  ! calc_bulk_ncar), fracao_de_gelo_sem_sis2 (med_exchange), apply_native_fluxes,
-  ! entregar (med_exchange: export_to_components e carimbo de tempo),
+  ! update_ice_fraction_from_docn), compute_fluxes (med_exchange:
+  ! calc_bulk_ncar), ice_fraction_without_sis2 (med_exchange), apply_native_fluxes,
+  ! deliver (med_exchange: export_to_components e carimbo de tempo),
   ! log_ifrac_export_bitsum e med_write_import_fields.
   !============================================================================
   subroutine MediatorAdvance(gcomp, rc)
@@ -507,14 +507,14 @@ contains
 
     !==========================================================================
     ! 3. Campos do oceano e do gelo na malha de fluxo: fase
-    ! ir_para_malha_de_fluxo (med_exchange)
+    ! go_to_flux_grid (med_exchange)
     !==========================================================================
-    call ir_para_malha_de_fluxo(is, importState, clock, rc)
+    call go_to_flux_grid(is, importState, clock, rc)
 
     !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
     !==========================================================================
-    call calcula_fluxos(is, &
+    call compute_fluxes(is, &
                         uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
                         i1, i2, j1, j2, clock, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: calc_bulk_ncar falhou', &
@@ -522,7 +522,7 @@ contains
 
     ! Sem o SIS2, a fração de gelo da malha de fluxo, depois da física
     ! (med_exchange)
-    call fracao_de_gelo_sem_sis2(is, importState, i1, i2, j1, j2)
+    call ice_fraction_without_sis2(is, importState, i1, i2, j1, j2)
 
     call apply_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
 
@@ -548,10 +548,10 @@ contains
     ! gelo).
     !
     ! A exportação e o carimbo de tempo dos campos exportados formam a fase
-    ! entregar (med_exchange); com use_med_to_mpas, o exportState recebe
+    ! deliver (med_exchange); com use_med_to_mpas, o exportState recebe
     ! depois o tempo atual do relógio.
     !==========================================================================
-    call entregar(is, importState, exportState, clock, stampTime, rc)
+    call deliver(is, importState, exportState, clock, stampTime, rc)
     if (allocated(uas_g)) deallocate(uas_g)
     if (allocated(vas_g)) deallocate(vas_g)
     if (allocated(tas_g)) deallocate(tas_g)

@@ -29,7 +29,7 @@
 !!               do med_cap_types até a R-FASE11-04-FIX01)
 !!   listas      as listas que o mediador anuncia e realiza desde a
 !!               R-FASE11-05, geradas por cpl_arrivals com as chaves do
-!!               mediador (MED_CHAVES), iguais nome a nome e na mesma ordem
+!!               mediador (MED_KEYS), iguais nome a nome e na mesma ordem
 !!               às de antes, em cada configuração: importação na malha de
 !!               fluxo, importação na grade do oceano, exportação e a
 !!               importação toda (a ordem do anúncio)
@@ -69,7 +69,7 @@ program test_cpl_map
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
   use cpl_map_mod,       only : GAPS, cpl_is_gap
   use cpl_fields_mod,    only : CPL_NAME_LEN
-  use med_cap_types_mod, only : MED_CHAVES
+  use med_cap_types_mod, only : MED_KEYS
   implicit none
 
   include 'listas_mediador.inc'
@@ -476,9 +476,9 @@ contains
     else
       want_ocn = MED_IMP_OCN
     end if
-    call cpl_arrivals('MED@atm_med', .true., CFG(k), MED_CHAVES, atm)
-    call cpl_arrivals('MED@ocn_med', .true., CFG(k), MED_CHAVES, ocn)
-    call cpl_arrivals('MED', .true., CFG(k), MED_CHAVES, all_names)
+    call cpl_arrivals('MED@atm_med', .true., CFG(k), MED_KEYS, atm)
+    call cpl_arrivals('MED@ocn_med', .true., CFG(k), MED_KEYS, ocn)
+    call cpl_arrivals('MED', .true., CFG(k), MED_KEYS, all_names)
     call cpl_arrivals('MED@ocn_med', .false., CFG(k), '', exp)
     call outcome(trim(CFG_NAME(k))//': mediador, importacao na malha de fluxo', &
       same_list(atm, want_atm))

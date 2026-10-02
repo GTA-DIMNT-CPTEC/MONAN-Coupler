@@ -1,7 +1,7 @@
 !> @file regrid_schemes.F90
 !! @brief Lista dos esquemas de interpolação do acoplador.
 !!
-!! Uma linha por esquema: o nome (o que se escreve na coluna esquema de
+!! Uma linha por esquema: o nome (o que se escreve na coluna scheme de
 !! ROUTES, em src/coupling/cpl_map.F90, ou em regrid_scheme no grupo
 !! &nuopc_regrid do nuopc.input) e o construtor, exportado pelo módulo do
 !! esquema. Para acrescentar um esquema: um arquivo em src/regrid/ (o modelo

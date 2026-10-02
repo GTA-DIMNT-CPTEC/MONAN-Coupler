@@ -46,8 +46,8 @@ Indicadores da fase 11 (contados nas instruções, sem comentários):
                      mapa de acoplamento, em src/coupling/, é onde os nomes
                      devem ficar);
   malha ESMF         chamada a ESMF_GridCreate* fora de src/coupling/;
-  criação de rota    chamada a regrid%add ou a cria_rota fora de
-                     med_exchange.F90 (as de regrid%add dentro de cria_rota,
+  criação de rota    chamada a regrid%add ou a create_route fora de
+                     med_exchange.F90 (as de regrid%add dentro de create_route,
                      em med_cap_methods.F90, não contam);
   rota na física     chamada a regrid%apply em med_bulk_ncar.F90;
   carimbo de tempo   arquivo que chama NUOPC_SetTimestamp.
@@ -175,10 +175,10 @@ def acoplamento(caminho, instr, res):
         if re.search(r'\bESMF_GridCreate\w*\s*\(', cod, re.I) and '/coupling/' not in caminho:
             res['cpl_malhas'].append((caminho, n))
         # A criação de uma rota é uma chamada a regrid%add ou, desde a
-        # R-FASE11-12, a cria_rota (med_cap_methods), que a envolve com a
-        # configuração de ROUTES; as chamadas a regrid%add dentro de cria_rota
+        # R-FASE11-12, a create_route (med_cap_methods), que a envolve com a
+        # configuração de ROUTES; as chamadas a regrid%add dentro de create_route
         # não contam como pontos de criação.
-        cria = re.search(r'\bcall\s+cria_rota\s*\(', cod, re.I) or (
+        cria = re.search(r'\bcall\s+(create_route|cria[_]rota)\s*\(', cod, re.I) or (
             re.search(r'regrid\s*%\s*add\s*\(', cod, re.I) and nome != 'med_cap_methods.F90')
         if cria and nome != 'med_exchange.F90':
             res['cpl_rotas'].append((caminho, n))
@@ -353,7 +353,7 @@ def tabela_acoplamento(versoes, medidas):
         ('Arquivos com nomes de campos anunciados ou realizados à mão', lambda r: arquivos(r['cpl_campos'])),
         ('Chamadas ESMF_GridCreate* fora de src/coupling', lambda r: len(r['cpl_malhas'])),
         ('Arquivos com ESMF_GridCreate* fora de src/coupling', lambda r: arquivos(r['cpl_malhas'])),
-        ('Rotas criadas (regrid%add, cria_rota) fora de med_exchange', lambda r: len(r['cpl_rotas'])),
+        ('Rotas criadas (regrid%add, create_route) fora de med_exchange', lambda r: len(r['cpl_rotas'])),
         ('Arquivos que criam rotas fora de med_exchange', lambda r: arquivos(r['cpl_rotas'])),
         ('Chamadas de rota em módulos de física', lambda r: len(r['cpl_fisica'])),
         ('Arquivos que carimbam o tempo dos campos', lambda r: arquivos(r['cpl_carimbo'])),
