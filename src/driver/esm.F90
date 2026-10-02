@@ -49,7 +49,7 @@ module ESM_MONAN
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
-  use cpl_check_mod,      only : cpl_check_acoplamento
+  use cpl_check_mod,      only : cpl_check_acoplamento, cpl_escreve_metodos
   use cpl_map_mod,        only : cpl_config_atual, cpl_conectores_do_driver, &
                                  CONECTOR_DE, CONECTOR_PARA, N_CONECTORES, TROCAS
 
@@ -341,6 +341,10 @@ contains
   !!   srcTermProcessing=0    toda a aritmética no destino
   !! Entradas que já tragam a opção não são alteradas.
   !!
+  !! Em seguida, escreve em cada entrada o método de interpolação do mapa de
+  !! acoplamento (remapmethod, coluna metodo de TROCAS; cpl_escreve_metodos).
+  !! Hoje é bilinear em todas, o padrão que o conector usava sem a opção.
+  !!
   !! Depois, com as listas prontas, registra no log o relatório dos conectores
   !! e a conferência do mapa de acoplamento (cpl_check_acoplamento), que só
   !! escreve no log e não muda as listas.
@@ -352,7 +356,7 @@ contains
     character(len=*), parameter :: OPT_SRC   = ':srcTermProcessing=0'
     character(len=512), allocatable :: cplList(:)
     type(ESMF_CplComp),     pointer :: connectors(:)
-    integer :: i, j, n, n_order, n_src, n_full
+    integer :: i, j, n, n_order, n_src, n_full, n_metodo, n_cheia
 
     rc = ESMF_SUCCESS
     n_order = 0; n_src = 0; n_full = 0
@@ -383,6 +387,13 @@ contains
       int_to_str(n_order)//' entrada(s), srcTermProcessing=0 em '//int_to_str(n_src)// &
       ' entrada(s)', ESMF_LOGMSG_INFO)
 
+    call cpl_escreve_metodos(driver,                                                 &
+      [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
+      [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_metodo, n_cheia, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    call ESMF_LogWrite('ESM: metodo dos conectores pelo mapa: remapmethod em '// &
+      int_to_str(n_metodo)//' entrada(s)', ESMF_LOGMSG_INFO)
+
     call cpl_check_acoplamento(driver,                                               &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
@@ -391,6 +402,11 @@ contains
     if (n_full > 0) then
       call ESMF_LogWrite('ESM: '//int_to_str(n_full)//' entrada(s) de CplList sem espaco '// &
         'para as opcoes de reprodutibilidade; aumentar len de cplList', ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+    if (n_cheia > 0) then
+      call ESMF_LogWrite('ESM: '//int_to_str(n_cheia)//' entrada(s) de CplList sem espaco '// &
+        'para o metodo do mapa; aumentar len em cpl_escreve_metodos', ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
 

@@ -1,19 +1,26 @@
 !> @file cpl_check.F90
-!! @brief Conferência do mapa de acoplamento e relatório dos conectores no log.
+!! @brief Método dos conectores pelo mapa, conferência do mapa de acoplamento
+!! e relatório dos conectores no log.
 !!
-!! Chamada pelo driver (esm.F90) no fim de ModifyCplLists, quando os
-!! componentes já anunciaram os campos e os conectores já montaram as suas
-!! listas (CplList), e antes da realização dos campos. Faz duas coisas, só
-!! escrevendo no log do PET 0, com o prefixo CPL-REL:
+!! As duas rotinas públicas com o driver são chamadas pelo ModifyCplLists do
+!! esm.F90, quando os componentes já anunciaram os campos e os conectores já
+!! montaram as suas listas (CplList), e antes da realização dos campos:
 !!
-!!   relatório dos conectores  para cada conector do driver, os campos da
-!!                             CplList e as opções de cada um;
-!!   conferência do mapa       compara o mapa (cpl_map, na configuração lida
-!!                             do nuopc.input) com o que o driver montou:
-!!                             a CplList de cada conector contra as trocas do
-!!                             mapa entre os dois componentes; o importState
-!!                             de cada componente contra as trocas que chegam
-!!                             a ele; o exportState contra as que partem dele.
+!!   cpl_escreve_metodos    escreve em cada entrada da CplList a opção
+!!                          remapmethod com o método da troca no mapa
+!!                          (coluna metodo de TROCAS); desde a R-FASE11-22;
+!!   cpl_check_acoplamento  só escreve no log do PET 0, com o prefixo
+!!                          CPL-REL:, duas coisas:
+!!     relatório dos conectores  para cada conector do driver, os campos da
+!!                               CplList e as opções de cada um;
+!!     conferência do mapa       compara o mapa (cpl_map, na configuração
+!!                               lida do nuopc.input) com o que o driver
+!!                               montou: a CplList de cada conector contra as
+!!                               trocas do mapa entre os dois componentes,
+!!                               inclusive o método de cada campo; o
+!!                               importState de cada componente contra as
+!!                               trocas que chegam a ele; o exportState
+!!                               contra as que partem dele.
 !!
 !! Cada diferença vira uma linha "CPL-REL: DIFERENCA: ..."; campos exportados
 !! que nenhum componente consome viram "CPL-REL: AVISO: ...", porque são
@@ -21,7 +28,8 @@
 !! a rodada: até a R-FASE11-25 ela só registra. Um erro do ESMF durante a
 !! consulta também só é registrado, e a rodada segue.
 !!
-!! As rotinas cpl_confere_conector e cpl_confere_estado não usam o ESMF e
+!! As rotinas cpl_confere_conector, cpl_confere_metodos e cpl_confere_estado
+!! não usam o ESMF e
 !! são testadas em tests/unit/test_cpl_check.F90; a rotina do driver é
 !! exercitada por tests/cplcheck/.
 !!
@@ -30,24 +38,96 @@
 module cpl_check_mod
 
   use ESMF
-  use NUOPC,              only : NUOPC_CompAttributeGet, NUOPC_GetStateMemberLists
+  use NUOPC,              only : NUOPC_CompAttributeGet, NUOPC_CompAttributeSet, &
+                                 NUOPC_GetStateMemberLists
   use NUOPC_Driver,       only : NUOPC_DriverGetComp
-  use coupler_utils_mod,  only : int_to_str
+  use coupler_utils_mod,  only : int_to_str, ChkErr
   use cpl_fields_mod,     only : cpl_campo_indice
   use cpl_map_mod,        only : TROCAS, cpl_config_t, cpl_troca_vale, cpl_ponto_componente, &
-                                 cpl_config_atual
+                                 cpl_config_atual, cpl_metodo_conector, CPL_METODO_LEN
 
   implicit none
   private
 
-  public :: cpl_check_acoplamento
-  public :: cpl_confere_conector, cpl_confere_estado
+  public :: cpl_check_acoplamento, cpl_escreve_metodos
+  public :: cpl_confere_conector, cpl_confere_metodos, cpl_confere_estado
+  public :: cpl_metodo_da_entrada
   public :: CPL_PREFIXO, CPL_MSG_LEN
 
   character(len=*), parameter :: CPL_PREFIXO = 'CPL-REL: '
   integer,          parameter :: CPL_MSG_LEN = 200
 
+  !> Opção do conector NUOPC que escolhe o método de interpolação.
+  character(len=*), parameter :: OPT_METODO = 'remapmethod='
+
 contains
+
+  !> Escreve em cada entrada da CplList dos conectores a opção remapmethod
+  !! com o método da troca no mapa (cpl_metodo_conector).
+  !!
+  !! Entradas que já tragam remapmethod não são alteradas, nem as de campos
+  !! sem troca por conector no mapa (a conferência do mapa, depois, acusa as
+  !! duas situações se o método não for o do mapa). Os conectores são
+  !! procurados pelos pares de rótulos, como na conferência.
+  !!
+  !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
+  !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
+  !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
+  !! @param[out]   n_metodo     entradas que receberam a opção
+  !! @param[out]   n_cheia      entradas sem espaço para a opção (o chamador
+  !!                            trata como erro)
+  !! @param[out]   rc           código de retorno do ESMF
+  subroutine cpl_escreve_metodos(driver, rotulos, componentes, n_metodo, n_cheia, rc)
+    type(ESMF_GridComp), intent(inout) :: driver
+    character(len=*),    intent(in)    :: rotulos(:)
+    character(len=*),    intent(in)    :: componentes(:)
+    integer,             intent(out)   :: n_metodo, n_cheia
+    integer,             intent(out)   :: rc
+
+    type(ESMF_CplComp) :: conector
+    character(len=512), allocatable :: lista(:)
+    character(len=CPL_METODO_LEN) :: metodo
+    character(len=:), allocatable :: opcao
+    integer :: i, j, k, n, p
+
+    rc = ESMF_SUCCESS
+    n_metodo = 0
+    n_cheia  = 0
+    do i = 1, size(rotulos)
+      do j = 1, size(rotulos)
+        if (i == j) cycle
+        call NUOPC_DriverGetComp(driver, srcCompLabel=trim(rotulos(i)), &
+                                 dstCompLabel=trim(rotulos(j)), comp=conector, &
+                                 relaxedflag=.true., rc=rc)
+        if (ChkErr(rc, __LINE__, __FILE__)) return
+        if (.not. ESMF_CplCompIsCreated(conector)) cycle
+        call NUOPC_CompAttributeGet(conector, name='CplList', itemCount=n, rc=rc)
+        if (ChkErr(rc, __LINE__, __FILE__)) return
+        if (n == 0) cycle
+
+        allocate(lista(n))
+        call NUOPC_CompAttributeGet(conector, name='CplList', valueList=lista, rc=rc)
+        if (ChkErr(rc, __LINE__, __FILE__)) return
+        do k = 1, n
+          if (index(lista(k), OPT_METODO) > 0) cycle
+          p = index(lista(k), ':')
+          if (p == 0) p = len_trim(lista(k)) + 1
+          metodo = cpl_metodo_conector(lista(k)(1:p-1), componentes(i), componentes(j))
+          if (len_trim(metodo) == 0) cycle
+          opcao = ':'//OPT_METODO//trim(metodo)
+          if (len_trim(lista(k)) + len(opcao) > len(lista(k))) then
+            n_cheia = n_cheia + 1
+            cycle
+          end if
+          lista(k) = trim(lista(k))//opcao
+          n_metodo = n_metodo + 1
+        end do
+        call NUOPC_CompAttributeSet(conector, name='CplList', valueList=lista, rc=rc)
+        if (ChkErr(rc, __LINE__, __FILE__)) return
+        deallocate(lista)
+      end do
+    end do
+  end subroutine cpl_escreve_metodos
 
   !> Relatório dos conectores e conferência do mapa, no log do PET 0.
   !!
@@ -108,6 +188,7 @@ contains
     type(ESMF_CplComp) :: conector
     character(len=512), allocatable :: lista(:)
     character(len=512), allocatable :: nomes(:)
+    character(len=CPL_METODO_LEN), allocatable :: metodos(:)
     integer :: n, k, p, lrc, nprev
     character(len=:), allocatable :: titulo
 
@@ -131,7 +212,7 @@ contains
       call escreve('AVISO: CplList do conector '//titulo//' nao consultada (erro do ESMF)')
       return
     end if
-    allocate(lista(n), nomes(n))
+    allocate(lista(n), nomes(n), metodos(n))
     if (n > 0) then
       call NUOPC_CompAttributeGet(conector, name='CplList', valueList=lista, rc=lrc)
       if (lrc /= ESMF_SUCCESS) then
@@ -150,13 +231,11 @@ contains
         nomes(k) = lista(k)(1:p-1)
         call escreve('  '//trim(nomes(k))//'  '//trim(lista(k)(p+1:)))
       end if
+      metodos(k) = cpl_metodo_da_entrada(lista(k))
     end do
-    if (n > 0) then
-      if (index(lista(1), 'remapmethod=') == 0 .and. index(lista(1), 'REMAPMETHOD=') == 0) &
-        call escreve('  metodo: padrao do conector (sem remapmethod na CplList)')
-    end if
 
     call cpl_confere_conector(cfg, comp_de, comp_para, nomes, msgs, ndif)
+    call cpl_confere_metodos(comp_de, comp_para, nomes, metodos, msgs, ndif)
   end subroutine confere_um_conector
 
   !> Conferência do importState e do exportState de um componente.
@@ -249,6 +328,60 @@ contains
           ' no conector '//par//', que nao o leva')
     end do
   end subroutine cpl_confere_conector
+
+  !> Confere o método de cada campo da lista de um conector com o do mapa.
+  !!
+  !! Diferença: campo com troca por conector no mapa cuja entrada não traz
+  !! remapmethod (o conector usaria o seu padrão) ou traz outro método.
+  !! Campos sem troca no mapa já são diferença em cpl_confere_conector.
+  !!
+  !! @param[in]    comp_de    componente de origem no mapa
+  !! @param[in]    comp_para  componente de destino no mapa
+  !! @param[in]    nomes      campos da CplList, sem as opções
+  !! @param[in]    metodos    remapmethod de cada entrada ('' se não tem)
+  !! @param[inout] msgs       mensagens acumuladas
+  !! @param[inout] ndif       número de diferenças acumulado
+  subroutine cpl_confere_metodos(comp_de, comp_para, nomes, metodos, msgs, ndif)
+    character(len=*),                        intent(in)    :: comp_de, comp_para
+    character(len=*),                        intent(in)    :: nomes(:), metodos(:)
+    character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
+    integer,                                 intent(inout) :: ndif
+
+    character(len=CPL_METODO_LEN) :: previsto
+    character(len=:), allocatable :: par
+    integer :: k
+
+    par = trim(comp_de)//' -> '//trim(comp_para)
+    do k = 1, size(nomes)
+      previsto = cpl_metodo_conector(nomes(k), comp_de, comp_para)
+      if (len_trim(previsto) == 0) cycle
+      if (len_trim(metodos(k)) == 0) then
+        call acrescenta(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(nomes(k))// &
+          ' sem remapmethod, e o mapa preve '//trim(previsto))
+      else if (metodos(k) /= previsto) then
+        call acrescenta(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(nomes(k))// &
+          ' com remapmethod='//trim(metodos(k))//', e o mapa preve '//trim(previsto))
+      end if
+    end do
+  end subroutine cpl_confere_metodos
+
+  !> Valor da opção remapmethod de uma entrada da CplList ('' se não tem).
+  pure function cpl_metodo_da_entrada(entrada) result(metodo)
+    character(len=*), intent(in) :: entrada
+    character(len=CPL_METODO_LEN) :: metodo
+    integer :: p, q
+
+    metodo = ''
+    p = index(entrada, ':'//OPT_METODO)
+    if (p == 0) return
+    p = p + 1 + len(OPT_METODO)
+    q = index(entrada(p:), ':')
+    if (q == 0) then
+      metodo = entrada(p:)
+    else
+      metodo = entrada(p:p+q-2)
+    end if
+  end function cpl_metodo_da_entrada
 
   !> Confere os campos anunciados num State de um componente com o mapa.
   !!

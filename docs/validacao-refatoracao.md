@@ -53,7 +53,7 @@ Desde a fase 11, a rodada escreve no log do PET 0 (`logs/PET000.esmApp.log`) lin
 
 | Linhas | Quando | Desde |
 | --- | --- | --- |
-| `configuracao do mapa`, `conector A -> B: N campo(s)` e um campo por linha, com as opções | inicialização, no `ModifyCplLists` do driver | R-FASE11-03 |
+| `configuracao do mapa`, `conector A -> B: N campo(s)` e um campo por linha, com as opções | inicialização, no `ModifyCplLists` do driver | R-FASE11-03 (desde a R-FASE11-22, cada campo com `remapmethod`, e sem a linha `metodo: padrao do conector`) |
 | `DIFERENCA:`, `AVISO:` e `conferencia do mapa: N diferenca(s), M aviso(s)` | idem; a produção dá 0 diferenças e 3 avisos | R-FASE11-03 |
 | `rota NOME: esquema, metodos, mascara, aceito METODO` (ou `usa a reserva`) | na criação de cada rota do mediador | R-FASE11-04 |
 | `completar ROTA CAMPO: N aplicacao(oes), P ponto(s) fora da faixa, F com valor fixo` | último passo da rodada, somando todos os PETs do mediador | R-FASE11-04 (saída corrigida na R-FASE11-04-FIX01) |

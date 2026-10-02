@@ -45,133 +45,137 @@ DATM: as trocas com `datm` descrevem o que o cap do DATM anuncia.
 
 ## 2. Trocas por conector
 
+A coluna "Método" é o método de interpolação do conector NUOPC para o
+campo (coluna `metodo` de `TROCAS`), que o driver escreve na `CplList`
+como `remapmethod` (`cpl_escreve_metodos`, em `src/coupling/cpl_check.F90`).
+
 ### ATM para MED
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Sa_u10m_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Sa_v10m_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Sa_tbot_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Sa_pslv_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_swdn_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_lwdn_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_rain_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Sa_shum_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_snow_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_sen_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_lat_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_taux_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Faxa_tauy_mpas` | `ATM@atm_cap` | `MED@atm_med` | `mpas` |
-| `Sa_u10m` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Sa_v10m` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Sa_tbot` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Sa_shum` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Sa_pslv` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Faxa_swdn` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Faxa_lwdn` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Faxa_rain` | `ATM@datm` | `MED@atm_med` | `datm` |
-| `Faxa_snow` | `ATM@datm` | `MED@atm_med` | `datm` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Sa_u10m_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Sa_v10m_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Sa_tbot_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Sa_pslv_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_swdn_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_lwdn_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_rain_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Sa_shum_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_snow_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_sen_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_lat_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_taux_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Faxa_tauy_mpas` | `ATM@atm_cap` | `MED@atm_med` | `bilinear` | `mpas` |
+| `Sa_u10m` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Sa_v10m` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Sa_tbot` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Sa_shum` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Sa_pslv` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Faxa_swdn` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Faxa_lwdn` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Faxa_rain` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
+| `Faxa_snow` | `ATM@datm` | `MED@atm_med` | `bilinear` | `datm` |
 
 ### OCN para MED
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `So_t` | `OCN@ocn_mom6` | `MED@ocn_med` | `mom6` |
-| `So_u` | `OCN@ocn_mom6` | `MED@ocn_med` | `mom6` |
-| `So_v` | `OCN@ocn_mom6` | `MED@ocn_med` | `mom6` |
-| `So_omask` | `OCN@ocn_mom6` | `MED@ocn_med` | `mom6` |
-| `So_t` | `OCN@docn` | `MED@ocn_med` | `docn` |
-| `So_u` | `OCN@docn` | `MED@ocn_med` | `docn` |
-| `So_v` | `OCN@docn` | `MED@ocn_med` | `docn` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `So_t` | `OCN@ocn_mom6` | `MED@ocn_med` | `bilinear` | `mom6` |
+| `So_u` | `OCN@ocn_mom6` | `MED@ocn_med` | `bilinear` | `mom6` |
+| `So_v` | `OCN@ocn_mom6` | `MED@ocn_med` | `bilinear` | `mom6` |
+| `So_omask` | `OCN@ocn_mom6` | `MED@ocn_med` | `bilinear` | `mom6` |
+| `So_t` | `OCN@docn` | `MED@ocn_med` | `bilinear` | `docn` |
+| `So_u` | `OCN@docn` | `MED@ocn_med` | `bilinear` | `docn` |
+| `So_v` | `OCN@docn` | `MED@ocn_med` | `bilinear` | `docn` |
 
 ### ICE para MED
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Si_ifrac_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
-| `Si_avsdr_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
-| `Si_avsdf_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
-| `Si_anidr_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
-| `Si_anidf_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
-| `Si_t_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `sis2` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Si_ifrac_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
+| `Si_avsdr_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
+| `Si_avsdf_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
+| `Si_anidr_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
+| `Si_anidf_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
+| `Si_t_sis2` | `ICE@ice_sis2` | `MED@ocn_med` | `bilinear` | `sis2` |
 
 ### MED para OCN
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Foxx_taux` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_tauy` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_sen` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_evap` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_lwnet` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_swnet_vdr` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_swnet_vdf` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_swnet_idr` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_swnet_idf` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Faxa_rain` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Faxa_snow` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Sa_pslv` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Si_ifrac` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `So_duu10n` | `MED@ocn_med` | `OCN@ocn_mom6` | `mom6` |
-| `Foxx_taux` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_tauy` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_sen` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_evap` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_lwnet` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_swnet_vdr` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_swnet_vdf` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_swnet_idr` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Foxx_swnet_idf` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Faxa_rain` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Faxa_snow` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Sa_pslv` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `Si_ifrac` | `MED@ocn_med` | `OCN@docn` | `docn` |
-| `So_duu10n` | `MED@ocn_med` | `OCN@docn` | `docn` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Foxx_taux` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_tauy` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_sen` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_evap` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_lwnet` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_swnet_vdr` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_swnet_vdf` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_swnet_idr` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_swnet_idf` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Faxa_rain` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Faxa_snow` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Sa_pslv` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Si_ifrac` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `So_duu10n` | `MED@ocn_med` | `OCN@ocn_mom6` | `bilinear` | `mom6` |
+| `Foxx_taux` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_tauy` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_sen` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_evap` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_lwnet` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_swnet_vdr` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_swnet_vdf` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_swnet_idr` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Foxx_swnet_idf` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Faxa_rain` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Faxa_snow` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Sa_pslv` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `Si_ifrac` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
+| `So_duu10n` | `MED@ocn_med` | `OCN@docn` | `bilinear` | `docn` |
 
 ### MED para ICE
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Fioi_taux` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_tauy` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_sen` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_evap` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_lwnet` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_swnet_vdr` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_swnet_vdf` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_swnet_idr` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Fioi_swnet_idf` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Faxa_rain` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Faxa_snow` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Sa_pslv` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `Faxa_coszen` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `So_t` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `So_u` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
-| `So_v` | `MED@ocn_med` | `ICE@ice_sis2` | `sis2` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Fioi_taux` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_tauy` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_sen` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_evap` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_lwnet` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_swnet_vdr` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_swnet_vdf` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_swnet_idr` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Fioi_swnet_idf` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Faxa_rain` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Faxa_snow` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Sa_pslv` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `Faxa_coszen` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `So_t` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `So_u` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
+| `So_v` | `MED@ocn_med` | `ICE@ice_sis2` | `bilinear` | `sis2` |
 
 ### MED para ATM
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Sx_tsfc` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `Si_ifrac` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `So_u` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `So_v` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `Sf_zorl` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `Sf_albedo` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
-| `Sx_omask` | `MED@ocn_med` | `ATM@atm_cap` | `mpas`, `med_to_mpas` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Sx_tsfc` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `Si_ifrac` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `So_u` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `So_v` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `Sf_zorl` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `Sf_albedo` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
+| `Sx_omask` | `MED@ocn_med` | `ATM@atm_cap` | `bilinear` | `mpas`, `med_to_mpas` |
 
 ### OCN para ATM
 
-| Campo | De | Para | Quando |
-| --- | --- | --- | --- |
-| `Si_ifrac` | `OCN@docn` | `ATM@atm_cap` | `mpas`, `docn`, `ocn_to_mpas` |
-| `So_u` | `OCN@docn` | `ATM@atm_cap` | `mpas`, `docn`, `ocn_to_mpas` |
-| `So_v` | `OCN@docn` | `ATM@atm_cap` | `mpas`, `docn`, `ocn_to_mpas` |
-| `Sf_zorl` | `OCN@docn` | `ATM@atm_cap` | `mpas`, `docn`, `ocn_to_mpas` |
-| `Si_ifrac` | `OCN@ocn_mom6` | `ATM@atm_cap` | `mpas`, `mom6`, `ocn_to_mpas` |
-| `So_u` | `OCN@ocn_mom6` | `ATM@atm_cap` | `mpas`, `mom6`, `ocn_to_mpas` |
-| `So_v` | `OCN@ocn_mom6` | `ATM@atm_cap` | `mpas`, `mom6`, `ocn_to_mpas` |
+| Campo | De | Para | Método | Quando |
+| --- | --- | --- | --- | --- |
+| `Si_ifrac` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
+| `So_u` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
+| `So_v` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
+| `Sf_zorl` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
+| `Si_ifrac` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
+| `So_u` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
+| `So_v` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
 
 ## 3. Trocas dentro dos componentes
 

@@ -15,12 +15,16 @@
 !!   mpas_docn        com o DOCN e o contorno direto do oceano, o MONAN-A
 !!                    importa Sx_tsfc, Sf_albedo e Sx_omask sem origem (a
 !!                    lacuna conhecida aparece como três diferenças)
+!!   metodo           remapmethod de cada entrada da CplList contra o método
+!!                    do mapa (R-FASE11-22): igual, ausente, outro método e
+!!                    campo sem troca; leitura da opção numa entrada
 !!
 !! Saída: uma linha PASSOU/FALHOU por caso e, no fim, "TODOS OS TESTES
 !! PASSARAM" ou o número de falhas; termina com código 1 se algum falhar.
 program test_cpl_check
   use cpl_map_mod,       only : cpl_config_t
-  use cpl_check_mod,     only : cpl_confere_conector, cpl_confere_estado, CPL_MSG_LEN
+  use cpl_check_mod,     only : cpl_confere_conector, cpl_confere_estado, CPL_MSG_LEN, &
+                                cpl_confere_metodos, cpl_metodo_da_entrada
   implicit none
 
   include 'listas_mediador.inc'
@@ -48,7 +52,7 @@ program test_cpl_check
 
   character(len=CPL_MSG_LEN), allocatable :: msgs(:)
   character(len=32), allocatable :: med_imp(:)
-  integer :: nfalhas, ndif, naviso
+  integer :: nfalhas, ndif, naviso, k
 
   nfalhas = 0
   med_imp = [character(len=32) :: import_mpas_names, MED_IMP_OCN, ICE_EXP]
@@ -89,6 +93,29 @@ program test_cpl_check
   call cpl_confere_estado(MPAS_DOCN, 'ATM', .true., ATM_IMP, msgs, ndif, naviso)
   call resultado('mpas_docn: Sx_tsfc, Sf_albedo e Sx_omask sem origem', &
                  ndif == 3 .and. contem('Sx_tsfc') .and. contem('Sf_albedo') .and. contem('Sx_omask'))
+
+  ! --- método de cada campo (remapmethod) ---------------------------------------
+  call zera()
+  call cpl_confere_metodos('MED', 'ICE', ICE_IMP, [character(len=16) :: ('bilinear', k = 1, 16)], &
+                           msgs, ndif)
+  call resultado('metodo: MED -> ICE com bilinear em todos, nenhuma diferenca', ndif == 0)
+  call zera()
+  call cpl_confere_metodos('OCN', 'MED', MED_IMP_OCN, &
+                           [character(len=16) :: 'bilinear', '', 'bilinear', 'bilinear'], msgs, ndif)
+  call resultado('metodo: campo sem remapmethod', ndif == 1 .and. contem(trim(MED_IMP_OCN(2))))
+  call zera()
+  call cpl_confere_metodos('OCN', 'MED', MED_IMP_OCN, &
+                           [character(len=16) :: 'bilinear', 'bilinear', 'patch', 'bilinear'], msgs, ndif)
+  call resultado('metodo: campo com outro metodo', ndif == 1 .and. contem(trim(MED_IMP_OCN(3))))
+  call zera()
+  call cpl_confere_metodos('OCN', 'MED', [character(len=24) :: 'So_s'], [character(len=16) :: ''], &
+                           msgs, ndif)
+  call resultado('metodo: campo sem troca no mapa nao e conferido aqui', ndif == 0)
+  call resultado('metodo: leitura da opcao na entrada', &
+    cpl_metodo_da_entrada('So_t:termorder=srcseq:srcTermProcessing=0:remapmethod=bilinear') == 'bilinear' &
+    .and. cpl_metodo_da_entrada('So_t:remapmethod=patch:termorder=srcseq') == 'patch' &
+    .and. len_trim(cpl_metodo_da_entrada('So_t:termorder=srcseq')) == 0 &
+    .and. len_trim(cpl_metodo_da_entrada('So_t')) == 0)
 
   if (nfalhas == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'

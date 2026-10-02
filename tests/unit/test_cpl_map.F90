@@ -65,6 +65,7 @@ program test_cpl_map
                                 cpl_condicoes_validas, cpl_rota_indice, cpl_malha_indice, &
                                 cpl_ponto_componente, cpl_ponto_malha, cpl_troca_t
   use cpl_map_mod,       only : cpl_chegadas, cpl_exportacoes, EXPORTACOES, cpl_config_atual
+  use cpl_map_mod,       only : METODOS_CONECTOR, cpl_metodo_conector
   use cpl_fields_mod,    only : CPL_NOME_LEN
   use med_cap_types_mod, only : MED_CHAVES
   implicit none
@@ -103,6 +104,7 @@ program test_cpl_map
   call confere_campos()
   call confere_malhas_e_rotas()
   call confere_trocas()
+  call confere_metodos()
   do k = 1, NCFG
     call confere_origens(k)
     call confere_cadeia(k)
@@ -285,6 +287,59 @@ contains
     end do
     call resultado('TROCAS: campos, pontos, condicoes e meios validos, sem repeticao', nerr == 0)
   end subroutine confere_trocas
+
+  !> Coluna metodo (R-FASE11-22): preenchida, com um valor aceito pelo
+  !! conector NUOPC, só nas trocas por conector; o mesmo método nas trocas
+  !! do mesmo campo entre os mesmos dois componentes (cpl_metodo_conector não
+  !! depende da configuração); hoje, bilinear em todas, o padrão que o
+  !! conector usava antes de a opção ser escrita.
+  subroutine confere_metodos()
+    integer :: i, j, nerr, nbil, ncon
+    character(len=16) :: cde, cpara
+
+    nerr = 0; nbil = 0; ncon = 0
+    do i = 1, size(TROCAS)
+      if (trim(TROCAS(i)%meio) /= 'conector') then
+        if (len_trim(TROCAS(i)%metodo) > 0) then
+          nerr = nerr + 1
+          call falha('metodo fora de troca por conector: '//descreve(i))
+        end if
+        cycle
+      end if
+      ncon = ncon + 1
+      if (.not. any(METODOS_CONECTOR == TROCAS(i)%metodo)) then
+        nerr = nerr + 1
+        call falha('metodo invalido: '//descreve(i)//' '//trim(TROCAS(i)%metodo))
+      end if
+      if (TROCAS(i)%metodo == 'bilinear') nbil = nbil + 1
+      cde   = cpl_ponto_componente(TROCAS(i)%de)
+      cpara = cpl_ponto_componente(TROCAS(i)%para)
+      do j = 1, size(TROCAS)
+        if (trim(TROCAS(j)%meio) /= 'conector' .or. TROCAS(j)%campo /= TROCAS(i)%campo) cycle
+        if (cpl_ponto_componente(TROCAS(j)%de) /= cde) cycle
+        if (cpl_ponto_componente(TROCAS(j)%para) /= cpara) cycle
+        if (TROCAS(j)%metodo /= TROCAS(i)%metodo) then
+          nerr = nerr + 1
+          call falha('metodos diferentes para o mesmo campo e conector: '//descreve(i))
+        end if
+      end do
+      if (cpl_metodo_conector(TROCAS(i)%campo, cde, cpara) /= TROCAS(i)%metodo) then
+        nerr = nerr + 1
+        call falha('cpl_metodo_conector diferente da tabela: '//descreve(i))
+      end if
+    end do
+    call resultado('TROCAS: metodo valido so nas trocas por conector, um por campo e conector', &
+                   nerr == 0)
+    call resultado('TROCAS: todas as trocas por conector com bilinear (padrao do NUOPC)', &
+                   nbil == ncon .and. ncon > 0)
+    call resultado('cpl_metodo_conector: vazio sem troca por conector', &
+                   len_trim(cpl_metodo_conector('So_t', 'MED', 'ATM')) == 0 .and. &
+                   len_trim(cpl_metodo_conector('Foxx_taux', 'MED', 'MED')) == 0 .and. &
+                   len_trim(cpl_metodo_conector('Sa_u10m_mpas', 'ATM', 'ATM')) == 0)
+    call resultado('cpl_metodo_conector: So_t do OCN para o MED e do MED para o ICE', &
+                   cpl_metodo_conector('So_t', 'OCN', 'MED') == 'bilinear' .and. &
+                   cpl_metodo_conector('So_t', 'MED', 'ICE') == 'bilinear')
+  end subroutine confere_metodos
 
   !> Na configuração k: cada (campo, destino) recebe de uma só troca, entre
   !! as que chegam por conector (importação) e entre as demais.

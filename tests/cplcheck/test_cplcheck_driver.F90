@@ -6,8 +6,8 @@
 !! na configuração de produção (escritas aqui a partir dos caps, não do mapa)
 !! e são ligados pelos mesmos seis conectores do driver real. A
 !! especialização ModifyCplLists do driver de teste chama
-!! cpl_check_acoplamento, como o esm.F90, e o relatório sai no log do PET 0
-!! (linhas CPL-REL:).
+!! cpl_escreve_metodos e cpl_check_acoplamento, como o esm.F90, e o
+!! relatório sai no log do PET 0 (linhas CPL-REL:).
 !!
 !! Com o argumento "defeito", o OCN anuncia uma importação a mais (So_teste)
 !! e o MED deixa de anunciar So_omask, e a conferência tem de acusar as
@@ -169,7 +169,7 @@ module tdrv_mod
                     label_ModifyCplLists => label_ModifyCplLists
   use NUOPC_Connector, only: cplSS => SetServices
   use tcomp_mod,       only: compSS => SetServices
-  use cpl_check_mod,   only: cpl_check_acoplamento
+  use cpl_check_mod,   only: cpl_check_acoplamento, cpl_escreve_metodos
   use MED_cap_MONAN_mod, only: medSS => SetServices
   implicit none
   private
@@ -225,6 +225,13 @@ contains
     type(ESMF_GridComp) :: driver
     integer, intent(out) :: rc
     type(ESMF_VM) :: vm
+    integer :: n_metodo, n_cheia
+    call cpl_escreve_metodos(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], &
+                             n_metodo, n_cheia, rc)
+    if (rc /= ESMF_SUCCESS .or. n_cheia /= 0) then
+      rc = ESMF_FAILURE
+      return
+    end if
     call cpl_check_acoplamento(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (mediador_real) then
       ! para antes da realização do mediador real (ver o cabeçalho); a

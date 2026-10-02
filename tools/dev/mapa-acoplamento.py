@@ -345,6 +345,10 @@ def gera(t):
         '',
         '## 2. Trocas por conector',
         '',
+        'A coluna "Método" é o método de interpolação do conector NUOPC para o',
+        'campo (coluna `metodo` de `TROCAS`), que o driver escreve na `CplList`',
+        'como `remapmethod` (`cpl_escreve_metodos`, em `src/coupling/cpl_check.F90`).',
+        '',
     ]
     for o, d in PARES:
         sel = [x for x in trocas if x['meio'] == 'conector'
@@ -352,9 +356,9 @@ def gera(t):
         if not sel:
             continue
         out += ['### {} para {}'.format(o, d), '']
-        out += md_tabela(['Campo', 'De', 'Para', 'Quando'],
+        out += md_tabela(['Campo', 'De', 'Para', 'Método', 'Quando'],
                          [[codigo(x['campo']), codigo(x['de']), codigo(x['para']),
-                           quando_md(x['quando'])] for x in sel])
+                           codigo(x['metodo']), quando_md(x['quando'])] for x in sel])
         out.append('')
     out += ['## 3. Trocas dentro dos componentes', '',
             'Passagens entre duas malhas do mesmo componente: código próprio do cap',

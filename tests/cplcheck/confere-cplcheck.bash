@@ -7,8 +7,10 @@
 # tests/cplcheck/test_cplcheck_driver.F90, em que quatro componentes com os
 # rótulos do driver real (MPAS, MED, OCN, ICE) anunciam as listas de campos
 # de hoje e são ligados pelos seis conectores da produção. A especialização
-# ModifyCplLists chama cpl_check_acoplamento, como o esm.F90. Dois casos,
-# cada um em NP processos MPI:
+# ModifyCplLists chama cpl_escreve_metodos e cpl_check_acoplamento, como o
+# esm.F90. Em todos os casos, cada campo dos conectores tem de sair com
+# remapmethod=bilinear (o método do mapa). Três casos, cada um em NP
+# processos MPI:
 #   normal   listas de hoje: o relatório tem os seis conectores com 13, 7,
 #            14, 16, 4 e 6 campos, e a conferência dá 0 diferenças e 3
 #            avisos (So_s, Fioo_q e Si_ifrac do MOM6, sem consumidor)
@@ -100,6 +102,13 @@ confere() {   # confere CASO DIFERENCAS CAMPOS_OCN_MED
       falhas=$((falhas + 1))
     fi
   done
+  local n_campos n_metodo
+  n_campos=$(awk '/^CPL-REL: conector .* campo\(s\)$/ { n += $(NF-1) } END { print n + 0 }' "${rel}")
+  n_metodo=$(grep -c 'remapmethod=bilinear$' "${rel}")
+  if [[ ${n_metodo} -ne ${n_campos} ]]; then
+    echo "FALHOU  ${caso}: ${n_metodo} de ${n_campos} campo(s) com remapmethod=bilinear"
+    falhas=$((falhas + 1))
+  fi
   if grep -q "conferencia do mapa: ${esperadas} diferenca(s), 3 aviso(s)" "${rel}"; then
     echo "PASSOU  ${caso}: ${esperadas} diferença(s) e 3 avisos"
   else

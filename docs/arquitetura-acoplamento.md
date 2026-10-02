@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6) e na R-FASE11-21 (seções 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6) e na R-FASE11-22 (seções 2, 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -92,7 +92,7 @@ A lista completa dos campos de cada conector e das rotas está no Apêndice A.
 | Criação das rotas | "máscara aplicada antes de criar as rotas que a pedem" (mudaria o momento de criação da `ocn2atm_sst` e os resultados) | coluna `criar` (`inicio` ou `mascara_mista`), que reproduz o momento de hoje |
 | Preenchimento do gelo | dentro da rota (mudaria o diagnóstico que registra o campo antes do preenchimento) | explícito onde a ordem importa, com comentário na linha da rota |
 | Decomposição | `decomp=DECOMP_FROM_MOM6` / `DECOMP_FROM_SIS2` (os dois caps descrevem a decomposição de formas diferentes) | decomposição sempre como lista de blocos por PET (`cpl_blocos_t`) |
-| Método dos conectores | escrito no `CplList` sem conferência | só depois de confirmar no log que é igual ao padrão usado hoje |
+| Método dos conectores | escrito no `CplList` sem conferência | só depois de confirmar no log que é igual ao padrão usado hoje (confirmado na R-FASE11-22: o relatório da R-FASE11-03 mostrava a `CplList` sem `remapmethod`, e o padrão do conector no ESMF 8.9.1 é o bilinear) |
 | Tempo, sinal, conferência | ausentes | carimbo de tempo num lugar só; sinal no dicionário de campos; conferência do mapa na inicialização |
 | Organização | 11 arquivos novos em 4 subdiretórios | 4 arquivos em `src/coupling/`, `src/regrid/` como está, `med_exchange.F90` no mediador |
 | Registro no log | "manifesto" | **relatório de acoplamento**, para não confundir com o `MANIFEST` da linha de base |
@@ -221,7 +221,7 @@ type(cpl_campo_t), parameter :: CAMPOS(*) = [                                   
 
 O mapa está em `src/coupling/cpl_map.F90` desde a R-FASE11-02, e a versão em tabelas, gerada dele, em `docs/acoplamento.md`.
 
-`TROCAS` tem uma linha por passagem de um campo de uma malha a outra. As colunas são: campo, `componente@malha` de origem, `componente@malha` de destino, meio (`conector`, nome de rota ou `cap`) e `quando`, a lista de condições em que a troca vale, separadas por vírgula (vazia: vale sempre). Cada chave de `&nuopc_mode` tem as duas condições, a de cada valor, para que toda troca diga onde vale sem precisar de negação:
+`TROCAS` tem uma linha por passagem de um campo de uma malha a outra. As colunas são: campo, `componente@malha` de origem, `componente@malha` de destino, meio (`conector`, nome de rota ou `cap`), `quando`, a lista de condições em que a troca vale, separadas por vírgula (vazia: vale sempre), e `metodo`, o método de interpolação do conector (desde a R-FASE11-22; só nas trocas por conector, vazio nas demais). Cada chave de `&nuopc_mode` tem as duas condições, a de cada valor, para que toda troca diga onde vale sem precisar de negação:
 
 | Condições | Chave |
 | --- | --- |
@@ -233,16 +233,16 @@ O mapa está em `src/coupling/cpl_map.F90` desde a R-FASE11-02, e a versão em t
 Exemplo com o caminho da temperatura de superfície:
 
 ```fortran
-type(cpl_troca_t), parameter :: TROCAS(*) = [                                                &
-  !           campo            de              para            meio           quando
-  cpl_troca_t('So_t',          'OCN@ocn_mom6', 'MED@ocn_med',  'conector',    'mom6'),              &
-  cpl_troca_t('So_t',          'OCN@docn',     'MED@ocn_med',  'conector',    'docn'),              &
-  cpl_troca_t('So_t',          'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst', ''),                  &
-  cpl_troca_t('Sx_tsfc',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',     ''),                  &
-  cpl_troca_t('Sx_tsfc',       'MED@ocn_med',  'ATM@atm_cap',  'conector',    'mpas,med_to_mpas'),  &
-  cpl_troca_t('Sx_tsfc',       'ATM@atm_cap',  'ATM@mpas',     'cap',         'mpas'),              &
-  cpl_troca_t('Si_ifrac_sis2', 'ICE@ice_sis2', 'MED@ocn_med',  'conector',    'sis2'),              &
-  cpl_troca_t('Si_ifrac_sis2', 'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice', 'sis2') ]
+type(cpl_troca_t), parameter :: TROCAS(*) = [                                                            &
+  !           campo            de              para            meio           quando              metodo
+  cpl_troca_t('So_t',          'OCN@ocn_mom6', 'MED@ocn_med',  'conector',    'mom6',             'bilinear'), &
+  cpl_troca_t('So_t',          'OCN@docn',     'MED@ocn_med',  'conector',    'docn',             'bilinear'), &
+  cpl_troca_t('So_t',          'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst', '',                 ''),         &
+  cpl_troca_t('Sx_tsfc',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',     '',                 ''),         &
+  cpl_troca_t('Sx_tsfc',       'MED@ocn_med',  'ATM@atm_cap',  'conector',    'mpas,med_to_mpas', 'bilinear'), &
+  cpl_troca_t('Sx_tsfc',       'ATM@atm_cap',  'ATM@mpas',     'cap',         'mpas',             ''),         &
+  cpl_troca_t('Si_ifrac_sis2', 'ICE@ice_sis2', 'MED@ocn_med',  'conector',    'sis2',             'bilinear'), &
+  cpl_troca_t('Si_ifrac_sis2', 'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice', 'sis2',             '') ]
 ```
 
 No mediador, o mesmo nome pode existir duas vezes em `MED@ocn_med`: o campo importado e o exportado (`So_t`, `So_u` e `So_v`). A regra de leitura do mapa é que uma rota que parte de `MED@ocn_med` lê o campo importado, e um conector que parte dali leva o exportado, que chegou de `MED@atm_med` pela rota `atm2ocn`.
@@ -263,6 +263,8 @@ type(cpl_exporta_t), parameter :: EXPORTACOES(*) = [          &
 Desde a R-FASE11-12, o mediador cria as rotas por `cria_rota(regrid, nome, src, dst, rc)` (`med_cap_methods`), que lê a linha da rota em `ROTAS` (`spec_da_rota`): os métodos, o esquema, a máscara na origem (se a coluna `mascara` está preenchida) e a rota de reserva. O grupo `&nuopc_regrid` do `nuopc.input` continua podendo trocar o esquema e os métodos de uma rota. A busca na tabela ficou no mediador, e não em `regrid_manager%add`, como o plano previa: o framework de interpolação (`src/regrid`) não depende do mapa de acoplamento e continua testável sozinho (`tests/regrid`). Desde a R-FASE11-13, a rota também aplica as colunas `sem_valor` e `nan_para`: `zerar` zera o destino inteiro antes da interpolação, `manter` e `sentinela` preservam o valor anterior nos pontos que a interpolação não alcança, e `nan_para` troca os NaN do destino depois dela. As chamadas de interpolação deixaram de passar `zero_total`. Quando uma rota usa a interpolação da reserva, essas opções continuam sendo as da rota pedida (`regrid_manager` guarda a configuração de cada rota). O valor da sentinela continua sendo escrito por quem usa a rota (`fill_ice_sentinels` em `med_ice` e o preenchimento de `Si_ifrac` em `med_export`), e não pela rota: o preenchimento acontece mesmo quando a rota não é aplicada (um campo do SIS2 ausente fica com a sentinela), e o da fração exportada vale também para a interpolação pela reserva. Desde a R-FASE11-14, a rota também executa a etapa completar (coluna `completar`): o `regrid_manager` faz o preenchimento por vizinhança depois da interpolação e antes da troca de NaN, com as opções da rota pedida, e devolve as contagens para o relatório de acoplamento. Saíram as chamadas à parte na SST (`fill_sst_gaps`, em `med_ocean`) e na fração de gelo exportada (`med_export`). Enquanto a máscara do oceano é uniforme, a SST passa pela rota `ocn2atm`, e a chamada pede o preenchimento da `ocn2atm_sst` (`completar_da_rota`), como antes. As colunas `limite_min`, `limite_max` e `criar` ainda não são lidas (bloco E).
 
 Desde a R-FASE11-21, o driver registra os conectores pelo mapa: `cpl_conectores_do_driver` (`cpl_map`) percorre a lista dos sete pares que o driver sabe registrar (`CONECTOR_DE` e `CONECTOR_PARA`, na ordem de registro, que é a ordem de inicialização no NUOPC e a das linhas dos conectores no relatório) e escolhe os que têm troca por conector válida na configuração atual (`cpl_conector_vale`). A ordem da lista não é a de `TROCAS`, que define a do anúncio dos campos. Um conector do mapa que não tem lugar na lista é erro na inicialização. Como o driver registra o MONAN-A também com `use_datm`, a escolha consulta o mapa com a chave `datm` desligada.
+
+Desde a R-FASE11-22, o método de cada campo de um conector também sai do mapa. O `ModifyCplLists` do driver, depois das opções de reprodutibilidade (`termorder=srcseq` e `srcTermProcessing=0`), chama `cpl_escreve_metodos` (`cpl_check`), que acrescenta a cada entrada da `CplList` a opção `remapmethod` com o método da troca no mapa (`cpl_metodo_conector`, coluna `metodo` de `TROCAS`). O método não depende da configuração: as trocas do mesmo campo entre os mesmos dois componentes têm o mesmo método em todas as linhas (conferido pelo teste do mapa). Hoje é `bilinear` em todas, que é o padrão do conector NUOPC do ESMF 8.9.1 quando a `CplList` não traz `remapmethod`: com a opção escrita, o conector faz as mesmas chamadas ao ESMF, com os mesmos parâmetros (`polemethod`, `unmappedaction`, `extrapmethod` e as máscaras continuam no padrão, como antes). A conferência do mapa passou a comparar também o método de cada entrada com o do mapa (`cpl_confere_metodos`): entrada sem `remapmethod`, ou com outro método, é diferença. A troca de método de um conector, quando vier, é uma linha do mapa; a passagem para `redist` entre representações da mesma malha continua sendo uma decisão da fase 10 (seção 5).
 
 O DATM está no mapa como o cap dele anuncia os campos (malha `datm`, condição `datm`), mas o driver não o registra: com `use_datm=.true.` o componente atmosférico continua sendo o MONAN-A. Duas lacunas de hoje ficam registradas no teste do mapa: com o DOCN, `So_omask` não chega ao mediador (o DOCN não a exporta); com o DOCN e o contorno direto do oceano, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A, e o cap atmosférico interrompe a rodada.
 
@@ -537,7 +539,9 @@ A R-FASE11-20 passou a física bulk para arrays: o tipo `med_fluxo_t` reúne os 
 
 A R-FASE11-21 abriu o bloco F: o driver passou a registrar os conectores pelo mapa (seção 3.5), no lugar das condições sobre `use_med_to_mpas` e o SIS2. A escolha nova dá os mesmos conectores, na mesma ordem, nas doze configurações válidas (teste unitário `test_conectores`, com as condições de antes copiadas).
 
-Próxima etapa: **R-FASE11-22**, conforme a tabela do bloco F: o método de cada campo escrito no `CplList`, se o relatório dos conectores mostrar que o padrão de hoje é o bilinear com as opções que serão escritas; senão, a etapa só documenta e fica como decisão da fase 10.
+A R-FASE11-22 escreveu o método de cada campo no `CplList` (seção 3.5). A condição da etapa foi conferida antes: o relatório dos conectores validado na Jaci mostrava todas as entradas sem `remapmethod` (só `termorder=srcseq` e `srcTermProcessing=0`), e o fonte do conector no ESMF 8.9.1 (`NUOPC_Connector.F90`) usa, sem a opção, o bilinear, sem tratamento dos polos, com `unmappedaction=ignore`, sem extrapolação e sem máscaras. A coluna `metodo` de `TROCAS` recebeu `bilinear` nas 93 trocas por conector, o driver passou a escrever `remapmethod=bilinear` em cada entrada, e a conferência do mapa passou a conferir o método. O relatório de acoplamento muda de propósito: cada linha de campo dos conectores ganha `:remapmethod=bilinear`, e a linha `metodo: padrao do conector (sem remapmethod na CplList)` sai de cada conector.
+
+Próxima etapa: **R-FASE11-23**, conforme a tabela do bloco F: `weights_regridder_t`, opções em texto, `regrid_schemes.F90`, modelo de esquema e `compara-esquema.bash`.
 
 ---
 

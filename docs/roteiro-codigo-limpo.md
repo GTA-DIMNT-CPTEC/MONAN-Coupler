@@ -165,6 +165,7 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-19 | fração de gelo sem o SIS2 fora da física bulk (fase `fracao_de_gelo_sem_sis2`, logo depois de `calc_bulk_ncar`); chamadas de rota em módulos de física de 1 para 0 (meta); nenhum arquivo com mais de 1000 linhas |
 | R-FASE11-20 | física bulk em arrays (`med_fluxo_t`, fase `calcula_fluxos`): `med_bulk_ncar` sem estado interno, campos do ESMF nem rotas; fim do bloco E |
 | R-FASE11-21 | conectores registrados pelo mapa (`cpl_conectores_do_driver`), no lugar das condições do driver; teste `test_conectores`; início do bloco F |
+| R-FASE11-22 | método de cada campo dos conectores pelo mapa (coluna `metodo`, `remapmethod=bilinear` escrito na `CplList` por `cpl_escreve_metodos`) e conferido pela conferência do mapa |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 
