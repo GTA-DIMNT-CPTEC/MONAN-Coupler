@@ -2,7 +2,7 @@
 #   make            compila ./test_regrid
 #   make run NP=2   executa com NP processos MPI (num nó de cálculo;
 #                   na Jaci, carregar antes o módulo cray-pals)
-#   make test_esquema   compila o programa de compara-esquema.bash
+#   make test_scheme   compila o programa de compara-esquema.bash
 include $(ESMFMKFILE)
 
 SRC  := ../../src
@@ -22,7 +22,7 @@ vpath %.F90 $(SRC)/shared $(SRC)/regrid .
 test_regrid: $(OBJS)
 	$(FC) -o $@ $^ $(LIBS)
 
-test_esquema: $(REGRID) test_esquema.o
+test_scheme: $(REGRID) test_scheme.o
 	$(FC) -o $@ $^ $(LIBS)
 
 %.o: %.F90
@@ -38,7 +38,7 @@ regrid_registry.o: regrid_schemes.o
 regrid_manager.o: regrid_registry.o coupler_config.o
 identity_scheme.o: regrid_weights_base.o
 test_regrid.o: regrid_manager.o identity_scheme.o regrid_idw.o
-test_esquema.o: regrid_manager.o
+test_scheme.o: regrid_manager.o
 
 # Lançador MPI: na Jaci, dentro de um job, o 'mpiexec' do PBS (/opt/pbs/bin)
 # aparece antes do Cray PALS no PATH e não funciona com o cray-mpich. Usa o do
@@ -50,6 +50,6 @@ run: test_regrid
 	$(MPIEXEC) -n $(NP) ./test_regrid
 
 clean:
-	rm -f *.o *.mod test_regrid test_esquema PET*.log pesos_teste.nc pesos_idw.nc
+	rm -f *.o *.mod test_regrid test_scheme PET*.log pesos_teste.nc pesos_idw.nc
 
 .PHONY: run clean

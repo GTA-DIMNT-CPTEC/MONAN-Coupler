@@ -224,24 +224,24 @@ contains
 
   !> Valor real da opção chave em options, ou padrao se ela não aparece.
   !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um número.
-  subroutine regrid_option_real(options, chave, padrao, valor, rc)
-    character(len=*),   intent(in)  :: options, chave
-    real(ESMF_KIND_R8), intent(in)  :: padrao
-    real(ESMF_KIND_R8), intent(out) :: valor
+  subroutine regrid_option_real(options, key, default_val, val, rc)
+    character(len=*),   intent(in)  :: options, key
+    real(ESMF_KIND_R8), intent(in)  :: default_val
+    real(ESMF_KIND_R8), intent(out) :: val
     integer,            intent(out) :: rc
 
-    character(len=OPTIONS_LEN) :: texto
-    logical :: achou
+    character(len=OPTIONS_LEN) :: text
+    logical :: found
     integer :: ios
 
     rc = ESMF_SUCCESS
-    valor = padrao
-    call option_text(options, chave, texto, achou)
-    if (.not. achou) return
-    read(texto, *, iostat=ios) valor
+    val = default_val
+    call option_text(options, key, text, found)
+    if (.not. found) return
+    read(text, *, iostat=ios) val
     if (ios /= 0) then
-      valor = padrao
-      call ESMF_LogWrite('regrid: opcao '//trim(chave)//' com valor invalido: '//trim(texto), &
+      val = default_val
+      call ESMF_LogWrite('regrid: opcao '//trim(key)//' com valor invalido: '//trim(text), &
         ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
@@ -249,28 +249,28 @@ contains
 
   !> Valor inteiro da opção chave em options, ou padrao se ela não aparece.
   !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um inteiro.
-  subroutine regrid_option_int(options, chave, padrao, valor, rc)
-    character(len=*), intent(in)  :: options, chave
-    integer,          intent(in)  :: padrao
-    integer,          intent(out) :: valor
+  subroutine regrid_option_int(options, key, default_val, val, rc)
+    character(len=*), intent(in)  :: options, key
+    integer,          intent(in)  :: default_val
+    integer,          intent(out) :: val
     integer,          intent(out) :: rc
 
-    character(len=OPTIONS_LEN) :: texto
-    logical :: achou
+    character(len=OPTIONS_LEN) :: text
+    logical :: found
     integer :: ios
 
     rc = ESMF_SUCCESS
-    valor = padrao
-    call option_text(options, chave, texto, achou)
-    if (.not. achou) return
-    if (verify(trim(texto), '+-0123456789') /= 0) then
+    val = default_val
+    call option_text(options, key, text, found)
+    if (.not. found) return
+    if (verify(trim(text), '+-0123456789') /= 0) then
       ios = 1
     else
-      read(texto, *, iostat=ios) valor
+      read(text, *, iostat=ios) val
     end if
     if (ios /= 0) then
-      valor = padrao
-      call ESMF_LogWrite('regrid: opcao '//trim(chave)//' com valor invalido: '//trim(texto), &
+      val = default_val
+      call ESMF_LogWrite('regrid: opcao '//trim(key)//' com valor invalido: '//trim(text), &
         ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
@@ -278,25 +278,25 @@ contains
 
   !> Confere que toda chave de options está em conhecidas e tem valor.
   !! rc = ESMF_FAILURE (com mensagem no log) na primeira que não está.
-  subroutine regrid_options_check(options, conhecidas, rc)
+  subroutine regrid_options_check(options, known, rc)
     character(len=*), intent(in)  :: options
-    character(len=*), intent(in)  :: conhecidas(:)
+    character(len=*), intent(in)  :: known(:)
     integer,          intent(out) :: rc
 
-    integer :: inicio, fim, p
+    integer :: first, last, p
     character(len=:), allocatable :: item
 
     rc = ESMF_SUCCESS
-    inicio = 1
-    do while (inicio <= len_trim(options))
-      fim = index(options(inicio:), ',')
-      if (fim == 0) then
-        fim = len_trim(options)
+    first = 1
+    do while (first <= len_trim(options))
+      last = index(options(first:), ',')
+      if (last == 0) then
+        last = len_trim(options)
       else
-        fim = inicio + fim - 2
+        last = first + last - 2
       end if
-      item = trim(adjustl(options(inicio:fim)))
-      inicio = fim + 2
+      item = trim(adjustl(options(first:last)))
+      first = last + 2
       if (len(item) == 0) cycle
       p = index(item, '=')
       if (p <= 1) then
@@ -304,7 +304,7 @@ contains
         rc = ESMF_FAILURE
         return
       end if
-      if (.not. any(conhecidas == trim(adjustl(item(1:p-1))))) then
+      if (.not. any(known == trim(adjustl(item(1:p-1))))) then
         call ESMF_LogWrite('regrid: opcao desconhecida: '//item(1:p-1), ESMF_LOGMSG_ERROR)
         rc = ESMF_FAILURE
         return
@@ -314,31 +314,31 @@ contains
 
   !> Texto do valor da chave em options ('chave=valor', separados por
   !! vírgula; espaços em volta são ignorados). Vale a primeira ocorrência.
-  subroutine option_text(options, chave, texto, achou)
-    character(len=*), intent(in)  :: options, chave
-    character(len=*), intent(out) :: texto
-    logical,          intent(out) :: achou
+  subroutine option_text(options, key, text, found)
+    character(len=*), intent(in)  :: options, key
+    character(len=*), intent(out) :: text
+    logical,          intent(out) :: found
 
-    integer :: inicio, fim, p
+    integer :: first, last, p
     character(len=:), allocatable :: item
 
-    texto = ''
-    achou = .false.
-    inicio = 1
-    do while (inicio <= len_trim(options))
-      fim = index(options(inicio:), ',')
-      if (fim == 0) then
-        fim = len_trim(options)
+    text = ''
+    found = .false.
+    first = 1
+    do while (first <= len_trim(options))
+      last = index(options(first:), ',')
+      if (last == 0) then
+        last = len_trim(options)
       else
-        fim = inicio + fim - 2
+        last = first + last - 2
       end if
-      item = trim(adjustl(options(inicio:fim)))
-      inicio = fim + 2
+      item = trim(adjustl(options(first:last)))
+      first = last + 2
       p = index(item, '=')
       if (p <= 1) cycle
-      if (trim(adjustl(item(1:p-1))) /= trim(chave)) cycle
-      texto = adjustl(item(p+1:))
-      achou = .true.
+      if (trim(adjustl(item(1:p-1))) /= trim(key)) cycle
+      text = adjustl(item(p+1:))
+      found = .true.
       return
     end do
   end subroutine option_text

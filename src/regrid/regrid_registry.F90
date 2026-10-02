@@ -15,7 +15,7 @@ module regrid_registry_mod
 
   use ESMF,               only : ESMF_SUCCESS, ESMF_FAILURE, ESMF_LogWrite, ESMF_LOGMSG_ERROR
   use regrid_base_mod,    only : regridder_t, regridder_ctor, NAME_LEN
-  use regrid_schemes_mod, only : regrid_esquemas_do_acoplador
+  use regrid_schemes_mod, only : regrid_coupler_schemes
 
   implicit none
   private
@@ -102,7 +102,7 @@ contains
 
     if (done) return
     done = .true.
-    call regrid_esquemas_do_acoplador(regrid_register, rc)
+    call regrid_coupler_schemes(regrid_register, rc)
   end subroutine register_builtins
 
 end module regrid_registry_mod

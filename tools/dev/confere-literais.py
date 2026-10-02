@@ -88,7 +88,7 @@ def main():
     if git('rev-parse', '--verify', '--quiet', rev + '^{commit}')[0] != 0:
         print(f'ERRO: commit {rev!r} não encontrado', file=sys.stderr)
         return 2
-    arquivos = sys.argv[2:] or git('diff', '--name-only', rev, '--', '*.F90')[1].split()
+    arquivos = sys.argv[2:] or git('diff', '--name-only', '--no-renames', rev, '--', '*.F90')[1].split()
     iguais = True
     total_antes, total_depois = collections.Counter(), collections.Counter()
     relatorio = []   # (arquivo, antes, sumiram, novos)

@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE11-26 (02/10/2026), que encerrou a fase 11. Para retomar, comece pela seção 10.
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE12-01 (02/10/2026), primeira etapa da fase 12 (nomes em inglês). Para retomar, comece pela seção 10.
 
 ## 1. O que é o projeto
 
@@ -284,6 +284,28 @@ Indicadores da fase na partida (`fase9-07-validada`): 8 arquivos com nomes de ca
 
 Encerramento da fase 11 (R-FASE11-26, 02/10/2026): os indicadores da fase chegaram às metas (seção 4.4 do documento de arquitetura): 0 arquivos com nomes de campos à mão; `ESMF_GridCreate*` só no DOCN e no DATM; 0 rotas criadas fora de `med_exchange`; 0 chamadas de rota na física; 0 fórmulas de índice fora de `cpl_grids`; o tempo dos campos carimbado só em `cap_common` e `med_exchange`. Desvio aprovado: o relatório de acoplamento final difere do da R-FASE11-04 nas linhas de campo dos conectores, que ganharam `remapmethod=bilinear` na R-FASE11-22. Ficam para depois: as decisões da fase 10 (entre elas, o DATM, que a conferência agora para, e `redist` nos conectores entre representações da mesma malha), a atualização da NTC e do RPQ, que ficam fora do repositório, e a integração ao `develop`, pelo procedimento abaixo, com `fase11-26-validada` no passo 1 e "fases 1 a 9 e 11" na mensagem do passo 6.
 
+### Fase 12: nomes em inglês
+
+Decisões de 02/10/2026 (Daniel):
+
+- os identificadores Fortran (variáveis, constantes, tipos e seus componentes, rotinas, interfaces, módulos e programas, e os nomes dos arquivos que os contêm) passam a ser em inglês dos EUA, e código novo segue essa regra (convenção no `README.md`);
+- só os identificadores mudam: os textos entre aspas (mensagens de log, linhas `CPL-REL:`, nomes de campos, valores das tabelas do mapa como `inicio` e `mascara_mista`, opções dos esquemas como `vizinhos` e `expoente`) ficam como estão, e com eles o relatório de acoplamento e as chaves do `nuopc.input`, que já são em inglês;
+- os comentários continuam em português; neles, só os nomes de código citados são atualizados;
+- uma etapa por área do código, cada uma validada na Jaci antes da seguinte; os scripts e ferramentas em Python e Bash ficam fora, exceto onde citam nomes do Fortran.
+
+Cada etapa tem a sua tabela de trocas em `tools/dev/nomes/`, aplicada e conferida por `tools/dev/renomeia-identificadores.py` (conferência `nomes` de `confere-tudo.bash`, seção 2.16 de `docs/conferencias-locais.md`). A conferência prova que a árvore nova é a anterior com outros nomes, símbolo a símbolo, e que nenhuma troca colide com um nome existente. A rodada na Jaci continua sendo o critério final. O `docs/CHANGELOG.md` não é reescrito: as entradas antigas citam os nomes da época, e as tabelas fazem a ponte.
+
+| Ordem | Etapa | Área | Situação |
+| --- | --- | --- | --- |
+| 1 | R-FASE12-01 | framework de interpolação (`src/regrid`, `tests/regrid`); ferramenta de troca e conferência `nomes` | em validação |
+| 2 | R-FASE12-02 | mapa de acoplamento (`src/coupling`) e seus testes; `tools/dev/mapa-acoplamento.py` | a fazer |
+| 3 | R-FASE12-03 | mediador (`src/mediator`) | a fazer |
+| 4 | R-FASE12-04 | caps dos modelos (`src/caps`), inclusive o adaptador do MPAS | a fazer |
+| 5 | R-FASE12-05 | `src/shared`, driver e programa principal | a fazer |
+| 6 | R-FASE12-06 | testes restantes (`tests/`), nomes dos programas de teste e encerramento | a fazer |
+
+Com nomes de identificadores trocados, os testes de regressão que compilam a versão `REV` com o programa de teste da árvore de trabalho (`malhas`, `completar`, `docn`) podem deixar de compilar com `REV` quando a etapa troca um nome público que o teste usa; nesses casos, a equivalência da conferência `nomes` faz o papel deles.
+
 ### Integração de `refactor/principal` ao `develop`
 
 Autorizada em 29/09/2026, depois da R-FASE9-07; adiada em 30/09/2026 (ver fase 11). A refatoração partiu do commit `ea10fb6` do `develop`. Na Jaci, um comando por vez, na raiz do repositório:
@@ -311,7 +333,7 @@ Commits: autor Daniel Massaru <dmassaru@gmail.com>, sem linhas de coautoria nem 
 
 ## 10. Para retomar o trabalho em outro ambiente
 
-A fase 11 terminou na R-FASE11-26; o estado final está em `docs/arquitetura-acoplamento.md`, seção 6, e o andamento de todas as fases, na seção 8 deste documento e no `docs/CHANGELOG.md`. Os próximos passos possíveis estão no fim da seção 8: integração ao `develop`, decisões da fase 10 e atualização da NTC e do RPQ.
+A fase 11 terminou na R-FASE11-26; o estado final está em `docs/arquitetura-acoplamento.md`, seção 6. A fase em andamento é a 12 (nomes em inglês), com o plano na seção 8. O andamento de todas as fases está na seção 8 deste documento e no `docs/CHANGELOG.md`.
 
 ### 10.1 Numa nova conversa ou com outra pessoa
 
@@ -348,6 +370,6 @@ Com `ESMF_COMM=mpich`, o ESMF usa o `mpif90` do sistema, que no Ubuntu é o do O
 
 1. Conferências locais: `tools/dev/confere-tudo.bash HEAD` antes do commit (ou `HEAD~1` depois), com `-i` quando a etapa só muda comentários.
 2. Um commit, autor Daniel Massaru <dmassaru@gmail.com>, sem linhas de coautoria nem marcas de ferramentas (seção 9).
-3. `git format-patch -1 --stdout > R-FASE11-NN.patch`; informar `head -1` e `md5sum` do arquivo.
-4. Na Jaci, um comando por vez: `git am`, compilação e `valida_rodada.bash` (seção 5); com PASS, `git tag fase11-NN-validada` e envio do ramo e da tag ao GitHub.
-5. Atualizar este documento, o CHANGELOG, o roteiro e, nesta fase, o documento de arquitetura.
+3. `git format-patch -1 --stdout > R-FASEnn-NN.patch`; informar `head -1` e `md5sum` do arquivo.
+4. Na Jaci, um comando por vez: `git am`, compilação e `valida_rodada.bash` (seção 5); com PASS, `git tag fasenn-NN-validada` e envio do ramo e da tag ao GitHub.
+5. Atualizar este documento, o CHANGELOG e, quando a etapa os afeta, o roteiro, o documento de arquitetura e o `README.md`.

@@ -1,15 +1,15 @@
 !> Esquemas mínimos usados no teste: copiam o campo de origem para o
 !! destino (mesma grade). Mostram como um esquema externo se encaixa no
 !! framework: identity_regridder_t estende regridder_t diretamente;
-!! pesos_identidade_t estende a base de pesos (weights_regridder_t) e só
-!! escreve calcula_pesos, com peso 1 de cada ponto para o de mesmo índice.
+!! identity_weights_t estende a base de pesos (weights_regridder_t) e só
+!! escreve compute_weights, com peso 1 de cada ponto para o de mesmo índice.
 module identity_scheme_mod
   use ESMF
   use regrid_base_mod,         only : regridder_t
-  use regrid_weights_base_mod, only : weights_regridder_t, regrid_pontos_t
+  use regrid_weights_base_mod, only : weights_regridder_t, regrid_points_t
   implicit none
   private
-  public :: new_identity, new_pesos_identidade
+  public :: new_identity, new_identity_weights
 
   type, extends(regridder_t) :: identity_regridder_t
   contains
@@ -18,10 +18,10 @@ module identity_scheme_mod
     procedure :: release => id_release
   end type identity_regridder_t
 
-  type, extends(weights_regridder_t) :: pesos_identidade_t
+  type, extends(weights_regridder_t) :: identity_weights_t
   contains
-    procedure :: calcula_pesos => pi_calcula_pesos
-  end type pesos_identidade_t
+    procedure :: compute_weights => iw_compute_weights
+  end type identity_weights_t
 
 contains
 
@@ -59,23 +59,23 @@ contains
     rc = ESMF_SUCCESS
   end subroutine id_release
 
-  subroutine new_pesos_identidade(r)
+  subroutine new_identity_weights(r)
     class(regridder_t), allocatable, intent(out) :: r
-    allocate(pesos_identidade_t :: r)
-  end subroutine new_pesos_identidade
+    allocate(identity_weights_t :: r)
+  end subroutine new_identity_weights
 
-  subroutine pi_calcula_pesos(this, origem, destino, fator, orig, dest, rc)
-    class(pesos_identidade_t),       intent(inout) :: this
-    type(regrid_pontos_t),           intent(in)    :: origem, destino
-    real(ESMF_KIND_R8), allocatable, intent(out)   :: fator(:)
+  subroutine iw_compute_weights(this, src_points, dst_points, factors, orig, dest, rc)
+    class(identity_weights_t),       intent(inout) :: this
+    type(regrid_points_t),           intent(in)    :: src_points, dst_points
+    real(ESMF_KIND_R8), allocatable, intent(out)   :: factors(:)
     integer,            allocatable, intent(out)   :: orig(:), dest(:)
     integer,                         intent(out)   :: rc
-    allocate(fator(size(destino%indice)))
-    fator = 1.0_ESMF_KIND_R8
-    orig  = destino%indice
-    dest  = destino%indice
+    allocate(factors(size(dst_points%global_index)))
+    factors = 1.0_ESMF_KIND_R8
+    orig  = dst_points%global_index
+    dest  = dst_points%global_index
     this%method_used = 'pesos_identidade'
     rc = ESMF_SUCCESS
-    if (size(origem%indice) < maxval([0, dest])) rc = ESMF_FAILURE
-  end subroutine pi_calcula_pesos
+    if (size(src_points%global_index) < maxval([0, dest])) rc = ESMF_FAILURE
+  end subroutine iw_compute_weights
 end module identity_scheme_mod

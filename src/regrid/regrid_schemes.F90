@@ -22,33 +22,33 @@ module regrid_schemes_mod
   implicit none
   private
 
-  public :: regrid_esquemas_do_acoplador
+  public :: regrid_coupler_schemes
 
   abstract interface
     !> Registra um esquema (regrid_register, de regrid_registry).
-    subroutine registra_i(name, ctor, rc)
+    subroutine register_iface(name, ctor, rc)
       import :: regridder_ctor
       character(len=*), intent(in)  :: name
       procedure(regridder_ctor)     :: ctor
       integer,          intent(out) :: rc
-    end subroutine registra_i
+    end subroutine register_iface
   end interface
 
 contains
 
   !> Entrega cada esquema da lista a registra, na ordem da lista; para no
   !! primeiro que falhar (rc dele).
-  subroutine regrid_esquemas_do_acoplador(registra, rc)
-    procedure(registra_i) :: registra
+  subroutine regrid_coupler_schemes(register, rc)
+    procedure(register_iface) :: register
     integer, intent(out)  :: rc
 
-    call registra('esmf',         new_esmf,    rc)
+    call register('esmf',         new_esmf,    rc)
     if (rc /= 0) return
-    call registra('weights_file', new_weights, rc)
+    call register('weights_file', new_weights, rc)
     if (rc /= 0) return
-    call registra('mpassit',      new_mpassit, rc)
+    call register('mpassit',      new_mpassit, rc)
     if (rc /= 0) return
-    call registra('idw',          new_idw,     rc)
-  end subroutine regrid_esquemas_do_acoplador
+    call register('idw',          new_idw,     rc)
+  end subroutine regrid_coupler_schemes
 
 end module regrid_schemes_mod

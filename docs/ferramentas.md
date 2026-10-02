@@ -105,6 +105,7 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | `tools/dev/indicadores.py` | mede os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos) de uma ou mais versões | `docs/conferencias-locais.md` |
 | `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
 | `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
+| `tools/dev/renomeia-identificadores.py` | troca nomes de identificadores Fortran por uma tabela de `tools/dev/nomes/` (`aplica`) e confere que a troca não mudou mais nada (`confere REV`) | `docs/conferencias-locais.md` |
 | `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit (etapas que só movem código) | `docs/conferencias-locais.md` |
 | `tests/writers/compara-gravadores.bash` | executa os gravadores de diagnóstico de duas versões com os mesmos dados e compara os arquivos byte a byte | `docs/conferencias-locais.md` |
 | `tests/unit/roda-unitarios.bash` | executa os testes com valor esperado: as fórmulas do acoplador comparadas com valores calculados à parte | `docs/conferencias-locais.md` |

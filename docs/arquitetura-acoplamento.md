@@ -356,7 +356,7 @@ Desde a R-FASE11-17, a inicialização também é uma fase de `med_exchange`: `i
 
 `src/regrid/` continua como está. A migração acrescenta três coisas:
 
-- **Uma base para esquemas de pesos** (`weights_regridder_t`). O esquema escreve só `calcula_pesos`, com arrays comuns do Fortran; a base cuida do *route handle*, da reprodutibilidade (`srcTermProcessing=0`, `termorder=srcseq`) e da liberação.
+- **Uma base para esquemas de pesos** (`weights_regridder_t`). O esquema escreve só `compute_weights`, com arrays comuns do Fortran; a base cuida do *route handle*, da reprodutibilidade (`srcTermProcessing=0`, `termorder=srcseq`) e da liberação.
 - **Opções em texto** (`'expoente=2,vizinhos=4'`), lidas pelo próprio esquema.
 - **Uma lista de esquemas** em `regrid_schemes.F90`, com um modelo de esquema e o teste `compara-esquema.bash`.
 
@@ -364,7 +364,7 @@ Feito na R-FASE11-23:
 
 | Peça | Onde | Como ficou |
 | --- | --- | --- |
-| base de pesos | `regrid_weights_base.F90` | `weights_regridder_t`, com `calcula_pesos(origem, destino, fator, orig, dest, rc)` diferida. Os pontos são do tipo `regrid_pontos_t` (longitude e latitude em graus, máscara e índice global, o sequencial do ESMF): a origem inteira em cada processo, ordenada pelo índice, e o destino só com os pontos locais. A base guarda os pesos com `ESMF_FieldSMMStore` (`srcTermProcessing=0`), aplica-os com `ESMF_FieldSMM` (`termorder=srcseq`) e libera o *route handle*. Aceita só `ESMF_Grid` de um tile, com um DE por processo |
+| base de pesos | `regrid_weights_base.F90` | `weights_regridder_t`, com `compute_weights(src_points, dst_points, factors, orig, dest, rc)` diferida. Os pontos são do tipo `regrid_points_t` (longitude e latitude em graus, máscara e índice global, o sequencial do ESMF): a origem inteira em cada processo, ordenada pelo índice, e o destino só com os pontos locais. A base guarda os pesos com `ESMF_FieldSMMStore` (`srcTermProcessing=0`), aplica-os com `ESMF_FieldSMM` (`termorder=srcseq`) e libera o *route handle*. Aceita só `ESMF_Grid` de um tile, com um DE por processo |
 | opções em texto | `regrid_base.F90` | `regrid_spec_t%options` (`'chave=valor,...'`), lidas por `regrid_option_real` e `regrid_option_int`, com valor padrão; `regrid_options_check` recusa chave desconhecida. Também no `nuopc.input`, em `regrid_options` do grupo `&nuopc_regrid`. A linha da rota no relatório de acoplamento só mostra as opções quando há alguma |
 | lista de esquemas | `regrid_schemes.F90` | uma linha por esquema (nome e construtor, exportado pelo módulo do esquema), entregue ao catálogo (`regrid_registry`) por uma rotina passada como argumento, o que evita dependência circular; a interface `regridder_ctor` passou para `regrid_base` |
 | modelo de esquema | `regrid_idw.F90` | esquema `idw` (inverso da distância, opções `vizinhos` e `expoente`), comentado como molde; nenhuma rota o usa |

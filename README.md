@@ -90,6 +90,7 @@ Convenções para código novo:
 
 | Tema | Regra |
 | --- | --- |
+| Nomes | identificadores Fortran (variáveis, constantes, tipos, componentes, rotinas, módulos e os nomes dos arquivos que os contêm) em inglês dos EUA; comentários, mensagens de log e textos entre aspas continuam em português. Desde a fase 12; as trocas de nome de cada etapa estão em `tools/dev/nomes/`, e `tools/dev/renomeia-identificadores.py aplica` as leva a um ramo antigo |
 | Erros ESMF | `if (ChkErr(rc, __LINE__, __FILE__)) return`, de `coupler_utils_mod` |
 | Texto | `int_to_str`, `real_to_str` e `str_lower` de `coupler_utils_mod`; não criar cópias locais |
 | Configuração | nova chave em `coupler_config.F90`, com validação em `valid_config`; não usar atributos NUOPC para repassar configuração |

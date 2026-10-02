@@ -9,6 +9,9 @@
 #   avisos      compila também a versão REV, com as mesmas interfaces
 #               mínimas, e falha se algum fonte tiver mais avisos que antes
 #   literais    constantes de texto iguais às de REV (confere-literais.py)
+#   nomes       só com tabelas novas em tools/dev/nomes/: a árvore de
+#               trabalho é REV com as trocas de nome da tabela, símbolo a
+#               símbolo, e sem colisões (renomeia-identificadores.py)
 #   instrucoes  só com -i: instruções idênticas às de REV na soma dos .F90
 #               alterados (etapas que só mudam comentários ou espaços)
 #   regrid      testes do framework de interpolação (tests/regrid)
@@ -50,12 +53,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid esquemas gravadores bulk grade malhas completar unitarios mapa cplcheck supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,49p' "$0"; exit 2; }
+uso() { sed -n '2,52p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -154,9 +157,24 @@ fi
 # ---------------------------------------------------------------------------
 quer literais && executa literais tools/dev/confere-literais.py "${REV}"
 
+confere_nomes() {
+  # tabelas de troca de nomes novas desde REV (tools/dev/nomes/)
+  local t tabelas=()
+  for t in tools/dev/nomes/*.txt; do
+    [[ -f "${t}" ]] || continue
+    git cat-file -e "${REV}:${t}" 2> /dev/null || tabelas+=("${t}")
+  done
+  if [[ ${#tabelas[@]} -eq 0 ]]; then
+    echo "nenhuma tabela de nomes nova desde ${REV}"
+    return 0
+  fi
+  tools/dev/renomeia-identificadores.py confere "${REV}" "${tabelas[@]}"
+}
+quer nomes && executa nomes confere_nomes
+
 confere_instrucoes() {
   local n saida
-  mapfile -t arquivos < <(git diff --name-only "${REV}" -- '*.F90')
+  mapfile -t arquivos < <(git diff --name-only --no-renames "${REV}" -- '*.F90')
   if [[ ${#arquivos[@]} -eq 0 ]]; then
     echo "nenhum .F90 alterado desde ${REV}"
     return 0

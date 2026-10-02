@@ -4,5 +4,5 @@
 test_regrid
 pesos_teste.nc
 PET*.log
-test_esquema
+test_scheme
 pesos_idw.nc

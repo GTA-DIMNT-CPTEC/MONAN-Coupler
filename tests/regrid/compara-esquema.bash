@@ -4,7 +4,7 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Para quem escreve um esquema novo (modelo: src/regrid/regrid_idw.F90).
-# Compila tests/regrid/test_esquema.F90 e interpola o campo analítico
+# Compila tests/regrid/test_scheme.F90 e interpola o campo analítico
 # f = 2 + cos(lat) cos(lon) de uma grade global de 4 graus para uma de 1
 # grau, com o esquema pedido e com uma referência (um método do esquema
 # esmf), em 1 e em NP processos MPI. Mostra o erro máximo e médio de cada
@@ -37,8 +37,8 @@ NP=${NP:-4}
 [[ -n "${ESMFMKFILE:-}" && -f "${ESMFMKFILE}" ]] || { echo "ERRO: defina ESMFMKFILE" >&2; exit 2; }
 [[ -z "${OPCOES}" ]] && OPCOES=-
 
-echo "--- compilando tests/regrid/test_esquema"
-make -C "${RAIZ}/tests/regrid" test_esquema > "${SAIDA}/compila.txt" 2>&1 \
+echo "--- compilando tests/regrid/test_scheme"
+make -C "${RAIZ}/tests/regrid" test_scheme > "${SAIDA}/compila.txt" 2>&1 \
   || { cat "${SAIDA}/compila.txt"; echo "ERRO: compilação" >&2; exit 2; }
 
 falhas=0
@@ -47,7 +47,7 @@ for n in 1 "${NP}"; do
   rm -rf "${dir}" && mkdir -p "${dir}"
   echo "--- ${ESQUEMA} (opções: ${OPCOES}) contra esmf ${REFERENCIA}, ${n} processo(s)"
   # shellcheck disable=SC2086
-  if (cd "${dir}" && ${MPIRUN} -np "${n}" "${RAIZ}/tests/regrid/test_esquema" \
+  if (cd "${dir}" && ${MPIRUN} -np "${n}" "${RAIZ}/tests/regrid/test_scheme" \
         "${ESQUEMA}" "${OPCOES}" "${REFERENCIA}" campo.bin > execucao.txt 2>&1); then
     sed -n 's/^\(METODO\|ERRO_\|DIF_\)/   &/p' "${dir}/execucao.txt"
   else

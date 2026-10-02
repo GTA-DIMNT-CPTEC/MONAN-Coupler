@@ -189,34 +189,34 @@ contains
     type(regrid_fill_t), optional, intent(in)  :: fill
     integer,             optional, intent(out) :: n_invalid, n_left
 
-    integer :: k, k_pedida, ni, nl
+    integer :: k, k_requested, ni, nl
     logical :: zt
-    type(regrid_fill_t) :: completar
+    type(regrid_fill_t) :: fill_cfg
 
     if (present(n_invalid)) n_invalid = -1
     if (present(n_left))    n_left    = -1
-    k_pedida = find(this, name)
+    k_requested = find(this, name)
     k = resolve(this, name)
     if (k == 0) then
       call ESMF_LogWrite('regrid: rota inexistente: '//trim(name), ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
       return
     end if
-    zt = this%routes(k_pedida)%spec%zero_total
+    zt = this%routes(k_requested)%spec%zero_total
     if (present(zero_total)) zt = zero_total
     call this%routes(k)%r%apply(src, dst, rc, zt)
     if (rc /= ESMF_SUCCESS) return
 
-    completar = this%routes(k_pedida)%spec%fill
-    if (present(fill)) completar = fill
-    if (completar%enabled) then
-      call complete(dst, completar, ni, nl, rc)
+    fill_cfg = this%routes(k_requested)%spec%fill
+    if (present(fill)) fill_cfg = fill
+    if (fill_cfg%enabled) then
+      call complete(dst, fill_cfg, ni, nl, rc)
       if (present(n_invalid)) n_invalid = ni
       if (present(n_left))    n_left    = nl
       if (rc /= ESMF_SUCCESS) return
     end if
-    if (this%routes(k_pedida)%spec%nan_replace) &
-      call replace_nan(dst, this%routes(k_pedida)%spec%nan_value, rc)
+    if (this%routes(k_requested)%spec%nan_replace) &
+      call replace_nan(dst, this%routes(k_requested)%spec%nan_value, rc)
   end subroutine apply
 
   !> Preenchimento por vizinhança do destino, em cada DE local (sem troca de
@@ -245,9 +245,9 @@ contains
   end subroutine complete
 
   !> Troca os NaN do destino, em cada DE local, por valor.
-  subroutine replace_nan(dst, valor, rc)
+  subroutine replace_nan(dst, val, rc)
     type(ESMF_Field),   intent(inout) :: dst
-    real(ESMF_KIND_R8), intent(in)    :: valor
+    real(ESMF_KIND_R8), intent(in)    :: val
     integer,            intent(out)   :: rc
     real(ESMF_KIND_R8), pointer :: p(:,:)
     integer :: lde, ldec
@@ -257,7 +257,7 @@ contains
     do lde = 0, ldec - 1
       call ESMF_FieldGet(dst, localDe=lde, farrayPtr=p, rc=rc)
       if (rc /= ESMF_SUCCESS) return
-      where (p /= p) p = valor
+      where (p /= p) p = val
     end do
   end subroutine replace_nan
 

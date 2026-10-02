@@ -2,14 +2,14 @@
 !! @brief Base para esquemas de interpolação escritos só com pesos.
 !!
 !! Um esquema de pesos estende weights_regridder_t e escreve uma única
-!! rotina, calcula_pesos, com arrays comuns do Fortran: recebe os pontos de
+!! rotina, compute_weights, com arrays comuns do Fortran: recebe os pontos de
 !! origem e de destino (coordenadas em graus, máscara e índice global) e
 !! devolve a lista de pesos, um por par (ponto de origem, ponto de destino):
 !!
 !!   valor(destino(k)) = soma em k de fator(k) * valor(origem(k))
 !!
 !! A base cuida do resto, como os outros esquemas do acoplador:
-!!   setup    monta os pontos a partir dos campos, chama calcula_pesos e
+!!   setup    monta os pontos a partir dos campos, chama compute_weights e
 !!            guarda os pesos no ESMF (ESMF_FieldSMMStore), com toda a soma
 !!            feita no destino (srcTermProcessing = 0);
 !!   execute  aplica os pesos (ESMF_FieldSMM) na ordem do índice de origem
@@ -30,7 +30,7 @@
 !! mensagem no log. A máscara de origem (spec%mask_src) é a da grade
 !! (ESMF_GRIDITEM_MASK, 0 = ignorar), a mesma do esquema esmf.
 !!
-!! Os pesos calculados ficam guardados (fator, origem_k, destino_k), para
+!! Os pesos calculados ficam guardados (fator, src_index, dst_index), para
 !! diagnóstico e para quem quiser gravá-los.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
@@ -44,27 +44,27 @@ module regrid_weights_base_mod
   private
 
   public :: weights_regridder_t
-  public :: regrid_pontos_t
+  public :: regrid_points_t
 
   !> Pontos de uma grade, como arrays comuns do Fortran.
-  type :: regrid_pontos_t
+  type :: regrid_points_t
     real(ESMF_KIND_R8), allocatable :: lon(:)    !< longitude [graus]
     real(ESMF_KIND_R8), allocatable :: lat(:)    !< latitude [graus]
-    logical,            allocatable :: valido(:) !< .false.: ponto mascarado (ou ausente)
-    integer,            allocatable :: indice(:) !< índice global (sequencial do ESMF)
-  end type regrid_pontos_t
+    logical,            allocatable :: valid(:) !< .false.: ponto mascarado (ou ausente)
+    integer,            allocatable :: global_index(:) !< índice global (sequencial do ESMF)
+  end type regrid_points_t
 
-  !> Esquema de pesos: o esquema concreto escreve só calcula_pesos.
+  !> Esquema de pesos: o esquema concreto escreve só compute_weights.
   type, abstract, extends(regridder_t) :: weights_regridder_t
     type(ESMF_RouteHandle) :: rh
     !> Pesos calculados neste PET (destinos locais), em índices globais.
-    real(ESMF_KIND_R8), allocatable :: fator(:)
-    integer,            allocatable :: origem_k(:), destino_k(:)
+    real(ESMF_KIND_R8), allocatable :: factors(:)
+    integer,            allocatable :: src_index(:), dst_index(:)
   contains
     procedure :: setup   => wb_setup
     procedure :: execute => wb_execute
     procedure :: release => wb_release
-    procedure(calcula_pesos_i), deferred :: calcula_pesos
+    procedure(compute_weights_iface), deferred :: compute_weights
   end type weights_regridder_t
 
   abstract interface
@@ -77,14 +77,14 @@ module regrid_weights_base_mod
     !! @param[out]   orig     índice global de origem de cada peso
     !! @param[out]   dest     índice global de destino de cada peso
     !! @param[out]   rc       ESMF_SUCCESS ou ESMF_FAILURE (com mensagem)
-    subroutine calcula_pesos_i(this, origem, destino, fator, orig, dest, rc)
-      import :: weights_regridder_t, regrid_pontos_t, ESMF_KIND_R8
+    subroutine compute_weights_iface(this, src_points, dst_points, factors, orig, dest, rc)
+      import :: weights_regridder_t, regrid_points_t, ESMF_KIND_R8
       class(weights_regridder_t),      intent(inout) :: this
-      type(regrid_pontos_t),           intent(in)    :: origem, destino
-      real(ESMF_KIND_R8), allocatable, intent(out)   :: fator(:)
+      type(regrid_points_t),           intent(in)    :: src_points, dst_points
+      real(ESMF_KIND_R8), allocatable, intent(out)   :: factors(:)
       integer,            allocatable, intent(out)   :: orig(:), dest(:)
       integer,                         intent(out)   :: rc
-    end subroutine calcula_pesos_i
+    end subroutine compute_weights_iface
   end interface
 
 contains
@@ -94,35 +94,35 @@ contains
     type(ESMF_Field),           intent(inout) :: src, dst
     integer,                    intent(out)   :: rc
 
-    type(regrid_pontos_t) :: locais, origem, destino
+    type(regrid_points_t) :: local_points, src_points, dst_points
     integer(ESMF_KIND_I4), allocatable :: indices(:,:)
     integer :: srcTermProcessing
 
-    call pontos_locais(src, this%spec%mask_src, locais, rc)
+    call get_local_points(src, this%spec%mask_src, local_points, rc)
     if (rc /= ESMF_SUCCESS) return
-    call reune_origem(locais, origem, rc)
+    call gather_source(local_points, src_points, rc)
     if (rc /= ESMF_SUCCESS) return
-    call pontos_locais(dst, .false., destino, rc)
+    call get_local_points(dst, .false., dst_points, rc)
     if (rc /= ESMF_SUCCESS) return
 
-    call this%calcula_pesos(origem, destino, this%fator, this%origem_k, this%destino_k, rc)
+    call this%compute_weights(src_points, dst_points, this%factors, this%src_index, this%dst_index, rc)
     if (rc /= ESMF_SUCCESS) then
       call ESMF_LogWrite('regrid: rota '//trim(this%label)//': calculo dos pesos falhou', &
         ESMF_LOGMSG_ERROR)
       return
     end if
-    if (size(this%origem_k) /= size(this%fator) .or. size(this%destino_k) /= size(this%fator)) then
+    if (size(this%src_index) /= size(this%factors) .or. size(this%dst_index) /= size(this%factors)) then
       call ESMF_LogWrite('regrid: rota '//trim(this%label)//': listas de pesos de tamanhos '// &
         'diferentes', ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
       return
     end if
 
-    allocate(indices(2, size(this%fator)))
-    indices(1,:) = int(this%origem_k, ESMF_KIND_I4)
-    indices(2,:) = int(this%destino_k, ESMF_KIND_I4)
+    allocate(indices(2, size(this%factors)))
+    indices(1,:) = int(this%src_index, ESMF_KIND_I4)
+    indices(2,:) = int(this%dst_index, ESMF_KIND_I4)
     srcTermProcessing = 0
-    call ESMF_FieldSMMStore(src, dst, this%rh, this%fator, indices, &
+    call ESMF_FieldSMMStore(src, dst, this%rh, this%factors, indices, &
       srcTermProcessing=srcTermProcessing, rc=rc)
     if (rc /= ESMF_SUCCESS) return
 
@@ -154,17 +154,17 @@ contains
     rc = ESMF_SUCCESS
     if (this%ready) call ESMF_FieldSMMRelease(this%rh, rc=rc)
     this%ready = .false.
-    if (allocated(this%fator))     deallocate(this%fator)
-    if (allocated(this%origem_k))  deallocate(this%origem_k)
-    if (allocated(this%destino_k)) deallocate(this%destino_k)
+    if (allocated(this%factors))     deallocate(this%factors)
+    if (allocated(this%src_index))  deallocate(this%src_index)
+    if (allocated(this%dst_index)) deallocate(this%dst_index)
   end subroutine wb_release
 
   !> Pontos locais de um campo em ESMF_Grid: coordenadas do centro, máscara
   !! (se pedida) e índice global de cada ponto, na ordem do array local.
-  subroutine pontos_locais(campo, com_mascara, p, rc)
-    type(ESMF_Field),      intent(in)  :: campo
-    logical,               intent(in)  :: com_mascara
-    type(regrid_pontos_t), intent(out) :: p
+  subroutine get_local_points(field, use_mask, p, rc)
+    type(ESMF_Field),      intent(in)  :: field
+    logical,               intent(in)  :: use_mask
+    type(regrid_points_t), intent(out) :: p
     integer,               intent(out) :: rc
 
     type(ESMF_GeomType_Flag) :: geomtype
@@ -174,9 +174,9 @@ contains
     integer(ESMF_KIND_I4), pointer :: m(:,:)
     integer, allocatable :: seq(:)
     integer :: localDeCount, n, elementCount
-    logical :: tem_mascara
+    logical :: has_mask
 
-    call ESMF_FieldGet(campo, geomtype=geomtype, rc=rc)
+    call ESMF_FieldGet(field, geomtype=geomtype, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     if (.not. (geomtype == ESMF_GEOMTYPE_GRID)) then
       call ESMF_LogWrite('regrid: esquema de pesos aceita so campos em ESMF_Grid', &
@@ -184,7 +184,7 @@ contains
       rc = ESMF_FAILURE
       return
     end if
-    call ESMF_FieldGet(campo, grid=grid, localDeCount=localDeCount, rc=rc)
+    call ESMF_FieldGet(field, grid=grid, localDeCount=localDeCount, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     if (localDeCount > 1) then
       call ESMF_LogWrite('regrid: esquema de pesos aceita no maximo um DE por PET', &
@@ -192,7 +192,7 @@ contains
       rc = ESMF_FAILURE
       return
     end if
-    allocate(p%lon(0), p%lat(0), p%valido(0), p%indice(0))
+    allocate(p%lon(0), p%lat(0), p%valid(0), p%global_index(0))
     if (localDeCount == 0) return
 
     call ESMF_GridGetCoord(grid, 1, staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=x, rc=rc)
@@ -216,34 +216,34 @@ contains
 
     p%lon    = reshape(x, [n])
     p%lat    = reshape(y, [n])
-    p%indice = seq
-    deallocate(p%valido)
-    allocate(p%valido(n))
-    p%valido = .true.
-    if (com_mascara) then
+    p%global_index = seq
+    deallocate(p%valid)
+    allocate(p%valid(n))
+    p%valid = .true.
+    if (use_mask) then
       call ESMF_GridGetItem(grid, ESMF_GRIDITEM_MASK, staggerloc=ESMF_STAGGERLOC_CENTER, &
-        isPresent=tem_mascara, rc=rc)
+        isPresent=has_mask, rc=rc)
       if (rc /= ESMF_SUCCESS) return
-      if (tem_mascara) then
+      if (has_mask) then
         call ESMF_GridGetItem(grid, ESMF_GRIDITEM_MASK, staggerloc=ESMF_STAGGERLOC_CENTER, &
           farrayPtr=m, rc=rc)
         if (rc /= ESMF_SUCCESS) return
-        p%valido = reshape(m /= 0, [n])
+        p%valid = reshape(m /= 0, [n])
       end if
     end if
-  end subroutine pontos_locais
+  end subroutine get_local_points
 
   !> Reúne em todos os PETs os pontos de origem, ordenados pelo índice
   !! global: o ponto de índice n vai para a posição n. Posições sem ponto
   !! (não deveria haver numa grade de um tile) ficam inválidas.
-  subroutine reune_origem(locais, origem, rc)
-    type(regrid_pontos_t), intent(in)  :: locais
-    type(regrid_pontos_t), intent(out) :: origem
+  subroutine gather_source(local_points, src_points, rc)
+    type(regrid_points_t), intent(in)  :: local_points
+    type(regrid_points_t), intent(out) :: src_points
     integer,               intent(out) :: rc
 
     type(ESMF_VM) :: vm
     integer :: petCount, nloc, ntot, nmax, k
-    integer, allocatable :: contagens(:), deslocamentos(:), idx(:), val_loc(:), val(:)
+    integer, allocatable :: counts(:), offsets(:), idx(:), val_loc(:), val(:)
     real(ESMF_KIND_R8), allocatable :: lon(:), lat(:)
 
     call ESMF_VMGetCurrent(vm, rc=rc)
@@ -251,39 +251,39 @@ contains
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (rc /= ESMF_SUCCESS) return
 
-    nloc = size(locais%indice)
-    allocate(contagens(petCount), deslocamentos(petCount))
-    call ESMF_VMAllGather(vm, [nloc], contagens, 1, rc=rc)
+    nloc = size(local_points%global_index)
+    allocate(counts(petCount), offsets(petCount))
+    call ESMF_VMAllGather(vm, [nloc], counts, 1, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    deslocamentos(1) = 0
+    offsets(1) = 0
     do k = 2, petCount
-      deslocamentos(k) = deslocamentos(k-1) + contagens(k-1)
+      offsets(k) = offsets(k-1) + counts(k-1)
     end do
-    ntot = sum(contagens)
+    ntot = sum(counts)
 
     allocate(idx(ntot), val(ntot), lon(ntot), lat(ntot))
-    val_loc = merge(1, 0, locais%valido)
-    call ESMF_VMAllGatherV(vm, locais%indice, nloc, idx, contagens, deslocamentos, rc=rc)
+    val_loc = merge(1, 0, local_points%valid)
+    call ESMF_VMAllGatherV(vm, local_points%global_index, nloc, idx, counts, offsets, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    call ESMF_VMAllGatherV(vm, val_loc, nloc, val, contagens, deslocamentos, rc=rc)
+    call ESMF_VMAllGatherV(vm, val_loc, nloc, val, counts, offsets, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    call ESMF_VMAllGatherV(vm, locais%lon, nloc, lon, contagens, deslocamentos, rc=rc)
+    call ESMF_VMAllGatherV(vm, local_points%lon, nloc, lon, counts, offsets, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    call ESMF_VMAllGatherV(vm, locais%lat, nloc, lat, contagens, deslocamentos, rc=rc)
+    call ESMF_VMAllGatherV(vm, local_points%lat, nloc, lat, counts, offsets, rc=rc)
     if (rc /= ESMF_SUCCESS) return
 
     nmax = 0
     if (ntot > 0) nmax = maxval(idx)
-    allocate(origem%lon(nmax), origem%lat(nmax), origem%valido(nmax), origem%indice(nmax))
-    origem%lon    = 0.0_ESMF_KIND_R8
-    origem%lat    = 0.0_ESMF_KIND_R8
-    origem%valido = .false.
-    origem%indice = [(k, k = 1, nmax)]
+    allocate(src_points%lon(nmax), src_points%lat(nmax), src_points%valid(nmax), src_points%global_index(nmax))
+    src_points%lon    = 0.0_ESMF_KIND_R8
+    src_points%lat    = 0.0_ESMF_KIND_R8
+    src_points%valid = .false.
+    src_points%global_index = [(k, k = 1, nmax)]
     do k = 1, ntot
-      origem%lon(idx(k))    = lon(k)
-      origem%lat(idx(k))    = lat(k)
-      origem%valido(idx(k)) = val(k) /= 0
+      src_points%lon(idx(k))    = lon(k)
+      src_points%lat(idx(k))    = lat(k)
+      src_points%valid(idx(k)) = val(k) /= 0
     end do
-  end subroutine reune_origem
+  end subroutine gather_source
 
 end module regrid_weights_base_mod

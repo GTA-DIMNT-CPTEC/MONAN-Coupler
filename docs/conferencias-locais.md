@@ -42,7 +42,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.15 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.16 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -70,6 +70,7 @@ O que cada linha confere:
 | `compilacao` | algum fonte não compila (seção 2.1) |
 | `avisos` | algum fonte tem mais avisos do que na versão `REV`, compilada com as mesmas interfaces mínimas |
 | `literais` | alguma constante de texto mudou (seção 2.2) |
+| `nomes` | só quando há tabela nova em `tools/dev/nomes/` desde `REV`: a árvore de trabalho não é `REV` com as trocas de nome da tabela, ou alguma troca colide com um nome existente (seção 2.16) |
 | `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
 | `esquemas` | o esquema modelo `idw`, em `compara-esquema.bash`, não roda ou dá campos diferentes com 1 e com 4 processos (seção 2.15) |
@@ -323,7 +324,22 @@ O programa usa só interfaces que existem desde a R-FASE11-12 (tag `fase11-12-va
 tests/regrid/compara-esquema.bash idw 'vizinhos=4,expoente=2'
 ```
 
-Desde a R-FASE11-23, um esquema de interpolação pode ser escrito só com pesos, a partir do modelo `src/regrid/regrid_idw.F90` (seção 3.8 do documento de arquitetura e `docs/interpolacao-plugavel.md`). Este script é a conferência de quem escreve um esquema: compila `tests/regrid/test_esquema.F90` e interpola o campo analítico f = 2 + cos(lat) cos(lon) de uma grade global de 4 graus para uma de 1 grau, com o esquema pedido (e as suas opções) e com uma referência, um método do esquema `esmf` (padrão: `bilinear`; terceiro argumento). Roda com 1 processo e com `NP` (padrão 4) e mostra, para cada rodada, o método usado, o erro máximo e o médio do esquema e da referência contra a função (só onde |lat| < 85 graus) e a diferença máxima entre os dois. Passa se as duas rodadas terminam e o campo do esquema é o mesmo, bit a bit, com 1 e com `NP` processos. Um esquema que não roda (opção desconhecida, por exemplo) aparece como falha, com as mensagens de erro do log. O `confere-tudo.bash` roda o modelo `idw`, que hoje dá erro máximo de 2,6e-2 e médio de 4,9e-3 (o bilinear do ESMF, 1,1e-3 e 3,0e-4). Leva menos de 10 segundos.
+Desde a R-FASE11-23, um esquema de interpolação pode ser escrito só com pesos, a partir do modelo `src/regrid/regrid_idw.F90` (seção 3.8 do documento de arquitetura e `docs/interpolacao-plugavel.md`). Este script é a conferência de quem escreve um esquema: compila `tests/regrid/test_scheme.F90` e interpola o campo analítico f = 2 + cos(lat) cos(lon) de uma grade global de 4 graus para uma de 1 grau, com o esquema pedido (e as suas opções) e com uma referência, um método do esquema `esmf` (padrão: `bilinear`; terceiro argumento). Roda com 1 processo e com `NP` (padrão 4) e mostra, para cada rodada, o método usado, o erro máximo e o médio do esquema e da referência contra a função (só onde |lat| < 85 graus) e a diferença máxima entre os dois. Passa se as duas rodadas terminam e o campo do esquema é o mesmo, bit a bit, com 1 e com `NP` processos. Um esquema que não roda (opção desconhecida, por exemplo) aparece como falha, com as mensagens de erro do log. O `confere-tudo.bash` roda o modelo `idw`, que hoje dá erro máximo de 2,6e-2 e médio de 4,9e-3 (o bilinear do ESMF, 1,1e-3 e 3,0e-4). Leva menos de 10 segundos.
+
+### 2.16 Troca de nomes de identificadores
+
+```bash
+tools/dev/renomeia-identificadores.py confere HEAD tools/dev/nomes/R-FASE12-01.txt
+```
+
+Na fase 12, os identificadores Fortran passam do português para o inglês, uma área do código por etapa. Cada etapa tem uma tabela em `tools/dev/nomes/`, com uma troca por linha (`nome_antigo novo_nome`, com um terceiro campo opcional que limita a troca a alguns diretórios, para nomes locais comuns como `campo`) e as linhas `@arquivo` dos fontes renomeados. A mesma ferramenta faz a troca (`aplica`) e a confere (`confere REV`). A conferência tem duas partes:
+
+| Parte | Falha quando |
+| --- | --- |
+| colisões | num fonte de `REV` que contém um nome antigo já existe o nome novo, dois nomes antigos viram o mesmo no mesmo fonte, ou o nome novo é uma função intrínseca do Fortran |
+| equivalência | algum fonte de `REV`, com as trocas aplicadas só ao código, não é igual, símbolo a símbolo, ao da árvore de trabalho (comentários e espaços não contam; textos entre aspas têm de ser idênticos) |
+
+A equivalência mostra que a etapa só trocou nomes: o que o compilador recebe é o mesmo programa, com outros nomes. A conferência por arquivo das colisões é suficiente porque, no Fortran, um nome só fica visível num fonte por declaração, por `use` ou por associação com o hospedeiro: se o nome novo não aparece num fonte, a troca não pode capturar outro objeto ali (um nome importado sem `only` que passasse a coincidir com o novo daria erro de compilação, e não um resultado diferente). Nos comentários, a ferramenta só troca os nomes com sublinhado e os nomes de tabela escritos em maiúsculas, para não mexer em palavras comuns do texto; nos scripts e documentos (menos o CHANGELOG), também, e o resultado é lido no diff. O `confere-tudo.bash` roda esta conferência (`nomes`) com as tabelas que ainda não existiam em `REV`. Leva cerca de um segundo.
 
 ## 3. Interfaces mínimas
 

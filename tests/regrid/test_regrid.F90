@@ -14,7 +14,7 @@ program test_regrid
   use regrid_registry_mod, only : regrid_register, regrid_create
   use regrid_manager_mod,  only : regrid_manager_t, regrid_spec
   use regrid_mpassit_mod,  only : mpas_mesh_create
-  use identity_scheme_mod, only : new_identity, new_pesos_identidade
+  use identity_scheme_mod, only : new_identity, new_identity_weights
   use regrid_idw_mod,      only : idw_regridder_t
 
   implicit none
@@ -134,30 +134,30 @@ program test_regrid
   ref2 = local(fdst3)
   call neighbor_fill(ref2, F2, n_left=nl_ref2, n_invalid=ni_ref2)
   call report('completar: o caso tem NaN, pontos fora da faixa e acima de vmax', &
-              rc == 0 .and. count_nan(fdst3) > 0 .and. soma(ni_ref1) > soma(nl_ref1) .and. &
-              soma(nl_ref1) > 0 .and. soma(count(local(fdst3) > F1%vmax)) > 0)
+              rc == 0 .and. count_nan(fdst3) > 0 .and. acc(ni_ref1) > acc(nl_ref1) .and. &
+              acc(nl_ref1) > 0 .and. acc(count(local(fdst3) > F1%vmax)) > 0)
   spec = regrid_spec('bilinear')
   spec%fill = F1
   call mgr%add('completa', spec, freg, fdst3, rc)
   if (rc == 0) call mgr%apply('completa', freg, fdst3, rc, n_invalid=ni, n_left=nl)
   call report('completar pela rota: igual ao preenchimento a parte, com as contagens', &
-              rc == 0 .and. iguais(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
+              rc == 0 .and. equal(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
   spec = regrid_spec('metodo_inexistente')
   spec%fill = F1
   call mgr%add('completa_reserva', spec, freg, fdst3, rc, fallback='regional')
   if (rc == 0) call mgr%apply('completa_reserva', freg, fdst3, rc, n_invalid=ni, n_left=nl)
   call report('reserva com o preenchimento da rota pedida', &
-              rc == 0 .and. iguais(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
+              rc == 0 .and. equal(local(fdst3), ref1) .and. ni == ni_ref1 .and. nl == nl_ref1)
   spec = regrid_spec('bilinear', nan_value=7.0_ESMF_KIND_R8)
   spec%fill = F1
   call mgr%add('completa_nan', spec, freg, fdst3, rc)
   if (rc == 0) call mgr%apply('completa_nan', freg, fdst3, rc)
   call report('completar antes da troca de NaN: os NaN sao completados por vizinhanca', &
-              rc == 0 .and. iguais(local(fdst3), ref1))
+              rc == 0 .and. equal(local(fdst3), ref1))
   if (rc == 0) call mgr%apply('completa', freg, fdst3, rc, fill=F2, n_invalid=ni, n_left=nl)
   call report('preenchimento passado na chamada substitui o da rota (difusao pulada)', &
-              rc == 0 .and. iguais(local(fdst3), ref2) .and. ni == ni_ref2 .and. nl == nl_ref2 .and. &
-              soma(nl_ref2) == soma(ni_ref2) .and. soma(ni_ref2) > 0)
+              rc == 0 .and. equal(local(fdst3), ref2) .and. ni == ni_ref2 .and. nl == nl_ref2 .and. &
+              acc(nl_ref2) == acc(ni_ref2) .and. acc(ni_ref2) > 0)
   if (rc == 0) call mgr%apply('regional', freg, fdst3, rc, n_invalid=ni, n_left=nl)
   call report('rota sem preenchimento: contagens -1', rc == 0 .and. ni == -1 .and. nl == -1)
 
@@ -167,17 +167,17 @@ program test_regrid
   fa = ESMF_FieldCreate(gsrc, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
   fb = ESMF_FieldCreate(gsrc, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
   call set_analytic(f4, g4)
-  call regrid_register('pesos_identidade', new_pesos_identidade, rc)
+  call regrid_register('pesos_identidade', new_identity_weights, rc)
   call mgr%add('id_pesos', regrid_spec('', scheme='pesos_identidade'), fsrc, fa, rc)
   if (rc == 0) call mgr%apply('id_pesos', fsrc, fa, rc)
   call report('base de pesos: pesos de identidade copiam o campo, bit a bit', &
-              rc == 0 .and. iguais(local(fa), local(fsrc)))
+              rc == 0 .and. equal(local(fa), local(fsrc)))
   call mgr%add('vizinho', regrid_spec('nearest_stod'), f4, fa, rc)
   if (rc == 0) call mgr%apply('vizinho', f4, fa, rc)
   call mgr%add('idw1', regrid_spec('', scheme='idw', options='vizinhos=1'), f4, fb, rc)
   if (rc == 0) call mgr%apply('idw1', f4, fb, rc)
   call report('idw com vizinhos=1 igual ao nearest_stod do ESMF, bit a bit', &
-              rc == 0 .and. iguais(local(fa), local(fb)) .and. trim(mgr%method('idw1')) == 'idw')
+              rc == 0 .and. equal(local(fa), local(fb)) .and. trim(mgr%method('idw1')) == 'idw')
   call mgr%add('idw', regrid_spec('', scheme='idw'), f4, fb, rc)
   if (rc == 0) call mgr%apply('idw', f4, fb, rc)
   call report('idw padrao (4 vizinhos, expoente 2): erro maximo < 3e-2', &
@@ -186,22 +186,22 @@ program test_regrid
   call report('idw recusa opcao desconhecida', rc /= 0)
   call mgr%add('idw_errado2', regrid_spec('', scheme='idw', options='vizinhos=quatro'), f4, fb, rc)
   call report('idw recusa valor invalido', rc /= 0)
-  call report('opcoes em texto: leitura, padrao e conferencia', test_opcoes())
+  call report('opcoes em texto: leitura, padrao e conferencia', test_options())
 
   ! Ida e volta: os pesos do idw gravados em arquivo e lidos pelo weights_file
   idw%label = 'idw_direto'
   idw%spec  = regrid_spec('', scheme='idw', options='expoente=1.5,vizinhos=6')
   call idw%setup(f4, fa, rc)
   if (rc == 0) call idw%apply(f4, fa, rc)
-  if (rc == 0) call write_pesos(idw%fator, idw%origem_k, idw%destino_k, WFILE_IDW)
+  if (rc == 0) call write_factors(idw%factors, idw%src_index, idw%dst_index, WFILE_IDW)
   spec = regrid_spec('', scheme='weights_file')
   spec%weights_file = WFILE_IDW
   if (rc == 0) call mgr%add('idw_arquivo', spec, f4, fb, rc)
   if (rc == 0) call mgr%apply('idw_arquivo', f4, fb, rc)
   call report('pesos do idw pelo weights_file: resultado identico, bit a bit', &
-              rc == 0 .and. iguais(local(fa), local(fb)))
+              rc == 0 .and. equal(local(fa), local(fb)))
   call idw%release(rc)
-  call report('release do esquema de pesos', rc == 0 .and. .not. allocated(idw%fator))
+  call report('release do esquema de pesos', rc == 0 .and. .not. allocated(idw%factors))
 
   call mgr%destroy(rc)
   call report('destroy', rc == 0)
@@ -292,18 +292,18 @@ contains
   end function local
 
   !> Igualdade bit a bit dos valores (NaN igual a NaN).
-  logical function iguais(a, b)
+  logical function equal(a, b)
     real(ESMF_KIND_R8), intent(in) :: a(:,:), b(:,:)
-    iguais = all(shape(a) == shape(b))
-    if (iguais) iguais = all(transfer(a, 1_8, size(a)) == transfer(b, 1_8, size(b)))
-  end function iguais
+    equal = all(shape(a) == shape(b))
+    if (equal) equal = all(transfer(a, 1_8, size(a)) == transfer(b, 1_8, size(b)))
+  end function equal
 
   !> Soma de n em todos os PETs.
-  integer function soma(n)
+  integer function acc(n)
     integer, intent(in) :: n
     integer :: ierr
-    call MPI_Allreduce(n, soma, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
-  end function soma
+    call MPI_Allreduce(n, acc, 1, MPI_INTEGER, MPI_SUM, MPI_COMM_WORLD, ierr)
+  end function acc
 
   !> Contagem global de NaN.
   integer function count_nan(f)
@@ -425,7 +425,7 @@ contains
 
   !> Grava, no formato SCRIP/ESMF, pesos dados em índices globais (os de
   !! cada PET, reunidos no PET 0).
-  subroutine write_pesos(S, col_loc, row_loc, fname)
+  subroutine write_factors(S, col_loc, row_loc, fname)
     real(ESMF_KIND_R8), intent(in) :: S(:)
     integer,            intent(in) :: col_loc(:), row_loc(:)
     character(len=*),   intent(in) :: fname
@@ -455,12 +455,12 @@ contains
       ierr = nf90_close(ncid)
     end if
     call MPI_Barrier(MPI_COMM_WORLD, ierr)
-  end subroutine write_pesos
+  end subroutine write_factors
 
   !> Leitura das opções em texto: valores, padrão, espaços, chave
   !! desconhecida, chave sem valor e valores inválidos.
-  logical function test_opcoes()
-    character(len=8), parameter :: CONHECIDAS(2) = ['vizinhos', 'expoente']
+  logical function test_options()
+    character(len=8), parameter :: KNOWN(2) = ['vizinhos', 'expoente']
     real(ESMF_KIND_R8) :: x
     integer :: n, irc
     logical :: ok
@@ -476,16 +476,16 @@ contains
     ok = ok .and. irc /= ESMF_SUCCESS .and. n == 4
     call regrid_option_real('expoente=', 'expoente', 2.0_ESMF_KIND_R8, x, irc)
     ok = ok .and. irc /= ESMF_SUCCESS .and. x == 2.0_ESMF_KIND_R8
-    call regrid_options_check('vizinhos=6,expoente=1.5', CONHECIDAS, irc)
+    call regrid_options_check('vizinhos=6,expoente=1.5', KNOWN, irc)
     ok = ok .and. irc == ESMF_SUCCESS
-    call regrid_options_check('', CONHECIDAS, irc)
+    call regrid_options_check('', KNOWN, irc)
     ok = ok .and. irc == ESMF_SUCCESS
-    call regrid_options_check('vizinhos=6,raio=3', CONHECIDAS, irc)
+    call regrid_options_check('vizinhos=6,raio=3', KNOWN, irc)
     ok = ok .and. irc /= ESMF_SUCCESS
-    call regrid_options_check('vizinhos', CONHECIDAS, irc)
+    call regrid_options_check('vizinhos', KNOWN, irc)
     ok = ok .and. irc /= ESMF_SUCCESS
-    test_opcoes = ok
-  end function test_opcoes
+    test_options = ok
+  end function test_options
 
   logical function test_neighbor_fill()
     real(ESMF_KIND_R8) :: a(5,5)
