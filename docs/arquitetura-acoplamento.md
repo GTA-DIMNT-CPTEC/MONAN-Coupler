@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6), na R-FASE11-22 (seções 2, 3.5 e 6) e na R-FASE11-23 (seções 3.8 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6), na R-FASE11-22 (seções 2, 3.5 e 6), na R-FASE11-23 (seções 3.8 e 6) e na R-FASE11-24 (seções 3.1, 3.9 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -112,6 +112,8 @@ src/coupling/
 src/regrid/        framework de interpolação (como hoje, mais a base de pesos)
 src/mediator/
   med_exchange.F90 executa as trocas do mediador, por fase
+src/caps/atmos/
+  mpas_adaptador.F90  tradução entre o MONAN-A e o ESMF (desde a R-FASE11-24)
 ```
 
 ### 3.2 Onde escrever cada mudança
@@ -366,6 +368,17 @@ Feito na R-FASE11-23:
 
 O `weights_file` não foi reescrito sobre a base: isso mudaria as suas chamadas ao ESMF (leitura própria do arquivo em vez de `ESMF_FieldSMMStore` com o nome do arquivo). O critério "o `weights_file` dá os mesmos pesos" ficou num teste de ida e volta: os pesos do `idw` gravados em arquivo e lidos pelo `weights_file` dão o mesmo campo, bit a bit.
 
+### 3.9 Adaptador do MPAS
+
+Desde a R-FASE11-24, a tradução entre o MONAN-A e o ESMF está num módulo só, `src/caps/atmos/mpas_adaptador.F90`. O dado passa em duas etapas, com as estruturas `atm_public` (exportação) e `atm_bnd` (importação), de `mpas_atm_types`, no meio:
+
+| Etapa | Módulos | Usa o ESMF |
+| --- | --- | --- |
+| campos do MPAS para `atm_public`, e `atm_bnd` para os campos do MPAS | `mpas_atm_setup`, `mpas_atm_fluxes`, `mpas_atm_model` | não |
+| `atm_public` para o `exportState`, e o `importState` para `atm_bnd` | `mpas_adaptador` | sim |
+
+O adaptador tem a grade do cap (`mpas_create_grid`), a exportação dos 13 campos `*_mpas` (`mpas_export`, das células à grade do cap pela média por caixa) e a importação dos 7 campos do contorno oceânico (`mpas_import`, cada célula com o valor da caixa que a contém), que são as trocas `cap` do mapa, além do acesso aos campos do `ESMF_State` (`find_local_field`, `state_set_field_1d`, `state_get_field_1d`) e do diagnóstico `state_diagnose`. O algoritmo da média por caixa (`map_cells_to_regular_grid` e as suas etapas) continua em `mpas_cell_binning`, sem acesso ao `ESMF_State`. Os nomes dos campos continuam escritos no adaptador; o teste do mapa confere que as trocas `cap` são exatamente as exportações e as importações do MONAN-A, e a conferência das constantes de texto, que os nomes não mudam.
+
 ---
 
 ## 4. Plano de migração: fase 11
@@ -555,7 +568,9 @@ A R-FASE11-22 escreveu o método de cada campo no `CplList` (seção 3.5). A con
 
 A R-FASE11-23 completou o framework de interpolação com o que a seção 3.8 previa: a base dos esquemas de pesos, as opções em texto, a lista de esquemas, o modelo `idw` e o teste `compara-esquema.bash`. Os esquemas `esmf`, `weights_file` e `mpassit` só ganharam o construtor exportado, para a lista; as chamadas ao ESMF não mudaram, e nenhuma rota de `ROTAS` mudou de esquema. Desvio do plano, combinado antes da etapa: o `weights_file` continua com a sua implementação (ver seção 3.8).
 
-Próxima etapa: **R-FASE11-24**, conforme a tabela do bloco F: o adaptador do MPAS, com a tradução entre o modelo e o ESMF reunida num módulo e as trocas `cap` declaradas no mapa.
+A R-FASE11-24 reuniu a tradução entre o MONAN-A e o ESMF no adaptador do MPAS (seção 3.9): `mpas_cap_methods.F90` virou `mpas_adaptador.F90`, e `find_local_field` e `state_set_field_1d` saíram de `mpas_cell_binning`, que ficou só com o algoritmo da média por caixa. As instruções são as mesmas, conferidas na soma dos arquivos (mudaram só as linhas de `module`, `use` e `public`). As trocas `cap` já estavam declaradas no mapa desde a R-FASE11-02; o teste do mapa passou a conferir que elas são as exportações e as importações do MONAN-A. Ficaram de fora, de propósito, as duas constantes de π locais do adaptador (trocá-las pelas de `coupler_constants` mudaria o último bit) e limpezas de forma (desalocações repetidas, indentação herdada dos BLOCK).
+
+Próxima etapa: **R-FASE11-25**, conforme a tabela do bloco F: a conferência do mapa passa a interromper a rodada em caso de diferença, e o dicionário do NUOPC passa a ter os nomes de `CAMPOS`, com o acréscimo automático desligado.
 
 ---
 

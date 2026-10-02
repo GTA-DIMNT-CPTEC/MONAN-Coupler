@@ -167,6 +167,7 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-21 | conectores registrados pelo mapa (`cpl_conectores_do_driver`), no lugar das condições do driver; teste `test_conectores`; início do bloco F |
 | R-FASE11-22 | método de cada campo dos conectores pelo mapa (coluna `metodo`, `remapmethod=bilinear` escrito na `CplList` por `cpl_escreve_metodos`) e conferido pela conferência do mapa |
 | R-FASE11-23 | base dos esquemas de pesos, opções em texto, lista de esquemas (`regrid_schemes.F90`), modelo `idw` e `compara-esquema.bash`; esquema novo passa a ser um arquivo e uma linha na lista |
+| R-FASE11-24 | adaptador do MPAS (`mpas_adaptador.F90`): a tradução entre o MONAN-A e o ESMF num módulo só; `mpas_cell_binning` só com o algoritmo |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 

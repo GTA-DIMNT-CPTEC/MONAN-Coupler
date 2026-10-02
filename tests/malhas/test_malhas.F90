@@ -14,12 +14,18 @@
 !!
 !! Usa só as interfaces que essas rotinas tinham antes de cpl_grids, para
 !! que o mesmo programa sirva às duas versões comparadas por
-!! compara-malhas.bash. O hgrid.nc vem de tests/supergrid/gera-supergrid.py.
+!! compara-malhas.bash. Desde a R-FASE11-24, mpas_create_grid está no
+!! adaptador do MPAS (mpas_adaptador_mod); o script compila com
+!! -DCOM_ADAPTADOR a versão que o tem. O hgrid.nc vem de tests/supergrid/gera-supergrid.py.
 program test_malhas
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use med_init_mod,          only : create_atm_grid
+#ifdef COM_ADAPTADOR
+  use mpas_adaptador_mod,    only : mpas_create_grid
+#else
   use mpas_cap_methods_mod,  only : mpas_create_grid
+#endif
   use med_init_mod,          only : create_ocn_grid
   use coupler_config_mod,    only : config_read
   use mom6_supergrid_mod,    only : mom6_supergrid_dims

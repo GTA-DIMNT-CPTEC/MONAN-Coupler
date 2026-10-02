@@ -47,7 +47,7 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_su
       regrid_weights_base.o regrid_idw.o regrid_schemes.o
       regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o mpas_stubs.o
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o
+      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o mpas_adaptador.o
       med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
       med_ice.o med_ocean.o med_init.o"
 # A versão de referência pode não ter algum objeto da lista (fonte criado
@@ -71,9 +71,11 @@ for versao in antiga nova; do
   # shellcheck disable=SC2086
   bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" ${ausente} > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
+  defs=""
+  [[ -f "${src}/src/caps/atmos/mpas_adaptador.F90" ]] && defs="-DCOM_ADAPTADOR"
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
-    ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
+    ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch ${defs} \
       -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malhas.F90" -o test_malhas.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_malhas test_malhas.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp

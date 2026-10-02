@@ -18,7 +18,7 @@ program test_mpas_export
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use mpas_atm_types_mod,    only : mpas_atm_public_type, MPAS_RKIND
-  use mpas_cap_methods_mod,  only : mpas_export, mpas_create_grid
+  use mpas_adaptador_mod,    only : mpas_export, mpas_create_grid
   use mpas_cap_netcdf_mod,   only : mpas_diag_export_t
   implicit none
 

@@ -105,6 +105,7 @@ program test_cpl_map
   call confere_malhas_e_rotas()
   call confere_trocas()
   call confere_metodos()
+  call confere_trocas_cap()
   do k = 1, NCFG
     call confere_origens(k)
     call confere_cadeia(k)
@@ -340,6 +341,35 @@ contains
                    cpl_metodo_conector('So_t', 'OCN', 'MED') == 'bilinear' .and. &
                    cpl_metodo_conector('So_t', 'MED', 'ICE') == 'bilinear')
   end subroutine confere_metodos
+
+  !> Trocas 'cap' do MONAN-A (R-FASE11-24), feitas pelo adaptador do MPAS
+  !! (mpas_adaptador): as de ATM@mpas para ATM@atm_cap são exatamente os
+  !! campos que o MONAN-A exporta (cpl_exportacoes, os de mpas_export), e as
+  !! de ATM@atm_cap para ATM@mpas, na mesma ordem, os que ele importa
+  !! (cpl_chegadas por conector, os de mpas_import). O cap consulta o mapa
+  !! sem chaves (todas as configurações).
+  subroutine confere_trocas_cap()
+    character(len=CPL_NOME_LEN), allocatable :: exp(:), imp(:), ida(:), volta(:)
+    logical :: ok_ida, ok_volta
+    integer :: t
+
+    allocate(ida(0), volta(0))
+    do t = 1, size(TROCAS)
+      if (trim(TROCAS(t)%meio) /= 'cap') cycle
+      if (TROCAS(t)%de == 'ATM@mpas' .and. TROCAS(t)%para == 'ATM@atm_cap') &
+        ida = [character(len=CPL_NOME_LEN) :: ida, TROCAS(t)%campo]
+      if (TROCAS(t)%de == 'ATM@atm_cap' .and. TROCAS(t)%para == 'ATM@mpas') &
+        volta = [character(len=CPL_NOME_LEN) :: volta, TROCAS(t)%campo]
+    end do
+    call cpl_exportacoes('ATM@atm_cap', CFG(1), '', exp)
+    call cpl_chegadas('ATM@atm_cap', .true., CFG(1), '', imp)
+    ok_ida = size(ida) == size(exp) .and. size(ida) == 13
+    if (ok_ida) ok_ida = all([(any(exp == ida(t)), t = 1, size(ida))])
+    ok_volta = size(volta) == size(imp) .and. size(volta) == 7
+    if (ok_volta) ok_volta = all(volta == imp)
+    call resultado('trocas cap ATM@mpas -> ATM@atm_cap: as 13 exportacoes do MONAN-A', ok_ida)
+    call resultado('trocas cap ATM@atm_cap -> ATM@mpas: as 7 importacoes, na mesma ordem', ok_volta)
+  end subroutine confere_trocas_cap
 
   !> Na configuração k: cada (campo, destino) recebe de uma só troca, entre
   !! as que chegam por conector (importação) e entre as demais.

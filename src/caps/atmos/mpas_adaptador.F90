@@ -1,13 +1,38 @@
-!> @file mpas_cap_methods.F90
-!! @brief Importacao/exportacao de campos ESMF <-> MPAS-A e criacao de malha.
+!> @file mpas_adaptador.F90
+!! @brief Adaptador do MPAS: a tradução entre o MONAN-A e o ESMF.
 !!
-!! Importação e exportação entre os campos ESMF e o MPAS-A (mpas_import,
-!! mpas_export), a grade ESMF do cap (mpas_create_grid) e a cópia de campos
-!! entre o ESMF_State e os arranjos das células MPAS. O diagnóstico NetCDF
-!! fica em mpas_cap_netcdf.F90, e a cópia das células MPAS para a grade
-!! regular (state_set_field_1d) em mpas_cell_binning.F90.
+!! O dado passa entre o modelo e o ESMF em duas etapas, com as estruturas
+!! atm_public (exportação) e atm_bnd (importação), de mpas_atm_types, no
+!! meio:
+!!   modelo <-> atm_public/atm_bnd   mpas_atm_setup, mpas_atm_fluxes e
+!!                                   mpas_atm_model, sem ESMF;
+!!   atm_public/atm_bnd <-> ESMF     este módulo, o único do cap atmosférico
+!!                                   que lê ou escreve campos do ESMF com
+!!                                   dados do modelo.
+!!
+!! Rotinas:
+!!   mpas_create_grid    grade ESMF do cap (ATM@atm_cap), por cpl_grids;
+!!   mpas_export         os 13 campos *_mpas, das células à grade do cap
+!!                       (troca 'cap' de ATM@mpas para ATM@atm_cap no mapa
+!!                       de acoplamento): state_set_field_1d, com a média por
+!!                       caixa de map_cells_to_regular_grid
+!!                       (mpas_cell_binning);
+!!   mpas_import         os 7 campos do contorno oceânico, da grade do cap às
+!!                       células (troca 'cap' de ATM@atm_cap para ATM@mpas):
+!!                       state_get_field_1d, cada célula com o valor da caixa
+!!                       que a contém (caixa do centro);
+!!   state_diagnose      diagnóstico dos campos de um State no log;
+!!   find_local_field    busca do campo no State e verificações antes de
+!!                       acessar os dados.
+!! Os nomes dos campos estão escritos aqui; tests/unit/test_cpl_map.F90
+!! confere que as trocas 'cap' do mapa são as exportações e as importações
+!! do MONAN-A. O diagnóstico NetCDF fica em mpas_cap_netcdf.F90.
+!!
+!! Até a R-FASE11-23 este arquivo era mpas_cap_methods.F90, e
+!! find_local_field e state_set_field_1d estavam em mpas_cell_binning.F90;
+!! a R-FASE11-24 reuniu aqui a tradução, sem mudar instruções.
 
-module mpas_cap_methods_mod
+module mpas_adaptador_mod
 
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY, RAD2DEG, FILL_VALUE_R8
@@ -28,7 +53,7 @@ module mpas_cap_methods_mod
                                   mpas_diag_export_t
   use mpas_import_diag_mod, only: write_mpas_import_diag,   &
                                   mpas_import_diag_clock_t
-  use mpas_cell_binning_mod, only: state_set_field_1d, find_local_field
+  use mpas_cell_binning_mod, only: map_cells_to_regular_grid
   implicit none
   private
 
@@ -655,4 +680,126 @@ contains
   end subroutine state_get_field_1d
 
 
-end module mpas_cap_methods_mod
+  ! -------------------------------------------------------------------------
+  ! Acesso aos campos do ESMF_State (de mpas_cell_binning até a R-FASE11-23)
+  ! -------------------------------------------------------------------------
+
+  !> @brief Procura o campo fldname no State e informa se há dados locais.
+  !!
+  !! found fica .false., e nada mais é feito, quando o campo não existe (nota
+  !! INFO no log), quando este PET não tem DE do campo ou quando a consulta do
+  !! rank falha (aviso no log). Essas verificações vêm antes de farrayPtr para
+  !! não gerar erro no log do ESMF.
+  !!
+  !! @param[in]  state     State onde procurar
+  !! @param[in]  fldname   nome do campo
+  !! @param[in]  subname   nome da rotina chamadora, usado nas mensagens
+  !! @param[out] field     o campo, quando encontrado
+  !! @param[out] fld_rank  número de dimensões do campo
+  !! @param[out] found     .true. quando o campo pode ser acessado
+  subroutine find_local_field(state, fldname, subname, field, fld_rank, found)
+    type(ESMF_State), intent(in)  :: state
+    character(len=*), intent(in)  :: fldname
+    character(len=*), intent(in)  :: subname
+    type(ESMF_Field), intent(out) :: field
+    integer,          intent(out) :: fld_rank
+    logical,          intent(out) :: found
+
+    integer :: localDeCount, rc
+
+    found    = .false.
+    fld_rank = 0
+
+    call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
+      return
+    end if
+
+    call ESMF_FieldGet(field, localDeCount=localDeCount, rc=rc)
+    if (rc /= ESMF_SUCCESS .or. localDeCount == 0) return
+
+    call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
+    if (rc /= ESMF_SUCCESS) then
+      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
+      return
+    end if
+
+    found = .true.
+  end subroutine find_local_field
+
+  !> @brief Copia array Fortran 1D (celulas MPAS) para campo do ESMF_State.
+  !!
+  !! Campo rank-1: copia posicional. Campo rank-2 (ESMF_Grid 360x180): com
+  !! lon_rad/lat_rad presentes, cada celula MPAS e' escrita no ponto da grade
+  !! que contem sua posicao geografica, pela media entre PETs de
+  !! map_cells_to_regular_grid; sem as coordenadas, copia na ordem
+  !! column-major.
+  subroutine state_set_field_1d(state, fldname, n, data, rc, lon_rad, lat_rad)
+    type(ESMF_State),  intent(inout) :: state
+    character(len=*),  intent(in)    :: fldname
+    integer,           intent(in)    :: n
+    real(MPAS_RKIND),  intent(in)    :: data(n)
+    integer,           intent(out)   :: rc
+    real(MPAS_RKIND),  intent(in), optional :: lon_rad(:)  !< lon células MPAS [rad, 0..2π]
+    real(MPAS_RKIND),  intent(in), optional :: lat_rad(:)  !< lat células MPAS [rad, -π/2..π/2]
+
+    type(ESMF_Field)             :: field
+    real(ESMF_KIND_R8), pointer  :: fptr1d(:)
+    real(ESMF_KIND_R8), pointer  :: fptr2d(:,:)
+    integer :: n_esmf, fld_rank, i, j, idx
+    character(len=*), parameter  :: subname = '(state_set_field_1d)'
+    logical :: found
+
+    rc = ESMF_SUCCESS
+    nullify(fptr1d, fptr2d)
+
+    call find_local_field(state, fldname, subname, field, fld_rank, found)
+    if (.not. found) return
+
+    if (fld_rank == 1) then
+      ! Campo rank-1: ESMF_Mesh ou ESMF_Grid 1D
+      call ESMF_FieldGet(field, farrayPtr=fptr1d, rc=rc)
+      if (rc /= ESMF_SUCCESS .or. .not. associated(fptr1d)) then
+        rc = ESMF_SUCCESS; return
+      end if
+      n_esmf = min(size(fptr1d), n)
+      fptr1d(1:n_esmf) = real(data(1:n_esmf), ESMF_KIND_R8)
+      nullify(fptr1d)
+    else
+      ! Campo rank-2: ESMF_Grid regular (NLON x NLAT_local)
+      ! Percorrer column-major: elemento (i,j) = posicao (j-1)*dim1 + i
+      call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
+      if (rc /= ESMF_SUCCESS .or. .not. associated(fptr2d)) then
+        rc = ESMF_SUCCESS; return
+      end if
+      n_esmf = min(size(fptr2d), n)
+
+      ! Mapeamento geografico por MEDIA (map_cells_to_regular_grid): varias
+      ! celulas Voronoi, de PETs diferentes, podem cair no mesmo ponto (ig,jg)
+      ! da grade 1°x1°, sobretudo perto dos polos. Uma soma simples dobraria o
+      ! valor (Sa_pslv chegou a 2017 hPa). Por isso somam-se valores e contagens
+      ! de todos os PETs, e o ponto recebe a media (zero onde nao ha celula):
+      !   buf_global(ig,jg) = sum_global(ig,jg) / count_global(ig,jg)
+      if (present(lon_rad) .and. present(lat_rad) .and. &
+          size(lon_rad) >= n .and. size(lat_rad) >= n) then
+
+          call map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
+          if (ChkErr(rc, __LINE__, __FILE__)) return
+      else
+        ! Fallback legado: mapeamento column-major (sem garantia geográfica)
+        idx = 0
+        outer: do j = lbound(fptr2d,2), ubound(fptr2d,2)
+          do i = lbound(fptr2d,1), ubound(fptr2d,1)
+            idx = idx + 1
+            if (idx > n_esmf) exit outer
+            fptr2d(i,j) = real(data(idx), ESMF_KIND_R8)
+          end do
+        end do outer
+      end if
+      nullify(fptr2d)
+    end if
+    rc = ESMF_SUCCESS
+  end subroutine state_set_field_1d
+
+end module mpas_adaptador_mod

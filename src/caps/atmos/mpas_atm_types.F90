@@ -11,7 +11,7 @@
 !!
 !! Depende apenas de mpas_kind_types (sem ESMF).
 !! Usado por: mpas_atm_model_mod, mpas_atm_setup_mod, mpas_atm_fluxes_mod,
-!! mpas_cap_methods_mod, mpas_cap_MONAN_mod e mpas_import_diag_mod.
+!! mpas_adaptador_mod, mpas_cap_MONAN_mod e mpas_import_diag_mod.
 
 module mpas_atm_types_mod
 
@@ -132,12 +132,15 @@ module mpas_atm_types_mod
 
   ! ── Condições de contorno vindas do oceano (via mediador) ─────────────────
   !
-  ! Mapeamento mediador → campo do cap (conector MED→MPAS):
-  !   So_t      → sst           SST [K]
+  ! Campos importados do mediador (conector MED→MPAS) e membro que cada um
+  ! preenche (mpas_import, em mpas_adaptador):
+  !   Sx_tsfc   → sst           temperatura de pele composta [K]
   !   Si_ifrac  → ice_fraction  fração de gelo [0–1]
   !   So_u      → uocn          corrente zonal      a 0 m [m/s]
   !   So_v      → vocn          corrente meridional a 0 m [m/s]
-  ! Sf_zorl → zorl rugosidade [m] (Charnock no MED —)
+  !   Sf_zorl   → zorl          rugosidade [m] (Charnock no mediador)
+  !   Sf_albedo → alb           albedo de superfície [0–1]
+  !   Sx_omask  → omask         máscara terra/oceano [0–1]
   !
   ! uocn/vocn permitem o vento relativo ao oceano nos esquemas de
   !   superfície do MPAS-A.

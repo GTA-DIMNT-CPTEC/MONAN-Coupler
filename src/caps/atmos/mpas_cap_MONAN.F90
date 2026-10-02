@@ -4,8 +4,9 @@
 !! Protocolo NUOPC completo via NUOPC_CompDerive (InitializeAdvertise,
 !! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
 !! cap exporta a forcante atmosferica do MONAN-A ao mediador e importa dele
-!! a superficie do oceano e do gelo (PONTO_ATM, abaixo). A troca com o
-!! MPAS-A fica em mpas_cap_methods.F90, e os diagnosticos NetCDF em
+!! a superficie do oceano e do gelo (PONTO_ATM, abaixo). A traducao entre
+!! o MPAS-A e o ESMF fica no adaptador (mpas_adaptador.F90), e os
+!! diagnosticos NetCDF em
 !! mpas_cap_netcdf.F90 e mpas_import_diag.F90.
 !!
 !! As coordenadas para o NetCDF vem de lonCell(1:n_local), com
@@ -36,7 +37,7 @@ module mpas_cap_MONAN_mod
   use mpas_atm_model_mod,   only : mpas_atm_init, mpas_atm_init_sfc, mpas_atm_run, &
                                     mpas_atm_final
 
-  use mpas_cap_methods_mod, only : mpas_import,         &
+  use mpas_adaptador_mod,   only : mpas_import,         &
                                     mpas_export,         &
                                     mpas_create_grid,    &
                                     state_diagnose
@@ -614,7 +615,7 @@ contains
   !!   So_u      corrente zonal (0.0 m/s, oceano em repouso)
   !!   So_v      corrente meridional (0.0 m/s, oceano em repouso)
   !!   Sf_zorl   rugosidade (cfg_zorl_default) [m]
-  !!   Sf_albedo o mesmo valor de agua aberta usado em mpas_cap_methods.F90 e
+  !!   Sf_albedo o mesmo valor de agua aberta usado em mpas_adaptador.F90 e
   !!             mpas_atm_setup.F90 (ALB_OCEAN_DEFAULT)
   !!   Sx_omask  1, tudo oceano
   subroutine valor_inicial_importacao(nome, valor, conhecido)

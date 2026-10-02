@@ -41,7 +41,7 @@ EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
 OBJS="coupler_utils.o coupler_constants.o coupler_config.o nc_writer.o mpas_stubs.o
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mom6_supergrid.o cpl_grids.o mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o"
+      mom6_supergrid.o cpl_grids.o mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o mpas_adaptador.o"
 # A versão de referência pode não ter algum objeto da lista (fonte criado
 # depois dela): liga só os que existem no diretório de compilação.
 objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }

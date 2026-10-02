@@ -515,7 +515,7 @@ contains
   !!
   !! LIMITE CONHECIDO. Isto NAO trata a duplicacao de celulas na
   !! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
-  !! do mpas_cap_methods), em que a mesma celula fisica recebe
+  !! do mpas_cell_binning), em que a mesma celula fisica recebe
   !! contribuicao do regrid em mais de um PET. Se a divergencia
   !! persistir, esse e' o alvo seguinte, e o conserto e' no cap
   !! (mpas_cap_MONAN.F90 e mpas_cell_binning.F90).

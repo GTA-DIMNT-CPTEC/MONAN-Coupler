@@ -1,17 +1,16 @@
 !> @file mpas_cell_binning.F90
-!! @brief Copia das celulas MPAS para campos do ESMF_State (grade regular).
+!! @brief Média das células MPAS por caixa da grade regular de 1 grau.
 !!
-!! state_set_field_1d leva um arranjo 1D das células MPAS a um campo do
-!! ESMF_State. No campo rank-2 (grade regular 360x180), a média por caixa de
-!! 1 grau é feita por map_cells_to_regular_grid e suas etapas (bin_cells_local,
-!! mpas_mpi_comm, ordered_sum_bcast, fill_empty_bins, diagnósticos no log e
-!! copy_to_local_grid).
+!! map_cells_to_regular_grid leva os valores das células MPAS de todos os
+!! PETs à grade regular 360x180, pela média por caixa de 1 grau, em etapas:
+!! bin_cells_local, mpas_mpi_comm, ordered_sum_bcast, fill_empty_bins,
+!! diagnósticos no log e copy_to_local_grid. É o algoritmo da troca 'cap'
+!! de ATM@mpas para ATM@atm_cap do mapa de acoplamento; quem o chama é o
+!! adaptador do MPAS (mpas_adaptador.F90, state_set_field_1d).
 !!
-!! find_local_field faz a busca do campo no State e as verificações que
-!! state_set_field_1d e state_get_field_1d (mpas_cap_methods) fazem antes de
-!! acessar os dados.
-!!
-!! Separado de mpas_cap_methods.F90 sem mudar instruções (R-FASE8-15).
+!! Separado de mpas_cap_methods.F90 sem mudar instruções (R-FASE8-15). Desde
+!! a R-FASE11-24, find_local_field e state_set_field_1d, que acessam o
+!! ESMF_State, estão no adaptador, e aqui fica só o algoritmo.
 
 module mpas_cell_binning_mod
 
@@ -24,130 +23,12 @@ module mpas_cell_binning_mod
   implicit none
   private
 
-  public :: state_set_field_1d, find_local_field
+  public :: map_cells_to_regular_grid
   ! Etapas de cálculo de map_cells_to_regular_grid, públicas para os testes
   ! com valor esperado (tests/unit).
   public :: bin_cells_local, fill_empty_bins
 
 contains
-
-  !> @brief Procura o campo fldname no State e informa se há dados locais.
-  !!
-  !! found fica .false., e nada mais é feito, quando o campo não existe (nota
-  !! INFO no log), quando este PET não tem DE do campo ou quando a consulta do
-  !! rank falha (aviso no log). Essas verificações vêm antes de farrayPtr para
-  !! não gerar erro no log do ESMF.
-  !!
-  !! @param[in]  state     State onde procurar
-  !! @param[in]  fldname   nome do campo
-  !! @param[in]  subname   nome da rotina chamadora, usado nas mensagens
-  !! @param[out] field     o campo, quando encontrado
-  !! @param[out] fld_rank  número de dimensões do campo
-  !! @param[out] found     .true. quando o campo pode ser acessado
-  subroutine find_local_field(state, fldname, subname, field, fld_rank, found)
-    type(ESMF_State), intent(in)  :: state
-    character(len=*), intent(in)  :: fldname
-    character(len=*), intent(in)  :: subname
-    type(ESMF_Field), intent(out) :: field
-    integer,          intent(out) :: fld_rank
-    logical,          intent(out) :: found
-
-    integer :: localDeCount, rc
-
-    found    = .false.
-    fld_rank = 0
-
-    call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
-      return
-    end if
-
-    call ESMF_FieldGet(field, localDeCount=localDeCount, rc=rc)
-    if (rc /= ESMF_SUCCESS .or. localDeCount == 0) return
-
-    call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
-    if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
-      return
-    end if
-
-    found = .true.
-  end subroutine find_local_field
-
-  !> @brief Copia array Fortran 1D (celulas MPAS) para campo do ESMF_State.
-  !!
-  !! Campo rank-1: copia posicional. Campo rank-2 (ESMF_Grid 360x180): com
-  !! lon_rad/lat_rad presentes, cada celula MPAS e' escrita no ponto da grade
-  !! que contem sua posicao geografica, pela media entre PETs de
-  !! map_cells_to_regular_grid; sem as coordenadas, copia na ordem
-  !! column-major.
-  subroutine state_set_field_1d(state, fldname, n, data, rc, lon_rad, lat_rad)
-    type(ESMF_State),  intent(inout) :: state
-    character(len=*),  intent(in)    :: fldname
-    integer,           intent(in)    :: n
-    real(MPAS_RKIND),  intent(in)    :: data(n)
-    integer,           intent(out)   :: rc
-    real(MPAS_RKIND),  intent(in), optional :: lon_rad(:)  !< lon células MPAS [rad, 0..2π]
-    real(MPAS_RKIND),  intent(in), optional :: lat_rad(:)  !< lat células MPAS [rad, -π/2..π/2]
-
-    type(ESMF_Field)             :: field
-    real(ESMF_KIND_R8), pointer  :: fptr1d(:)
-    real(ESMF_KIND_R8), pointer  :: fptr2d(:,:)
-    integer :: n_esmf, fld_rank, i, j, idx
-    character(len=*), parameter  :: subname = '(state_set_field_1d)'
-    logical :: found
-
-    rc = ESMF_SUCCESS
-    nullify(fptr1d, fptr2d)
-
-    call find_local_field(state, fldname, subname, field, fld_rank, found)
-    if (.not. found) return
-
-    if (fld_rank == 1) then
-      ! Campo rank-1: ESMF_Mesh ou ESMF_Grid 1D
-      call ESMF_FieldGet(field, farrayPtr=fptr1d, rc=rc)
-      if (rc /= ESMF_SUCCESS .or. .not. associated(fptr1d)) then
-        rc = ESMF_SUCCESS; return
-      end if
-      n_esmf = min(size(fptr1d), n)
-      fptr1d(1:n_esmf) = real(data(1:n_esmf), ESMF_KIND_R8)
-      nullify(fptr1d)
-    else
-      ! Campo rank-2: ESMF_Grid regular (NLON x NLAT_local)
-      ! Percorrer column-major: elemento (i,j) = posicao (j-1)*dim1 + i
-      call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
-      if (rc /= ESMF_SUCCESS .or. .not. associated(fptr2d)) then
-        rc = ESMF_SUCCESS; return
-      end if
-      n_esmf = min(size(fptr2d), n)
-
-      ! Mapeamento geografico por MEDIA (map_cells_to_regular_grid): varias
-      ! celulas Voronoi, de PETs diferentes, podem cair no mesmo ponto (ig,jg)
-      ! da grade 1°x1°, sobretudo perto dos polos. Uma soma simples dobraria o
-      ! valor (Sa_pslv chegou a 2017 hPa). Por isso somam-se valores e contagens
-      ! de todos os PETs, e o ponto recebe a media (zero onde nao ha celula):
-      !   buf_global(ig,jg) = sum_global(ig,jg) / count_global(ig,jg)
-      if (present(lon_rad) .and. present(lat_rad) .and. &
-          size(lon_rad) >= n .and. size(lat_rad) >= n) then
-
-          call map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
-          if (ChkErr(rc, __LINE__, __FILE__)) return
-      else
-        ! Fallback legado: mapeamento column-major (sem garantia geográfica)
-        idx = 0
-        outer: do j = lbound(fptr2d,2), ubound(fptr2d,2)
-          do i = lbound(fptr2d,1), ubound(fptr2d,1)
-            idx = idx + 1
-            if (idx > n_esmf) exit outer
-            fptr2d(i,j) = real(data(idx), ESMF_KIND_R8)
-          end do
-        end do outer
-      end if
-      nullify(fptr2d)
-    end if
-    rc = ESMF_SUCCESS
-  end subroutine state_set_field_1d
 
   !> @brief Leva os valores das células MPAS à grade regular 360x180 (média).
   !!

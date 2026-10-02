@@ -484,7 +484,7 @@ contains
                           nGlobal, mask_2d, nlon, nlat, dlon, dlat, &
                           1.0e-5_ESMF_KIND_R8, 0.1_ESMF_KIND_R8)
     ! Os limites [-5, +5] m/s nas correntes sao os MESMOS do clamp fisico
-    ! aplicado na importacao (mpas_cap_methods.F90: |u|>5 -> 0). Se os dois
+    ! aplicado na importacao (mpas_adaptador.F90: |u|>5 -> 0). Se os dois
     ! divergirem, o diagnostico passa a descartar valor que a fisica aceitou,
     ! ou a aceitar valor que a fisica zerou. Mantenha-os iguais.
     call bin_masked_field(ncid, varids(IMP_UOCN), recvBuf(:, IMP_UOCN), lon_global, lat_global, &
