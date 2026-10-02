@@ -103,6 +103,8 @@ module cpl_map_mod
   public :: cpl_rota_indice, cpl_malha_indice
   public :: cpl_ponto_componente, cpl_ponto_malha
   public :: cpl_config_atual, cpl_config_valida, cpl_chegadas
+  public :: cpl_conector_vale, cpl_conector_fora, cpl_conectores_do_driver
+  public :: N_CONECTORES, CONECTOR_DE, CONECTOR_PARA
   public :: cpl_exporta_t, EXPORTACOES, cpl_exportacoes
 
   integer, parameter :: r8 = ESMF_KIND_R8
@@ -447,6 +449,19 @@ module cpl_map_mod
                completar=regrid_fill_t(enabled=.true., vmin=0.0_r8,                           &
                    vmax=1.0_r8, vfill=0.0_r8)) ]
 
+  !> Conectores que o driver (esm.F90) sabe registrar, na ordem de registro
+  !! (a ordem em que o NUOPC os inicializa e a das linhas dos conectores no
+  !! relatório de acoplamento), com os componentes como o mapa os chama.
+  !! Cada um é registrado se TROCAS tem troca por conector entre os dois
+  !! componentes na configuração (cpl_conectores_do_driver); MED->ATM e
+  !! OCN->ATM se excluem pela chave use_med_to_mpas. Esta ordem não é a de
+  !! TROCAS, que define a ordem do anúncio dos campos.
+  integer, parameter :: N_CONECTORES = 7
+  character(len=3), parameter :: CONECTOR_DE(N_CONECTORES)   = &
+    ['ATM', 'OCN', 'MED', 'MED', 'OCN', 'MED', 'ICE']
+  character(len=3), parameter :: CONECTOR_PARA(N_CONECTORES) = &
+    ['MED', 'MED', 'OCN', 'ATM', 'ATM', 'ICE', 'MED']
+
 contains
 
   !> Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
@@ -591,6 +606,80 @@ contains
       end if
     end do
   end function cpl_troca_vale
+
+  !> Há troca por conector, válida em cfg, do componente de para o
+  !! componente para ('ATM', 'OCN', 'ICE', 'MED')? É o que decide se o
+  !! driver registra o conector de para para (desde a R-FASE11-21).
+  pure logical function cpl_conector_vale(de, para, cfg) result(vale)
+    character(len=*),   intent(in) :: de, para
+    type(cpl_config_t), intent(in) :: cfg
+    integer :: t
+
+    vale = .false.
+    do t = 1, size(TROCAS)
+      if (trim(TROCAS(t)%meio) /= 'conector') cycle
+      if (trim(cpl_ponto_componente(TROCAS(t)%de)) /= de) cycle
+      if (trim(cpl_ponto_componente(TROCAS(t)%para)) /= para) cycle
+      if (.not. cpl_troca_vale(TROCAS(t), cfg)) cycle
+      vale = .true.
+      return
+    end do
+  end function cpl_conector_vale
+
+  !> Conectores que o driver registra na configuração cfg: ordem(1:n) são os
+  !! índices em CONECTOR_DE/CONECTOR_PARA, na ordem de registro. O
+  !! componente atmosférico registrado é sempre o MONAN-A, também com
+  !! use_datm (o DATM está no mapa, mas o driver não o registra); por isso o
+  !! mapa é consultado com a chave datm desligada. t_fora é a primeira troca
+  !! por conector válida que não tem lugar na lista (0 se não há).
+  !!
+  !! @param[in]  cfg     configuração (cpl_config_atual)
+  !! @param[out] ordem   índices dos conectores registrados
+  !! @param[out] n       quantos
+  !! @param[out] t_fora  índice em TROCAS de um conector sem lugar, ou 0
+  pure subroutine cpl_conectores_do_driver(cfg, ordem, n, t_fora)
+    type(cpl_config_t), intent(in)  :: cfg
+    integer,            intent(out) :: ordem(N_CONECTORES)
+    integer,            intent(out) :: n, t_fora
+    type(cpl_config_t) :: c
+    integer :: k
+
+    c = cfg
+    c%datm = .false.
+    ordem = 0
+    n = 0
+    t_fora = cpl_conector_fora(CONECTOR_DE, CONECTOR_PARA, c)
+    do k = 1, N_CONECTORES
+      if (.not. cpl_conector_vale(CONECTOR_DE(k), CONECTOR_PARA(k), c)) cycle
+      n = n + 1
+      ordem(n) = k
+    end do
+  end subroutine cpl_conectores_do_driver
+
+  !> Primeira troca por conector válida em cfg cujo par de componentes não
+  !! está na lista (des(k), paras(k)); 0 se todas estão. Serve ao driver
+  !! para recusar um conector do mapa que ele não sabe registrar.
+  pure integer function cpl_conector_fora(des, paras, cfg) result(t_fora)
+    character(len=*),   intent(in) :: des(:), paras(:)
+    type(cpl_config_t), intent(in) :: cfg
+    integer :: t, k
+    logical :: achou
+
+    t_fora = 0
+    do t = 1, size(TROCAS)
+      if (trim(TROCAS(t)%meio) /= 'conector') cycle
+      if (.not. cpl_troca_vale(TROCAS(t), cfg)) cycle
+      achou = .false.
+      do k = 1, size(des)
+        if (trim(cpl_ponto_componente(TROCAS(t)%de)) == trim(des(k)) .and. &
+            trim(cpl_ponto_componente(TROCAS(t)%para)) == trim(paras(k))) achou = .true.
+      end do
+      if (.not. achou) then
+        t_fora = t
+        return
+      end if
+    end do
+  end function cpl_conector_fora
 
   !> Verdadeiro se todas as condições da lista estão em CONDICOES.
   pure logical function cpl_condicoes_validas(quando) result(ok)

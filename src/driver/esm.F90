@@ -50,6 +50,8 @@ module ESM_MONAN
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
   use cpl_check_mod,      only : cpl_check_acoplamento
+  use cpl_map_mod,        only : cpl_config_atual, cpl_conectores_do_driver, &
+                                 CONECTOR_DE, CONECTOR_PARA, N_CONECTORES, TROCAS
 
   implicit none
   private
@@ -145,28 +147,10 @@ contains
     end if
 
     ! ---- Conectores ---------------------------------------------------------
-    call add_connector(driver, MPAS_LABEL, MED_LABEL, driverClock, rc)
+    ! Escolhidos pelo mapa de acoplamento (TROCAS, coluna quando), na ordem
+    ! de CONECTOR_DE/CONECTOR_PARA.
+    call add_connectors(driver, driverClock, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call add_connector(driver, OCN_LABEL, MED_LABEL, driverClock, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    call add_connector(driver, MED_LABEL, OCN_LABEL, driverClock, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! Condição de contorno oceânica da atmosfera: pelo mediador (MOM6) ou
-    ! direto do oceano de dados (DOCN).
-    if (cfg_use_med_to_mpas) then
-      call add_connector(driver, MED_LABEL, MPAS_LABEL, driverClock, rc)
-    else
-      call add_connector(driver, OCN_LABEL, MPAS_LABEL, driverClock, rc)
-    end if
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    if (use_ice) then
-      call add_connector(driver, MED_LABEL, ICE_LABEL, driverClock, rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call add_connector(driver, ICE_LABEL, MED_LABEL, driverClock, rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end if
 
     call ESMF_LogWrite('ESM: componentes e conectores registrados', ESMF_LOGMSG_INFO)
   end subroutine SetModelServices
@@ -284,6 +268,47 @@ contains
     call NUOPC_CompAttributeSet(comp, name='Verbosity', value='high', rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine add_model
+
+  !> Registra os conectores que o mapa de acoplamento tem na configuração
+  !! atual, na ordem de CONECTOR_DE/CONECTOR_PARA (cpl_conectores_do_driver,
+  !! em cpl_map). Um conector do mapa que não está na lista é erro.
+  !!
+  !! @param[inout] driver       o driver
+  !! @param[in]    driverClock  relógio do driver (copiado para cada conector)
+  !! @param[out]   rc           ESMF_SUCCESS ou o código do erro
+  subroutine add_connectors(driver, driverClock, rc)
+    type(ESMF_GridComp), intent(inout) :: driver
+    type(ESMF_Clock),    intent(in)    :: driverClock
+    integer,             intent(out)   :: rc
+    integer :: ordem(N_CONECTORES), n, k, t
+
+    rc = ESMF_SUCCESS
+    call cpl_conectores_do_driver(cpl_config_atual(), ordem, n, t)
+    if (t > 0) then
+      call ESMF_LogSetError(ESMF_RC_NOT_IMPL, &
+        msg='ESM: conector do mapa sem registro no driver: '//trim(TROCAS(t)%de)// &
+            ' -> '//trim(TROCAS(t)%para), &
+        line=__LINE__, file=__FILE__, rcToReturn=rc)
+      return
+    end if
+
+    do k = 1, n
+      call add_connector(driver, trim(rotulo(CONECTOR_DE(ordem(k)))), &
+                         trim(rotulo(CONECTOR_PARA(ordem(k)))), driverClock, rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+
+  contains
+
+    !> Rótulo do componente no driver ('MPAS' para o ATM do mapa).
+    function rotulo(comp) result(label)
+      character(len=*), intent(in) :: comp
+      character(len=4) :: label
+      label = comp
+      if (comp == 'ATM') label = MPAS_LABEL
+    end function rotulo
+
+  end subroutine add_connectors
 
   !> Registra um conector NUOPC padrão com cópia própria do relógio do driver
   !! (mesmos motivos de add_model).
