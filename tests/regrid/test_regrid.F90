@@ -1,25 +1,33 @@
 !> Testes do framework de interpolação (src/regrid).
 !! Uso: mpirun -np N ./test_regrid     (imprime PASSOU/FALHOU por teste)
+!!
+!! Desde a R-FASE11-23, o item 9 testa a base de esquemas de pesos
+!! (weights_regridder_t), o modelo idw, as opções em texto e a ida e volta
+!! dos pesos de um esquema de pesos pelo esquema weights_file.
 program test_regrid
 
   use ESMF
   use mpi
   use netcdf
-  use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill
+  use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill, &
+                                  regrid_option_real, regrid_option_int, regrid_options_check
   use regrid_registry_mod, only : regrid_register, regrid_create
   use regrid_manager_mod,  only : regrid_manager_t, regrid_spec
   use regrid_mpassit_mod,  only : mpas_mesh_create
-  use identity_scheme_mod, only : new_identity
+  use identity_scheme_mod, only : new_identity, new_pesos_identidade
+  use regrid_idw_mod,      only : idw_regridder_t
 
   implicit none
 
   real(ESMF_KIND_R8), parameter :: PI = 3.14159265358979323846_ESMF_KIND_R8
   real(ESMF_KIND_R8), parameter :: D2R = PI / 180.0_ESMF_KIND_R8
   character(len=*),   parameter :: WFILE = 'pesos_teste.nc'
+  character(len=*),   parameter :: WFILE_IDW = 'pesos_idw.nc'
 
   type(ESMF_VM)    :: vm
-  type(ESMF_Grid)  :: gsrc, gdst, greg
-  type(ESMF_Field) :: fsrc, fdst, fdst2, fmesh, freg, fdst3
+  type(ESMF_Grid)  :: gsrc, gdst, greg, g4
+  type(ESMF_Field) :: fsrc, fdst, fdst2, fmesh, freg, fdst3, f4, fa, fb
+  type(idw_regridder_t) :: idw
   type(ESMF_Mesh)  :: mesh
   type(regrid_manager_t) :: mgr
   type(regrid_spec_t)    :: spec
@@ -152,6 +160,48 @@ program test_regrid
               soma(nl_ref2) == soma(ni_ref2) .and. soma(ni_ref2) > 0)
   if (rc == 0) call mgr%apply('regional', freg, fdst3, rc, n_invalid=ni, n_left=nl)
   call report('rota sem preenchimento: contagens -1', rc == 0 .and. ni == -1 .and. nl == -1)
+
+  ! 9. Esquemas de pesos (R-FASE11-23): origem de 4 graus, destino de 2.
+  g4 = make_grid(90, 45)
+  f4 = ESMF_FieldCreate(g4,   ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  fa = ESMF_FieldCreate(gsrc, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  fb = ESMF_FieldCreate(gsrc, ESMF_TYPEKIND_R8, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
+  call set_analytic(f4, g4)
+  call regrid_register('pesos_identidade', new_pesos_identidade, rc)
+  call mgr%add('id_pesos', regrid_spec('', scheme='pesos_identidade'), fsrc, fa, rc)
+  if (rc == 0) call mgr%apply('id_pesos', fsrc, fa, rc)
+  call report('base de pesos: pesos de identidade copiam o campo, bit a bit', &
+              rc == 0 .and. iguais(local(fa), local(fsrc)))
+  call mgr%add('vizinho', regrid_spec('nearest_stod'), f4, fa, rc)
+  if (rc == 0) call mgr%apply('vizinho', f4, fa, rc)
+  call mgr%add('idw1', regrid_spec('', scheme='idw', options='vizinhos=1'), f4, fb, rc)
+  if (rc == 0) call mgr%apply('idw1', f4, fb, rc)
+  call report('idw com vizinhos=1 igual ao nearest_stod do ESMF, bit a bit', &
+              rc == 0 .and. iguais(local(fa), local(fb)) .and. trim(mgr%method('idw1')) == 'idw')
+  call mgr%add('idw', regrid_spec('', scheme='idw'), f4, fb, rc)
+  if (rc == 0) call mgr%apply('idw', f4, fb, rc)
+  call report('idw padrao (4 vizinhos, expoente 2): erro maximo < 3e-2', &
+              rc == 0 .and. max_error(fb, gsrc) < 3.0e-2_ESMF_KIND_R8)
+  call mgr%add('idw_errado', regrid_spec('', scheme='idw', options='vizinho=4'), f4, fb, rc)
+  call report('idw recusa opcao desconhecida', rc /= 0)
+  call mgr%add('idw_errado2', regrid_spec('', scheme='idw', options='vizinhos=quatro'), f4, fb, rc)
+  call report('idw recusa valor invalido', rc /= 0)
+  call report('opcoes em texto: leitura, padrao e conferencia', test_opcoes())
+
+  ! Ida e volta: os pesos do idw gravados em arquivo e lidos pelo weights_file
+  idw%label = 'idw_direto'
+  idw%spec  = regrid_spec('', scheme='idw', options='expoente=1.5,vizinhos=6')
+  call idw%setup(f4, fa, rc)
+  if (rc == 0) call idw%apply(f4, fa, rc)
+  if (rc == 0) call write_pesos(idw%fator, idw%origem_k, idw%destino_k, WFILE_IDW)
+  spec = regrid_spec('', scheme='weights_file')
+  spec%weights_file = WFILE_IDW
+  if (rc == 0) call mgr%add('idw_arquivo', spec, f4, fb, rc)
+  if (rc == 0) call mgr%apply('idw_arquivo', f4, fb, rc)
+  call report('pesos do idw pelo weights_file: resultado identico, bit a bit', &
+              rc == 0 .and. iguais(local(fa), local(fb)))
+  call idw%release(rc)
+  call report('release do esquema de pesos', rc == 0 .and. .not. allocated(idw%fator))
 
   call mgr%destroy(rc)
   call report('destroy', rc == 0)
@@ -372,6 +422,70 @@ contains
     call MPI_Barrier(MPI_COMM_WORLD, ierr)
     deallocate(S, idx)
   end subroutine write_weights
+
+  !> Grava, no formato SCRIP/ESMF, pesos dados em índices globais (os de
+  !! cada PET, reunidos no PET 0).
+  subroutine write_pesos(S, col_loc, row_loc, fname)
+    real(ESMF_KIND_R8), intent(in) :: S(:)
+    integer,            intent(in) :: col_loc(:), row_loc(:)
+    character(len=*),   intent(in) :: fname
+    integer, allocatable :: counts(:), displs(:), row(:), col(:)
+    real(ESMF_KIND_R8), allocatable :: w(:)
+    integer :: n, ntot, ierr, ncid, dimid, vr, vc, vs, k
+
+    n = size(S)
+    allocate(counts(petCount), displs(petCount))
+    call MPI_Allgather(n, 1, MPI_INTEGER, counts, 1, MPI_INTEGER, MPI_COMM_WORLD, ierr)
+    displs = [(sum(counts(1:k-1)), k = 1, petCount)]
+    ntot = sum(counts)
+    allocate(row(ntot), col(ntot), w(ntot))
+    call MPI_Gatherv(col_loc, n, MPI_INTEGER, col, counts, displs, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+    call MPI_Gatherv(row_loc, n, MPI_INTEGER, row, counts, displs, MPI_INTEGER, 0, MPI_COMM_WORLD, ierr)
+    call MPI_Gatherv(S, n, MPI_DOUBLE_PRECISION, w, counts, displs, MPI_DOUBLE_PRECISION, 0, MPI_COMM_WORLD, ierr)
+    if (localPet == 0) then
+      ierr = nf90_create(fname, NF90_CLOBBER, ncid)
+      ierr = nf90_def_dim(ncid, 'n_s', ntot, dimid)
+      ierr = nf90_def_var(ncid, 'row', NF90_INT, [dimid], vr)
+      ierr = nf90_def_var(ncid, 'col', NF90_INT, [dimid], vc)
+      ierr = nf90_def_var(ncid, 'S', NF90_DOUBLE, [dimid], vs)
+      ierr = nf90_enddef(ncid)
+      ierr = nf90_put_var(ncid, vr, row)
+      ierr = nf90_put_var(ncid, vc, col)
+      ierr = nf90_put_var(ncid, vs, w)
+      ierr = nf90_close(ncid)
+    end if
+    call MPI_Barrier(MPI_COMM_WORLD, ierr)
+  end subroutine write_pesos
+
+  !> Leitura das opções em texto: valores, padrão, espaços, chave
+  !! desconhecida, chave sem valor e valores inválidos.
+  logical function test_opcoes()
+    character(len=8), parameter :: CONHECIDAS(2) = ['vizinhos', 'expoente']
+    real(ESMF_KIND_R8) :: x
+    integer :: n, irc
+    logical :: ok
+
+    ok = .true.
+    call regrid_option_real(' vizinhos = 6 , expoente=1.5', 'expoente', 2.0_ESMF_KIND_R8, x, irc)
+    ok = ok .and. irc == ESMF_SUCCESS .and. x == 1.5_ESMF_KIND_R8
+    call regrid_option_int(' vizinhos = 6 , expoente=1.5', 'vizinhos', 4, n, irc)
+    ok = ok .and. irc == ESMF_SUCCESS .and. n == 6
+    call regrid_option_int('', 'vizinhos', 4, n, irc)
+    ok = ok .and. irc == ESMF_SUCCESS .and. n == 4
+    call regrid_option_int('vizinhos=2.5', 'vizinhos', 4, n, irc)
+    ok = ok .and. irc /= ESMF_SUCCESS .and. n == 4
+    call regrid_option_real('expoente=', 'expoente', 2.0_ESMF_KIND_R8, x, irc)
+    ok = ok .and. irc /= ESMF_SUCCESS .and. x == 2.0_ESMF_KIND_R8
+    call regrid_options_check('vizinhos=6,expoente=1.5', CONHECIDAS, irc)
+    ok = ok .and. irc == ESMF_SUCCESS
+    call regrid_options_check('', CONHECIDAS, irc)
+    ok = ok .and. irc == ESMF_SUCCESS
+    call regrid_options_check('vizinhos=6,raio=3', CONHECIDAS, irc)
+    ok = ok .and. irc /= ESMF_SUCCESS
+    call regrid_options_check('vizinhos', CONHECIDAS, irc)
+    ok = ok .and. irc /= ESMF_SUCCESS
+    test_opcoes = ok
+  end function test_opcoes
 
   logical function test_neighbor_fill()
     real(ESMF_KIND_R8) :: a(5,5)

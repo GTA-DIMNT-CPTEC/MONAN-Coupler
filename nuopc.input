@@ -390,13 +390,16 @@
 ! ocn2atm_ice, ocn2atm_landmask, atm2ocn_ice.
 !
 !   regrid_route    nome da rota
-!   regrid_scheme   'esmf' | 'weights_file' | 'mpassit' | esquema registrado
+!   regrid_scheme   'esmf' | 'weights_file' | 'mpassit' | 'idw' | esquema
+!                   da lista de src/regrid/regrid_schemes.F90
 !   regrid_methods  métodos em ordem de preferência, separados por vírgula:
 !                   bilinear, conserve, conserve_2nd, patch,
 !                   nearest_stod, nearest_dtos
 !   regrid_weights  arquivo de pesos SCRIP/ESMF (esquema weights_file)
 !   regrid_class    classe do campo no esquema mpassit:
 !                   continuous | integer | accumulated
+!   regrid_options  opções do esquema, 'chave=valor,chave=valor'; no idw:
+!                   vizinhos (padrão 4) e expoente (padrão 2)
 !
 ! Exemplo (desativado):
 !   regrid_route(1)   = 'ocn2atm_sst'

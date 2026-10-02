@@ -12,6 +12,8 @@
 #   instrucoes  só com -i: instruções idênticas às de REV na soma dos .F90
 #               alterados (etapas que só mudam comentários ou espaços)
 #   regrid      testes do framework de interpolação (tests/regrid)
+#   esquemas    tests/regrid/compara-esquema.bash com o esquema modelo idw:
+#               mesmo campo, bit a bit, com 1 e NP processos
 #   gravadores  tests/writers/compara-gravadores.bash REV
 #   bulk        tests/bulk/compara-bulk.bash REV
 #   grade       tests/atmgrid/compara-grade-atm.bash REV
@@ -48,12 +50,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais regrid gravadores bulk grade malhas completar unitarios mapa cplcheck supergrid docn"
+TODAS="compilacao avisos literais regrid esquemas gravadores bulk grade malhas completar unitarios mapa cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,47p' "$0"; exit 2; }
+uso() { sed -n '2,49p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -184,6 +186,8 @@ teste_regrid() {
   grep -q 'TODOS OS TESTES PASSARAM' <<< "${saida}"
 }
 quer regrid     && executa regrid teste_regrid
+quer esquemas   && executa esquemas tests/regrid/compara-esquema.bash idw 'vizinhos=4,expoente=2' \
+                     bilinear "${SAIDA}/esquema"
 quer gravadores && executa gravadores tests/writers/compara-gravadores.bash "${REV}" "${SAIDA}/writers"
 quer bulk       && executa bulk tests/bulk/compara-bulk.bash "${REV}" "${SAIDA}/bulk"
 quer grade      && executa grade tests/atmgrid/compara-grade-atm.bash "${REV}" "${SAIDA}/atmgrid"

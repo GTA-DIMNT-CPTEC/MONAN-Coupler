@@ -19,6 +19,7 @@ module regrid_weights_mod
   private
 
   public :: weights_file_regridder_t
+  public :: new_weights
 
   type, extends(regridder_t) :: weights_file_regridder_t
     type(ESMF_RouteHandle) :: rh
@@ -29,6 +30,12 @@ module regrid_weights_mod
   end type weights_file_regridder_t
 
 contains
+
+  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  subroutine new_weights(r)
+    class(regridder_t), allocatable, intent(out) :: r
+    allocate(weights_file_regridder_t :: r)
+  end subroutine new_weights
 
   subroutine weights_setup(this, src, dst, rc)
     class(weights_file_regridder_t), intent(inout) :: this

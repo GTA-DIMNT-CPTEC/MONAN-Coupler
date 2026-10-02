@@ -40,6 +40,7 @@ module coupler_constants_mod
   !--------------------------------------------------------------------------
   real(ESMF_KIND_R8), parameter, public :: PI      = 3.14159265358979323846_ESMF_KIND_R8 !< π
   real(ESMF_KIND_R8), parameter, public :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8 !< radianos para graus
+  real(ESMF_KIND_R8), parameter, public :: DEG2RAD = PI / 180.0_ESMF_KIND_R8         !< graus para radianos
   real(ESMF_KIND_R8), parameter, public :: FILL_VALUE_R8 = -9.99e+20_ESMF_KIND_R8   !< _FillValue das saídas NetCDF
 
   !--------------------------------------------------------------------------

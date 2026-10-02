@@ -12,8 +12,17 @@
 !! dos pontos sem valor válido e troca de NaN) são de regrid_manager%apply.
 !!
 !! O comportamento de cada interpolação é descrito por um regrid_spec_t
-!! (esquema, métodos em ordem de preferência, máscaras, preenchimento).
-!! Novos esquemas são registrados em regrid_registry_mod.
+!! (esquema, métodos em ordem de preferência, máscaras, preenchimento e
+!! opções próprias do esquema, em texto). Os esquemas do acoplador estão na
+!! lista de regrid_schemes.F90; um esquema escrito só com pesos estende
+!! weights_regridder_t (regrid_weights_base.F90), como o modelo
+!! regrid_idw.F90.
+!!
+!! Opções em texto (spec%options, desde a R-FASE11-23): pares chave=valor
+!! separados por vírgula, por exemplo 'expoente=2,vizinhos=4'. Cada esquema
+!! lê as suas com regrid_option_real e regrid_option_int e recusa chaves que
+!! não conhece com regrid_options_check. Os esquemas esmf, weights_file e
+!! mpassit não têm opções.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -28,10 +37,13 @@ module regrid_base_mod
   public :: regrid_spec_t
   public :: regrid_fill_t
   public :: neighbor_fill
-  public :: MAX_METHODS, NAME_LEN
+  public :: regridder_ctor
+  public :: regrid_option_real, regrid_option_int, regrid_options_check
+  public :: MAX_METHODS, NAME_LEN, OPTIONS_LEN
 
   integer, parameter :: MAX_METHODS = 4    !< tamanho máximo da cadeia de métodos
   integer, parameter :: NAME_LEN    = 32
+  integer, parameter :: OPTIONS_LEN = 128  !< texto das opções de um esquema
 
   !> Preenchimento por vizinhança aplicado ao campo de destino depois da
   !! interpolação: pontos fora de [vmin, vmax] (ou NaN) recebem a média dos
@@ -74,6 +86,9 @@ module regrid_base_mod
     !! preenchimento por vizinhança. Aplicado por regrid_manager%apply.
     logical :: nan_replace = .false.
     real(ESMF_KIND_R8) :: nan_value = 0.0_ESMF_KIND_R8
+    !> Opções próprias do esquema, 'chave=valor,chave=valor' (ver o
+    !! cabeçalho); vazio usa os valores padrão do esquema.
+    character(len=OPTIONS_LEN) :: options = ''
   end type regrid_spec_t
 
   !> Esquema de interpolação.
@@ -110,6 +125,12 @@ module regrid_base_mod
       class(regridder_t), intent(inout) :: this
       integer,            intent(out)   :: rc
     end subroutine release_i
+
+    !> Cria uma instância vazia de um esquema (usada pelo registro).
+    subroutine regridder_ctor(r)
+      import :: regridder_t
+      class(regridder_t), allocatable, intent(out) :: r
+    end subroutine regridder_ctor
   end interface
 
 contains
@@ -200,5 +221,126 @@ contains
     if (present(n_left)) n_left = count(.not. valid)
     where (.not. valid) arr = opt%vfill
   end subroutine neighbor_fill
+
+  !> Valor real da opção chave em options, ou padrao se ela não aparece.
+  !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um número.
+  subroutine regrid_option_real(options, chave, padrao, valor, rc)
+    character(len=*),   intent(in)  :: options, chave
+    real(ESMF_KIND_R8), intent(in)  :: padrao
+    real(ESMF_KIND_R8), intent(out) :: valor
+    integer,            intent(out) :: rc
+
+    character(len=OPTIONS_LEN) :: texto
+    logical :: achou
+    integer :: ios
+
+    rc = ESMF_SUCCESS
+    valor = padrao
+    call option_text(options, chave, texto, achou)
+    if (.not. achou) return
+    read(texto, *, iostat=ios) valor
+    if (ios /= 0) then
+      valor = padrao
+      call ESMF_LogWrite('regrid: opcao '//trim(chave)//' com valor invalido: '//trim(texto), &
+        ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+  end subroutine regrid_option_real
+
+  !> Valor inteiro da opção chave em options, ou padrao se ela não aparece.
+  !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um inteiro.
+  subroutine regrid_option_int(options, chave, padrao, valor, rc)
+    character(len=*), intent(in)  :: options, chave
+    integer,          intent(in)  :: padrao
+    integer,          intent(out) :: valor
+    integer,          intent(out) :: rc
+
+    character(len=OPTIONS_LEN) :: texto
+    logical :: achou
+    integer :: ios
+
+    rc = ESMF_SUCCESS
+    valor = padrao
+    call option_text(options, chave, texto, achou)
+    if (.not. achou) return
+    if (verify(trim(texto), '+-0123456789') /= 0) then
+      ios = 1
+    else
+      read(texto, *, iostat=ios) valor
+    end if
+    if (ios /= 0) then
+      valor = padrao
+      call ESMF_LogWrite('regrid: opcao '//trim(chave)//' com valor invalido: '//trim(texto), &
+        ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+    end if
+  end subroutine regrid_option_int
+
+  !> Confere que toda chave de options está em conhecidas e tem valor.
+  !! rc = ESMF_FAILURE (com mensagem no log) na primeira que não está.
+  subroutine regrid_options_check(options, conhecidas, rc)
+    character(len=*), intent(in)  :: options
+    character(len=*), intent(in)  :: conhecidas(:)
+    integer,          intent(out) :: rc
+
+    integer :: inicio, fim, p
+    character(len=:), allocatable :: item
+
+    rc = ESMF_SUCCESS
+    inicio = 1
+    do while (inicio <= len_trim(options))
+      fim = index(options(inicio:), ',')
+      if (fim == 0) then
+        fim = len_trim(options)
+      else
+        fim = inicio + fim - 2
+      end if
+      item = trim(adjustl(options(inicio:fim)))
+      inicio = fim + 2
+      if (len(item) == 0) cycle
+      p = index(item, '=')
+      if (p <= 1) then
+        call ESMF_LogWrite('regrid: opcao sem valor: '//item, ESMF_LOGMSG_ERROR)
+        rc = ESMF_FAILURE
+        return
+      end if
+      if (.not. any(conhecidas == trim(adjustl(item(1:p-1))))) then
+        call ESMF_LogWrite('regrid: opcao desconhecida: '//item(1:p-1), ESMF_LOGMSG_ERROR)
+        rc = ESMF_FAILURE
+        return
+      end if
+    end do
+  end subroutine regrid_options_check
+
+  !> Texto do valor da chave em options ('chave=valor', separados por
+  !! vírgula; espaços em volta são ignorados). Vale a primeira ocorrência.
+  subroutine option_text(options, chave, texto, achou)
+    character(len=*), intent(in)  :: options, chave
+    character(len=*), intent(out) :: texto
+    logical,          intent(out) :: achou
+
+    integer :: inicio, fim, p
+    character(len=:), allocatable :: item
+
+    texto = ''
+    achou = .false.
+    inicio = 1
+    do while (inicio <= len_trim(options))
+      fim = index(options(inicio:), ',')
+      if (fim == 0) then
+        fim = len_trim(options)
+      else
+        fim = inicio + fim - 2
+      end if
+      item = trim(adjustl(options(inicio:fim)))
+      inicio = fim + 2
+      p = index(item, '=')
+      if (p <= 1) cycle
+      if (trim(adjustl(item(1:p-1))) /= trim(chave)) cycle
+      texto = adjustl(item(p+1:))
+      achou = .true.
+      return
+    end do
+  end subroutine option_text
 
 end module regrid_base_mod

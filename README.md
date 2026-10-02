@@ -70,7 +70,7 @@ MONAN-Coupler/
 │   ├── driver/      esm.F90 (driver NUOPC, RunSequences, partição de PETs)
 │   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_exchange (trocas por fase), med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS), ocean (MOM6), ice (SIS2)
-│   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit)
+│   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit, idw), lista em regrid_schemes.F90
 │   ├── coupling/    mapa de acoplamento: malhas regulares (cpl_grids), dicionário de campos (cpl_fields), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
@@ -96,7 +96,7 @@ Convenções para código novo:
 | Componentes e conectores | registrar pelo `add_model` e `add_connector` de `esm.F90` |
 | Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` (scripts de `tools/`: `docs/historico-scripts.md`) |
 | Novo fonte | incluir em `SRCS` e declarar suas dependências no `Makefile` |
-| Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente. No mediador, a rota é criada por `cria_rota` (`med_cap_methods`), com a configuração da sua linha em `ROTAS` (`src/coupling/cpl_map.F90`); rota nova ganha uma linha na tabela |
+| Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente. No mediador, a rota é criada por `cria_rota` (`med_cap_methods`), com a configuração da sua linha em `ROTAS` (`src/coupling/cpl_map.F90`); rota nova ganha uma linha na tabela. Esquema novo: um arquivo em `src/regrid/`, a partir do modelo `regrid_idw.F90` (base de pesos), e uma linha em `regrid_schemes.F90`; opções do esquema em texto (`regrid_options` no `&nuopc_regrid`) |
 | Campos trocados | todo campo novo ganha uma linha em `CAMPOS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `TROCAS` (`src/coupling/cpl_map.F90`); campo que um modelo exporta, a linha em `EXPORTACOES`, na ordem do anúncio; rota nova ou alterada, a linha em `ROTAS`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
 | Malhas | grade latitude e longitude criada por `cpl_malha_latlon` grade tripolar do supergrid do MOM6 por `cpl_malha_tripolar` e grade do cap do MOM6 nos blocos do modelo por `cpl_malha_de_blocos` (`src/coupling/cpl_grids.F90`), com a decomposição de `cpl_regdecomp` ou os blocos do modelo (`cpl_blocos_t`); fórmula de centro, canto ou índice nova vira função em `cpl_grids`, uma por regra de arredondamento |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |

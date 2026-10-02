@@ -10,11 +10,15 @@
 !!     regrid_route(1)   = 'ocn2atm_sst'
 !!     regrid_scheme(1)  = 'weights_file'
 !!     regrid_weights(1) = 'INPUT/pesos_ocn2atm.nc'
+!!     regrid_route(2)   = 'ocn2atm'
+!!     regrid_scheme(2)  = 'idw'
+!!     regrid_options(2) = 'vizinhos=4,expoente=2'
 !!   /
 !!
 !! Cada rota criada é registrada no log do PET 0, numa linha do relatório de
 !! acoplamento (prefixo CPL-REL:, ver src/coupling/cpl_check.F90): esquema,
-!! métodos pedidos, máscara na origem e método aceito, ou a reserva usada.
+!! métodos pedidos, máscara na origem, opções do esquema (só se houver) e
+!! método aceito, ou a reserva usada.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -25,7 +29,7 @@ module regrid_manager_mod
                                   NAME_LEN, MAX_METHODS
   use regrid_registry_mod, only : regrid_create
   use coupler_config_mod,  only : cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
-                                  cfg_regrid_weights, cfg_regrid_class
+                                  cfg_regrid_weights, cfg_regrid_class, cfg_regrid_options
 
   implicit none
   private
@@ -62,15 +66,16 @@ contains
 
   !> Monta um regrid_spec_t a partir de uma lista de métodos separados por
   !! vírgula ('conserve,bilinear').
-  function regrid_spec(methods, scheme, mask_src, zero_total, nan_value) result(spec)
+  function regrid_spec(methods, scheme, mask_src, zero_total, nan_value, options) result(spec)
     character(len=*),   intent(in)           :: methods
-    character(len=*),   intent(in), optional :: scheme
+    character(len=*),   intent(in), optional :: scheme, options
     logical,            intent(in), optional :: mask_src, zero_total
     real(ESMF_KIND_R8), intent(in), optional :: nan_value
     type(regrid_spec_t) :: spec
 
     call split_methods(methods, spec%methods)
     if (present(scheme))     spec%scheme     = scheme
+    if (present(options))    spec%options    = options
     if (present(mask_src))   spec%mask_src   = mask_src
     if (present(zero_total)) spec%zero_total = zero_total
     if (present(nan_value)) then
@@ -152,6 +157,7 @@ contains
     end do
     if (len_trim(spec%methods(1)) == 0) line = line//'-'
     line = line//', mascara '//trim(merge('sim', 'nao', spec%mask_src))
+    if (len_trim(spec%options) > 0) line = line//', opcoes '//trim(spec%options)
     if (this%routes(k)%alias > 0) then
       line = line//', nenhum metodo aceito, usa a reserva '// &
              trim(this%routes(this%routes(k)%alias)%name)
@@ -326,6 +332,7 @@ contains
       if (len_trim(cfg_regrid_methods(k)) > 0) call split_methods(cfg_regrid_methods(k), spec%methods)
       if (len_trim(cfg_regrid_weights(k)) > 0) spec%weights_file = cfg_regrid_weights(k)
       if (len_trim(cfg_regrid_class(k))   > 0) spec%field_class  = cfg_regrid_class(k)
+      if (len_trim(cfg_regrid_options(k)) > 0) spec%options      = cfg_regrid_options(k)
       call ESMF_LogWrite('regrid: rota '//trim(name)//' configurada por &nuopc_regrid', &
         ESMF_LOGMSG_INFO)
       return

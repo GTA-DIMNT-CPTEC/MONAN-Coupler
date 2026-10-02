@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6) e na R-FASE11-22 (seções 2, 3.5 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6), na R-FASE11-22 (seções 2, 3.5 e 6) e na R-FASE11-23 (seções 3.8 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -354,6 +354,18 @@ Desde a R-FASE11-17, a inicialização também é uma fase de `med_exchange`: `i
 - **Opções em texto** (`'expoente=2,vizinhos=4'`), lidas pelo próprio esquema.
 - **Uma lista de esquemas** em `regrid_schemes.F90`, com um modelo de esquema e o teste `compara-esquema.bash`.
 
+Feito na R-FASE11-23:
+
+| Peça | Onde | Como ficou |
+| --- | --- | --- |
+| base de pesos | `regrid_weights_base.F90` | `weights_regridder_t`, com `calcula_pesos(origem, destino, fator, orig, dest, rc)` diferida. Os pontos são do tipo `regrid_pontos_t` (longitude e latitude em graus, máscara e índice global, o sequencial do ESMF): a origem inteira em cada processo, ordenada pelo índice, e o destino só com os pontos locais. A base guarda os pesos com `ESMF_FieldSMMStore` (`srcTermProcessing=0`), aplica-os com `ESMF_FieldSMM` (`termorder=srcseq`) e libera o *route handle*. Aceita só `ESMF_Grid` de um tile, com um DE por processo |
+| opções em texto | `regrid_base.F90` | `regrid_spec_t%options` (`'chave=valor,...'`), lidas por `regrid_option_real` e `regrid_option_int`, com valor padrão; `regrid_options_check` recusa chave desconhecida. Também no `nuopc.input`, em `regrid_options` do grupo `&nuopc_regrid`. A linha da rota no relatório de acoplamento só mostra as opções quando há alguma |
+| lista de esquemas | `regrid_schemes.F90` | uma linha por esquema (nome e construtor, exportado pelo módulo do esquema), entregue ao catálogo (`regrid_registry`) por uma rotina passada como argumento, o que evita dependência circular; a interface `regridder_ctor` passou para `regrid_base` |
+| modelo de esquema | `regrid_idw.F90` | esquema `idw` (inverso da distância, opções `vizinhos` e `expoente`), comentado como molde; nenhuma rota o usa |
+| teste de esquema | `tests/regrid/compara-esquema.bash` | erro do esquema e de uma referência contra um campo analítico e o mesmo campo, bit a bit, com 1 e com vários processos; conferência `esquemas` do `confere-tudo` |
+
+O `weights_file` não foi reescrito sobre a base: isso mudaria as suas chamadas ao ESMF (leitura própria do arquivo em vez de `ESMF_FieldSMMStore` com o nome do arquivo). O critério "o `weights_file` dá os mesmos pesos" ficou num teste de ida e volta: os pesos do `idw` gravados em arquivo e lidos pelo `weights_file` dão o mesmo campo, bit a bit.
+
 ---
 
 ## 4. Plano de migração: fase 11
@@ -541,7 +553,9 @@ A R-FASE11-21 abriu o bloco F: o driver passou a registrar os conectores pelo ma
 
 A R-FASE11-22 escreveu o método de cada campo no `CplList` (seção 3.5). A condição da etapa foi conferida antes: o relatório dos conectores validado na Jaci mostrava todas as entradas sem `remapmethod` (só `termorder=srcseq` e `srcTermProcessing=0`), e o fonte do conector no ESMF 8.9.1 (`NUOPC_Connector.F90`) usa, sem a opção, o bilinear, sem tratamento dos polos, com `unmappedaction=ignore`, sem extrapolação e sem máscaras. A coluna `metodo` de `TROCAS` recebeu `bilinear` nas 93 trocas por conector, o driver passou a escrever `remapmethod=bilinear` em cada entrada, e a conferência do mapa passou a conferir o método. O relatório de acoplamento muda de propósito: cada linha de campo dos conectores ganha `:remapmethod=bilinear`, e a linha `metodo: padrao do conector (sem remapmethod na CplList)` sai de cada conector.
 
-Próxima etapa: **R-FASE11-23**, conforme a tabela do bloco F: `weights_regridder_t`, opções em texto, `regrid_schemes.F90`, modelo de esquema e `compara-esquema.bash`.
+A R-FASE11-23 completou o framework de interpolação com o que a seção 3.8 previa: a base dos esquemas de pesos, as opções em texto, a lista de esquemas, o modelo `idw` e o teste `compara-esquema.bash`. Os esquemas `esmf`, `weights_file` e `mpassit` só ganharam o construtor exportado, para a lista; as chamadas ao ESMF não mudaram, e nenhuma rota de `ROTAS` mudou de esquema. Desvio do plano, combinado antes da etapa: o `weights_file` continua com a sua implementação (ver seção 3.8).
+
+Próxima etapa: **R-FASE11-24**, conforme a tabela do bloco F: o adaptador do MPAS, com a tradução entre o modelo e o ESMF reunida num módulo e as trocas `cap` declaradas no mapa.
 
 ---
 

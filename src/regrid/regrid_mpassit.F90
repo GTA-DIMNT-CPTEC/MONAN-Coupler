@@ -21,6 +21,7 @@
 module regrid_mpassit_mod
 
   use ESMF
+  use regrid_base_mod, only : regridder_t
   use regrid_esmf_mod, only : esmf_regridder_t, regrid_method_flag
   use coupler_constants_mod, only : RAD2DEG
 
@@ -30,6 +31,7 @@ module regrid_mpassit_mod
   public :: mpassit_regridder_t
   public :: mpas_mesh_create
   public :: mpassit_method
+  public :: new_mpassit
 
   type, extends(esmf_regridder_t) :: mpassit_regridder_t
     !> Posições (i, j), contadas a partir de 1 no array local, dos pontos
@@ -41,6 +43,12 @@ module regrid_mpassit_mod
   end type mpassit_regridder_t
 
 contains
+
+  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  subroutine new_mpassit(r)
+    class(regridder_t), allocatable, intent(out) :: r
+    allocate(mpassit_regridder_t :: r)
+  end subroutine new_mpassit
 
   !> Método do MPASSIT para cada classe de campo.
   pure function mpassit_method(field_class) result(method)

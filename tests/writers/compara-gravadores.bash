@@ -40,7 +40,8 @@ mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
 OBJS="mpas_stubs.o coupler_utils.o coupler_constants.o coupler_config.o nc_writer.o
-      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
+      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_weights_base.o regrid_idw.o regrid_schemes.o
+      regrid_registry.o regrid_manager.o
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o mpas_atm_types.o
       mom6_supergrid.o cpl_grids.o mpas_cap_netcdf.o mpas_import_diag.o med_cap_types.o med_cap_netcdf.o docn_cap_netcdf.o"
 # A versão de referência pode não ter algum objeto da lista (fonte criado

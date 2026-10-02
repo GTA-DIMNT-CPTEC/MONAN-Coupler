@@ -2,38 +2,27 @@
 !! @brief Catálogo dos esquemas de interpolação disponíveis.
 !!
 !! Cada esquema é identificado por um nome e por uma rotina que cria uma
-!! instância vazia dele. Para acrescentar um esquema novo:
-!!   1. escrever um módulo com um tipo que estende regridder_t;
-!!   2. registrá-lo: call regrid_register('meu_esquema', novo_meu_esquema, rc)
-!!      (ou incluí-lo em register_builtins, se for de uso geral);
-!!   3. selecioná-lo em nuopc.input (&nuopc_regrid) ou no regrid_spec_t.
-!! Nenhum outro arquivo do acoplador precisa ser alterado.
+!! instância vazia dele. Os esquemas do acoplador estão na lista de
+!! regrid_schemes.F90, lida na primeira consulta ao catálogo; para
+!! acrescentar um, ver o cabeçalho de regrid_schemes.F90 e o modelo
+!! regrid_idw.F90. Um programa pode ainda registrar um esquema próprio com
+!! call regrid_register('meu_esquema', novo_meu_esquema, rc) e escolhê-lo no
+!! regrid_spec_t ou em nuopc.input (&nuopc_regrid).
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module regrid_registry_mod
 
   use ESMF,               only : ESMF_SUCCESS, ESMF_FAILURE, ESMF_LogWrite, ESMF_LOGMSG_ERROR
-  use regrid_base_mod,    only : regridder_t, NAME_LEN
-  use regrid_esmf_mod,    only : esmf_regridder_t
-  use regrid_weights_mod, only : weights_file_regridder_t
-  use regrid_mpassit_mod, only : mpassit_regridder_t
+  use regrid_base_mod,    only : regridder_t, regridder_ctor, NAME_LEN
+  use regrid_schemes_mod, only : regrid_esquemas_do_acoplador
 
   implicit none
   private
 
-  public :: regridder_ctor
   public :: regrid_register
   public :: regrid_create
   public :: regrid_is_registered
-
-  abstract interface
-    !> Cria uma instância vazia de um esquema.
-    subroutine regridder_ctor(r)
-      import :: regridder_t
-      class(regridder_t), allocatable, intent(out) :: r
-    end subroutine regridder_ctor
-  end interface
 
   type :: entry_t
     character(len=NAME_LEN) :: name = ''
@@ -106,31 +95,14 @@ contains
     end do
   end function find
 
-  !> Esquemas que acompanham o acoplador.
+  !> Esquemas do acoplador (lista de regrid_schemes.F90), uma vez.
   subroutine register_builtins()
     logical, save :: done = .false.
     integer :: rc
 
     if (done) return
     done = .true.
-    call regrid_register('esmf',         new_esmf,    rc)
-    call regrid_register('weights_file', new_weights, rc)
-    call regrid_register('mpassit',      new_mpassit, rc)
+    call regrid_esquemas_do_acoplador(regrid_register, rc)
   end subroutine register_builtins
-
-  subroutine new_esmf(r)
-    class(regridder_t), allocatable, intent(out) :: r
-    allocate(esmf_regridder_t :: r)
-  end subroutine new_esmf
-
-  subroutine new_weights(r)
-    class(regridder_t), allocatable, intent(out) :: r
-    allocate(weights_file_regridder_t :: r)
-  end subroutine new_weights
-
-  subroutine new_mpassit(r)
-    class(regridder_t), allocatable, intent(out) :: r
-    allocate(mpassit_regridder_t :: r)
-  end subroutine new_mpassit
 
 end module regrid_registry_mod

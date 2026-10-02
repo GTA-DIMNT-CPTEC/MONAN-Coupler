@@ -19,6 +19,7 @@ module regrid_esmf_mod
 
   public :: esmf_regridder_t
   public :: regrid_method_flag
+  public :: new_esmf
 
   type, extends(regridder_t) :: esmf_regridder_t
     type(ESMF_RouteHandle) :: rh
@@ -30,6 +31,12 @@ module regrid_esmf_mod
   end type esmf_regridder_t
 
 contains
+
+  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  subroutine new_esmf(r)
+    class(regridder_t), allocatable, intent(out) :: r
+    allocate(esmf_regridder_t :: r)
+  end subroutine new_esmf
 
   subroutine esmf_setup(this, src, dst, rc)
     class(esmf_regridder_t), intent(inout) :: this

@@ -112,6 +112,7 @@ module coupler_config_mod
   character(len=64),  public, protected :: cfg_regrid_methods(MAX_REGRID_OVERRIDES) = ''
   character(len=256), public, protected :: cfg_regrid_weights(MAX_REGRID_OVERRIDES) = ''
   character(len=32),  public, protected :: cfg_regrid_class(MAX_REGRID_OVERRIDES)   = ''
+  character(len=128), public, protected :: cfg_regrid_options(MAX_REGRID_OVERRIDES) = ''
 
 contains
 
@@ -155,6 +156,7 @@ contains
     character(len=64)  :: regrid_methods(MAX_REGRID_OVERRIDES)
     character(len=256) :: regrid_weights(MAX_REGRID_OVERRIDES)
     character(len=32)  :: regrid_class(MAX_REGRID_OVERRIDES)
+    character(len=128) :: regrid_options(MAX_REGRID_OVERRIDES)
 
     namelist /nuopc_driver/    start_date, stop_date, dt_coupling, dt_atm, &
                                log_dir, log_kind, write_fixdiag
@@ -174,7 +176,7 @@ contains
                                ocn_pet_count, ice_pet_count, use_sis2_dynamic, &
                                seq_repro
     namelist /nuopc_regrid/    regrid_route, regrid_scheme, regrid_methods, &
-                               regrid_weights, regrid_class
+                               regrid_weights, regrid_class, regrid_options
 
     character(len=512) :: fpath
     logical :: exists, is_root
@@ -216,6 +218,7 @@ contains
     regrid_route = cfg_regrid_route;  regrid_scheme = cfg_regrid_scheme
     regrid_methods = cfg_regrid_methods;  regrid_weights = cfg_regrid_weights
     regrid_class = cfg_regrid_class
+    regrid_options = cfg_regrid_options
 
     ! 2. Localizar o arquivo
     if (present(file_path)) then
@@ -315,6 +318,7 @@ contains
     cfg_regrid_route = regrid_route;  cfg_regrid_scheme = regrid_scheme
     cfg_regrid_methods = regrid_methods;  cfg_regrid_weights = regrid_weights
     cfg_regrid_class = regrid_class
+    cfg_regrid_options = regrid_options
 
   contains
 

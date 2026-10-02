@@ -150,6 +150,7 @@ LDLIBS := $(MPAS_LIBS) $(ESMF_LIBS) $(MOM6_LIBS) -lz -ldl -lm -lgomp
 SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
         mom6_supergrid nc_writer cap_common                               \
         regrid_base regrid_esmf regrid_weights regrid_mpassit             \
+        regrid_weights_base regrid_idw regrid_schemes                     \
         regrid_registry regrid_manager                                    \
         cpl_grids cpl_fields cpl_map cpl_check                            \
         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
@@ -220,10 +221,13 @@ $(OBJDIR)/mpas_cell_binning.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_u
 $(OBJDIR)/mpas_import_diag.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/mpi_allreduce_wrappers.o: $(OBJDIR)/mpi_allreduce_i4.o $(OBJDIR)/mpi_allreduce_r8.o
 $(OBJDIR)/regrid_esmf.o: $(OBJDIR)/regrid_base.o
+$(OBJDIR)/regrid_idw.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_weights_base.o
 $(OBJDIR)/regrid_manager.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_registry.o
-$(OBJDIR)/regrid_mpassit.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_esmf.o
-$(OBJDIR)/regrid_registry.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o $(OBJDIR)/regrid_mpassit.o $(OBJDIR)/regrid_weights.o
+$(OBJDIR)/regrid_mpassit.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o
+$(OBJDIR)/regrid_registry.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_schemes.o
+$(OBJDIR)/regrid_schemes.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o $(OBJDIR)/regrid_idw.o $(OBJDIR)/regrid_mpassit.o $(OBJDIR)/regrid_weights.o
 $(OBJDIR)/regrid_weights.o: $(OBJDIR)/regrid_base.o
+$(OBJDIR)/regrid_weights_base.o: $(OBJDIR)/regrid_base.o
 $(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom6_supergrid.o $(OBJDIR)/sis_cap_fields.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/sis_cap_fields.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/time_utils.o: $(OBJDIR)/mom_cap_methods.o

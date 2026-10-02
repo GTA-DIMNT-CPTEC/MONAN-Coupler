@@ -33,6 +33,7 @@ Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são
 | `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
 | `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
 | `tests/cplcheck/confere-cplcheck.bash` | num driver NUOPC com as listas de campos de hoje, a conferência do mapa (`cpl_check`) dá 0 diferenças, e acusa os defeitos plantados? |
+| `tests/regrid/compara-esquema.bash ESQUEMA [OPCOES]` | um esquema de interpolação (por exemplo, um novo, escrito a partir do modelo `regrid_idw.F90`) erra quanto, comparado a uma referência, e dá o mesmo campo, bit a bit, com 1 e com vários processos? |
 
 ### 2.0 Todas as conferências de uma vez
 
@@ -41,7 +42,7 @@ export ESMFMKFILE=/caminho/para/esmf.mk
 tools/dev/confere-tudo.bash HEAD
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.14 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.15 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
 
 ```
 Resumo (referência: HEAD)
@@ -49,6 +50,7 @@ Resumo (referência: HEAD)
   avisos       OK                              33 s
   literais     OK                               0 s
   regrid       OK                              27 s
+  esquemas     OK                               8 s
   gravadores   OK                              86 s
   bulk         OK                              82 s
   grade        OK                              83 s
@@ -70,6 +72,7 @@ O que cada linha confere:
 | `literais` | alguma constante de texto mudou (seção 2.2) |
 | `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
 | `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
+| `esquemas` | o esquema modelo `idw`, em `compara-esquema.bash`, não roda ou dá campos diferentes com 1 e com 4 processos (seção 2.15) |
 | `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
 | `malhas` | o teste de regressão da seção 2.13 acusa diferença |
 | `completar` | o teste de regressão da seção 2.14 acusa diferença |
@@ -311,6 +314,14 @@ tests/completar/compara-completar.bash HEAD
 Desde a R-FASE11-14, a SST na malha de fluxo e a fração de gelo exportada ao oceano são completadas por vizinhança pela rota (coluna `completar` de `ROTAS`), e não mais por chamadas à parte em `med_ocean` e `med_export`. Este teste compila a versão do commit `REV` e a da árvore de trabalho, liga a cada uma o programa `tests/completar/test_completar.F90` e o executa com 1, 4, 6 e 8 processos MPI (variável `LISTA_NP`). O programa monta o mediador como na inicialização (anúncio dos campos pelo mapa, `create_atm_grid`, `create_ocn_grid` com o supergrid sintético, `realize_component_fields`, `create_internal_fields`, `idc_create_routes`) e roda três passos de `update_ocean_fields_on_atm_grid` e `export_to_components`, com uma SST que tem pontos abaixo de 270 K, acima de 310 K e NaN, e uma fração de gelo entre -0,2 e 1,2. No passo 1 a máscara do oceano é uniforme, e a SST passa pela rota `ocn2atm`, completada como a `ocn2atm_sst`; nos passos 2 e 3 a máscara tem terra, e a rota `ocn2atm_sst` é criada e usada. Têm de ser idênticos, bit a bit: a SST e (desde a R-FASE11-18) os campos do gelo na malha de fluxo e todos os campos do `exportState`, com o carimbo de tempo de cada um (desde a R-FASE11-15), em cada passo e em cada PET; e as contagens de pontos completados. No log do ESMF, sem data e hora, as linhas `CPL-REL:` do relatório (rotas e `relata_completas`) têm de ser as mesmas e na mesma ordem; as demais mensagens do mediador e do framework de interpolação, as mesmas, em qualquer ordem (a R-FASE11-18 antecipou a criação de rotas dentro do passo, e com ela algumas mensagens). Desde a R-FASE11-18, o SIS2 está ligado, como na produção, com campos `*_sis2` sintéticos, e há um quinto caso, `mista4` (4 processos, argumento `mista`), em que a máscara do oceano já tem terra no passo 1 e todas as rotas do passo são criadas no mesmo passo. Conferido ao contrário: trocar a ordem de criação da `ocn2atm_sst` e da `ocn2atm_ice`, ou da `ocn2atm_landmask` e da `atm2ocn_ice`, faz o relatório diferir. Conferido ao contrário: tirar o preenchimento da SST no passo da máscara uniforme faz os arquivos e os logs diferirem.
 
 O programa usa só interfaces que existem desde a R-FASE11-12 (tag `fase11-12-validada`), com exceção das fases de `med_exchange`. Desde a R-FASE11-15, a exportação é a fase `entregar`; quando o `med_exchange.F90` da versão compilada a tem, o script compila o programa com `-DCOM_ENTREGAR`, e ele chama `entregar`; sem ela, repete a sequência que o `MediatorAdvance` fazia até a R-FASE11-14 (`export_to_components`, `stamp_export_fields` e, com `use_med_to_mpas`, `RouteOcnToAtm`). Do mesmo modo, desde a R-FASE11-16, `-DCOM_IR_PARA` faz o programa chamar `ir_para_malha_de_fluxo`; sem ela, ele chama `update_ocean_fields_on_atm_grid` e `update_ice_fraction_from_docn`, como o `MediatorAdvance` até a R-FASE11-15. E, desde a R-FASE11-17, `-DCOM_INICIO` faz o programa montar as rotas da inicialização por `prepara_inicio` (`med_exchange`); sem ela, por `idc_create_routes` (`med_init`). Conferido ao contrário: criar as rotas de `cria_rotas_inicio` na ordem inversa da tabela faz os logs diferirem. O relógio tem passo de 1 h, o carimbo dos campos é o fim do passo (como no modo concorrente) e `use_med_to_mpas` fica ligado só no passo 2, para que os dois carimbos difiram. Conferido ao contrário: carimbar pelo relógio antes de carimbar os campos, em `entregar`, faz os arquivos diferirem. O teste da física bulk (seção 2.5) não passa por esses caminhos: ele chama `calc_bulk_ncar` com os campos já na malha de fluxo.
+
+### 2.15 Teste de um esquema de interpolação
+
+```bash
+tests/regrid/compara-esquema.bash idw 'vizinhos=4,expoente=2'
+```
+
+Desde a R-FASE11-23, um esquema de interpolação pode ser escrito só com pesos, a partir do modelo `src/regrid/regrid_idw.F90` (seção 3.8 do documento de arquitetura e `docs/interpolacao-plugavel.md`). Este script é a conferência de quem escreve um esquema: compila `tests/regrid/test_esquema.F90` e interpola o campo analítico f = 2 + cos(lat) cos(lon) de uma grade global de 4 graus para uma de 1 grau, com o esquema pedido (e as suas opções) e com uma referência, um método do esquema `esmf` (padrão: `bilinear`; terceiro argumento). Roda com 1 processo e com `NP` (padrão 4) e mostra, para cada rodada, o método usado, o erro máximo e o médio do esquema e da referência contra a função (só onde |lat| < 85 graus) e a diferença máxima entre os dois. Passa se as duas rodadas terminam e o campo do esquema é o mesmo, bit a bit, com 1 e com `NP` processos. Um esquema que não roda (opção desconhecida, por exemplo) aparece como falha, com as mensagens de erro do log. O `confere-tudo.bash` roda o modelo `idw`, que hoje dá erro máximo de 2,6e-2 e médio de 4,9e-3 (o bilinear do ESMF, 1,1e-3 e 3,0e-4). Leva menos de 10 segundos.
 
 ## 3. Interfaces mínimas
 

@@ -33,7 +33,8 @@ ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS
 # de acoplamento (cpl_grids, cpl_fields, cpl_map, cpl_check), com o que eles usam (mpas_stubs.o são
 # as interfaces mínimas do MPAS).
 OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writer.o
-      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_registry.o regrid_manager.o
+      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_weights_base.o regrid_idw.o regrid_schemes.o
+      regrid_registry.o regrid_manager.o
       mom6_supergrid.o cpl_grids.o cpl_fields.o cpl_map.o cpl_check.o
       med_cap_types.o med_cap_methods.o med_bulk_ncar.o med_diag.o
       mpas_stubs.o mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o

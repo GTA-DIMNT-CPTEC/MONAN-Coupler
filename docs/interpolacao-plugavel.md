@@ -40,11 +40,14 @@ end type
 
 | Módulo | Papel |
 | --- | --- |
-| `regrid_base` | `regridder_t`, `regrid_spec_t`, `regrid_fill_t` e o preenchimento por vizinhança (`neighbor_fill`) |
+| `regrid_base` | `regridder_t`, `regrid_spec_t`, `regrid_fill_t`, o preenchimento por vizinhança (`neighbor_fill`), a interface dos construtores (`regridder_ctor`) e a leitura das opções em texto (`regrid_option_real`, `regrid_option_int`, `regrid_options_check`) |
 | `regrid_esmf` | Esquema `esmf`: pesos calculados pelo ESMF, com cadeia de métodos |
 | `regrid_weights` | Esquema `weights_file`: pesos lidos de arquivo SCRIP/ESMF (variáveis `row`, `col`, `S`) |
 | `regrid_mpassit` | Esquema `mpassit` e `mpas_mesh_create` (malha ESMF a partir das células Voronoi do MPAS) |
-| `regrid_registry` | Catálogo de esquemas: nome e rotina que cria uma instância |
+| `regrid_weights_base` | Base dos esquemas de pesos (`weights_regridder_t`): o esquema escreve só `calcula_pesos`, com arrays do Fortran (desde a R-FASE11-23) |
+| `regrid_idw` | Esquema `idw` (inverso da distância), escrito sobre a base de pesos; é o modelo de esquema (desde a R-FASE11-23) |
+| `regrid_schemes` | Lista dos esquemas do acoplador: uma linha por esquema, com o nome e o construtor (desde a R-FASE11-23) |
+| `regrid_registry` | Catálogo de esquemas: nome e rotina que cria uma instância; lê a lista de `regrid_schemes` na primeira consulta |
 | `regrid_manager` | Rotas com nome, rota de reserva e troca por `nuopc.input` (`&nuopc_regrid`) |
 
 Uso num componente:
@@ -59,11 +62,26 @@ Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manag
 
 ## Como acrescentar um esquema
 
-1. Criar um módulo com um tipo que estende `regridder_t` e implementa `setup`, `execute` e `release`.
-2. Registrá-lo: `call regrid_register('meu_esquema', novo_meu_esquema, rc)`, ou incluí-lo em `register_builtins` (em `regrid_registry.F90`) se for de uso geral.
-3. Selecioná-lo para uma rota em `nuopc.input` (`regrid_scheme(k) = 'meu_esquema'`).
+Desde a R-FASE11-23, o caminho mais curto é um esquema de pesos, a partir do modelo `src/regrid/regrid_idw.F90`:
 
-O teste `tests/regrid/identity_scheme.F90` é um exemplo mínimo completo.
+1. Copiar `regrid_idw.F90` para `src/regrid/regrid_<nome>.F90` e trocar `idw` pelo nome do esquema no módulo, no tipo e no construtor.
+2. Escrever `calcula_pesos`. Ela recebe os pontos de origem (todos, ordenados pelo índice global) e os de destino (os locais), com longitude e latitude em graus, máscara e índice global, e devolve três arrays: o fator, o índice de origem e o índice de destino de cada peso. Não usa o ESMF: a base (`weights_regridder_t`) guarda os pesos no ESMF (`ESMF_FieldSMMStore`, com `srcTermProcessing = 0`), aplica-os na ordem do índice de origem (`termorder = srcseq`), o que dá o mesmo resultado, bit a bit, com qualquer número de processos, e os libera.
+3. Ler as opções com `regrid_option_real` e `regrid_option_int` e recusar as desconhecidas com `regrid_options_check`.
+4. Acrescentar uma linha na lista de `src/regrid/regrid_schemes.F90` (`call registra('<nome>', new_<nome>, rc)`) e o arquivo no `Makefile` (`SRCS` e dependências).
+5. Conferir com `tests/regrid/compara-esquema.bash <nome> '<opções>'` (seção 2.15 de `docs/conferencias-locais.md`).
+6. Selecioná-lo para uma rota: na coluna `esquema` de `ROTAS` (`src/coupling/cpl_map.F90`), ou só no `nuopc.input`, para experimentar:
+
+```fortran
+&nuopc_regrid
+  regrid_route(1)   = 'ocn2atm'
+  regrid_scheme(1)  = 'idw'
+  regrid_options(1) = 'vizinhos=4,expoente=2'
+/
+```
+
+Limites da base de pesos: campos em `ESMF_Grid` de um tile, com coordenadas no centro das células e um DE por processo; a máscara de origem é a da grade (`ESMF_GRIDITEM_MASK`), como no esquema `esmf`. Os pesos calculados ficam no esquema (`fator`, `origem_k`, `destino_k`) e podem ser gravados no formato SCRIP/ESMF e lidos depois pelo esquema `weights_file`, com resultado idêntico.
+
+Um esquema que não é só de pesos (como o `mpassit`, que corrige os pontos não alcançados depois da interpolação) estende `regridder_t` e implementa `setup`, `execute` e `release`; o teste `tests/regrid/identity_scheme.F90` é um exemplo mínimo, e tem também um esquema de pesos mínimo (`pesos_identidade_t`). Um programa pode ainda registrar um esquema próprio sem mexer na lista, com `call regrid_register('meu_esquema', novo_meu_esquema, rc)`, como os testes.
 
 ## MPASSIT
 
@@ -82,4 +100,4 @@ export ESMFMKFILE=...        # esmf.mk do ESMF instalado
 make test NP=2               # na raiz do repositório
 ```
 
-Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha; e, com uma origem regional, que a rota de reserva usa o `zero_total`, o preenchimento por vizinhança e a troca de NaN da rota pedida; que o preenchimento pela rota dá, bit a bit, o mesmo campo e as mesmas contagens que `neighbor_fill` chamado à parte depois da interpolação, também com o preenchimento passado na chamada; e que ele vem antes da troca de NaN. Passam com 1, 2, 3 e 4 processos.
+Os testes verificam: bilinear dentro da tolerância; cadeia de métodos; rota de reserva; pesos de arquivo idênticos, bit a bit, ao cálculo online; esquema externo registrado em tempo de execução; preenchimento por vizinhança; esquema `mpassit` numa malha poligonal sintética, com valor de ausência fora da malha; e, com uma origem regional, que a rota de reserva usa o `zero_total`, o preenchimento por vizinhança e a troca de NaN da rota pedida; que o preenchimento pela rota dá, bit a bit, o mesmo campo e as mesmas contagens que `neighbor_fill` chamado à parte depois da interpolação, também com o preenchimento passado na chamada; e que ele vem antes da troca de NaN. Desde a R-FASE11-23, também: a base de pesos com pesos de identidade copia o campo, bit a bit; o `idw` com `vizinhos=1` dá o mesmo campo, bit a bit, que o `nearest_stod` do ESMF; o `idw` padrão erra menos de 3e-2; opção desconhecida e valor inválido são recusados; a leitura das opções em texto; e os pesos do `idw` gravados em arquivo e lidos pelo `weights_file` dão o mesmo campo, bit a bit. Passam com 1, 2, 3 e 4 processos. O script `tests/regrid/compara-esquema.bash` confere um esquema contra uma referência, com 1 e com vários processos (seção 2.15 de `docs/conferencias-locais.md`).
