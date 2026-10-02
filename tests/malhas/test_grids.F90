@@ -1,4 +1,4 @@
-!> @file test_malhas.F90
+!> @file test_grids.F90
 !! @brief Grava as coordenadas das malhas do mediador e do cap atmosférico.
 !!
 !! Cria, e grava em saida_<PET>.bin, para cada DE local, os limites
@@ -15,14 +15,14 @@
 !! Usa só as interfaces que essas rotinas tinham antes de cpl_grids, para
 !! que o mesmo programa sirva às duas versões comparadas por
 !! compara-malhas.bash. Desde a R-FASE11-24, mpas_create_grid está no
-!! adaptador do MPAS (mpas_adaptador_mod); o script compila com
+!! adaptador do MPAS (mpas_adapter_mod); o script compila com
 !! -DCOM_ADAPTADOR a versão que o tem. O hgrid.nc vem de tests/supergrid/gera-supergrid.py.
-program test_malhas
+program test_grids
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use med_init_mod,          only : create_atm_grid
 #ifdef COM_ADAPTADOR
-  use mpas_adaptador_mod,    only : mpas_create_grid
+  use mpas_adapter_mod,      only : mpas_create_grid
 #else
   use mpas_cap_methods_mod,  only : mpas_create_grid
 #endif
@@ -32,9 +32,9 @@ program test_malhas
   implicit none
 
   type(ESMF_VM)   :: vm
-  type(ESMF_Grid) :: grade_med, grade_cap, grade_ocn, grade_docn
+  type(ESMF_Grid) :: med_grid, cap_grid, ocn_grid, docn_grid
   integer :: rc, localPet, petCount, un, nx, ny
-  character(len=32) :: arquivo
+  character(len=32) :: file_name
 
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, &
                        defaultLogFileName='teste_malhas', &
@@ -44,15 +44,15 @@ program test_malhas
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
 
   rc = ESMF_SUCCESS
-  call create_atm_grid(petCount, ATM_NX, ATM_NY, grade_med, rc)
+  call create_atm_grid(petCount, ATM_NX, ATM_NY, med_grid, rc)
   if (rc /= ESMF_SUCCESS) error stop 'create_atm_grid'
-  call mpas_create_grid(grade_cap, rc)
+  call mpas_create_grid(cap_grid, rc)
   if (rc /= ESMF_SUCCESS) error stop 'mpas_create_grid'
 
   ! Oceano no mediador com o MOM6 (supergrid sintético) e com o DOCN
   if (localPet == 0) then
-    call escreve_nml('mom6.nml', '.false.')
-    call escreve_nml('docn.nml', '.true.')
+    call write_nml('mom6.nml', '.false.')
+    call write_nml('docn.nml', '.true.')
   end if
   call ESMF_VMBarrier(vm, rc=rc)
   call config_read(rc, 'mom6.nml')
@@ -60,25 +60,25 @@ program test_malhas
   call mom6_supergrid_dims('hgrid.nc', nx, ny, rc)
   if (rc /= ESMF_SUCCESS) error stop 'mom6_supergrid_dims'
   rc = ESMF_SUCCESS
-  call create_ocn_grid(petCount, nx, ny, grade_ocn, rc)
+  call create_ocn_grid(petCount, nx, ny, ocn_grid, rc)
   if (rc /= ESMF_SUCCESS) error stop 'create_ocn_grid (MOM6)'
   call config_read(rc, 'docn.nml')
   if (rc /= ESMF_SUCCESS) error stop 'config_read docn.nml'
   rc = ESMF_SUCCESS
-  call create_ocn_grid(petCount, 36, 18, grade_docn, rc)
+  call create_ocn_grid(petCount, 36, 18, docn_grid, rc)
   if (rc /= ESMF_SUCCESS) error stop 'create_ocn_grid (DOCN)'
 
-  write(arquivo, '(A,I0,A)') 'saida_', localPet, '.bin'
-  open(newunit=un, file=trim(arquivo), access='stream', form='unformatted', status='replace')
-  call grava(un, grade_med, ESMF_STAGGERLOC_CENTER)
-  call grava(un, grade_med, ESMF_STAGGERLOC_CORNER)
-  call grava(un, grade_cap, ESMF_STAGGERLOC_CENTER)
-  call grava(un, grade_ocn, ESMF_STAGGERLOC_CENTER)
-  call grava(un, grade_ocn, ESMF_STAGGERLOC_CORNER)
-  call grava_mascara(un, grade_ocn)
-  call grava(un, grade_docn, ESMF_STAGGERLOC_CENTER)
-  call grava(un, grade_docn, ESMF_STAGGERLOC_CORNER)
-  call grava_mascara(un, grade_docn)
+  write(file_name, '(A,I0,A)') 'saida_', localPet, '.bin'
+  open(newunit=un, file=trim(file_name), access='stream', form='unformatted', status='replace')
+  call write_grid(un, med_grid, ESMF_STAGGERLOC_CENTER)
+  call write_grid(un, med_grid, ESMF_STAGGERLOC_CORNER)
+  call write_grid(un, cap_grid, ESMF_STAGGERLOC_CENTER)
+  call write_grid(un, ocn_grid, ESMF_STAGGERLOC_CENTER)
+  call write_grid(un, ocn_grid, ESMF_STAGGERLOC_CORNER)
+  call write_mask(un, ocn_grid)
+  call write_grid(un, docn_grid, ESMF_STAGGERLOC_CENTER)
+  call write_grid(un, docn_grid, ESMF_STAGGERLOC_CORNER)
+  call write_mask(un, docn_grid)
   close(un)
 
   call ESMF_Finalize(rc=rc)
@@ -86,10 +86,10 @@ program test_malhas
 contains
 
   !> Configuração com use_docn dado, o supergrid sintético e a grade do DOCN.
-  subroutine escreve_nml(arquivo, use_docn)
-    character(len=*), intent(in) :: arquivo, use_docn
+  subroutine write_nml(file_name, use_docn)
+    character(len=*), intent(in) :: file_name, use_docn
     integer :: u
-    open(newunit=u, file=arquivo, status='replace', action='write')
+    open(newunit=u, file=file_name, status='replace', action='write')
     write(u,'(A)') '&nuopc_mode'
     write(u,'(2A)') '  use_docn = ', use_docn
     write(u,'(A)') '/'
@@ -100,10 +100,10 @@ contains
     write(u,'(A)') "  mesh_ocn = 'hgrid.nc'"
     write(u,'(A)') '/'
     close(u)
-  end subroutine escreve_nml
+  end subroutine write_nml
 
   !> Para cada DE local: limites e valores do item de máscara (centros).
-  subroutine grava_mascara(un, grade)
+  subroutine write_mask(un, grade)
     integer,         intent(in) :: un
     type(ESMF_Grid), intent(in) :: grade
     integer(ESMF_KIND_I4), pointer :: m(:,:)
@@ -120,11 +120,11 @@ contains
       write(un) lde, lbound(m), ubound(m)
       write(un) m
     end do
-  end subroutine grava_mascara
+  end subroutine write_mask
 
   !> Para cada DE local: limites computacionais, limites do vetor e valores,
   !! das duas coordenadas.
-  subroutine grava(un, grade, stagger)
+  subroutine write_grid(un, grade, stagger)
     integer,                intent(in) :: un
     type(ESMF_Grid),        intent(in) :: grade
     type(ESMF_StaggerLoc),  intent(in) :: stagger
@@ -145,6 +145,6 @@ contains
         write(un) c
       end do
     end do
-  end subroutine grava
+  end subroutine write_grid
 
-end program test_malhas
+end program test_grids

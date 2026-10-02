@@ -115,7 +115,7 @@ src/regrid/        framework de interpolação (como hoje, mais a base de pesos)
 src/mediator/
   med_exchange.F90 executa as trocas do mediador, por fase
 src/caps/atmos/
-  mpas_adaptador.F90  tradução entre o MONAN-A e o ESMF (desde a R-FASE11-24)
+  mpas_adapter.F90  tradução entre o MONAN-A e o ESMF (desde a R-FASE11-24)
 ```
 
 ### 3.2 Onde escrever cada mudança
@@ -374,12 +374,12 @@ O `weights_file` não foi reescrito sobre a base: isso mudaria as suas chamadas 
 
 ### 3.9 Adaptador do MPAS
 
-Desde a R-FASE11-24, a tradução entre o MONAN-A e o ESMF está num módulo só, `src/caps/atmos/mpas_adaptador.F90`. O dado passa em duas etapas, com as estruturas `atm_public` (exportação) e `atm_bnd` (importação), de `mpas_atm_types`, no meio:
+Desde a R-FASE11-24, a tradução entre o MONAN-A e o ESMF está num módulo só, `src/caps/atmos/mpas_adapter.F90`. O dado passa em duas etapas, com as estruturas `atm_public` (exportação) e `atm_bnd` (importação), de `mpas_atm_types`, no meio:
 
 | Etapa | Módulos | Usa o ESMF |
 | --- | --- | --- |
 | campos do MPAS para `atm_public`, e `atm_bnd` para os campos do MPAS | `mpas_atm_setup`, `mpas_atm_fluxes`, `mpas_atm_model` | não |
-| `atm_public` para o `exportState`, e o `importState` para `atm_bnd` | `mpas_adaptador` | sim |
+| `atm_public` para o `exportState`, e o `importState` para `atm_bnd` | `mpas_adapter` | sim |
 
 O adaptador tem a grade do cap (`mpas_create_grid`), a exportação dos 13 campos `*_mpas` (`mpas_export`, das células à grade do cap pela média por caixa) e a importação dos 7 campos do contorno oceânico (`mpas_import`, cada célula com o valor da caixa que a contém), que são as trocas `cap` do mapa, além do acesso aos campos do `ESMF_State` (`find_local_field`, `state_set_field_1d`, `state_get_field_1d`) e do diagnóstico `state_diagnose`. O algoritmo da média por caixa (`map_cells_to_regular_grid` e as suas etapas) continua em `mpas_cell_binning`, sem acesso ao `ESMF_State`. Os nomes dos campos continuam escritos no adaptador; o teste do mapa confere que as trocas `cap` são exatamente as exportações e as importações do MONAN-A, e a conferência das constantes de texto, que os nomes não mudam.
 
@@ -583,7 +583,7 @@ A R-FASE11-22 escreveu o método de cada campo no `CplList` (seção 3.5). A con
 
 A R-FASE11-23 completou o framework de interpolação com o que a seção 3.8 previa: a base dos esquemas de pesos, as opções em texto, a lista de esquemas, o modelo `idw` e o teste `compara-esquema.bash`. Os esquemas `esmf`, `weights_file` e `mpassit` só ganharam o construtor exportado, para a lista; as chamadas ao ESMF não mudaram, e nenhuma rota de `ROUTES` mudou de esquema. Desvio do plano, combinado antes da etapa: o `weights_file` continua com a sua implementação (ver seção 3.8).
 
-A R-FASE11-24 reuniu a tradução entre o MONAN-A e o ESMF no adaptador do MPAS (seção 3.9): `mpas_cap_methods.F90` virou `mpas_adaptador.F90`, e `find_local_field` e `state_set_field_1d` saíram de `mpas_cell_binning`, que ficou só com o algoritmo da média por caixa. As instruções são as mesmas, conferidas na soma dos arquivos (mudaram só as linhas de `module`, `use` e `public`). As trocas `cap` já estavam declaradas no mapa desde a R-FASE11-02; o teste do mapa passou a conferir que elas são as exportações e as importações do MONAN-A. Ficaram de fora, de propósito, as duas constantes de π locais do adaptador (trocá-las pelas de `coupler_constants` mudaria o último bit) e limpezas de forma (desalocações repetidas, indentação herdada dos BLOCK).
+A R-FASE11-24 reuniu a tradução entre o MONAN-A e o ESMF no adaptador do MPAS (seção 3.9): `mpas_cap_methods.F90` virou `mpas_adapter.F90`, e `find_local_field` e `state_set_field_1d` saíram de `mpas_cell_binning`, que ficou só com o algoritmo da média por caixa. As instruções são as mesmas, conferidas na soma dos arquivos (mudaram só as linhas de `module`, `use` e `public`). As trocas `cap` já estavam declaradas no mapa desde a R-FASE11-02; o teste do mapa passou a conferir que elas são as exportações e as importações do MONAN-A. Ficaram de fora, de propósito, as duas constantes de π locais do adaptador (trocá-las pelas de `coupler_constants` mudaria o último bit) e limpezas de forma (desalocações repetidas, indentação herdada dos BLOCK).
 
 A R-FASE11-25 tornou a conferência do mapa uma barreira (seção 3.6): uma diferença interrompe a inicialização, depois do relatório inteiro. Antes, as lacunas conhecidas das configurações com o DOCN, que a conferência acusava como diferença, foram para a tabela `GAPS` do mapa e passaram a sair como aviso; a lista que estava copiada no `test_cpl_map` saiu. O `test_cpl_check` passou a montar, nas doze configurações válidas, os estados e as `CplList` como a rodada os monta: sem o DATM, nenhuma diferença, e cada lacuna aparece como aviso. O dicionário do NUOPC passou a ter só os nomes de `FIELDS`, sem acréscimo automático; o critério do plano, "uma rodada com um nome errado de propósito tem de parar", ficou no teste `cplcheck` (casos `defeito` e `dicionario`), porque provocá-lo na Jaci exigiria mudar o código. Mudança de comportamento só em erro: com `use_datm`, que o driver não registra, a rodada agora para na conferência.
 

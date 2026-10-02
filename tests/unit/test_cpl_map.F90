@@ -337,7 +337,7 @@ contains
   end subroutine check_methods
 
   !> Trocas 'cap' do MONAN-A (R-FASE11-24), feitas pelo adaptador do MPAS
-  !! (mpas_adaptador): as de ATM@mpas para ATM@atm_cap são exatamente os
+  !! (mpas_adapter): as de ATM@mpas para ATM@atm_cap são exatamente os
   !! campos que o MONAN-A exporta (cpl_exports, os de mpas_export), e as
   !! de ATM@atm_cap para ATM@mpas, na mesma ordem, os que ele importa
   !! (cpl_arrivals por conector, os de mpas_import). O cap consulta o mapa

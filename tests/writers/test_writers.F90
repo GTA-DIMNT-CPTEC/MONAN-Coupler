@@ -127,7 +127,7 @@ contains
     type(ESMF_Field) :: f3(3)
     real(ESMF_KIND_R8), allocatable :: lond(:), latd(:), v1(:), v2(:)
     real(ESMF_KIND_R8), pointer :: p(:,:)
-    character(len=16), parameter :: nomes3(3) = &
+    character(len=16), parameter :: names3(3) = &
       [character(len=16) :: 'Sa_pslv_mpas', 'Faxa_swdn_mpas', 'Sa_tbot_mpas']
     integer :: m, i, j
 
@@ -145,7 +145,7 @@ contains
 
     est = ESMF_StateCreate(name='exp_mpas', rc=rc)
     do m = 1, 3
-      f3(m) = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, name=trim(nomes3(m)), rc=rc)
+      f3(m) = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, name=trim(names3(m)), rc=rc)
       call ESMF_FieldGet(f3(m), farrayPtr=p, rc=rc)
       do j = lbound(p,2), ubound(p,2)
         do i = lbound(p,1), ubound(p,1)
@@ -206,11 +206,11 @@ contains
 
     gc = ESMF_GridCompCreate(name='docn_teste', rc=rc)
     if (localPet == 0) then
-      call cria_nc('in_sst_1.nc', 'time', ['sst '], 4, 1)
-      call cria_nc('in_ice_1.nc', 'time', ['icec'], 4, 2)
-      call cria_nc('in_sst_2.nc', 'TIME', ['sst '], 5, 1)
-      call cria_nc('in_ice_2.nc', 'Time', ['icec'], 3, 3)
-      call cria_nc('in_cur_2.nc', 'time', ['uo  ', 'vo  '], 2, 4)
+      call create_nc('in_sst_1.nc', 'time', ['sst '], 4, 1)
+      call create_nc('in_ice_1.nc', 'time', ['icec'], 4, 2)
+      call create_nc('in_sst_2.nc', 'TIME', ['sst '], 5, 1)
+      call create_nc('in_ice_2.nc', 'Time', ['icec'], 3, 3)
+      call create_nc('in_cur_2.nc', 'time', ['uo  ', 'vo  '], 2, 4)
       call nml('docn_1.nml', 'in_sst_1.nc', 'in_ice_1.nc', '', 86400, '.false.')
       call nml('docn_2.nml', 'in_sst_2.nc', 'in_ice_2.nc', 'in_cur_2.nc', 43200, '.true.')
       call nml('docn_3.nml', 'nao_existe.nc', 'in_ice_1.nc', '', 86400, '.false.')
@@ -249,10 +249,10 @@ contains
   !> Grava um arquivo NetCDF (lon, lat, tempo) com as variáveis pedidas.
   !! tipo 1: SST em graus Celsius; 2: fração de gelo; 3: gelo em %;
   !! 4: correntes. Todos com alguns pontos de valor ausente (1e20).
-  subroutine cria_nc(fname, tdim, vars, nt, tipo)
+  subroutine create_nc(fname, tdim, vars, nt, var_type)
     character(len=*), intent(in) :: fname, tdim
     character(len=*), intent(in) :: vars(:)
-    integer,          intent(in) :: nt, tipo
+    integer,          intent(in) :: nt, var_type
     integer, parameter :: NXD = 36, NYD = 18
     integer :: ncid, dx, dy, dt, v, vid, i, j, t, st
     real(ESMF_KIND_R8) :: a(NXD, NYD, nt)
@@ -268,7 +268,7 @@ contains
       do t = 1, nt
         do j = 1, NYD
           do i = 1, NXD
-            select case (tipo)
+            select case (var_type)
             case (1); a(i,j,t) = 28.0d0*cos(0.17d0*(j-9.5d0)) - 1.8d0 + 0.3d0*t + 0.01d0*i
             case (2); a(i,j,t) = max(0.0d0, min(1.0d0, (abs(j-9.5d0) - 6.0d0)/3.0d0 + 0.05d0*t))
             case (3); a(i,j,t) = max(0.0d0, min(100.0d0, (abs(j-9.5d0) - 6.0d0)*35.0d0 + t + 0.5d0*i))
@@ -282,7 +282,7 @@ contains
       st = nf90_put_var(ncid, vid, a)
     end do
     st = nf90_close(ncid)
-  end subroutine cria_nc
+  end subroutine create_nc
 
   real(ESMF_KIND_R8) function ieee_nan()
     use, intrinsic :: ieee_arithmetic

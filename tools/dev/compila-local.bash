@@ -68,12 +68,13 @@ for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergr
          regrid_registry regrid_manager \
          cpl_grids cpl_fields cpl_map cpl_check \
          mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
-         mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adaptador:mpas_cap_methods mpas_cap_MONAN DATM_cap \
+         mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adapter:mpas_adaptador:mpas_cap_methods mpas_cap_MONAN DATM_cap \
          docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
          med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
          med_diag med_ice med_ocean med_init med_flux med_export med_exchange MED_cap esm; do
   # 'novo:antigo': fonte renomeado; compila o que a versão tiver (o
-  # adaptador do MPAS era mpas_cap_methods até a R-FASE11-23)
+  # adaptador do MPAS era mpas_cap_methods até a R-FASE11-23 e
+  # mpas_adaptador até a R-FASE12-03)
   f=""
   for nome in ${s//:/ }; do
     f=$(find "${RAIZ}/src" -name "${nome}.F90" -not -path '*/upstream/*' | head -1)

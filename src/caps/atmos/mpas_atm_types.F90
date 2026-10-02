@@ -11,7 +11,7 @@
 !!
 !! Depende apenas de mpas_kind_types (sem ESMF).
 !! Usado por: mpas_atm_model_mod, mpas_atm_setup_mod, mpas_atm_fluxes_mod,
-!! mpas_adaptador_mod, mpas_cap_MONAN_mod e mpas_import_diag_mod.
+!! mpas_adapter_mod, mpas_cap_MONAN_mod e mpas_import_diag_mod.
 
 module mpas_atm_types_mod
 
@@ -133,7 +133,7 @@ module mpas_atm_types_mod
   ! ── Condições de contorno vindas do oceano (via mediador) ─────────────────
   !
   ! Campos importados do mediador (conector MED→MPAS) e membro que cada um
-  ! preenche (mpas_import, em mpas_adaptador):
+  ! preenche (mpas_import, em mpas_adapter):
   !   Sx_tsfc   → sst           temperatura de pele composta [K]
   !   Si_ifrac  → ice_fraction  fração de gelo [0–1]
   !   So_u      → uocn          corrente zonal      a 0 m [m/s]

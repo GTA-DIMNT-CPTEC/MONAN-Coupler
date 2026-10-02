@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE12-03 (02/10/2026), terceira etapa da fase 12 (nomes em inglês). Para retomar, comece pela seção 10.
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE12-04 (02/10/2026), quarta etapa da fase 12 (nomes em inglês). Para retomar, comece pela seção 10.
 
 ## 1. O que é o projeto
 
@@ -66,7 +66,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE11-08 | `cpl_grids.F90`: malha de fluxo do mediador e grade do cap atmosférico construídas por `cpl_latlon_grid`, com a decomposição `cpl_regdecomp` e as fórmulas de centro e canto em funções; teste `tests/malhas` (conferência `malhas`) e `test_cpl_grids` |
 | R-FASE11-09 | fórmulas de índice e de longitude das grades regulares (cap atmosférico, gravadores de diagnóstico, mediador, OISST no cap do MOM6) em `cpl_grids`, uma função por regra; equivalência bit a bit conferida em `test_cpl_grids` |
 | R-FASE11-10 | oceano no mediador (`ocn_med`, com o MOM6 e com o DOCN) e malha do SIS2 (`ice_sis2`) construídos por `cpl_grids` (`cpl_tripolar_grid`, `cpl_blocks_t`); teste `malhas` estendido e `tests/malhas/test_malha_gelo.F90` |
-| R-FASE11-11 | grade do cap do MOM6 (`ocn_mom6`) por `cpl_block_grid`, com as chamadas do ESMF de hoje e as coordenadas do modelo (etapa redefinida: o plano original mudaria resultados); `test_malha_gelo.F90` passa a `test_malhas_modelos.F90`, com a grade do MOM6; fim do bloco C |
+| R-FASE11-11 | grade do cap do MOM6 (`ocn_mom6`) por `cpl_block_grid`, com as chamadas do ESMF de hoje e as coordenadas do modelo (etapa redefinida: o plano original mudaria resultados); `test_malha_gelo.F90` passa a `test_model_grids.F90`, com a grade do MOM6; fim do bloco C |
 | R-FASE11-12 | rotas do mediador criadas por `create_route` com a configuração de `ROUTES`; `set_ocn_grid_mask` no lugar das duas cópias da máscara do oceano; teste `test_routes` |
 | R-FASE11-13 | `no_value` e `nan_to` de `ROUTES` aplicados pela rota (`regrid_manager` guarda a configuração de cada rota); chamadas de interpolação sem `zero_total`; NaN de `RegridOrCopy` pela rota `atm2ocn` |
 | R-FASE11-14 | etapa completar pela rota (`regrid_manager%apply`, com as contagens do relatório) na SST e na fração de gelo exportada; `fill_sst_gaps` sai; teste `tests/completar` (conferência `completar`); fim do bloco D |
@@ -79,11 +79,12 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE11-21 | conectores registrados pelo driver a partir do mapa (`cpl_driver_connectors`, lista `CONNECTOR_SRC`/`CONNECTOR_DST` na ordem de registro), no lugar das condições sobre `use_med_to_mpas` e o SIS2; teste `test_connectors`; início do bloco F |
 | R-FASE11-22 | método de cada campo dos conectores pelo mapa: coluna `method` de `EXCHANGES` (`bilinear`, o padrão do conector NUOPC), escrito como `remapmethod` em cada entrada da `CplList` (`cpl_write_methods`, chamada pelo `ModifyCplLists`) e conferido pela conferência do mapa (`cpl_check_methods`) |
 | R-FASE11-23 | framework de interpolação completo: base dos esquemas de pesos (`weights_regridder_t`, `regrid_weights_base.F90`), opções em texto (`regrid_spec_t%options`, `regrid_options` no `&nuopc_regrid`), lista de esquemas (`regrid_schemes.F90`), modelo de esquema `idw` (`regrid_idw.F90`) e teste `tests/regrid/compara-esquema.bash` (conferência `esquemas`); nenhuma rota muda de esquema |
-| R-FASE11-24 | adaptador do MPAS: `mpas_cap_methods.F90` vira `mpas_adaptador.F90`, com `find_local_field` e `state_set_field_1d` vindos de `mpas_cell_binning` (que fica só com o algoritmo da média por caixa), sem mudar instruções; teste do mapa confere as trocas `cap` contra as exportações e importações do MONAN-A |
+| R-FASE11-24 | adaptador do MPAS: `mpas_cap_methods.F90` vira `mpas_adapter.F90`, com `find_local_field` e `state_set_field_1d` vindos de `mpas_cell_binning` (que fica só com o algoritmo da média por caixa), sem mudar instruções; teste do mapa confere as trocas `cap` contra as exportações e importações do MONAN-A |
 | R-FASE11-25 | conferência do mapa interrompe a inicialização quando acha diferença; lacunas conhecidas na tabela `GAPS` do mapa, como aviso; dicionário do NUOPC só com os nomes de `FIELDS` (`cpl_nuopc_dictionary`), sem acréscimo automático; com `use_datm` (DATM não registrado), a rodada para na conferência |
 | R-FASE11-26 | encerramento da fase 11: o cap do MOM6 carimba o tempo por `cap_stamp_export` (último indicador na meta); indicadores finais e "pronto quando" no documento de arquitetura |
 | R-FASE12-01 | início da fase 12 (nomes em inglês): identificadores de `src/regrid` e `tests/regrid`; `tools/dev/renomeia-identificadores.py` e conferência `nomes` |
 | R-FASE12-02 | nomes em inglês no mapa de acoplamento (`src/coupling`: tabelas, tipos, colunas, consultas e malhas) e nos seus testes; colisões por unidade de escopo e modo `traduz` |
+| R-FASE12-03 | nomes em inglês no mediador (`src/mediator`: fases, rotas, tipos e contagens) e nos seus testes |
 | R-FASE9-07 | encerramento da fase 9: indicadores finais, RPQ na sexta versão e procedimento de integração ao `develop`; só documentação |
 | R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 |
 | R-FASE9-05 | leitura do supergrid do MOM6 (`mom6_supergrid_tcoords` e `mom6_supergrid_corners`) numa rotina privada; trechos repetidos de 67 para 54; conferida com teste avulso |
@@ -301,8 +302,8 @@ Cada etapa tem a sua tabela de trocas em `tools/dev/nomes/`, aplicada e conferid
 | --- | --- | --- | --- |
 | 1 | R-FASE12-01 | framework de interpolação (`src/regrid`, `tests/regrid`); ferramenta de troca e conferência `nomes` | concluída (PASS, 73 iguais, relatório de acoplamento igual ao da `fase11-26-validada`, tag `fase12-01-validada`) |
 | 2 | R-FASE12-02 | mapa de acoplamento (`src/coupling`) e seus testes; `tools/dev/mapa-acoplamento.py` | concluída (PASS, 73 iguais, relatório igual ao da `fase12-01-validada`, tag `fase12-02-validada`) |
-| 3 | R-FASE12-03 | mediador (`src/mediator`) e seus testes | em validação |
-| 4 | R-FASE12-04 | caps dos modelos (`src/caps`), inclusive o adaptador do MPAS | a fazer |
+| 3 | R-FASE12-03 | mediador (`src/mediator`) e seus testes | concluída (PASS, 73 iguais, relatório igual ao da `fase12-02-validada`, tag `fase12-03-validada`) |
+| 4 | R-FASE12-04 | caps dos modelos (`src/caps`, sem `upstream/`), inclusive o adaptador do MPAS, e seus testes | em validação |
 | 5 | R-FASE12-05 | `src/shared`, driver e programa principal | a fazer |
 | 6 | R-FASE12-06 | testes restantes (`tests/`), nomes dos programas de teste e encerramento | a fazer |
 

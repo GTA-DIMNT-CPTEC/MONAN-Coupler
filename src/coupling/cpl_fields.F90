@@ -11,7 +11,7 @@
 !! mpas_import_diag) e os comentários dos caps. A coluna de sinal só é
 !! preenchida onde a convenção foi conferida no código:
 !!   - Faxa_sen_mpas e Faxa_lat_mpas vêm do 'hfx' e do 'lh' do MONAN-A,
-!!     positivos para cima (mpas_adaptador); o mediador inverte o sinal
+!!     positivos para cima (mpas_adapter); o mediador inverte o sinal
 !!     ao usá-los (med_flux);
 !!   - Foxx_sen e Fioi_sen são calculados em med_bulk_ncar como
 !!     ρ cp Ch |V| (Tar - Tsup), positivos para a superfície; o cap do SIS2

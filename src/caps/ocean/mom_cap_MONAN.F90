@@ -129,7 +129,7 @@ module MOM_cap_MONAN_mod
   ! Si_ifrac é a fração de gelo do OISST ou derivada da SST e do frazil (ver
   ! compute_si_ifrac_proxy), porque ocean_public não expõe a fração de gelo.
   ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
-  character(len=*), parameter :: PONTO_OCN = 'OCN@ocn_mom6'
+  character(len=*), parameter :: POINT_OCN = 'OCN@ocn_mom6'
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
@@ -216,25 +216,25 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     integer :: n
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
     ! Anuncia campos importados (fluxos do mediador → OCN)
-    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
+    call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
+    do n = 1, size(names)
       call NUOPC_Advertise(importState,                              &
-           StandardName=trim(nomes(n)),                              &
+           StandardName=trim(names(n)),                              &
            TransferOfferGeomObject="cannot provide",                 &
            SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
     ! Anuncia campos exportados (SST real, correntes → MED e MPAS)
-    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
+    call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
+    do n = 1, size(names)
       call NUOPC_Advertise(exportState,                              &
-           StandardName=trim(nomes(n)),                              &
+           StandardName=trim(names(n)),                              &
            TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
@@ -508,7 +508,7 @@ contains
 
     integer :: npes_ocn, ntiles, n_2
     integer, allocatable :: xb(:), xe(:), yb(:), ye(:), pe(:)
-    integer, allocatable :: limites(:,:)
+    integer, allocatable :: bounds(:,:)
     integer, allocatable :: petMap(:)
     real(ESMF_KIND_R8), pointer :: lon_ptr(:,:) => null()
     real(ESMF_KIND_R8), pointer :: lat_ptr(:,:) => null()
@@ -546,10 +546,10 @@ contains
     ! ── 3. Limites de cada bloco e PET de cada bloco ──────────────────────
     ! limites(:, n) = (is, ie, js, je) globais do bloco do PET MOM6 n;
     ! petMap(n): PET ESMF responsável (zero-based, relativo ao pe(1)).
-    allocate(limites(4, npes_ocn))
+    allocate(bounds(4, npes_ocn))
     allocate(petMap(npes_ocn))
     do n_2 = 1, npes_ocn
-      limites(:, n_2) = (/ xb(n_2), xe(n_2), yb(n_2), ye(n_2) /)
+      bounds(:, n_2) = (/ xb(n_2), xe(n_2), yb(n_2), ye(n_2) /)
       petMap(n_2) = pe(n_2) - pe(1)
     end do
     deallocate(xb, xe, yb, ye, pe)
@@ -557,9 +557,9 @@ contains
     ! ── 4. Grade nos blocos do MOM6, com o stagger dos centros ────────────
     ! Malha ocn_mom6 (cpl_grids): DistGrid [1..ni] x [1..nj] com a lista de
     ! blocos, sem halo, sem periodicidade declarada, índices locais por DE.
-    call cpl_block_grid('ocn_mom6', ni, nj, limites, petMap, ocn_grid, rc)
+    call cpl_block_grid('ocn_mom6', ni, nj, bounds, petMap, ocn_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    deallocate(limites, petMap)
+    deallocate(bounds, petMap)
 
     ! ── 5. Coordenadas lon/lat nos centróides, as do MOM6 ─────────────────
     ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
@@ -613,16 +613,16 @@ contains
     type(ESMF_Grid),  intent(in)    :: ocn_grid
     type(ESMF_State), intent(inout) :: importState, exportState
     integer,          intent(out)   :: rc
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
     ! ── 8. Realizar campos de importação e exportação ─────────────────────
-    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', nomes)
-    call cap_realize_fields(importState, ocn_grid, nomes, size(nomes), rc)
+    call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
+    call cap_realize_fields(importState, ocn_grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
-    call cap_realize_fields(exportState, ocn_grid, nomes, size(nomes), rc)
+    call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
+    call cap_realize_fields(exportState, ocn_grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
   end subroutine realize_ocean_fields
@@ -922,7 +922,7 @@ contains
     type(ESMF_Field)        :: field
     integer :: n, localrc
     character(len=256) :: msg
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
@@ -932,9 +932,9 @@ contains
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=dt, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
-      call ESMF_StateGet(importState, itemName=trim(nomes(n)), &
+    call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
+    do n = 1, size(names)
+      call ESMF_StateGet(importState, itemName=trim(names(n)), &
            field=field, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle   ! campo opcional: ignorar
 
@@ -949,7 +949,7 @@ contains
       ! Verifica janela de tolerância ±dt
       if (fldTime < currTime - dt .or. fldTime > currTime + dt) then
         write(msg,'(3A)') 'OCN(MOM6): CheckImport WARNING — timestamp fora ', &
-          'da janela ±dt para campo ', trim(nomes(n))
+          'da janela ±dt para campo ', trim(names(n))
         call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_WARNING)
       end if
     end do

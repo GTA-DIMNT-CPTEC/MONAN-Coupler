@@ -155,7 +155,7 @@ SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
         cpl_grids cpl_fields cpl_map cpl_check                            \
         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
         mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model      \
-        mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adaptador \
+        mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adapter \
         mpas_cap_MONAN DATM_cap                                           \
         docn_cap_netcdf DOCN_cap                                          \
         mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods   \
@@ -211,11 +211,11 @@ $(OBJDIR)/mom_cap_methods.o: $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_sur
 $(OBJDIR)/mom_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_si_ifrac.o $(OBJDIR)/mom_surface_forcing_nuopc.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/mom_si_ifrac.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/docn_cap_netcdf.o $(OBJDIR)/mom_cap_methods.o $(OBJDIR)/mom_ocean_model_nuopc.o
 $(OBJDIR)/mom_ocean_model_nuopc.o: $(OBJDIR)/mom_surface_forcing_nuopc.o
-$(OBJDIR)/mpas_adaptador.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o $(OBJDIR)/mpas_cell_binning.o $(OBJDIR)/mpas_import_diag.o
+$(OBJDIR)/mpas_adapter.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o $(OBJDIR)/mpas_cell_binning.o $(OBJDIR)/mpas_import_diag.o
 $(OBJDIR)/mpas_atm_fluxes.o: $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_atm_model.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/mpas_atm_fluxes.o $(OBJDIR)/mpas_atm_setup.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_atm_setup.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/mpas_atm_types.o
-$(OBJDIR)/mpas_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mpas_adaptador.o $(OBJDIR)/mpas_atm_model.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o $(OBJDIR)/mpas_import_diag.o
+$(OBJDIR)/mpas_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mpas_adapter.o $(OBJDIR)/mpas_atm_model.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o $(OBJDIR)/mpas_import_diag.o
 $(OBJDIR)/mpas_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpi_allreduce_wrappers.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/mpas_cell_binning.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_import_diag.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/nc_writer.o

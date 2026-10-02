@@ -18,23 +18,23 @@ program test_mpas_export
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use mpas_atm_types_mod,    only : mpas_atm_public_type, MPAS_RKIND
-  use mpas_adaptador_mod,    only : mpas_export, mpas_create_grid
+  use mpas_adapter_mod,      only : mpas_export, mpas_create_grid
   use mpas_cap_netcdf_mod,   only : mpas_diag_export_t
   implicit none
 
-  integer, parameter :: NCAMPOS = 3
-  character(len=16), parameter :: nomes(NCAMPOS) = &
+  integer, parameter :: NFIELDS = 3
+  character(len=16), parameter :: names(NFIELDS) = &
     [character(len=16) :: 'Sa_pslv_mpas', 'Sa_u10m_mpas', 'Faxa_swdn_mpas']
   type(ESMF_VM)    :: vm
   type(ESMF_Grid)  :: grid
   type(ESMF_State) :: expst
-  type(ESMF_Field) :: campo(NCAMPOS)
+  type(ESMF_Field) :: field(NFIELDS)
   type(mpas_atm_public_type) :: pub
   type(mpas_diag_export_t)   :: diag   ! sem netcdf_init_coords: nada é guardado
   real(ESMF_KIND_R8), allocatable :: glob(:,:)
-  integer :: rc, localPet, petCount, n, k, i, chamada, u
+  integer :: rc, localPet, petCount, n, k, i, call_num, u
   real(ESMF_KIND_R8) :: lon0, lon1, x
-  character(len=64) :: arq
+  character(len=64) :: out_file
 
   call ESMF_Initialize(defaultLogFileName='teste_grade_atm', &
     logkindflag=ESMF_LOGKIND_MULTI, vm=vm, rc=rc)
@@ -43,10 +43,10 @@ program test_mpas_export
   call mpas_create_grid(grid, rc)
   if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)
   expst = ESMF_StateCreate(name='export', rc=rc)
-  do k = 1, NCAMPOS
-    campo(k) = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(nomes(k)), rc=rc)
-    call ESMF_StateAdd(expst, [campo(k)], rc=rc)
+  do k = 1, NFIELDS
+    field(k) = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, &
+      staggerloc=ESMF_STAGGERLOC_CENTER, name=trim(names(k)), rc=rc)
+    call ESMF_StateAdd(expst, [field(k)], rc=rc)
   end do
 
   ! Células sintéticas: o PET p cobre a faixa [p*360/P - 60, (p+1)*360/P + 60)
@@ -69,25 +69,25 @@ program test_mpas_export
                      * acos(-1.0_ESMF_KIND_R8) / 180.0_ESMF_KIND_R8, MPAS_RKIND)
   end do
 
-  do chamada = 1, 2
+  do call_num = 1, 2
     do i = 1, n
       x = real(i + 13 * localPet, ESMF_KIND_R8) / 97.0_ESMF_KIND_R8
-      pub%pslv(i)     = real(101325.0_ESMF_KIND_R8 + 800.0_ESMF_KIND_R8 * sin(x * chamada), MPAS_RKIND)
-      pub%u10(i)      = real(7.3_ESMF_KIND_R8 * cos(1.7_ESMF_KIND_R8 * x) + chamada / 3.0_ESMF_KIND_R8, MPAS_RKIND)
-      pub%swdn_sfc(i) = real(max(0.0_ESMF_KIND_R8, 900.0_ESMF_KIND_R8 * sin(0.3_ESMF_KIND_R8 * x + chamada)), MPAS_RKIND)
+      pub%pslv(i)     = real(101325.0_ESMF_KIND_R8 + 800.0_ESMF_KIND_R8 * sin(x * call_num), MPAS_RKIND)
+      pub%u10(i)      = real(7.3_ESMF_KIND_R8 * cos(1.7_ESMF_KIND_R8 * x) + call_num / 3.0_ESMF_KIND_R8, MPAS_RKIND)
+      pub%swdn_sfc(i) = real(max(0.0_ESMF_KIND_R8, 900.0_ESMF_KIND_R8 * sin(0.3_ESMF_KIND_R8 * x + call_num)), MPAS_RKIND)
     end do
     call mpas_export(diag, pub, expst, rc)
     if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)
-    do k = 1, NCAMPOS
+    do k = 1, NFIELDS
       if (localPet == 0) then
         allocate(glob(ATM_NX, ATM_NY))
       else
         allocate(glob(1,1))
       end if
-      call ESMF_FieldGather(campo(k), farray=glob, rootPet=0, rc=rc)
+      call ESMF_FieldGather(field(k), farray=glob, rootPet=0, rc=rc)
       if (localPet == 0) then
-        write(arq,'(A,A,A,I0,A)') 'saida_', trim(nomes(k)), '_', chamada, '.bin'
-        open(newunit=u, file=trim(arq), access='stream', form='unformatted', status='replace')
+        write(out_file,'(A,A,A,I0,A)') 'saida_', trim(names(k)), '_', call_num, '.bin'
+        open(newunit=u, file=trim(out_file), access='stream', form='unformatted', status='replace')
         write(u) glob
         close(u)
       end if

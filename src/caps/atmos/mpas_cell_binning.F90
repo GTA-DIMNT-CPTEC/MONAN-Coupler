@@ -6,7 +6,7 @@
 !! bin_cells_local, mpas_mpi_comm, ordered_sum_bcast, fill_empty_bins,
 !! diagnósticos no log e copy_to_local_grid. É o algoritmo da troca 'cap'
 !! de ATM@mpas para ATM@atm_cap do mapa de acoplamento; quem o chama é o
-!! adaptador do MPAS (mpas_adaptador.F90, state_set_field_1d).
+!! adaptador do MPAS (mpas_adapter.F90, state_set_field_1d).
 !!
 !! Separado de mpas_cap_methods.F90 sem mudar instruções (R-FASE8-15). Desde
 !! a R-FASE11-24, find_local_field e state_set_field_1d, que acessam o

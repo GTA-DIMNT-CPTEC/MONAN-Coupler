@@ -6,14 +6,14 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # Compila a versão de um commit e a da árvore de trabalho, liga a cada uma o
-# programa tests/malhas/test_malhas.F90 da árvore de trabalho (ele só usa
+# programa tests/malhas/test_grids.F90 da árvore de trabalho (ele só usa
 # create_atm_grid, create_ocn_grid e mpas_create_grid, cujas interfaces não
 # mudam) e o executa com 1, 4, 6 e 8 processos MPI, com um supergrid
 # sintético (tests/supergrid/gera-supergrid.py). Para cada PET e cada DE
 # local, os limites computacionais e os vetores de coordenadas dos centros e
 # dos cantos e a máscara gravados (saida_<PET>.bin) têm de ser idênticos,
 # bit a bit, e as mensagens das rotinas no log do ESMF também, sem data e
-# hora. Depois, só na árvore de trabalho, tests/malhas/test_malhas_modelos.F90
+# hora. Depois, só na árvore de trabalho, tests/malhas/test_model_grids.F90
 # confere as malhas dos caps do SIS2 e do MOM6 (ver o cabeçalho do
 # programa) com 4, 6 e 8 processos.
 #
@@ -47,7 +47,7 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_su
       regrid_weights_base.o regrid_idw.o regrid_schemes.o
       regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o mpas_stubs.o
       mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o mpas_adaptador.o
+      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o mpas_adaptador.o mpas_adapter.o
       med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
       med_ice.o med_ocean.o med_init.o"
 # A versão de referência pode não ter algum objeto da lista (fonte criado
@@ -76,20 +76,20 @@ for versao in antiga nova; do
   bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" ${ausente} > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   defs=""
-  [[ -f "${src}/src/caps/atmos/mpas_adaptador.F90" ]] && defs="-DCOM_ADAPTADOR"
+  [[ -f "${src}/src/caps/atmos/mpas_adapter.F90" ]] && defs="-DCOM_ADAPTADOR"
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch ${defs} \
-      -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malhas.F90" -o test_malhas.o &&
+      -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_grids.F90" -o test_grids.o &&
     # shellcheck disable=SC2086
-    ${FC} -o test_malhas test_malhas.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+    ${FC} -o test_grids test_grids.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
   for np in ${LISTA_NP}; do
     run="${dir}/run_${np}"
     rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
     # shellcheck disable=SC2086
-    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malhas > run.log 2>&1 ) \
+    ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_grids > run.log 2>&1 ) \
       || { tail -20 "${run}/run.log"; echo "ERRO: execução da versão ${versao} com ${np} processos" >&2; exit 2; }
   done
 done
@@ -120,16 +120,16 @@ dir="${SAIDA}/nova"
 ( cd "${dir}" || exit 2
   # shellcheck disable=SC2086
   ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
-    -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_malhas_modelos.F90" -o test_malhas_modelos.o &&
+    -O2 -ffp-contract=off -c "${RAIZ}/tests/malhas/test_model_grids.F90" -o test_model_grids.o &&
   # shellcheck disable=SC2086
-  ${FC} -o test_malhas_modelos test_malhas_modelos.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+  ${FC} -o test_model_grids test_model_grids.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
 ) > "${SAIDA}/liga_caps.txt" 2>&1 \
-  || { cat "${SAIDA}/liga_caps.txt"; echo "ERRO: ligação de test_malhas_modelos" >&2; exit 2; }
+  || { cat "${SAIDA}/liga_caps.txt"; echo "ERRO: ligação de test_model_grids" >&2; exit 2; }
 for np in 4 6 8; do
   run="${dir}/caps_${np}"
   rm -rf "${run}"; mkdir -p "${run}"; cp "${SAIDA}/dados/hgrid.nc" "${run}/"
   # shellcheck disable=SC2086
-  if ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_malhas_modelos > run.log 2>&1 ) \
+  if ( cd "${run}" && ${MPIRUN} -n "${np}" ../test_model_grids > run.log 2>&1 ) \
      && grep -q 'TODOS OS TESTES PASSARAM' "${run}/run.log"; then
     echo "  caps, ${np} PETs: $(grep -c PASSOU "${run}/run.log") caso(s) iguais"
   else

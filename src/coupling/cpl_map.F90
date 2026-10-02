@@ -381,7 +381,7 @@ module cpl_map_mod
     cpl_exchange_t('Si_ifrac',       'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
     cpl_exchange_t('So_u',           'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
     cpl_exchange_t('So_v',           'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
-    ! 11. MONAN-A: da grade do cap para as células (caixa do centro, mpas_adaptador)
+    ! 11. MONAN-A: da grade do cap para as células (caixa do centro, mpas_adapter)
     cpl_exchange_t('Sx_tsfc',        'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
     cpl_exchange_t('Si_ifrac',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
     cpl_exchange_t('So_u',           'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &

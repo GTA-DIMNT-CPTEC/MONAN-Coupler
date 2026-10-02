@@ -167,7 +167,7 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-21 | conectores registrados pelo mapa (`cpl_driver_connectors`), no lugar das condições do driver; teste `test_connectors`; início do bloco F |
 | R-FASE11-22 | método de cada campo dos conectores pelo mapa (coluna `method`, `remapmethod=bilinear` escrito na `CplList` por `cpl_write_methods`) e conferido pela conferência do mapa |
 | R-FASE11-23 | base dos esquemas de pesos, opções em texto, lista de esquemas (`regrid_schemes.F90`), modelo `idw` e `compara-esquema.bash`; esquema novo passa a ser um arquivo e uma linha na lista |
-| R-FASE11-24 | adaptador do MPAS (`mpas_adaptador.F90`): a tradução entre o MONAN-A e o ESMF num módulo só; `mpas_cell_binning` só com o algoritmo |
+| R-FASE11-24 | adaptador do MPAS (`mpas_adapter.F90`): a tradução entre o MONAN-A e o ESMF num módulo só; `mpas_cell_binning` só com o algoritmo |
 | R-FASE11-25 | conferência do mapa como barreira (diferença interrompe a inicialização), lacunas conhecidas no mapa e dicionário do NUOPC com os nomes de `FIELDS`, sem acréscimo automático |
 | R-FASE11-26 | encerramento da fase 11: carimbo de tempo do cap do MOM6 por `cap_stamp_export`; todos os indicadores da fase nas metas |
 

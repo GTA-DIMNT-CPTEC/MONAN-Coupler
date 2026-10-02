@@ -38,7 +38,7 @@ OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writ
       mom6_supergrid.o cpl_grids.o cpl_fields.o cpl_map.o cpl_check.o
       med_cap_types.o med_cap_methods.o med_bulk_ncar.o med_diag.o
       mpas_stubs.o mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_adaptador.o"
+      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_adapter.o"
 
 echo "--- compilando a árvore de trabalho"
 bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compila.txt" \

@@ -97,7 +97,7 @@ module sis_cap_MONAN_mod
   ! mesma forma, a onda curta vem de Fioi_swnet_*, calculada com o albedo do
   ! gelo por banda puro; Foxx_swnet_* usa o albedo misturado por Si_ifrac.
   ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
-  character(len=*), parameter :: PONTO_ICE = 'ICE@ice_sis2'
+  character(len=*), parameter :: POINT_ICE = 'ICE@ice_sis2'
 
 contains
 
@@ -166,18 +166,18 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     integer :: n
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
-    call cpl_arrivals(PONTO_ICE, .true., cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
-      call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
+    call cpl_arrivals(POINT_ICE, .true., cpl_current_config(), '', names)
+    do n = 1, size(names)
+      call NUOPC_Advertise(importState, StandardName=trim(names(n)), &
         TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
-    call cpl_exports(PONTO_ICE, cpl_current_config(), '', nomes)
-    do n = 1, size(nomes)
+    call cpl_exports(POINT_ICE, cpl_current_config(), '', names)
+    do n = 1, size(names)
       ! O campo de export do ICE é realizado numa grade PRÓPRIA (is%ice_grid,
       ! criada em InitializeRealize) e oferece essa geometria ao conector como
       ! "will provide". Os imports usam "cannot provide", como o import do MED;
@@ -188,7 +188,7 @@ contains
       ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTACOES. Com share
       ! aqui, Si_ifrac saia correto (max=0.997) mas chegava zerado no mediador
       ! (min=max=0): o conector nao fazia a transferencia real.
-      call NUOPC_Advertise(exportState, StandardName=trim(nomes(n)), &
+      call NUOPC_Advertise(exportState, StandardName=trim(names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
@@ -435,25 +435,25 @@ contains
     integer,          intent(out)   :: rc
     integer :: k
     type(ESMF_Field) :: fld
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
-    call cpl_arrivals(PONTO_ICE, .true., cpl_current_config(), '', nomes)
-    do k = 1, size(nomes)
+    call cpl_arrivals(POINT_ICE, .true., cpl_current_config(), '', names)
+    do k = 1, size(names)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
-        name=trim(nomes(k)), rc=rc)
+        name=trim(names(k)), rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-        'FieldCreate import ' // trim(nomes(k)), &
+        'FieldCreate import ' // trim(names(k)), &
         line=__LINE__, file=__FILE__)) return
       call NUOPC_Realize(importState, field=fld, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call cpl_exports(PONTO_ICE, cpl_current_config(), '', nomes)
-    do k = 1, size(nomes)
+    call cpl_exports(POINT_ICE, cpl_current_config(), '', names)
+    do k = 1, size(names)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
-        name=trim(nomes(k)), rc=rc)
+        name=trim(names(k)), rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
-        'FieldCreate export ' // trim(nomes(k)), &
+        'FieldCreate export ' // trim(names(k)), &
         line=__LINE__, file=__FILE__)) return
       call NUOPC_Realize(exportState, field=fld, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -708,23 +708,23 @@ contains
   subroutine advance_ice_slow(is)
     type(ice_internal_state_type), pointer, intent(in) :: is
     character(len=200) :: msg_slow
-    integer(kind=8)    :: cks_ini, cks_ter, cks_din
-    logical            :: tem_ps
+    integer(kind=8)    :: cks_ini, cks_thermo, cks_dyn
+    logical            :: has_ps
 
-    tem_ps = associated(is%ice%part_size)
+    has_ps = associated(is%ice%part_size)
 
-    if (tem_ps) cks_ini = chksum_part_size(is%ice%part_size)
+    if (has_ps) cks_ini = chksum_part_size(is%ice%part_size)
     call update_ice_slow_thermo(is%ice)
-    if (tem_ps) cks_ter = chksum_part_size(is%ice%part_size)
+    if (has_ps) cks_thermo = chksum_part_size(is%ice%part_size)
     call update_ice_dynamics_trans(is%ice)
-    if (tem_ps) cks_din = chksum_part_size(is%ice%part_size)
+    if (has_ps) cks_dyn = chksum_part_size(is%ice%part_size)
 
-    if (tem_ps) then
+    if (has_ps) then
       write(msg_slow,'(A,I0,A,I0,A,I0)') &
         'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
-        '  pos_slow_thermo=', cks_ter, '  pos_dynamics_trans=', cks_din
+        '  pos_slow_thermo=', cks_thermo, '  pos_dynamics_trans=', cks_dyn
       call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
-      if (cks_ini == cks_ter .and. cks_ter == cks_din) then
+      if (cks_ini == cks_thermo .and. cks_thermo == cks_dyn) then
         call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
           'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
           'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &

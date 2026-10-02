@@ -61,9 +61,9 @@ module coupler_constants_mod
 
   ! Pendências (valores próximos, mas não iguais; unificar muda resultados):
   !   - π: med_bulk_ncar usa 3.14159265358979 (15 algarismos) no ângulo zenital,
-  !     e mpas_adaptador faz o mesmo em MPAS_RKIND; PI acima é o π completo.
+  !     e mpas_adapter faz o mesmo em MPAS_RKIND; PI acima é o π completo.
   !   - Constantes em MPAS_RKIND (pressão de vapor, eps, 0 °C e 271,35 K em
-  !     mpas_atm_fluxes e mpas_adaptador; albedo 0,08 em mpas_adaptador e
+  !     mpas_atm_fluxes e mpas_adapter; albedo 0,08 em mpas_adapter e
   !     mpas_atm_setup) ficam onde estão: o kind é o do MPAS, que só coincide
   !     com ESMF_KIND_R8 quando o MPAS é compilado em precisão dupla.
 

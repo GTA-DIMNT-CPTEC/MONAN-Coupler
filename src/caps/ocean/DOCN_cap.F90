@@ -120,8 +120,8 @@ module DOCN_cap_mod
   ! So_duu10n); a exportação, os 6 campos de EXPORTS (cpl_exports):
   ! So_t [K], Si_ifrac [0-1], Sf_zorl [m], So_s [psu], So_u e So_v [m/s].
   ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
-  ! O valor inicial de cada campo exportado está em valor_inicial_exportacao.
-  character(len=*), parameter :: PONTO_OCN = 'OCN@docn'
+  ! O valor inicial de cada campo exportado está em initial_export_value.
+  character(len=*), parameter :: POINT_OCN = 'OCN@docn'
 
   !----------------------------------------------------------------------------
   ! Estado interno do DOCN
@@ -189,7 +189,7 @@ contains
   ! (1440×720 com decomposição 2D via sqrt(petCount) tiles por dimensão,
   ! garantindo colunas ≥2 e evitando o erro "DE width 1" em qualquer petCount).
   !
-  ! As listas saem do mapa de acoplamento (ponto PONTO_OCN, acima).
+  ! As listas saem do mapa de acoplamento (ponto POINT_OCN, acima).
   !=============================================================================
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -202,8 +202,8 @@ contains
 
     rc = ESMF_SUCCESS
 
-    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', imp)
-    call cpl_exports(PONTO_OCN, cpl_current_config(), '', exp)
+    call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', imp)
+    call cpl_exports(POINT_OCN, cpl_current_config(), '', exp)
 
     ! Anuncia todos os campos importados do mediador (MED→OCN).
     do i = 1, size(imp)
@@ -250,7 +250,7 @@ contains
       integer :: regDecomp_2d(2)
       integer :: localDeCount_docn
       integer :: lde_docn
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
@@ -337,13 +337,13 @@ contains
       end do  ! lde_docn
 
     ! Campos importados: todos os fluxos do mediador.
-    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', nomes)
-    call cap_realize_fields(importState, grid, nomes, size(nomes), rc)
+    call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
+    call cap_realize_fields(importState, grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Exportados
-    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
-    call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
+    call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
+    call cap_realize_fields(exportState, grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Estado interno
@@ -371,8 +371,8 @@ contains
     type(ESMF_State)               :: exportState
     type(ESMF_Clock)               :: clock_idc
     type(ESMF_Time)                :: startTime_idc
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
-    real(ESMF_KIND_R8),          allocatable :: valores(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
+    real(ESMF_KIND_R8),          allocatable :: init_vals(:)
     integer :: k
 
     rc = ESMF_SUCCESS
@@ -381,13 +381,13 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Preencher exportState com valores iniciais fisicamente consistentes
-    ! (valor_inicial_exportacao); os campos sem valor previsto começam em zero.
-    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
-    allocate(valores(size(nomes)))
-    do k = 1, size(nomes)
-      valores(k) = valor_inicial_exportacao(nomes(k))
+    ! (initial_export_value); os campos sem valor previsto começam em zero.
+    call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
+    allocate(init_vals(size(names)))
+    do k = 1, size(names)
+      init_vals(k) = initial_export_value(names(k))
     end do
-    call cap_fill_export_initial(exportState, nomes, valores, rc)
+    call cap_fill_export_initial(exportState, names, init_vals, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Atualizar timestamps: NUOPC_ModelBase verifica que os campos no
@@ -410,29 +410,29 @@ contains
   end subroutine InitializeDataComplete
 
   !=============================================================================
-  ! valor_inicial_exportacao: valor de um campo exportado antes da primeira
+  ! initial_export_value: valor de um campo exportado antes da primeira
   ! leitura: SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fracao
   ! de gelo padrao, rugosidade ZORL_DEFAULT e salinidade media global de
   ! 35 psu; as correntes (So_u, So_v) e os demais campos comecam em zero
   ! (repouso).
   !=============================================================================
-  function valor_inicial_exportacao(nome) result(valor)
-    character(len=*), intent(in) :: nome
-    real(ESMF_KIND_R8)           :: valor
+  function initial_export_value(name) result(init_val)
+    character(len=*), intent(in) :: name
+    real(ESMF_KIND_R8)           :: init_val
 
-    select case (trim(nome))
+    select case (trim(name))
     case ('So_t')
-      valor = real(cfg_sst_default, ESMF_KIND_R8)
+      init_val = real(cfg_sst_default, ESMF_KIND_R8)
     case ('Si_ifrac')
-      valor = real(cfg_ice_fraction_default, ESMF_KIND_R8)
+      init_val = real(cfg_ice_fraction_default, ESMF_KIND_R8)
     case ('Sf_zorl')
-      valor = ZORL_DEFAULT
+      init_val = ZORL_DEFAULT
     case ('So_s')
-      valor = 35.0_ESMF_KIND_R8
+      init_val = 35.0_ESMF_KIND_R8
     case default
-      valor = 0.0_ESMF_KIND_R8
+      init_val = 0.0_ESMF_KIND_R8
     end select
-  end function valor_inicial_exportacao
+  end function initial_export_value
 
   !=============================================================================
   ! ModelAdvance — lê campos oceânicos do NetCDF e popula exportState
@@ -457,7 +457,7 @@ contains
     type(DOCN_InternalState), pointer :: is
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
     integer                  :: i1, i2, j1, j2
-    integer                  :: year, month, day, hour, minu, sec
+    integer                  :: year, month, day, hour, minute, sec
     character(len=256) :: msg
 
     rc = ESMF_SUCCESS
@@ -475,11 +475,11 @@ contains
     nextTime = currTime + dt
 
     call ESMF_TimeGet(currTime, yy=year, mm=month, dd=day, &
-      h=hour, m=minu, s=sec, rc=rc)
+      h=hour, m=minute, s=sec, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     write(msg,'(A,I4,5(A,I2.2))') 'DOCN: avancando para ', year, '-', &
-      month, '-', day, ' ', hour, ':', minu, ':', sec
+      month, '-', day, ' ', hour, ':', minute, ':', sec
     call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
 
     ! Obtém limites locais do subdomínio a partir do primeiro campo exportado

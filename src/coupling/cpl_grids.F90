@@ -3,7 +3,7 @@
 !!
 !! As malhas descritas em GRIDS (cpl_map.F90) são construídas aqui:
 !!
-!!   atm_cap   grade do cap do MONAN-A (mpas_adaptador::mpas_create_grid),
+!!   atm_cap   grade do cap do MONAN-A (mpas_adapter::mpas_create_grid),
 !!             regular, centros com longitude a partir de -180 graus, sem
 !!             cantos (cpl_latlon_grid)
 !!   atm_med   malha de fluxo do mediador (med_init::create_atm_grid),

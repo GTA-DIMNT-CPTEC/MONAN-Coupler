@@ -1,4 +1,4 @@
-!> @file mpas_adaptador.F90
+!> @file mpas_adapter.F90
 !! @brief Adaptador do MPAS: a tradução entre o MONAN-A e o ESMF.
 !!
 !! O dado passa entre o modelo e o ESMF em duas etapas, com as estruturas
@@ -32,7 +32,7 @@
 !! find_local_field e state_set_field_1d estavam em mpas_cell_binning.F90;
 !! a R-FASE11-24 reuniu aqui a tradução, sem mudar instruções.
 
-module mpas_adaptador_mod
+module mpas_adapter_mod
 
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY, RAD2DEG, FILL_VALUE_R8
@@ -802,4 +802,4 @@ contains
     rc = ESMF_SUCCESS
   end subroutine state_set_field_1d
 
-end module mpas_adaptador_mod
+end module mpas_adapter_mod

@@ -246,7 +246,7 @@ contains
   !!
   !! O MPAS-A roda apenas num subconjunto dos PETs do MED. Em PETs onde
   !! MPAS não roda, os campos uas, vas, tas, psl, swdn, lwdn, rain, shum,
-  !! snow têm fptr=0.0 (do mpas_adaptador:state_set_field_1d que zera o
+  !! snow têm fptr=0.0 (do mpas_adapter:state_set_field_1d que zera o
   !! domínio local antes de preencher apenas células Voronoi locais).
   !! Logo, do globo (360x180=64800 células), apenas a fração coberta por
   !! PETs com tile MPAS+MED recebe dado real; o resto fica zero.
@@ -377,7 +377,7 @@ contains
   !!     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
   !!
   !! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
-  !! hfx/lh/ust internos (ver mpas_atm_fluxes.F90/mpas_adaptador.F90).
+  !! hfx/lh/ust internos (ver mpas_atm_fluxes.F90/mpas_adapter.F90).
   !! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
   !! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
   !! inconsistencia entre o balanco de energia do MONAN-A e o forcante

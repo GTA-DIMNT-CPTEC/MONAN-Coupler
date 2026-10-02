@@ -153,7 +153,7 @@ program test_docn
   integer :: rc, urc, localPet, u, k, n, yy, mm, dd, hh
   character(len=64), allocatable :: names(:)
   character(len=64) :: fn
-  character(len=16) :: modo
+  character(len=16) :: mode
   type(ESMF_VM) :: vm
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, defaultLogFilename='teste', logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
   call ESMF_VMGetGlobal(vm, rc=rc); call ESMF_VMGet(vm, localPet=localPet, rc=rc)
@@ -162,8 +162,8 @@ program test_docn
   drv = ESMF_GridCompCreate(name="drv", rc=rc)
   call ESMF_GridCompSetServices(drv, tdrvSS, userRc=urc, rc=rc); call chk('ss')
   call ESMF_GridCompInitialize(drv, userRc=urc, rc=rc); call chk('init')
-  call get_command_argument(1, modo)
-  if (trim(modo) /= 'inicio') then
+  call get_command_argument(1, mode)
+  if (trim(mode) /= 'inicio') then
     call ESMF_GridCompRun(drv, userRc=urc, rc=rc); call chk('run')
   end if
   call NUOPC_DriverGetComp(drv, "OCN", comp=ocn, rc=rc); call chk('get')

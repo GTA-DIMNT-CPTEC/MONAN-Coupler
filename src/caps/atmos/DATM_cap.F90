@@ -62,7 +62,7 @@ module DATM_cap_mod
   ! Os campos exportados saem do mapa de acoplamento (src/coupling/
   ! cpl_map.F90), no ponto ATM@datm: os 9 campos de EXPORTS
   ! (cpl_exports), na ordem do anúncio. O DATM não importa nada.
-  character(len=*), parameter :: PONTO_DATM = 'ATM@datm'
+  character(len=*), parameter :: POINT_DATM = 'ATM@datm'
 
   ! Início da mensagem de erro de cap_put_field quando o campo não existe.
   character(len=*), parameter :: PUT_TAG = "PutField: "
@@ -140,7 +140,7 @@ contains
     type(ESMF_State)     :: importState, exportState
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
     integer :: i
 
     rc = ESMF_SUCCESS
@@ -148,9 +148,9 @@ contains
     ! Campos de estado atmosferico bruto (JRA55): vento a 10 m, temperatura,
     ! umidade e pressao; radiacao descendente (sem decomposicao em bandas, o
     ! MED faz isso) e precipitacao.
-    call cpl_exports(PONTO_DATM, cpl_current_config(), '', nomes)
-    do i = 1, size(nomes)
-      call NUOPC_Advertise(exportState, StandardName=trim(nomes(i)), rc=rc)
+    call cpl_exports(POINT_DATM, cpl_current_config(), '', names)
+    do i = 1, size(names)
+      call NUOPC_Advertise(exportState, StandardName=trim(names(i)), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
@@ -176,7 +176,7 @@ contains
     real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
     type(DATM_InternalStateWrapper) :: iswrap
     type(DATM_InternalState), pointer :: is
-    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
@@ -223,8 +223,8 @@ contains
     end do
 
     ! Realiza campos brutos
-    call cpl_exports(PONTO_DATM, cpl_current_config(), '', nomes)
-    call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
+    call cpl_exports(POINT_DATM, cpl_current_config(), '', names)
+    call cap_realize_fields(exportState, grid, names, size(names), rc)
     if (rc/=ESMF_SUCCESS) return
 
     allocate(iswrap%wrap)
@@ -286,7 +286,7 @@ contains
     type(DATM_InternalState), pointer :: is
     real(ESMF_KIND_R8), pointer :: fptr(:,:)
     integer :: i1, i2, j1, j2
-    integer :: year, month, day, hour, minu, sec
+    integer :: year, month, day, hour, minute, sec
     character(len=256) :: msg
 
     rc = ESMF_SUCCESS
@@ -304,11 +304,11 @@ contains
     nextTime = currTime + dt
 
     call ESMF_TimeGet(currTime, yy=year, mm=month, dd=day, &
-      h=hour, m=minu, s=sec, rc=rc)
+      h=hour, m=minute, s=sec, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     write(msg,'(A,I4,5(A,I2.2))') 'DATM: avancando para ', year, '-', &
-      month, '-', day, ' ', hour, ':', minu, ':', sec
+      month, '-', day, ' ', hour, ':', minute, ':', sec
     call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
 
     ! Obtem limites locais a partir do primeiro campo

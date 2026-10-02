@@ -525,33 +525,33 @@ contains
     type(mpas_pool_type), pointer :: diag_physicsPool
     type (field1DReal), pointer :: fld_halo => null()
     integer :: i_halo
-    character(len=32), parameter :: campos_sfcinput(3) = &
+    character(len=32), parameter :: sfcinput_fields(3) = &
     [ character(len=32) :: 'sst', 'xice', 'skintemp' ]
-    character(len=32), parameter :: campos_diagphys(2) = &
+    character(len=32), parameter :: diagphys_fields(2) = &
     [ character(len=32) :: 'z0', 'sfc_albedo' ]
 
-    do i_halo = 1, size(campos_sfcinput)
+    do i_halo = 1, size(sfcinput_fields)
       nullify(fld_halo)
       call mpas_pool_get_field(sfcInputPool, &
-        trim(campos_sfcinput(i_halo)), fld_halo)
+        trim(sfcinput_fields(i_halo)), fld_halo)
       if (associated(fld_halo)) then
         call mpas_dmpar_exch_halo_field(fld_halo)
       else
         call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-          'campo '//trim(campos_sfcinput(i_halo))// &
+          'campo '//trim(sfcinput_fields(i_halo))// &
           ' nao encontrado em sfc_input; halo NAO trocado')
       end if
     end do
 
-    do i_halo = 1, size(campos_diagphys)
+    do i_halo = 1, size(diagphys_fields)
       nullify(fld_halo)
       call mpas_pool_get_field(diag_physicsPool, &
-        trim(campos_diagphys(i_halo)), fld_halo)
+        trim(diagphys_fields(i_halo)), fld_halo)
       if (associated(fld_halo)) then
         call mpas_dmpar_exch_halo_field(fld_halo)
       else
         call mpas_log_write('mpas_atm_run: B-INJECT-HALO-01 AVISO - '// &
-          'campo '//trim(campos_diagphys(i_halo))// &
+          'campo '//trim(diagphys_fields(i_halo))// &
           ' nao encontrado em diag_physics; halo NAO trocado')
       end if
     end do

@@ -21,7 +21,7 @@ O MONAN-A recebe 5 campos do mediador a cada passo de acoplamento:
 Este script suporta duas fontes de dados, usadas automaticamente conforme
 a disponibilidade:
 
-  FONTE 1 — mpas_import_step????.nc  (escrita direta em mpas_adaptador.F90)
+  FONTE 1 — mpas_import_step????.nc  (escrita direta em mpas_adapter.F90)
     Ativa quando write_import_diag=.true. em &nuopc_docn do nuopc.input
     e o executável foi compilado com o módulo de diagnóstico de importação.
     Contém So_t, Si_ifrac e Sf_zorl lidos diretamente do importState MPAS.
@@ -820,7 +820,7 @@ def check_physics(steps, data, fonte_label, coords=None):
                       f"{(1-frac_dyn_last)*100:.0f}% das células no default e "
                       f"{frac_dyn_last*100:.0f}% com dado real.")
                 print(f"  │     Assinatura do bug de mapeamento no import — "
-                      f"recompilar mpas_adaptador.F90 (gather global em "
+                      f"recompilar mpas_adapter.F90 (gather global em "
                       f"state_get_field_1d).")
 
         # ── Localizador de LISTRA vertical (coluna anômala) ───────────────
@@ -1355,7 +1355,7 @@ def check_log(logfile):
         print("     sem parametrização Charnock+Smith. Recompilar com MED_cap_MONAN.F90")
         print("     atualizado.")
     if n_import == 0:
-        print("  ⚠  mpas_import não encontrado — verificar se mpas_adaptador.F90")
+        print("  ⚠  mpas_import não encontrado — verificar se mpas_adapter.F90")
         print("     está compilado com a versão atualizada.")
     if n_diag == 0:
         print("  ⚠  write_mpas_import_diag não localizado por string no log.")
