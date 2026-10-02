@@ -49,7 +49,7 @@ module MOM_cap_MONAN_mod
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
                            NUOPC_Advertise,         NUOPC_Realize,           &
-                           NUOPC_SetTimestamp,      NUOPC_CompAttributeSet,  &
+                           NUOPC_CompAttributeSet,                           &
                            NUOPC_GetTimestamp
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
                            model_label_DataInitialize => label_DataInitialize, &
@@ -71,7 +71,7 @@ module MOM_cap_MONAN_mod
   use MOM_cap_methods, only : mom_import, mom_export, mom_set_geomtype,   &
                                mod2med_areacor, med2mod_areacor,          &
                                state_diagnose, ChkErr
-  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields
+  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_stamp_export
   use cpl_fields_mod, only : CPL_NOME_LEN
   use cpl_map_mod,    only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
   use cpl_grids_mod,  only : cpl_malha_de_blocos
@@ -643,9 +643,6 @@ contains
     type(ESMF_Clock)        :: clock
     type(ESMF_Time)         :: startTime
     type(ocean_grid_type), pointer :: ocean_grid => null()
-    integer :: fieldCount, k
-    character(len=64), allocatable :: fldNames(:)
-    type(ESMF_Field) :: field
 
     rc = ESMF_SUCCESS
 
@@ -715,17 +712,8 @@ contains
     end if
 
     ! Estampilha todos os campos exportados com startTime
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
-    allocate(fldNames(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fldNames, rc=rc)
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fldNames(k)), &
-           field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, startTime, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    deallocate(fldNames)
+    call cap_stamp_export(exportState, startTime, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Sinaliza NUOPC que a inicialização de dados está completa
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
@@ -765,9 +753,6 @@ contains
     type(ESMF_TimeInterval) :: timeStep
     type(time_type)         :: fms_curr, fms_dt
     type(ocean_grid_type), pointer :: ocean_grid => null()
-    integer :: fieldCount, k
-    character(len=64), allocatable :: fldNames(:)
-    type(ESMF_Field) :: field
     integer :: yr, mo, dy, hr, mn, sc            ! conversão ESMF→FMS
     character(len=64)  :: timestr                ! log de tempo
     character(len=256) :: logmsg
@@ -860,19 +845,8 @@ contains
     end if
 
     ! ── Passo 4: Atualizar timestamps NUOPC de todos os campos exportados ──
-    call ESMF_StateGet(exportState, itemCount=fieldCount, rc=rc)
+    call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    allocate(fldNames(fieldCount))
-    call ESMF_StateGet(exportState, itemNameList=fldNames, rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-    do k = 1, fieldCount
-      call ESMF_StateGet(exportState, itemName=trim(fldNames(k)), &
-           field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_SetTimestamp(field, nextTime, rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
-    deallocate(fldNames)
 
     call ESMF_LogWrite('OCN(MOM6): ModelAdvance concluido', ESMF_LOGMSG_INFO)
 

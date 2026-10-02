@@ -169,16 +169,19 @@ O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), 
 | R-FASE11-23 | base dos esquemas de pesos, opções em texto, lista de esquemas (`regrid_schemes.F90`), modelo `idw` e `compara-esquema.bash`; esquema novo passa a ser um arquivo e uma linha na lista |
 | R-FASE11-24 | adaptador do MPAS (`mpas_adaptador.F90`): a tradução entre o MONAN-A e o ESMF num módulo só; `mpas_cell_binning` só com o algoritmo |
 | R-FASE11-25 | conferência do mapa como barreira (diferença interrompe a inicialização), lacunas conhecidas no mapa e dicionário do NUOPC com os nomes de `CAMPOS`, sem acréscimo automático |
+| R-FASE11-26 | encerramento da fase 11: carimbo de tempo do cap do MOM6 por `cap_stamp_export`; todos os indicadores da fase nas metas |
 
 Indicadores da fase 11 na partida (`fase9-07-validada`), medidos pela segunda tabela de `indicadores.py`:
 
-| Indicador | Partida | Meta |
-| --- | --- | --- |
-| arquivos com nomes de campos anunciados ou realizados à mão | 8 | 0 |
-| chamadas `ESMF_GridCreate*` fora de `src/coupling` | 7, em 6 arquivos | só as do DOCN e do DATM, se não migradas |
-| rotas criadas (`regrid%add`) fora de `med_exchange` | 7, em 5 arquivos | 0 |
-| chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 |
-| arquivos que carimbam o tempo dos campos | 5 | `cap_common` e `med_exchange` |
+| Indicador | Partida | Meta | Fim (R-FASE11-26) |
+| --- | --- | --- | --- |
+| arquivos com nomes de campos anunciados ou realizados à mão | 8 | 0 | 0 |
+| chamadas `ESMF_GridCreate*` fora de `src/coupling` | 7, em 6 arquivos | só as do DOCN e do DATM, se não migradas | 2, em `DOCN_cap` e `DATM_cap` |
+| rotas criadas (`regrid%add`) fora de `med_exchange` | 7, em 5 arquivos | 0 | 0 |
+| chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 | 0 |
+| arquivos que carimbam o tempo dos campos | 5 | `cap_common` e `med_exchange` | `cap_common` e `med_exchange` |
+
+A fase 11 terminou na R-FASE11-26, com todos os indicadores nas metas. No mesmo período, os indicadores de código limpo foram de 46 para 54 arquivos Fortran, de 315 para 411 rotinas, de 2 arquivos com mais de 1000 linhas para nenhum e de 71 para 64 variáveis locais com `save` implícito (`indicadores.py fase9-07-validada fase11-26-validada`).
 
 Desde a R-FASE11-02, o primeiro indicador não conta os arquivos de `src/coupling/`, que é onde os nomes devem ficar; os valores de partida não mudam.
 

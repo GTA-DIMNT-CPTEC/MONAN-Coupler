@@ -1,6 +1,6 @@
 # Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação
 
-Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6), na R-FASE11-22 (seções 2, 3.5 e 6), na R-FASE11-23 (seções 3.8 e 6), na R-FASE11-24 (seções 3.1, 3.9 e 6) e na R-FASE11-25 (seções 3.6 e 6). Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
+Versão de 30/09/2026, sobre a tag `fase9-07-validada`; no repositório desde a R-FASE11-01, atualizada na R-FASE11-02 (seções 3.5 e 6), na R-FASE11-03 (seções 3.6 e 6), na R-FASE11-04 (seções 4.2 e 6), na R-FASE11-05 (seções 3.5 e 6), na R-FASE11-06 (seções 3.5 e 6), na R-FASE11-07 (seções 3.5 e 6), na R-FASE11-08 (seções 3.3, 4.2 e 6), na R-FASE11-09 (seções 3.3 e 6), na R-FASE11-10 (seções 3.3 e 6), na R-FASE11-11 (seções 3.3, 4.3 e 6), na R-FASE11-12 (seções 3.5, 4.3 e 6), na R-FASE11-13 (seções 3.5, 4.3 e 6), na R-FASE11-14 (seções 3.5, 4.3 e 6), na R-FASE11-15 (seções 3.7 e 6), na R-FASE11-16 (seções 3.7 e 6) e na R-FASE11-17 (seções 3.7, 4.3 e 6, com a etapa R-FASE11-18 nova e as seguintes renumeradas) na R-FASE11-18 (seções 3.7 e 6), na R-FASE11-19 (seções 3.7, 4.3 e 6), na R-FASE11-20 (seções 3.7 e 6), na R-FASE11-21 (seções 3.5 e 6), na R-FASE11-22 (seções 2, 3.5 e 6), na R-FASE11-23 (seções 3.8 e 6), na R-FASE11-24 (seções 3.1, 3.9 e 6), na R-FASE11-25 (seções 3.6 e 6) e na R-FASE11-26 (seções 4.4, 4.5 e 6), que encerrou a fase 11: esta é a versão final do documento para a fase. Substitui a versão de 29/09/2026 e a proposta de interpolação anterior. Corresponde à arquitetura descrita na NTC "Arquitetura de acoplamento do MONAN-Coupler: malhas, trocas e interpolação" (INPE, 2026), com o plano de migração detalhado para execução.
 
 ## Resumo
 
@@ -28,6 +28,8 @@ A arquitetura proposta se apoia em três conceitos, quatro camadas e três arqui
 | `src/coupling/cpl_map.F90` | mapa de acoplamento: tabelas `TROCAS` e `ROTAS` |
 
 A migração é a **fase 11** do roteiro, com as mesmas regras das fases 1 a 9: uma etapa por patch, conferências locais e validação bit a bit na Jaci. A fase 10 continua reservada às decisões que mudam resultados.
+
+A fase 11 terminou na R-FASE11-26 (tag `fase11-26-validada`), com 26 etapas, todas reproduzindo bit a bit a linha de base R-NOFMA-02 e com todos os indicadores da seção 4.4 nas metas. O estado final está na seção 6.
 
 ---
 
@@ -470,7 +472,7 @@ As etapas estão agrupadas em seis blocos. Os blocos A e B dão visibilidade sem
 | R-FASE11-23 | `weights_regridder_t`, opções em texto, `regrid_schemes.F90`, modelo de esquema e `compara-esquema.bash` | os esquemas existentes fazem as mesmas chamadas ao ESMF | `tests/regrid`; o `weights_file` dá os mesmos pesos |
 | R-FASE11-24 | adaptador do MPAS: a tradução entre o modelo e o ESMF reunida num módulo, com as trocas `cap` declaradas no mapa | código movido, sem mudar operações | `confere-instrucoes.py`; teste `grade` |
 | R-FASE11-25 | conferência passa a interromper a rodada em caso de diferença; dicionário do NUOPC com os nomes de `CAMPOS` e acréscimo automático desligado | só muda o comportamento quando há erro | rodada normal igual; uma rodada com um nome errado de propósito tem de parar com a linha do mapa |
-| R-FASE11-26 | encerramento: documentação, indicadores finais, NTC e RPQ atualizados | só documentação | |
+| R-FASE11-26 | encerramento: documentação e indicadores finais; o cap do MOM6 carimba o tempo por `cap_stamp_export` (último indicador na meta); NTC e RPQ, que ficam fora do repositório, atualizados à parte | mesmas chamadas ao NUOPC, na mesma ordem | `confere-instrucoes.py`; relatório igual |
 
 Ordem e dependências: A antes de tudo; B depois de A; C e D podem alternar; E depois de D; F no fim. As etapas 11 e 21 dependem de uma conferência na Jaci e podem virar só documentação, se a conferência mostrar que a mudança não é neutra.
 
@@ -478,15 +480,17 @@ Ordem e dependências: A antes de tudo; B depois de A; C e D podem alternar; E d
 
 `indicadores.py` mede, desde a R-FASE11-01, os indicadores desta fase numa segunda tabela (a regra de cada contagem está em `docs/conferencias-locais.md`, seção 2.7). A coluna "Hoje" traz os valores medidos em `fase9-07-validada`, exceto as fórmulas de índice e as trocas sem linha no mapa, conferidas à mão. Cada etapa registra os valores antes e depois no CHANGELOG.
 
-| Indicador | Hoje | Meta |
-| --- | --- | --- |
-| arquivos com nomes de campos anunciados ou realizados escritos à mão | 8 (os caps do MONAN-A, MOM6, SIS2, DOCN e DATM; `MED_cap`, `med_cap_types` e `med_init`) | 0 |
-| construções de malha ESMF fora de `cpl_grids` | 7 chamadas `ESMF_GridCreate*` em 6 arquivos | só as do DOCN e do DATM, se não migradas |
-| rotas criadas fora de `med_exchange` | 7 pontos em 5 arquivos | 0 |
-| chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 |
-| fórmulas de índice de grade regular fora de `cpl_grids` | 9 rotinas | 0 |
-| arquivos que carimbam o tempo dos campos | 5 (`cap_common`, `mom_cap_MONAN`, `MED_cap`, `med_export`, `med_cap_methods`) | `cap_common` e `med_exchange` |
-| trocas sem linha no mapa | todas | 0 |
+| Indicador | Hoje | Meta | Fim da fase 11 (R-FASE11-26) |
+| --- | --- | --- | --- |
+| arquivos com nomes de campos anunciados ou realizados escritos à mão | 8 (os caps do MONAN-A, MOM6, SIS2, DOCN e DATM; `MED_cap`, `med_cap_types` e `med_init`) | 0 | 0 |
+| construções de malha ESMF fora de `cpl_grids` | 7 chamadas `ESMF_GridCreate*` em 6 arquivos | só as do DOCN e do DATM, se não migradas | 2 chamadas, em `DOCN_cap` e `DATM_cap` |
+| rotas criadas fora de `med_exchange` | 7 pontos em 5 arquivos | 0 | 0 |
+| chamadas de rota em módulos de física | 1 (`med_bulk_ncar`) | 0 | 0 |
+| fórmulas de índice de grade regular fora de `cpl_grids` | 9 rotinas | 0 | 0 (R-FASE11-09; conferido à mão) |
+| arquivos que carimbam o tempo dos campos | 5 (`cap_common`, `mom_cap_MONAN`, `MED_cap`, `med_export`, `med_cap_methods`) | `cap_common` e `med_exchange` | `cap_common` e `med_exchange` (o cap do MOM6 passou a usar `cap_stamp_export` na R-FASE11-26) |
+| trocas sem linha no mapa | todas | 0 | 0 (as trocas `cap` do MONAN-A conferidas desde a R-FASE11-24) |
+
+Na `fase9-07-validada`, `indicadores.py` mede 6 rotas criadas fora de `med_exchange`, em 4 arquivos; a coluna "Hoje" desta linha foi contada à mão, antes do script.
 
 ### 4.5 Pronto quando
 
@@ -494,6 +498,15 @@ Ordem e dependências: A antes de tudo; B depois de A; C e D podem alternar; E d
 - os indicadores da seção 4.4 estão nas metas;
 - o relatório de acoplamento da última etapa é igual ao da R-FASE11-04;
 - todas as etapas reproduziram a R-NOFMA-02, com tag.
+
+Situação no fim da fase (R-FASE11-26):
+
+| Critério | Situação |
+| --- | --- |
+| conferência ativa e interrompendo a rodada | cumprido desde a R-FASE11-25; as lacunas conhecidas, na tabela `LACUNAS`, saem como aviso |
+| indicadores nas metas | cumprido na R-FASE11-26, com o carimbo de tempo do MOM6 (tabela da seção 4.4) |
+| relatório igual ao da R-FASE11-04 | cumprido com um desvio aprovado: a R-FASE11-22 escreveu o método de cada campo na `CplList`, e as 60 linhas de campo dos conectores ganharam `:remapmethod=bilinear` (as 6 linhas do método padrão saíram). Fora isso, o relatório é o da R-FASE11-04, e foi igual de uma etapa para a seguinte em todas as outras |
+| todas as etapas com PASS e tag | cumprido: 26 etapas e a R-FASE11-04-FIX01, cada uma com a sua tag `fase11-NN-validada` (`fase11-04-fix01` na correção) |
 
 ### 4.6 Riscos e cuidados
 
@@ -574,7 +587,11 @@ A R-FASE11-24 reuniu a tradução entre o MONAN-A e o ESMF no adaptador do MPAS 
 
 A R-FASE11-25 tornou a conferência do mapa uma barreira (seção 3.6): uma diferença interrompe a inicialização, depois do relatório inteiro. Antes, as lacunas conhecidas das configurações com o DOCN, que a conferência acusava como diferença, foram para a tabela `LACUNAS` do mapa e passaram a sair como aviso; a lista que estava copiada no `test_cpl_map` saiu. O `test_cpl_check` passou a montar, nas doze configurações válidas, os estados e as `CplList` como a rodada os monta: sem o DATM, nenhuma diferença, e cada lacuna aparece como aviso. O dicionário do NUOPC passou a ter só os nomes de `CAMPOS`, sem acréscimo automático; o critério do plano, "uma rodada com um nome errado de propósito tem de parar", ficou no teste `cplcheck` (casos `defeito` e `dicionario`), porque provocá-lo na Jaci exigiria mudar o código. Mudança de comportamento só em erro: com `use_datm`, que o driver não registra, a rodada agora para na conferência.
 
-Próxima etapa: **R-FASE11-26**, conforme a tabela do bloco F: o encerramento da fase 11, com a documentação, os indicadores finais e a NTC e o RPQ atualizados.
+A R-FASE11-26 encerrou a fase 11. Única mudança de código: o cap do MOM6 deixou de carimbar o tempo dos campos exportados com dois laços próprios e passou a chamar `cap_stamp_export`, de `cap_common`, que faz as mesmas chamadas, na mesma ordem; com isso, o último indicador chegou à meta (seção 4.4). O resto da etapa é documentação: os valores finais dos indicadores, o "pronto quando" item por item (seção 4.5) e este resumo.
+
+**Estado no fim da fase 11.** O acoplamento está descrito num lugar só, `src/coupling/`: as malhas regulares e as fórmulas de índice (`cpl_grids`), os 59 campos (`cpl_fields`), as trocas, as exportações, as lacunas conhecidas, as rotas do mediador e os conectores do driver (`cpl_map`), e o registro no NUOPC, o método dos conectores e a conferência (`cpl_check`). Os caps e o mediador anunciam e realizam os campos a partir do mapa; o driver registra os conectores a partir dele; o mediador cria e aplica as rotas pela tabela `ROTAS`, em fases (`med_exchange`), e a física bulk trabalha só com arrays; a tradução entre o MONAN-A e o ESMF está no adaptador do MPAS; o framework de interpolação aceita esquemas escritos só com pesos, com opções em texto. Na inicialização, a conferência compara o mapa com o que os componentes anunciaram e interrompe a rodada em caso de diferença, e o dicionário do NUOPC só aceita os nomes de `CAMPOS`. Nenhum resultado mudou: todas as etapas reproduziram, bit a bit, os 73 arquivos da linha de base R-NOFMA-02.
+
+**Ficam para depois.** As decisões que mudariam resultados (seção 5) são da fase 10, cada uma com etapa própria e linha de base nova; entre elas, a passagem para `redist` nos conectores entre representações da mesma malha, que agora é uma linha da coluna `metodo` do mapa. O DATM continua descrito no mapa e não registrado pelo driver (decisão pendente do GT); com `use_datm`, a conferência interrompe a rodada. Limpezas de forma no adaptador do MPAS, que mudariam o último bit (as constantes de π locais) ou só a aparência (desalocações repetidas, indentação herdada dos BLOCK), ficaram de fora de propósito. O passo seguinte natural, como no fim da fase 9, é integrar o ramo `refactor/principal` ao `develop`.
 
 ---
 
