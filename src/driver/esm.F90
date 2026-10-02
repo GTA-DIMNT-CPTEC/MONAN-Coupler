@@ -280,10 +280,10 @@ contains
     type(ESMF_GridComp), intent(inout) :: driver
     type(ESMF_Clock),    intent(in)    :: driverClock
     integer,             intent(out)   :: rc
-    integer :: ordem(N_CONNECTORS), n, k, t
+    integer :: order(N_CONNECTORS), n, k, t
 
     rc = ESMF_SUCCESS
-    call cpl_driver_connectors(cpl_current_config(), ordem, n, t)
+    call cpl_driver_connectors(cpl_current_config(), order, n, t)
     if (t > 0) then
       call ESMF_LogSetError(ESMF_RC_NOT_IMPL, &
         msg='ESM: conector do mapa sem registro no driver: '//trim(EXCHANGES(t)%src)// &
@@ -293,20 +293,20 @@ contains
     end if
 
     do k = 1, n
-      call add_connector(driver, trim(rotulo(CONNECTOR_SRC(ordem(k)))), &
-                         trim(rotulo(CONNECTOR_DST(ordem(k)))), driverClock, rc)
+      call add_connector(driver, trim(comp_label(CONNECTOR_SRC(order(k)))), &
+                         trim(comp_label(CONNECTOR_DST(order(k)))), driverClock, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
   contains
 
     !> Rótulo do componente no driver ('MPAS' para o ATM do mapa).
-    function rotulo(comp) result(label)
+    function comp_label(comp) result(label)
       character(len=*), intent(in) :: comp
       character(len=4) :: label
       label = comp
       if (comp == 'ATM') label = MPAS_LABEL
-    end function rotulo
+    end function comp_label
 
   end subroutine add_connectors
 
@@ -357,7 +357,7 @@ contains
     character(len=*), parameter :: OPT_SRC   = ':srcTermProcessing=0'
     character(len=512), allocatable :: cplList(:)
     type(ESMF_CplComp),     pointer :: connectors(:)
-    integer :: i, j, n, n_order, n_src, n_full, n_metodo, n_cheia
+    integer :: i, j, n, n_order, n_src, n_full, n_method, n_full_method
 
     rc = ESMF_SUCCESS
     n_order = 0; n_src = 0; n_full = 0
@@ -390,10 +390,10 @@ contains
 
     call cpl_write_methods(driver,                                                   &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
-      [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_metodo, n_cheia, rc)
+      [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_method, n_full_method, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('ESM: metodo dos conectores pelo mapa: remapmethod em '// &
-      int_to_str(n_metodo)//' entrada(s)', ESMF_LOGMSG_INFO)
+      int_to_str(n_method)//' entrada(s)', ESMF_LOGMSG_INFO)
 
     call cpl_check_coupling(driver,                                                  &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
@@ -405,8 +405,8 @@ contains
         'para as opcoes de reprodutibilidade; aumentar len de cplList', ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if
-    if (n_cheia > 0) then
-      call ESMF_LogWrite('ESM: '//int_to_str(n_cheia)//' entrada(s) de CplList sem espaco '// &
+    if (n_full_method > 0) then
+      call ESMF_LogWrite('ESM: '//int_to_str(n_full_method)//' entrada(s) de CplList sem espaco '// &
         'para o metodo do mapa; aumentar len em cpl_escreve_metodos', ESMF_LOGMSG_ERROR)
       rc = ESMF_FAILURE
     end if

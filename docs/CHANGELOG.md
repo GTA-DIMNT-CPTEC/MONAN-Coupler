@@ -9,6 +9,15 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **Nomes em inglês em `src/shared`, no driver e no programa principal; encerramento da fase 12 (R-FASE12-05).** Quinta e última etapa da fase 12. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-05.txt` (10 trocas).
+  - `diag_bitsum`: `acumula`, `acumula_2d` e `grava` → `accumulate`, `accumulate_2d` e `write_sum`; `PREFIXO` → `PREFIX`; argumento `rotulo` → `label`. `mom6_supergrid`: `lido` → `was_read`. Driver (`esm`): função interna `rotulo` → `comp_label`, e as variáveis `ordem`, `n_metodo` e `n_cheia` → `order`, `n_method` e `n_full_method`.
+  - Os testes, que o plano deixava para uma sexta etapa, foram renomeados nas etapas das suas áreas; a fase termina aqui. Varredura final: nenhum identificador Fortran próprio em português em `src/` e `tests/` (o que sobra são as interfaces do MOM6, do FMS e do MPAS, a função intrínseca `achar` e abreviações em inglês).
+  - `renomeia-identificadores.py`: nos textos, quando um nome antigo tem trocas diferentes em áreas diferentes (aqui, `rotulo`), vale a primeira da tabela, em vez de interromper.
+  - `docs/estado-do-projeto.md`: R-FASE12-04 concluída e encerramento da fase 12 (o que ficou em português, por decisão, e como levar um ramo antigo aos nomes novos).
+  - Conferências locais: `confere-tudo.bash HEAD~1` sem nenhuma falha, inclusive `literais` (constantes de texto iguais) e `nomes`. Compilação sem avisos.
+  - Indicadores: nenhum muda.
+  - Validação: na Jaci, compilação e rodada com `valida_rodada.bash`; esperado PASS, 73 arquivos iguais à linha de base R-NOFMA-02, e o relatório de acoplamento igual ao da `fase12-04-validada`.
+
 - **Nomes em inglês nos caps dos modelos (R-FASE12-04).** Quarta etapa da fase 12. Troca os nomes de `src/caps` (sem os fontes de `upstream/`, que vêm do MOM6, nem os nomes das interfaces do MPAS, do MOM6, do FMS e do SIS2) e dos seus testes. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-04.txt` (63 trocas e quatro arquivos renomeados).
   - Adaptador do MPAS: `src/caps/atmos/mpas_adaptador.F90` → `mpas_adapter.F90`, módulo `mpas_adaptador_mod` → `mpas_adapter_mod` (`Makefile`, `compila-local.bash`, que aceita os três nomes que o adaptador já teve, e scripts dos testes atualizados).
   - Caps: pontos do mapa `PONTO_ATM`, `PONTO_DATM`, `PONTO_ICE` e `PONTO_OCN` → `POINT_ATM`, `POINT_DATM`, `POINT_ICE` e `POINT_OCN`; valores iniciais da importação do MONAN-A e da exportação do DOCN (`valor_inicial_importacao`, `valor_inicial_exportacao` → `initial_import_value`, `initial_export_value`); variáveis locais (`nomes` → `names`, `limites` → `bounds`, `campos_sfcinput` → `sfcinput_fields`, as somas de verificação do SIS2 `cks_ter`/`cks_din` → `cks_thermo`/`cks_dyn`, e outras).
@@ -16,7 +25,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `README.md`, `docs/arquitetura-acoplamento.md`, `docs/conferencias-locais.md`, `docs/interpolacao-plugavel.md`, `docs/roteiro-codigo-limpo.md`, `docs/estado-do-projeto.md` (R-FASE12-03 concluída) e as mensagens de `tools/postproc/postproc_monan2_import.py` que citam o adaptador atualizados.
   - Conferências locais: `confere-tudo.bash HEAD~1` sem nenhuma falha, inclusive `literais` (constantes de texto iguais) e `nomes`. Compilação sem avisos, inclusive dos caps do MONAN-A, do MOM6 e do SIS2 com as interfaces mínimas.
   - Indicadores: nenhum muda.
-  - Validação: na Jaci, compilação e rodada com `valida_rodada.bash`; esperado PASS, 73 arquivos iguais à linha de base R-NOFMA-02, e o relatório de acoplamento igual ao da `fase12-03-validada`.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02, nenhum com diferença só de metadados (tag `fase12-04-validada`); relatório de acoplamento (85 linhas) igual ao da `fase12-03-validada`.
 
 - **Nomes em inglês no mediador (R-FASE12-03).** Terceira etapa da fase 12. Troca os nomes de `src/mediator` e dos seus testes; os nomes públicos mudam também onde são usados. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-03.txt` (87 trocas e três arquivos renomeados).
   - Fases do mediador (`med_exchange`): `inicializar_dados`, `prepara_inicio`, `ir_para_malha_de_fluxo`, `calcula_fluxos`, `fracao_de_gelo_sem_sis2` e `entregar` → `initialize_data`, `prepare_start`, `go_to_flux_grid`, `compute_fluxes`, `ice_fraction_without_sis2` e `deliver`; rotinas internas (`garante_rotas_*` → `ensure_*_routes`, `aguarda_primeira_sst` → `wait_first_sst`, `associa_fluxo` → `associate_fluxes`, `aponta` → `point_to`).

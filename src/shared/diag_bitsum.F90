@@ -46,13 +46,13 @@ module diag_bitsum_mod
     module procedure bitsum_log_field
   end interface diag_bitsum_log
 
-  character(len=*), parameter :: PREFIXO = 'FIX-DIAG-BITSUM-01'
+  character(len=*), parameter :: PREFIX = 'FIX-DIAG-BITSUM-01'
 
 contains
 
   ! --------------------------------------------------------------------------
   !> Acumula contagem e as duas somas de 32 bits de um trecho contiguo.
-  pure subroutine acumula(x, n, s_hi, s_lo)
+  pure subroutine accumulate(x, n, s_hi, s_lo)
     real(real64),   intent(in)    :: x(:)
     integer(int64), intent(inout) :: n, s_hi, s_lo
 
@@ -66,22 +66,22 @@ contains
       s_hi = s_hi + iand(shiftr(b, 32), MASK32)
     end do
     n = n + size(x, kind=int64)
-  end subroutine acumula
+  end subroutine accumulate
 
   ! --------------------------------------------------------------------------
-  pure subroutine acumula_2d(x, n, s_hi, s_lo)
+  pure subroutine accumulate_2d(x, n, s_hi, s_lo)
     real(real64),   intent(in)    :: x(:,:)
     integer(int64), intent(inout) :: n, s_hi, s_lo
     integer :: j
     do j = 1, size(x, 2)
-      call acumula(x(:, j), n, s_hi, s_lo)
+      call accumulate(x(:, j), n, s_hi, s_lo)
     end do
-  end subroutine acumula_2d
+  end subroutine accumulate_2d
 
   ! --------------------------------------------------------------------------
   !> Grava a linha no log deste PET.
-  subroutine grava(rotulo, n, s_hi, s_lo, n_err)
-    character(len=*), intent(in) :: rotulo
+  subroutine write_sum(label, n, s_hi, s_lo, n_err)
+    character(len=*), intent(in) :: label
     integer(int64),   intent(in) :: n, s_hi, s_lo
     integer,          intent(in) :: n_err
 
@@ -89,43 +89,43 @@ contains
 
     if (n_err == 0) then
       write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0)') &
-            PREFIXO, trim(rotulo), n, s_hi, s_lo
+            PREFIX, trim(label), n, s_hi, s_lo
     else
       write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0," ERRO=",i0)') &
-            PREFIXO, trim(rotulo), n, s_hi, s_lo, n_err
+            PREFIX, trim(label), n, s_hi, s_lo, n_err
     end if
     call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
-  end subroutine grava
+  end subroutine write_sum
 
   ! --------------------------------------------------------------------------
-  subroutine bitsum_log_1d(rotulo, x, rc)
-    character(len=*), intent(in)  :: rotulo
+  subroutine bitsum_log_1d(label, x, rc)
+    character(len=*), intent(in)  :: label
     real(real64),     intent(in)  :: x(:)
     integer,          intent(out) :: rc
     integer(int64) :: n, s_hi, s_lo
     n = 0 ; s_hi = 0 ; s_lo = 0
-    call acumula(x, n, s_hi, s_lo)
-    call grava(rotulo, n, s_hi, s_lo, 0)
+    call accumulate(x, n, s_hi, s_lo)
+    call write_sum(label, n, s_hi, s_lo, 0)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_1d
 
   ! --------------------------------------------------------------------------
-  subroutine bitsum_log_2d(rotulo, x, rc)
-    character(len=*), intent(in)  :: rotulo
+  subroutine bitsum_log_2d(label, x, rc)
+    character(len=*), intent(in)  :: label
     real(real64),     intent(in)  :: x(:,:)
     integer,          intent(out) :: rc
     integer(int64) :: n, s_hi, s_lo
     n = 0 ; s_hi = 0 ; s_lo = 0
-    call acumula_2d(x, n, s_hi, s_lo)
-    call grava(rotulo, n, s_hi, s_lo, 0)
+    call accumulate_2d(x, n, s_hi, s_lo)
+    call write_sum(label, n, s_hi, s_lo, 0)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_2d
 
   ! --------------------------------------------------------------------------
   !> ESMF_Field real(8) de posto 1 ou 2, com qualquer numero de pedacos
   !! locais (localDeCount pode ser 0, 1 ou mais). Soma a regiao exclusiva.
-  subroutine bitsum_log_field(rotulo, field, rc)
-    character(len=*), intent(in)  :: rotulo
+  subroutine bitsum_log_field(label, field, rc)
+    character(len=*), intent(in)  :: label
     type(ESMF_Field), intent(in)  :: field
     integer,          intent(out) :: rc
 
@@ -151,7 +151,7 @@ contains
         nullify(p1)
         call ESMF_FieldGet(field, localDe=lde, farrayPtr=p1, rc=rc_loc)
         if (rc_loc == ESMF_SUCCESS .and. associated(p1)) then
-          call acumula(p1, n, s_hi, s_lo)
+          call accumulate(p1, n, s_hi, s_lo)
         else
           n_err = n_err + 1
         end if
@@ -159,14 +159,14 @@ contains
         nullify(p2)
         call ESMF_FieldGet(field, localDe=lde, farrayPtr=p2, rc=rc_loc)
         if (rc_loc == ESMF_SUCCESS .and. associated(p2)) then
-          call acumula_2d(p2, n, s_hi, s_lo)
+          call accumulate_2d(p2, n, s_hi, s_lo)
         else
           n_err = n_err + 1
         end if
       end if
     end do
 
-    call grava(rotulo, n, s_hi, s_lo, n_err)
+    call write_sum(label, n, s_hi, s_lo, n_err)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_field
 

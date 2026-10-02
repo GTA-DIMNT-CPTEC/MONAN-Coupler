@@ -137,6 +137,8 @@ def names_for(entries, path):
         if path is not None and prefixes is not None and not path.startswith(prefixes):
             continue
         if old in names and names[old] != new:
+            if path is None:
+                continue      # textos: vale a primeira troca da tabela
             sys.exit('ERRO: %s tem duas trocas em %s' % (old, path))
         names[old] = new
     return names

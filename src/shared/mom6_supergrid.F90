@@ -119,7 +119,7 @@ contains
     integer,              intent(out)  :: rc
     character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
     character(len=64) :: pfx
-    logical :: lido
+    logical :: was_read
     integer :: i1, i2, j1, j2, ni_local, nj_local
     character(len=300) :: dbgmsg
     real(ESMF_KIND_R8) :: x_row_min
@@ -130,8 +130,8 @@ contains
     pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
     ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
     call read_supergrid_points(filename, 0, ' para ler coordenadas T reais do MOM6', &
-      '"x" (lon)', '"y" (lat)', pfx, coordX, coordY, lido, rc)
-    if (.not. lido) return
+      '"x" (lon)', '"y" (lat)', pfx, coordX, coordY, was_read, rc)
+    if (.not. was_read) return
 
     i1 = lbound(coordX,1); i2 = ubound(coordX,1)
     j1 = lbound(coordX,2); j2 = ubound(coordX,2)
@@ -188,13 +188,13 @@ contains
     integer,              intent(out)  :: rc
     character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
     character(len=64) :: pfx
-    logical :: lido
+    logical :: was_read
 
     pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
     ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
     ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
     call read_supergrid_points(filename, 1, ' para ler cantos (vertices) do MOM6', &
-      '"x" (lon, canto)', '"y" (lat, canto)', pfx, coordX, coordY, lido, rc)
+      '"x" (lon, canto)', '"y" (lat, canto)', pfx, coordX, coordY, was_read, rc)
 
   end subroutine mom6_supergrid_corners
 
@@ -218,18 +218,18 @@ contains
   !! @param[out] rc        ESMF_SUCCESS ou ESMF_FAILURE
   !----------------------------------------------------------------------------
   subroutine read_supergrid_points(filename, off, txt_open, txt_x, txt_y, pfx, &
-                                   coordX, coordY, lido, rc)
+                                   coordX, coordY, was_read, rc)
     character(len=*),   intent(in)  :: filename
     integer,            intent(in)  :: off
     character(len=*),   intent(in)  :: txt_open, txt_x, txt_y, pfx
     real(ESMF_KIND_R8), pointer     :: coordX(:,:), coordY(:,:)
-    logical,            intent(out) :: lido
+    logical,            intent(out) :: was_read
     integer,            intent(out) :: rc
     integer :: ncid, varid_x, varid_y, ncstat
     integer :: i1, i2, j1, j2, ni_local, nj_local
     integer :: start2(2), count2(2), stride2(2)
 
-    lido = .false.
+    was_read = .false.
     rc = ESMF_SUCCESS
     if (.not. associated(coordX) .or. .not. associated(coordY)) return
 
@@ -256,7 +256,7 @@ contains
       ncstat = nf90_close(ncid)
       return
     end if
-    lido = .true.
+    was_read = .true.
 
     ! stride=2 le direto os pontos pedidos, sem carregar o supergrid inteiro
     ! (2x resolucao) na memoria de cada PET.
