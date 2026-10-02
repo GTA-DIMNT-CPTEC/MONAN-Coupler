@@ -210,12 +210,13 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo):
 
 
 def le_mapa(raiz):
-    """Lê CAMPOS, MALHAS, TROCAS, EXPORTACOES e ROTAS dos fontes."""
+    """Lê CAMPOS, MALHAS, TROCAS, EXPORTACOES, LACUNAS e ROTAS dos fontes."""
     tabelas = {}
     for arquivo, itens in (('src/coupling/cpl_fields.F90', [('cpl_campo_t', 'CAMPOS')]),
                            ('src/coupling/cpl_map.F90', [('cpl_malha_ref_t', 'MALHAS'),
                                                           ('cpl_troca_t', 'TROCAS'),
                                                           ('cpl_exporta_t', 'EXPORTACOES'),
+                                                          ('cpl_lacuna_t', 'LACUNAS'),
                                                           ('cpl_rota_t', 'ROTAS')])):
         caminho = os.path.join(raiz, arquivo)
         try:
@@ -337,11 +338,21 @@ def gera(t):
     out += [
         '',
         '`producao` é a configuração de validação (MONAN-A, MOM6 e SIS2, contorno',
-        'pelo mediador). Lacunas conhecidas, registradas no teste: em `mpas_docn`,',
-        '`Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A (o cap',
-        'atmosférico interrompe a rodada) e `So_omask` não chega ao mediador; em',
-        '`datm_docn`, `So_omask` não chega ao mediador. O driver não registra o',
-        'DATM: as trocas com `datm` descrevem o que o cap do DATM anuncia.',
+        'pelo mediador). O driver não registra o DATM: as trocas com `datm`',
+        'descrevem o que o cap do DATM anuncia, e a conferência do mapa',
+        'interrompe uma rodada com `use_datm`.',
+        '',
+        'Lacunas conhecidas (tabela `LACUNAS`): campos que um componente anuncia',
+        'na importação e que, na configuração indicada, não têm origem. A',
+        'conferência do mapa as registra como aviso, e não como diferença; nas',
+        'lacunas do MONAN-A, o cap atmosférico interrompe a rodada por conta',
+        'própria.',
+        '',
+    ]
+    out += md_tabela(['Campo', 'Ponto', 'Quando', 'Motivo'],
+                     [[codigo(x['campo']), codigo(x['ponto']), quando_md(x['quando']),
+                       x['motivo']] for x in t['LACUNAS']])
+    out += [
         '',
         '## 2. Trocas por conector',
         '',

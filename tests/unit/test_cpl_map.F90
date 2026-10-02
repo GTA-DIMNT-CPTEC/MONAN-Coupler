@@ -17,7 +17,8 @@
 !!   cadeia      em cada configuração, todo campo que parte de um ponto
 !!               intermediário (grade do cap atmosférico, grade do oceano no
 !!               mediador) chegou antes a ele; as exceções são as lacunas
-!!               conhecidas, registradas abaixo, e o teste exige que sejam
+!!               conhecidas, da tabela LACUNAS do mapa (desde a R-FASE11-25;
+!!               antes, uma lista neste teste), e o teste exige que sejam
 !!               exatamente essas
 !!   contagens   campos de cada conector na configuração de produção iguais
 !!               aos do Apêndice A de docs/arquitetura-acoplamento.md
@@ -66,6 +67,7 @@ program test_cpl_map
                                 cpl_ponto_componente, cpl_ponto_malha, cpl_troca_t
   use cpl_map_mod,       only : cpl_chegadas, cpl_exportacoes, EXPORTACOES, cpl_config_atual
   use cpl_map_mod,       only : METODOS_CONECTOR, cpl_metodo_conector
+  use cpl_map_mod,       only : LACUNAS, cpl_lacuna
   use cpl_fields_mod,    only : CPL_NOME_LEN
   use med_cap_types_mod, only : MED_CHAVES
   implicit none
@@ -83,14 +85,6 @@ program test_cpl_map
     cpl_config_t(datm=.true.,  docn=.false., med_to_mpas=.true.,  sis2=.false.),        &
     cpl_config_t(datm=.true.,  docn=.true.,  med_to_mpas=.false., sis2=.false.) ]
 
-  !> Lacunas conhecidas: configuração, ponto e campo.
-  integer, parameter :: NLAC = 5
-  character(len=16), parameter :: LAC_CFG(NLAC) = [character(len=16) :: &
-    'mpas_docn', 'mpas_docn', 'mpas_docn', 'mpas_docn', 'datm_docn']
-  character(len=16), parameter :: LAC_PONTO(NLAC) = [character(len=16) :: &
-    'MED@ocn_med', 'ATM@atm_cap', 'ATM@atm_cap', 'ATM@atm_cap', 'MED@ocn_med']
-  character(len=24), parameter :: LAC_CAMPO(NLAC) = [character(len=24) :: &
-    'So_omask', 'Sx_tsfc', 'Sf_albedo', 'Sx_omask', 'So_omask']
 
   !> Malhas onde um modelo produz campos, e a malha de fluxo do mediador,
   !! onde ele os calcula: pontos de partida que não precisam de chegada.
@@ -369,6 +363,12 @@ contains
     if (ok_volta) ok_volta = all(volta == imp)
     call resultado('trocas cap ATM@mpas -> ATM@atm_cap: as 13 exportacoes do MONAN-A', ok_ida)
     call resultado('trocas cap ATM@atm_cap -> ATM@mpas: as 7 importacoes, na mesma ordem', ok_volta)
+    ok_ida = .true.
+    do t = 1, size(LACUNAS)
+      ok_ida = ok_ida .and. cpl_campo_indice(LACUNAS(t)%campo) > 0 .and. &
+               ponto_valido(LACUNAS(t)%ponto) .and. cpl_condicoes_validas(LACUNAS(t)%quando)
+    end do
+    call resultado('LACUNAS: campos, pontos e condicoes validos', ok_ida)
   end subroutine confere_trocas_cap
 
   !> Na configuração k: cada (campo, destino) recebe de uma só troca, entre
@@ -418,17 +418,16 @@ contains
       end do
       if (chegou) cycle
       nfaltas = nfaltas + 1
-      esperada = .false.
-      do l = 1, NLAC
-        if (LAC_CFG(l) == NOME_CFG(k) .and. LAC_PONTO(l) == TROCAS(i)%de .and. &
-            LAC_CAMPO(l) == TROCAS(i)%campo) esperada = .true.
-      end do
+      esperada = cpl_lacuna(CFG(k), TROCAS(i)%campo, TROCAS(i)%de)
       if (.not. esperada) then
         nerr = nerr + 1
         call falha(trim(NOME_CFG(k))//': parte sem ter chegado: '//descreve(i))
       end if
     end do
-    nesperadas = count(LAC_CFG == NOME_CFG(k))
+    nesperadas = 0
+    do l = 1, size(LACUNAS)
+      if (cpl_lacuna(CFG(k), LACUNAS(l)%campo, LACUNAS(l)%ponto)) nesperadas = nesperadas + 1
+    end do
     if (nfaltas /= nesperadas .and. nerr == 0) &
       call falha(trim(NOME_CFG(k))//': lacuna conhecida que deixou de existir')
     call resultado(trim(NOME_CFG(k))//': cadeia completa, exceto as lacunas conhecidas', &

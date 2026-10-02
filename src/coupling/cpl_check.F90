@@ -1,8 +1,16 @@
 !> @file cpl_check.F90
-!! @brief Método dos conectores pelo mapa, conferência do mapa de acoplamento
-!! e relatório dos conectores no log.
+!! @brief O que o acoplamento registra no NUOPC e confere: dicionário de
+!! campos, método dos conectores, conferência do mapa e relatório dos
+!! conectores no log.
 !!
-!! As duas rotinas públicas com o driver são chamadas pelo ModifyCplLists do
+!! cpl_dicionario_nuopc é chamada pelo driver (esm.F90) antes de criar os
+!! componentes: registra no dicionário do NUOPC os nomes de CAMPOS
+!! (cpl_fields), com a unidade de cada um, e desliga o acréscimo automático;
+!! um nome fora de CAMPOS para a rodada no anúncio, com a mensagem do NUOPC
+!! "<nome> is not a StandardName in the NUOPC_FieldDictionary!" (desde a
+!! R-FASE11-25).
+!!
+!! As outras duas rotinas com o driver são chamadas pelo ModifyCplLists do
 !! esm.F90, quando os componentes já anunciaram os campos e os conectores já
 !! montaram as suas listas (CplList), e antes da realização dos campos:
 !!
@@ -24,9 +32,11 @@
 !!
 !! Cada diferença vira uma linha "CPL-REL: DIFERENCA: ..."; campos exportados
 !! que nenhum componente consome viram "CPL-REL: AVISO: ...", porque são
-!! normais (o MOM6 exporta So_s, por exemplo). A conferência nunca interrompe
-!! a rodada: até a R-FASE11-25 ela só registra. Um erro do ESMF durante a
-!! consulta também só é registrado, e a rodada segue.
+!! normais (o MOM6 exporta So_s, por exemplo), e também as lacunas conhecidas
+!! da tabela LACUNAS do mapa ("AVISO: lacuna conhecida: ..."). Desde a
+!! R-FASE11-25, havendo diferença, cpl_check_acoplamento devolve erro em
+!! todos os PETs, depois de escrever o relatório inteiro, e a inicialização
+!! para. Um erro do ESMF durante a consulta só é registrado.
 !!
 !! As rotinas cpl_confere_conector, cpl_confere_metodos e cpl_confere_estado
 !! não usam o ESMF e
@@ -42,14 +52,17 @@ module cpl_check_mod
                                  NUOPC_GetStateMemberLists
   use NUOPC_Driver,       only : NUOPC_DriverGetComp
   use coupler_utils_mod,  only : int_to_str, ChkErr
-  use cpl_fields_mod,     only : cpl_campo_indice
+  use NUOPC,              only : NUOPC_FieldDictionaryHasEntry, NUOPC_FieldDictionaryAddEntry, &
+                                 NUOPC_FieldDictionarySetAutoAdd
+  use cpl_fields_mod,     only : cpl_campo_indice, CAMPOS
   use cpl_map_mod,        only : TROCAS, cpl_config_t, cpl_troca_vale, cpl_ponto_componente, &
-                                 cpl_config_atual, cpl_metodo_conector, CPL_METODO_LEN
+                                 cpl_config_atual, cpl_metodo_conector, CPL_METODO_LEN, &
+                                 cpl_lacuna
 
   implicit none
   private
 
-  public :: cpl_check_acoplamento, cpl_escreve_metodos
+  public :: cpl_check_acoplamento, cpl_escreve_metodos, cpl_dicionario_nuopc
   public :: cpl_confere_conector, cpl_confere_metodos, cpl_confere_estado
   public :: cpl_metodo_da_entrada
   public :: CPL_PREFIXO, CPL_MSG_LEN
@@ -61,6 +74,37 @@ module cpl_check_mod
   character(len=*), parameter :: OPT_METODO = 'remapmethod='
 
 contains
+
+  !> Dicionário do NUOPC com os campos de CAMPOS, e sem acréscimo automático.
+  !!
+  !! Cada nome entra com a unidade da coluna unidade de CAMPOS ('1' se
+  !! vazia); um nome que o dicionário já tenha não é registrado de novo. O
+  !! NUOPC grava a unidade no atributo Units de cada campo anunciado.
+  !!
+  !! @param[out] rc  código de retorno do ESMF
+  subroutine cpl_dicionario_nuopc(rc)
+    integer, intent(out) :: rc
+
+    integer :: k
+    logical :: existe
+
+    rc = ESMF_SUCCESS
+    do k = 1, size(CAMPOS)
+      existe = NUOPC_FieldDictionaryHasEntry(trim(CAMPOS(k)%nome), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+      if (existe) cycle
+      if (len_trim(CAMPOS(k)%unidade) > 0) then
+        call NUOPC_FieldDictionaryAddEntry(standardName=trim(CAMPOS(k)%nome), &
+          canonicalUnits=trim(CAMPOS(k)%unidade), rc=rc)
+      else
+        call NUOPC_FieldDictionaryAddEntry(standardName=trim(CAMPOS(k)%nome), &
+          canonicalUnits='1', rc=rc)
+      end if
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end do
+    call NUOPC_FieldDictionarySetAutoAdd(.false., rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+  end subroutine cpl_dicionario_nuopc
 
   !> Escreve em cada entrada da CplList dos conectores a opção remapmethod
   !! com o método da troca no mapa (cpl_metodo_conector).
@@ -129,28 +173,60 @@ contains
     end do
   end subroutine cpl_escreve_metodos
 
-  !> Relatório dos conectores e conferência do mapa, no log do PET 0.
+  !> Relatório dos conectores e conferência do mapa, no log do PET 0; erro
+  !! em todos os PETs se a conferência acha diferença.
+  !!
+  !! O PET 0 faz a conferência e escreve o relatório; o número de diferenças
+  !! é distribuído a todos os PETs (ESMF_VMBroadcast), que devolvem
+  !! ESMF_FAILURE juntos, com uma mensagem de erro no log de cada um.
   !!
   !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
   !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
   !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
-  !! @param[out]   rc           sempre ESMF_SUCCESS: a conferência só registra
+  !! @param[out]   rc           ESMF_FAILURE se houve diferença
   subroutine cpl_check_acoplamento(driver, rotulos, componentes, rc)
     type(ESMF_GridComp), intent(inout) :: driver
     character(len=*),    intent(in)    :: rotulos(:)
     character(len=*),    intent(in)    :: componentes(:)
     integer,             intent(out)   :: rc
 
-    type(cpl_config_t) :: cfg
-    type(ESMF_VM)      :: vm
-    character(len=CPL_MSG_LEN), allocatable :: msgs(:)
-    integer :: localPet, ndif, naviso, i, j, lrc
+    type(ESMF_VM) :: vm
+    integer :: localPet, lrc
+    integer :: ndif(1)
 
     rc = ESMF_SUCCESS
     call ESMF_VMGetCurrent(vm, rc=lrc)
     if (lrc /= ESMF_SUCCESS) return
     call ESMF_VMGet(vm, localPet=localPet, rc=lrc)
-    if (lrc /= ESMF_SUCCESS .or. localPet /= 0) return
+    if (lrc /= ESMF_SUCCESS) return
+
+    ndif = 0
+    if (localPet == 0) then
+      call confere_no_pet0(driver, rotulos, componentes, ndif(1))
+      ! o relatório vai para o arquivo antes que um PET possa abortar a rodada
+      if (ndif(1) > 0) call ESMF_LogFlush(rc=lrc)
+    end if
+    call ESMF_VMBroadcast(vm, ndif, 1, 0, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (ndif(1) > 0) then
+      call ESMF_LogWrite('cpl_check: conferencia do mapa com '//int_to_str(ndif(1))// &
+        ' diferenca(s) (linhas DIFERENCA do relatorio no log do PET 0); inicializacao interrompida', &
+        ESMF_LOGMSG_ERROR)
+      call ESMF_LogFlush(rc=lrc)
+      rc = ESMF_FAILURE
+    end if
+  end subroutine cpl_check_acoplamento
+
+  !> A conferência e o relatório, no PET 0 (ver cpl_check_acoplamento).
+  subroutine confere_no_pet0(driver, rotulos, componentes, ndif)
+    type(ESMF_GridComp), intent(inout) :: driver
+    character(len=*),    intent(in)    :: rotulos(:)
+    character(len=*),    intent(in)    :: componentes(:)
+    integer,             intent(out)   :: ndif
+
+    type(cpl_config_t) :: cfg
+    character(len=CPL_MSG_LEN), allocatable :: msgs(:)
+    integer :: naviso, i, j
 
     cfg = cpl_config_atual()
     call escreve('configuracao do mapa: '//descreve_config(cfg))
@@ -173,7 +249,7 @@ contains
     end do
     call escreve('conferencia do mapa: '//int_to_str(ndif)//' diferenca(s), '// &
                  int_to_str(naviso)//' aviso(s)')
-  end subroutine cpl_check_acoplamento
+  end subroutine confere_no_pet0
 
   !> Relatório da CplList do conector origem -> destino e conferência dela
   !! contra o mapa. Conector ausente só é diferença se o mapa prevê trocas.
@@ -389,7 +465,9 @@ contains
   !! troca ativa por conector chegando ao componente; cada troca ativa que
   !! chega ao componente tem de estar anunciada. Exportação: cada troca ativa
   !! que parte do componente tem de estar anunciada; campo anunciado sem
-  !! troca é aviso (exportado sem consumidor), não diferença.
+  !! troca é aviso (exportado sem consumidor), não diferença. Campo
+  !! importado sem origem que é lacuna conhecida (LACUNAS, em cpl_map) também
+  !! é aviso, e não diferença.
   !!
   !! @param[in]    cfg         configuração (chaves de &nuopc_mode)
   !! @param[in]    comp        componente no mapa
@@ -414,7 +492,10 @@ contains
           call acrescenta(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(nomes(k))// &
             ', que nao esta no dicionario de campos')
         n = conta_trocas(cfg, nomes(k), '', comp)
-        if (n == 0) then
+        if (n == 0 .and. cpl_lacuna(cfg, nomes(k), comp)) then
+          call acrescenta(msgs, naviso, 'AVISO: lacuna conhecida: '//trim(comp)//' importa '// &
+            trim(nomes(k))//', que nao tem origem nesta configuracao')
+        else if (n == 0) then
           call acrescenta(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(nomes(k))// &
             ', que nao tem origem no mapa')
         else if (n > 1) then

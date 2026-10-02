@@ -31,8 +31,7 @@ module ESM_MONAN
   use NUOPC,             only : NUOPC_FreeFormat, NUOPC_FreeFormatCreate,   &
                                 NUOPC_FreeFormatDestroy, NUOPC_CompDerive,  &
                                 NUOPC_CompSpecialize, NUOPC_CompAttributeSet, &
-                                NUOPC_CompAttributeGet,                     &
-                                NUOPC_FieldDictionarySetAutoAdd
+                                NUOPC_CompAttributeGet
   use NUOPC_Driver,      driver_routine_SS             => SetServices,            &
                          driver_label_SetModelServices => label_SetModelServices, &
                          driver_label_SetRunSequence   => label_SetRunSequence,   &
@@ -49,7 +48,7 @@ module ESM_MONAN
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
-  use cpl_check_mod,      only : cpl_check_acoplamento, cpl_escreve_metodos
+  use cpl_check_mod,      only : cpl_check_acoplamento, cpl_escreve_metodos, cpl_dicionario_nuopc
   use cpl_map_mod,        only : cpl_config_atual, cpl_conectores_do_driver, &
                                  CONECTOR_DE, CONECTOR_PARA, N_CONECTORES, TROCAS
 
@@ -96,8 +95,9 @@ contains
     rc = ESMF_SUCCESS
     use_ice = cfg_use_sis2_dynamic
 
-    ! Nomes de campo próprios do acoplador (_mpas, Foxx_* etc.)
-    call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
+    ! Nomes de campo do acoplador (_mpas, Foxx_* etc.): os de CAMPOS, no
+    ! dicionário do NUOPC, sem acréscimo automático (desde a R-FASE11-25)
+    call cpl_dicionario_nuopc(rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompGet(driver, petCount=petCount, clock=driverClock, rc=rc)
@@ -346,8 +346,9 @@ contains
   !! Hoje é bilinear em todas, o padrão que o conector usava sem a opção.
   !!
   !! Depois, com as listas prontas, registra no log o relatório dos conectores
-  !! e a conferência do mapa de acoplamento (cpl_check_acoplamento), que só
-  !! escreve no log e não muda as listas.
+  !! e a conferência do mapa de acoplamento (cpl_check_acoplamento), que não
+  !! muda as listas; desde a R-FASE11-25, uma diferença na conferência
+  !! interrompe a inicialização aqui.
   subroutine ModifyCplLists(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc

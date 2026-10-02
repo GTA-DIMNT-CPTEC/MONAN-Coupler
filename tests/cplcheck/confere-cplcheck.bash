@@ -16,13 +16,18 @@
 #            avisos (So_s, Fioo_q e Si_ifrac do MOM6, sem consumidor)
 #   defeito  o OCN importa So_teste e o MED não anuncia So_omask: o
 #            conector OCN -> MED leva 3 campos, a conferência dá 4
-#            diferenças, e a inicialização termina assim mesmo
+#            diferenças e, desde a R-FASE11-25, a inicialização para logo
+#            depois do relatório (mensagem "inicializacao interrompida")
 #   mediador o MED é o mediador real (MED_cap), que desde a R-FASE11-05
 #            anuncia os campos a partir do mapa: o relatório tem de dar os
 #            mesmos conectores, 0 diferenças e 3 avisos; a inicialização
 #            para de propósito logo depois da conferência
-# Em ambos, só o PET 0 escreve as linhas CPL-REL:. O relatório de cada caso
-# fica em SAIDA/relatorio_<caso>.txt, sem data e hora.
+#   dicionario  as listas do defeito, com o dicionário do acoplador (só os
+#            nomes de CAMPOS, sem acréscimo automático, como no esm.F90): o
+#            anúncio de So_teste tem de parar a inicialização com a mensagem
+#            do NUOPC, antes de qualquer relatório
+# Nos três primeiros, só o PET 0 escreve as linhas CPL-REL:. O relatório de
+# cada caso fica em SAIDA/relatorio_<caso>.txt, sem data e hora.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/cplcheck/confere-cplcheck.bash [SAIDA]
@@ -80,12 +85,14 @@ confere() {   # confere CASO DIFERENCAS CAMPOS_OCN_MED
   # shellcheck disable=SC2086
   if (cd "${dir}" && ${MPIRUN} -np "${NP}" "${SAIDA}/obj/test_cplcheck_driver" "${caso}" \
         > execucao.txt 2>&1); then
-    if [[ ${caso} == mediador ]]; then
+    if [[ ${caso} != normal ]]; then
       echo "FALHOU  ${caso}: a inicialização devia parar depois da conferência"
       falhas=$((falhas + 1)); return
     fi
-  elif [[ ${caso} != mediador ]] || ! grep -q 'TESTE: parada depois da conferencia' "${dir}"/PET0.teste; then
-    echo "FALHOU  ${caso}: a execução terminou com erro (ver ${dir}/execucao.txt)"
+  elif [[ ${caso} == normal ]] \
+       || { [[ ${caso} == mediador ]] && ! grep -q 'TESTE: parada depois da conferencia' "${dir}"/PET0.teste; } \
+       || { [[ ${caso} == defeito ]] && ! grep -q 'inicializacao interrompida' "${dir}"/PET0.teste; }; then
+    echo "FALHOU  ${caso}: a execução terminou com erro inesperado (ver ${dir}/execucao.txt)"
     falhas=$((falhas + 1)); return
   fi
   rel="${SAIDA}/relatorio_${caso}.txt"
@@ -122,6 +129,25 @@ confere() {   # confere CASO DIFERENCAS CAMPOS_OCN_MED
 confere normal 0 4
 confere defeito 4 3
 confere mediador 0 4
+
+# Dicionário do acoplador: o nome fora de CAMPOS para o anúncio
+echo "--- caso dicionario"
+dir="${SAIDA}/dicionario"
+rm -rf "${dir}" && mkdir -p "${dir}" && cp "${SAIDA}/nuopc.input" "${dir}/"
+# shellcheck disable=SC2086
+if (cd "${dir}" && ${MPIRUN} -np "${NP}" "${SAIDA}/obj/test_cplcheck_driver" dicionario \
+      > execucao.txt 2>&1); then
+  echo "FALHOU  dicionario: a inicialização devia parar no anúncio de So_teste"
+  falhas=$((falhas + 1))
+elif ! cat "${dir}"/PET*.teste | grep -q 'So_teste is not a StandardName in the NUOPC_FieldDictionary'; then
+  echo "FALHOU  dicionario: sem a mensagem do NUOPC sobre So_teste (ver ${dir})"
+  falhas=$((falhas + 1))
+elif cat "${dir}"/PET*.teste | grep -q 'CPL-REL:'; then
+  echo "FALHOU  dicionario: a inicialização chegou à conferência"
+  falhas=$((falhas + 1))
+else
+  echo "PASSOU  dicionario: o anúncio de So_teste parou a inicialização"
+fi
 if [[ ${falhas} -eq 0 ]]; then
   grep -q 'OCN importa So_teste, que nao tem origem' "${SAIDA}/relatorio_defeito.txt" \
     && grep -q 'So_omask chegando a MED' "${SAIDA}/relatorio_defeito.txt" \

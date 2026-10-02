@@ -60,6 +60,14 @@
 !! (e na de EXPORTACOES, abaixo): mudar a ordem das linhas muda a ordem do
 !! anúncio.
 !!
+!! LACUNAS: campos que um componente anuncia na importação e que, numa
+!! configuração, não têm origem no mapa. São conhecidas e não são erro: a
+!! conferência do mapa (cpl_check) as registra como aviso, e não como
+!! diferença, que interrompe a rodada desde a R-FASE11-25. O cap
+!! atmosférico, porém, interrompe a rodada por conta própria quando um campo
+!! que ele importa não está conectado (verify_import_connected), o que
+!! acontece nas lacunas do MONAN-A.
+!!
 !! EXPORTACOES: o que cada modelo exporta (anuncia no exportState) em cada
 !! ponto, consumido ou não, na ordem do anúncio do cap. Toda troca por
 !! conector que parte de um modelo parte de uma linha desta tabela; um campo
@@ -113,6 +121,7 @@ module cpl_map_mod
   public :: cpl_conector_vale, cpl_conector_fora, cpl_conectores_do_driver
   public :: N_CONECTORES, CONECTOR_DE, CONECTOR_PARA
   public :: cpl_exporta_t, EXPORTACOES, cpl_exportacoes
+  public :: cpl_lacuna_t, LACUNAS, cpl_lacuna
 
   integer, parameter :: r8 = ESMF_KIND_R8
 
@@ -168,6 +177,14 @@ module cpl_map_mod
     character(len=CPL_PONTO_LEN)  :: ponto  = ''
     character(len=CPL_QUANDO_LEN) :: quando = ''
   end type cpl_exporta_t
+
+  !> Um campo importado num ponto que fica sem origem na configuração quando.
+  type :: cpl_lacuna_t
+    character(len=CPL_NOME_LEN)   :: campo  = ''
+    character(len=CPL_PONTO_LEN)  :: ponto  = ''
+    character(len=CPL_QUANDO_LEN) :: quando = ''
+    character(len=64)             :: motivo = ''
+  end type cpl_lacuna_t
 
   !> Uma interpolação do mediador (ver as quatro etapas no cabeçalho).
   type :: cpl_rota_t
@@ -427,6 +444,20 @@ module cpl_map_mod
     cpl_exporta_t('Si_t_sis2',      'ICE@ice_sis2', 'sis2') ]
 
   !--------------------------------------------------------------------------
+  ! LACUNAS
+  !--------------------------------------------------------------------------
+  type(cpl_lacuna_t), parameter :: LACUNAS(*) = [                                                      &
+    !            campo        ponto          quando                  motivo
+    ! O mediador anuncia So_omask também com o DOCN, que não o exporta
+    cpl_lacuna_t('So_omask',  'MED@ocn_med', 'docn',                 'o DOCN nao exporta So_omask'),       &
+    ! Contorno direto do oceano (use_med_to_mpas=.false.): o oceano não
+    ! exporta estes campos; o cap atmosférico interrompe a rodada
+    cpl_lacuna_t('Sx_tsfc',   'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_tsfc'),      &
+    cpl_lacuna_t('Sf_albedo', 'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sf_albedo'),    &
+    cpl_lacuna_t('Sx_omask',  'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_omask'),     &
+    cpl_lacuna_t('Sf_zorl',   'ATM@atm_cap', 'mpas,mom6,ocn_to_mpas', 'o MOM6 nao exporta Sf_zorl') ]
+
+  !--------------------------------------------------------------------------
   ! ROTAS
   !--------------------------------------------------------------------------
   ! Criação e uso hoje (Apêndice A de docs/arquitetura-acoplamento.md):
@@ -603,6 +634,23 @@ contains
       end select
     end do
   end function concorda
+
+  !> O campo importado no ponto é uma lacuna conhecida na configuração cfg
+  !! (tabela LACUNAS). ponto é 'COMPONENTE@malha' ou só o componente.
+  pure logical function cpl_lacuna(cfg, campo, ponto) result(lacuna)
+    type(cpl_config_t), intent(in) :: cfg
+    character(len=*),   intent(in) :: campo, ponto
+    integer :: k
+
+    lacuna = .false.
+    do k = 1, size(LACUNAS)
+      if (LACUNAS(k)%campo /= campo) cycle
+      if (.not. ponto_confere(LACUNAS(k)%ponto, ponto)) cycle
+      if (.not. cpl_troca_vale(cpl_troca_t(quando=LACUNAS(k)%quando), cfg)) cycle
+      lacuna = .true.
+      return
+    end do
+  end function cpl_lacuna
 
   !> Verdadeiro se a troca vale na configuração cfg (todas as condições da
   !! coluna quando valem; lista vazia vale sempre).

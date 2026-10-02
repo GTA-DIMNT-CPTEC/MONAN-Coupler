@@ -9,10 +9,19 @@
 !! cpl_escreve_metodos e cpl_check_acoplamento, como o esm.F90, e o
 !! relatório sai no log do PET 0 (linhas CPL-REL:).
 !!
+!! Nos modos normal e mediador, o dicionário do NUOPC é o do acoplador
+!! (cpl_dicionario_nuopc, como no esm.F90): só os nomes de CAMPOS, sem
+!! acréscimo automático.
+!!
 !! Com o argumento "defeito", o OCN anuncia uma importação a mais (So_teste)
 !! e o MED deixa de anunciar So_omask, e a conferência tem de acusar as
-!! diferenças. Os campos são realizados só se conectados, numa grade
-!! regular de 36 x 18, para que a inicialização termine.
+!! diferenças; desde a R-FASE11-25, ela também interrompe a inicialização
+!! logo depois do relatório. Para que So_teste chegue à conferência, este
+!! modo usa o acréscimo automático do dicionário. Com o argumento
+!! "dicionario", as listas são as do modo defeito, mas o dicionário é o do
+!! acoplador, e o anúncio de So_teste tem de parar a inicialização com a
+!! mensagem do NUOPC. Os campos são realizados só se conectados, numa grade
+!! regular de 36 x 18, para que a inicialização termine no modo normal.
 !!
 !! Com o argumento "mediador", o componente MED é o mediador real
 !! (MED_cap_MONAN_mod): a conferência compara com o mapa o que ele de fato
@@ -111,6 +120,7 @@ contains
       else
         call anuncia_lista(is, OCN_IMP, rc)
       end if
+      if (rc /= ESMF_SUCCESS) return
       call anuncia_lista(es, OCN_EXP, rc)
     case ('ICE')
       call anuncia_lista(is, ICE_IMP, rc); call anuncia_lista(es, ICE_EXP, rc)
@@ -250,6 +260,7 @@ program test_cplcheck_driver
   use ESMF
   use NUOPC
   use coupler_config_mod, only: config_read
+  use cpl_check_mod,      only: cpl_dicionario_nuopc
   use tcomp_mod, only: defeito
   use tdrv_mod,  only: tdrvSS => SetServices, mediador_real
   implicit none
@@ -262,9 +273,14 @@ program test_cplcheck_driver
   call config_read(rc, 'nuopc.input')
   if (rc /= ESMF_SUCCESS) call falha('config_read')
   call get_command_argument(1, modo)
-  defeito = trim(modo) == 'defeito'
+  defeito = trim(modo) == 'defeito' .or. trim(modo) == 'dicionario'
   mediador_real = trim(modo) == 'mediador'
-  call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
+  if (trim(modo) == 'defeito') then
+    call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
+  else
+    call cpl_dicionario_nuopc(rc)
+  end if
+  if (rc /= ESMF_SUCCESS) call falha('dicionario')
   drv = ESMF_GridCompCreate(name='drv', rc=rc)
   call ESMF_GridCompSetServices(drv, tdrvSS, userRc=urc, rc=rc)
   if (rc /= ESMF_SUCCESS .or. urc /= ESMF_SUCCESS) call falha('setservices')

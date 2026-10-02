@@ -37,11 +37,23 @@ Campos por conector em cada configuração conferida pelo teste:
 | OCN para ATM | 0 | 0 | 4 | 0 | 0 |
 
 `producao` é a configuração de validação (MONAN-A, MOM6 e SIS2, contorno
-pelo mediador). Lacunas conhecidas, registradas no teste: em `mpas_docn`,
-`Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A (o cap
-atmosférico interrompe a rodada) e `So_omask` não chega ao mediador; em
-`datm_docn`, `So_omask` não chega ao mediador. O driver não registra o
-DATM: as trocas com `datm` descrevem o que o cap do DATM anuncia.
+pelo mediador). O driver não registra o DATM: as trocas com `datm`
+descrevem o que o cap do DATM anuncia, e a conferência do mapa
+interrompe uma rodada com `use_datm`.
+
+Lacunas conhecidas (tabela `LACUNAS`): campos que um componente anuncia
+na importação e que, na configuração indicada, não têm origem. A
+conferência do mapa as registra como aviso, e não como diferença; nas
+lacunas do MONAN-A, o cap atmosférico interrompe a rodada por conta
+própria.
+
+| Campo | Ponto | Quando | Motivo |
+| --- | --- | --- | --- |
+| `So_omask` | `MED@ocn_med` | `docn` | o DOCN nao exporta So_omask |
+| `Sx_tsfc` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sx_tsfc |
+| `Sf_albedo` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sf_albedo |
+| `Sx_omask` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sx_omask |
+| `Sf_zorl` | `ATM@atm_cap` | `mpas`, `mom6`, `ocn_to_mpas` | o MOM6 nao exporta Sf_zorl |
 
 ## 2. Trocas por conector
 
