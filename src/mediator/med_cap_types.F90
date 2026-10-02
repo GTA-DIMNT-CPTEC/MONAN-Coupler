@@ -295,7 +295,7 @@ module med_cap_types_mod
   !> Chaves de &nuopc_mode que o mediador consulta para anunciar e realizar
   !! os campos: a fonte atmosférica (use_datm) e o gelo do SIS2
   !! (use_sis2_dynamic). As listas saem do mapa de acoplamento, com
-  !! cpl_chegadas (src/coupling/cpl_map.F90):
+  !! cpl_arrivals (src/coupling/cpl_map.F90):
   !!   importação, malha de fluxo (MED@atm_med): forçantes do MONAN-A
   !!     (sufixo _mpas) ou do DATM;
   !!   importação, grade do oceano (MED@ocn_med): So_t, So_u, So_v, So_omask

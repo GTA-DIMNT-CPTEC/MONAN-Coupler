@@ -76,14 +76,14 @@ contains
     proceed = .false.
 
     !==========================================================================
-    ! 1. TENTAR OBTER CAMPOS DO MPAS (PRIMARIO)
+    ! 1. TENTAR OBTER FIELDS DO MPAS (PRIMARIO)
     !==========================================================================
     ! use_mpas_atm vem do atributo NUOPC definido em esm.F90.
     ! Se false, pula a tentativa e vai direto ao DATM.
     mpas_available = is%use_mpas_atm
 
     !--------------------------------------------------------------------------
-    ! 1a. CAMPOS OBRIGATORIOS DO MPAS (campos exportados pelo cap do MPAS)
+    ! 1a. FIELDS OBRIGATORIOS DO MPAS (campos exportados pelo cap do MPAS)
     !--------------------------------------------------------------------------
     i1_glob = 1; i2_glob = 1; j1_glob = 1; j2_glob = 1  ! defaults
     if (mpas_available) then
@@ -114,7 +114,7 @@ contains
     end if
 
     !--------------------------------------------------------------------------
-    ! 1b. CAMPOS OPCIONAIS DE UMIDADE E NEVE (Sa_shum_mpas, Faxa_snow_mpas)
+    ! 1b. FIELDS OPCIONAIS DE UMIDADE E NEVE (Sa_shum_mpas, Faxa_snow_mpas)
     !     Na ausencia, usar valores padrao fisicos.
     !--------------------------------------------------------------------------
     if (mpas_available) then
@@ -124,7 +124,7 @@ contains
     end if
 
     !--------------------------------------------------------------------------
-    ! 1c. CAMPOS OPCIONAIS — fluxos nativos do PBL do MONAN-A.
+    ! 1c. FIELDS OPCIONAIS — fluxos nativos do PBL do MONAN-A.
     !     Ausencia (modo DATM, ou cap MPAS sem esses campos) NAO desabilita
     !     mpas_available; apenas mantem sen/evap/taux/tauy vindos do bulk
     !     NCAR (calc_bulk_ncar) mais abaixo.

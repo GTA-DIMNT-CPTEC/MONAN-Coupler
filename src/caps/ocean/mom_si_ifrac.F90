@@ -21,7 +21,7 @@ module mom_si_ifrac_mod
   use MOM_cap_methods,       only : ChkErr
   ! Leitura de Si_ifrac do arquivo OISST (use_docn_ice)
   use docn_cap_netcdf_mod,   only : ReadOcnFieldInterp
-  use cpl_grids_mod,         only : indice_trunca, lon_0a360_laco
+  use cpl_grids_mod,         only : index_trunc, lon_0to360_loop
   use coupler_config_mod,    only : cfg_docn_ice_file,       &
                                      cfg_docn_ice_varname,    &
                                      cfg_docn_ice_pct,        &
@@ -184,11 +184,11 @@ contains
         lat_c = ocean_grid%geolatT(ig, jg)
 
         ! Normalizar longitude para [0°, 360°)
-        lon_c = lon_0a360_laco(lon_c)
+        lon_c = lon_0to360_loop(lon_c)
 
         ! Índice OISST nearest-neighbor (base 1)
-        i_oisst = indice_trunca(lon_c, dx, nx)
-        j_oisst = indice_trunca(lat_c + 90.0_ESMF_KIND_R8, dy, ny)
+        i_oisst = index_trunc(lon_c, dx, nx)
+        j_oisst = index_trunc(lat_c + 90.0_ESMF_KIND_R8, dy, ny)
 
         ! Copiar para campo ESMF (índice local lb1+i-isc, lb2+j-jsc)
         ptr_ifrac(lb1 + i - isc, lb2 + j - jsc) = &

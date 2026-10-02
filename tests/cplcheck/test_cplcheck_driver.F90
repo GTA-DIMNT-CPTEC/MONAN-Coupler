@@ -6,11 +6,11 @@
 !! na configuração de produção (escritas aqui a partir dos caps, não do mapa)
 !! e são ligados pelos mesmos seis conectores do driver real. A
 !! especialização ModifyCplLists do driver de teste chama
-!! cpl_escreve_metodos e cpl_check_acoplamento, como o esm.F90, e o
+!! cpl_write_methods e cpl_check_coupling, como o esm.F90, e o
 !! relatório sai no log do PET 0 (linhas CPL-REL:).
 !!
 !! Nos modos normal e mediador, o dicionário do NUOPC é o do acoplador
-!! (cpl_dicionario_nuopc, como no esm.F90): só os nomes de CAMPOS, sem
+!! (cpl_nuopc_dictionary, como no esm.F90): só os nomes de FIELDS, sem
 !! acréscimo automático.
 !!
 !! Com o argumento "defeito", o OCN anuncia uma importação a mais (So_teste)
@@ -37,9 +37,9 @@ module tcomp_mod
   use NUOPC_Model, modelSS => SetServices
   implicit none
   private
-  public :: SetServices, defeito
+  public :: SetServices, defect
 
-  logical :: defeito = .false.   !< modo com defeitos de propósito
+  logical :: defect = .false.    !< modo com defeitos de propósito
 
   character(len=24), parameter :: ATM_IMP(7) = [character(len=24) :: &
     'Sx_tsfc', 'Si_ifrac', 'So_u', 'So_v', 'Sf_zorl', 'Sf_albedo', 'Sx_omask']
@@ -77,69 +77,69 @@ contains
     type(ESMF_GridComp) :: m
     integer, intent(out) :: rc
     call NUOPC_CompDerive(m, modelSS, rc=rc); if (rc /= ESMF_SUCCESS) return
-    call ESMF_GridCompSetEntryPoint(m, ESMF_METHOD_INITIALIZE, userRoutine=Fase0, phase=0, rc=rc)
+    call ESMF_GridCompSetEntryPoint(m, ESMF_METHOD_INITIALIZE, userRoutine=Phase0, phase=0, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     call NUOPC_CompSetEntryPoint(m, ESMF_METHOD_INITIALIZE, phaseLabelList=(/"IPDv03p1"/), &
-      userRoutine=Anuncia, rc=rc); if (rc /= ESMF_SUCCESS) return
+      userRoutine=Advertise, rc=rc); if (rc /= ESMF_SUCCESS) return
     call NUOPC_CompSetEntryPoint(m, ESMF_METHOD_INITIALIZE, phaseLabelList=(/"IPDv03p3"/), &
-      userRoutine=Realiza, rc=rc); if (rc /= ESMF_SUCCESS) return
-    call NUOPC_CompSpecialize(m, specLabel=label_Advance, specRoutine=Avanca, rc=rc)
+      userRoutine=Realize, rc=rc); if (rc /= ESMF_SUCCESS) return
+    call NUOPC_CompSpecialize(m, specLabel=label_Advance, specRoutine=Advance, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    call NUOPC_CompSpecialize(m, specLabel=label_DataInitialize, specRoutine=IniciaDados, rc=rc)
+    call NUOPC_CompSpecialize(m, specLabel=label_DataInitialize, specRoutine=init_data, rc=rc)
   end subroutine SetServices
 
   !> Fase 0: usa as fases IPDv03 (anúncio em p1, realização em p3).
-  subroutine Fase0(m, is, es, c, rc)
+  subroutine Phase0(m, is, es, c, rc)
     type(ESMF_GridComp) :: m
     type(ESMF_State) :: is, es
     type(ESMF_Clock) :: c
     integer, intent(out) :: rc
     call NUOPC_CompFilterPhaseMap(m, ESMF_METHOD_INITIALIZE, acceptStringList=(/"IPDv03p"/), rc=rc)
-  end subroutine Fase0
+  end subroutine Phase0
 
-  subroutine Anuncia(m, is, es, c, rc)
+  subroutine Advertise(m, is, es, c, rc)
     type(ESMF_GridComp) :: m
     type(ESMF_State) :: is, es
     type(ESMF_Clock) :: c
     integer, intent(out) :: rc
-    character(len=ESMF_MAXSTR) :: nome
-    call ESMF_GridCompGet(m, name=nome, rc=rc); if (rc /= ESMF_SUCCESS) return
-    select case (trim(nome))
+    character(len=ESMF_MAXSTR) :: name
+    call ESMF_GridCompGet(m, name=name, rc=rc); if (rc /= ESMF_SUCCESS) return
+    select case (trim(name))
     case ('MPAS')
-      call anuncia_lista(is, ATM_IMP, rc); call anuncia_lista(es, ATM_EXP, rc)
+      call advertise_list(is, ATM_IMP, rc); call advertise_list(es, ATM_EXP, rc)
     case ('MED')
-      if (defeito) then
-        call anuncia_lista(is, pack(MED_IMP, MED_IMP /= 'So_omask'), rc)
+      if (defect) then
+        call advertise_list(is, pack(MED_IMP, MED_IMP /= 'So_omask'), rc)
       else
-        call anuncia_lista(is, MED_IMP, rc)
+        call advertise_list(is, MED_IMP, rc)
       end if
-      call anuncia_lista(es, MED_EXP, rc)
+      call advertise_list(es, MED_EXP, rc)
     case ('OCN')
-      if (defeito) then
-        call anuncia_lista(is, [character(len=24) :: OCN_IMP, 'So_teste'], rc)
+      if (defect) then
+        call advertise_list(is, [character(len=24) :: OCN_IMP, 'So_teste'], rc)
       else
-        call anuncia_lista(is, OCN_IMP, rc)
+        call advertise_list(is, OCN_IMP, rc)
       end if
       if (rc /= ESMF_SUCCESS) return
-      call anuncia_lista(es, OCN_EXP, rc)
+      call advertise_list(es, OCN_EXP, rc)
     case ('ICE')
-      call anuncia_lista(is, ICE_IMP, rc); call anuncia_lista(es, ICE_EXP, rc)
+      call advertise_list(is, ICE_IMP, rc); call advertise_list(es, ICE_EXP, rc)
     end select
-  end subroutine Anuncia
+  end subroutine Advertise
 
-  subroutine anuncia_lista(estado, nomes, rc)
-    type(ESMF_State), intent(inout) :: estado
-    character(len=*), intent(in)    :: nomes(:)
+  subroutine advertise_list(state, names, rc)
+    type(ESMF_State), intent(inout) :: state
+    character(len=*), intent(in)    :: names(:)
     integer,          intent(out)   :: rc
     integer :: i
     rc = ESMF_SUCCESS
-    do i = 1, size(nomes)
-      call NUOPC_Advertise(estado, StandardName=trim(nomes(i)), rc=rc)
+    do i = 1, size(names)
+      call NUOPC_Advertise(state, StandardName=trim(names(i)), rc=rc)
       if (rc /= ESMF_SUCCESS) return
     end do
-  end subroutine anuncia_lista
+  end subroutine advertise_list
 
-  subroutine Realiza(m, is, es, c, rc)
+  subroutine Realize(m, is, es, c, rc)
     type(ESMF_GridComp) :: m
     type(ESMF_State) :: is, es
     type(ESMF_Clock) :: c
@@ -151,10 +151,10 @@ contains
     call NUOPC_Realize(is, grid=g, selection="realize_connected_remove_others", rc=rc)
     if (rc /= ESMF_SUCCESS) return
     call NUOPC_Realize(es, grid=g, selection="realize_connected_remove_others", rc=rc)
-  end subroutine Realiza
+  end subroutine Realize
 
   !> Dados prontos desde o início: carimbo de tempo e InitializeDataComplete.
-  subroutine IniciaDados(m, rc)
+  subroutine init_data(m, rc)
     type(ESMF_GridComp) :: m
     integer, intent(out) :: rc
     type(ESMF_State) :: es
@@ -162,13 +162,13 @@ contains
     call NUOPC_ModelGet(m, modelClock=c, exportState=es, rc=rc); if (rc /= ESMF_SUCCESS) return
     call NUOPC_SetTimestamp(es, c, rc=rc); if (rc /= ESMF_SUCCESS) return
     call NUOPC_CompAttributeSet(m, name="InitializeDataComplete", value="true", rc=rc)
-  end subroutine IniciaDados
+  end subroutine init_data
 
-  subroutine Avanca(m, rc)
+  subroutine Advance(m, rc)
     type(ESMF_GridComp) :: m
     integer, intent(out) :: rc
     rc = ESMF_SUCCESS
-  end subroutine Avanca
+  end subroutine Advance
 
 end module tcomp_mod
 
@@ -179,14 +179,14 @@ module tdrv_mod
                     label_ModifyCplLists => label_ModifyCplLists
   use NUOPC_Connector, only: cplSS => SetServices
   use tcomp_mod,       only: compSS => SetServices
-  use cpl_check_mod,   only: cpl_check_acoplamento, cpl_escreve_metodos
+  use cpl_check_mod,   only: cpl_check_coupling, cpl_write_methods
   use MED_cap_MONAN_mod, only: medSS => SetServices
   implicit none
   private
-  public :: SetServices, mediador_real
+  public :: SetServices, real_mediator
 
-  logical :: mediador_real = .false.   !< MED é o mediador real (modo "mediador")
-  character(len=4), parameter :: ROTULOS(4) = ['MPAS', 'MED ', 'OCN ', 'ICE ']
+  logical :: real_mediator = .false.   !< MED é o mediador real (modo "mediador")
+  character(len=4), parameter :: LABELS(4) = ['MPAS', 'MED ', 'OCN ', 'ICE ']
 contains
   subroutine SetServices(driver, rc)
     type(ESMF_GridComp) :: driver
@@ -206,15 +206,15 @@ contains
     type(ESMF_Clock) :: clock
     integer :: i
     do i = 1, 4
-      if (mediador_real .and. ROTULOS(i) == 'MED') then
+      if (real_mediator .and. LABELS(i) == 'MED') then
         call NUOPC_DriverAddComp(driver, 'MED', medSS, comp=child, rc=rc)
       else
-        call NUOPC_DriverAddComp(driver, trim(ROTULOS(i)), compSS, comp=child, rc=rc)
+        call NUOPC_DriverAddComp(driver, trim(LABELS(i)), compSS, comp=child, rc=rc)
       end if
       if (rc /= ESMF_SUCCESS) return
     end do
-    call liga('MPAS', 'MED', rc); call liga('OCN', 'MED', rc); call liga('MED', 'OCN', rc)
-    call liga('MED', 'MPAS', rc); call liga('MED', 'ICE', rc); call liga('ICE', 'MED', rc)
+    call connect('MPAS', 'MED', rc); call connect('OCN', 'MED', rc); call connect('MED', 'OCN', rc)
+    call connect('MED', 'MPAS', rc); call connect('MED', 'ICE', rc); call connect('ICE', 'MED', rc)
     if (rc /= ESMF_SUCCESS) return
     call ESMF_TimeSet(t0, yy=2026, mm=3, dd=29, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
     call ESMF_TimeSet(t1, yy=2026, mm=3, dd=29, h=1, calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
@@ -222,28 +222,28 @@ contains
     clock = ESMF_ClockCreate(dt, t0, stopTime=t1, rc=rc)
     call ESMF_GridCompSet(driver, clock=clock, rc=rc)
   contains
-    subroutine liga(de, para, rc)
-      character(len=*), intent(in) :: de, para
+    subroutine connect(src, dst, rc)
+      character(len=*), intent(in) :: src, dst
       integer, intent(inout) :: rc
       if (rc /= ESMF_SUCCESS) return
-      call NUOPC_DriverAddComp(driver, srcCompLabel=de, dstCompLabel=para, &
+      call NUOPC_DriverAddComp(driver, srcCompLabel=src, dstCompLabel=dst, &
                                compSetServicesRoutine=cplSS, rc=rc)
-    end subroutine liga
+    end subroutine connect
   end subroutine SetModelServices
 
   subroutine ModifyCplLists(driver, rc)
     type(ESMF_GridComp) :: driver
     integer, intent(out) :: rc
     type(ESMF_VM) :: vm
-    integer :: n_metodo, n_cheia
-    call cpl_escreve_metodos(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], &
-                             n_metodo, n_cheia, rc)
-    if (rc /= ESMF_SUCCESS .or. n_cheia /= 0) then
+    integer :: n_method, n_full
+    call cpl_write_methods(driver, LABELS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], &
+                             n_method, n_full, rc)
+    if (rc /= ESMF_SUCCESS .or. n_full /= 0) then
       rc = ESMF_FAILURE
       return
     end if
-    call cpl_check_acoplamento(driver, ROTULOS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
-    if (mediador_real) then
+    call cpl_check_coupling(driver, LABELS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
+    if (real_mediator) then
       ! para antes da realização do mediador real (ver o cabeçalho); a
       ! barreira espera o PET 0 terminar o relatório, porque o primeiro PET a
       ! sair com erro aborta o MPI e cortaria o log do PET 0 no meio
@@ -260,38 +260,38 @@ program test_cplcheck_driver
   use ESMF
   use NUOPC
   use coupler_config_mod, only: config_read
-  use cpl_check_mod,      only: cpl_dicionario_nuopc
-  use tcomp_mod, only: defeito
-  use tdrv_mod,  only: tdrvSS => SetServices, mediador_real
+  use cpl_check_mod,      only: cpl_nuopc_dictionary
+  use tcomp_mod, only: defect
+  use tdrv_mod,  only: tdrvSS => SetServices, real_mediator
   implicit none
   type(ESMF_GridComp) :: drv
   integer :: rc, urc
-  character(len=16) :: modo
+  character(len=16) :: mode
 
   call ESMF_Initialize(defaultCalKind=ESMF_CALKIND_GREGORIAN, defaultLogFilename='teste', &
                        logkindflag=ESMF_LOGKIND_MULTI, rc=rc)
   call config_read(rc, 'nuopc.input')
-  if (rc /= ESMF_SUCCESS) call falha('config_read')
-  call get_command_argument(1, modo)
-  defeito = trim(modo) == 'defeito' .or. trim(modo) == 'dicionario'
-  mediador_real = trim(modo) == 'mediador'
-  if (trim(modo) == 'defeito') then
+  if (rc /= ESMF_SUCCESS) call fail_at('config_read')
+  call get_command_argument(1, mode)
+  defect = trim(mode) == 'defeito' .or. trim(mode) == 'dicionario'
+  real_mediator = trim(mode) == 'mediador'
+  if (trim(mode) == 'defeito') then
     call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
   else
-    call cpl_dicionario_nuopc(rc)
+    call cpl_nuopc_dictionary(rc)
   end if
-  if (rc /= ESMF_SUCCESS) call falha('dicionario')
+  if (rc /= ESMF_SUCCESS) call fail_at('dicionario')
   drv = ESMF_GridCompCreate(name='drv', rc=rc)
   call ESMF_GridCompSetServices(drv, tdrvSS, userRc=urc, rc=rc)
-  if (rc /= ESMF_SUCCESS .or. urc /= ESMF_SUCCESS) call falha('setservices')
+  if (rc /= ESMF_SUCCESS .or. urc /= ESMF_SUCCESS) call fail_at('setservices')
   call ESMF_GridCompInitialize(drv, userRc=urc, rc=rc)
-  if (rc /= ESMF_SUCCESS .or. urc /= ESMF_SUCCESS) call falha('initialize')
+  if (rc /= ESMF_SUCCESS .or. urc /= ESMF_SUCCESS) call fail_at('initialize')
   call ESMF_GridCompFinalize(drv, userRc=urc, rc=rc)
   call ESMF_Finalize(rc=rc)
 contains
-  subroutine falha(onde)
-    character(len=*), intent(in) :: onde
-    print *, 'FALHA em ', onde
+  subroutine fail_at(location)
+    character(len=*), intent(in) :: location
+    print *, 'FALHA em ', location
     call ESMF_Finalize(endflag=ESMF_END_ABORT)
-  end subroutine falha
+  end subroutine fail_at
 end program test_cplcheck_driver

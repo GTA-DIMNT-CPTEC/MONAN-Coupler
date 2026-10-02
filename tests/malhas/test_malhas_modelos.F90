@@ -8,19 +8,19 @@
 !! e a de mom_cap_MONAN::create_ocean_grid até a R-FASE11-10 (tag
 !! fase11-10-validada):
 !!
-!!   blocos    cpl_blocos_de_limites contra a cópia sem mudança de
+!!   blocos    cpl_blocks_from_bounds contra a cópia sem mudança de
 !!             ICE_DecompFromBlocks (ref_decomp, abaixo), em layouts
 !!             válidos e inválidos: mesmo ok, mesma mensagem e, quando
 !!             válido, os mesmos tamanhos e o mesmo mapa bloco -> PET
 !!   malha     com os blocos de cada PET (layouts parecidos com os do SIS2
 !!             na grade T de 10 x 7 do supergrid sintético), a grade de
-!!             cpl_malha_tripolar(blocos=...) contra a grade criada como
+!!             cpl_tripolar_grid(blocos=...) contra a grade criada como
 !!             antes (ESMF_GridCreate1PeriDim com countsPerDEDim1/2 e
 !!             petMap, centros lidos por mom6_supergrid_tcoords no DE 0):
 !!             mesmos limites e coordenadas, bit a bit
 !!   mom6      com blocos de cada PET (um layout que não é produto, com 4
 !!             PETs, e layouts produto com o mapa de PETs invertido), a grade
-!!             de cpl_malha_de_blocos contra a criada como antes
+!!             de cpl_block_grid contra a criada como antes
 !!             (ESMF_DELayoutCreate, ESMF_DistGridCreate com deBlockList,
 !!             ESMF_GridCreate sem halo, ESMF_GridAddCoord): mesmo número de
 !!             DEs locais e mesmos limites dos vetores de coordenadas
@@ -37,8 +37,8 @@ module ref_gelo_mod
 contains
   ! Cópia sem mudança de ICE_DecompFromBlocks (sis_cap_MONAN.F90, tag
   ! fase11-09-validada), só com o nome trocado.
-  subroutine ref_decomp(blocos, npet, nx, ny, cntx, cnty, pmap, msg, ok)
-    integer,              intent(in)  :: blocos(:,:)
+  subroutine ref_decomp(blocks, npet, nx, ny, cntx, cnty, pmap, msg, ok)
+    integer,              intent(in)  :: blocks(:,:)
     integer,              intent(in)  :: npet, nx, ny
     integer, allocatable, intent(out) :: cntx(:), cnty(:), pmap(:,:,:)
     character(len=*),     intent(out) :: msg
@@ -57,26 +57,26 @@ contains
     do p = 1, npet
       novo = .true.
       do k = 1, nbx
-        if (xs(k) == blocos(1,p)) then
+        if (xs(k) == blocks(1,p)) then
           novo = .false.
-          if (xe(k) /= blocos(2,p)) then
+          if (xe(k) /= blocks(2,p)) then
             write(msg,'(a,i0,a)') 'colunas com mesmo inicio e fins diferentes (PET ', p-1, ')'
             return
           end if
         end if
       end do
-      if (novo) then ; nbx = nbx + 1 ; xs(nbx) = blocos(1,p) ; xe(nbx) = blocos(2,p) ; end if
+      if (novo) then ; nbx = nbx + 1 ; xs(nbx) = blocks(1,p) ; xe(nbx) = blocks(2,p) ; end if
       novo = .true.
       do k = 1, nby
-        if (ys(k) == blocos(3,p)) then
+        if (ys(k) == blocks(3,p)) then
           novo = .false.
-          if (ye(k) /= blocos(4,p)) then
+          if (ye(k) /= blocks(4,p)) then
             write(msg,'(a,i0,a)') 'linhas com mesmo inicio e fins diferentes (PET ', p-1, ')'
             return
           end if
         end if
       end do
-      if (novo) then ; nby = nby + 1 ; ys(nby) = blocos(3,p) ; ye(nby) = blocos(4,p) ; end if
+      if (novo) then ; nby = nby + 1 ; ys(nby) = blocks(3,p) ; ye(nby) = blocks(4,p) ; end if
     end do
 
     if (nbx * nby /= npet) then
@@ -106,8 +106,8 @@ contains
     cnty = ye(1:nby) - ys(1:nby) + 1
     pmap = -1
     do p = 1, npet
-      ix = findloc(xs(1:nbx), blocos(1,p), dim=1)
-      iy = findloc(ys(1:nby), blocos(3,p), dim=1)
+      ix = findloc(xs(1:nbx), blocks(1,p), dim=1)
+      iy = findloc(ys(1:nby), blocks(3,p), dim=1)
       if (pmap(ix, iy, 1) /= -1) then
         write(msg,'(a,i0,a,i0)') 'bloco atribuido a dois PETs: ', pmap(ix,iy,1), ' e ', p-1
         return
@@ -138,8 +138,8 @@ end module ref_gelo_mod
 program test_malhas_modelos
   use ESMF
   use mom6_supergrid_mod, only : mom6_supergrid_dims, mom6_supergrid_tcoords
-  use cpl_grids_mod,      only : cpl_blocos_t, cpl_blocos_de_limites, cpl_malha_tripolar, &
-                                 cpl_malha_de_blocos
+  use cpl_grids_mod,      only : cpl_blocks_t, cpl_blocks_from_bounds, cpl_tripolar_grid, &
+                                 cpl_block_grid
   use ref_gelo_mod,       only : ref_decomp
   use, intrinsic :: iso_fortran_env, only : int64
   implicit none
@@ -196,12 +196,12 @@ contains
   subroutine caso_blocos(nome, limites, nx, ny)
     character(len=*), intent(in) :: nome
     integer,          intent(in) :: limites(:,:), nx, ny
-    type(cpl_blocos_t) :: b
+    type(cpl_blocks_t) :: b
     integer, allocatable :: cntx(:), cnty(:), pmap(:,:,:)
     character(len=256) :: msg_novo, msg_ref
     logical :: ok_novo, ok_ref, igual
 
-    call cpl_blocos_de_limites(limites, size(limites, 2), nx, ny, b, msg_novo, ok_novo)
+    call cpl_blocks_from_bounds(limites, size(limites, 2), nx, ny, b, msg_novo, ok_novo)
     call ref_decomp(limites, size(limites, 2), nx, ny, cntx, cnty, pmap, msg_ref, ok_ref)
     igual = (ok_novo .eqv. ok_ref) .and. msg_novo == msg_ref
     if (igual .and. ok_ref) then
@@ -221,7 +221,7 @@ contains
     logical,          intent(in) :: y_rapido
     integer :: nbx, nby, ix, iy, loc4(4), rc
     integer, allocatable :: all4(:), cntx(:), cnty(:), pmap(:,:,:)
-    type(cpl_blocos_t) :: b
+    type(cpl_blocks_t) :: b
     type(ESMF_Grid) :: g_novo, g_ref
     character(len=256) :: msg
     logical :: ok
@@ -245,10 +245,10 @@ contains
     if (rc /= ESMF_SUCCESS) error stop 'ESMF_VMAllGather'
 
     ! nova
-    call cpl_blocos_de_limites(reshape(all4, [4, petCount]), petCount, nx, ny, b, msg, ok)
+    call cpl_blocks_from_bounds(reshape(all4, [4, petCount]), petCount, nx, ny, b, msg, ok)
     if (.not. ok) error stop 'cpl_blocos_de_limites'
-    call cpl_malha_tripolar('ice_sis2', 'hgrid.nc', nx, ny, petCount, .false., g_novo, rc, &
-                            blocos=b, tag='ICE(SIS2)')
+    call cpl_tripolar_grid('ice_sis2', 'hgrid.nc', nx, ny, petCount, .false., g_novo, rc, &
+                            blocks=b, tag='ICE(SIS2)')
     if (rc /= ESMF_SUCCESS) error stop 'cpl_malha_tripolar'
 
     ! como antes (sis_cap_MONAN::create_ice_grid, tag fase11-09-validada)
@@ -318,7 +318,7 @@ contains
     real(ESMF_KIND_R8), pointer :: cn(:,:), cr(:,:)
     logical :: igual
 
-    call cpl_malha_de_blocos('ocn_mom6', 10, 7, lim, pmap, g_novo, rc)
+    call cpl_block_grid('ocn_mom6', 10, 7, lim, pmap, g_novo, rc)
     if (rc /= ESMF_SUCCESS) error stop 'cpl_malha_de_blocos'
 
     ! como antes (mom_cap_MONAN::create_ocean_grid, tag fase11-10-validada)

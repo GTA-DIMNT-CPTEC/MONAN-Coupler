@@ -53,15 +53,15 @@ module DATM_cap_mod
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field, &
                              cap_fill_export_initial, cap_set_data_complete, &
                              cap_stamp_export
-  use cpl_fields_mod, only : CPL_NOME_LEN
-  use cpl_map_mod,    only : cpl_exportacoes, cpl_config_atual
+  use cpl_fields_mod, only : CPL_NAME_LEN
+  use cpl_map_mod,    only : cpl_exports, cpl_current_config
 
   implicit none
   private
 
   ! Os campos exportados saem do mapa de acoplamento (src/coupling/
-  ! cpl_map.F90), no ponto ATM@datm: os 9 campos de EXPORTACOES
-  ! (cpl_exportacoes), na ordem do anúncio. O DATM não importa nada.
+  ! cpl_map.F90), no ponto ATM@datm: os 9 campos de EXPORTS
+  ! (cpl_exports), na ordem do anúncio. O DATM não importa nada.
   character(len=*), parameter :: PONTO_DATM = 'ATM@datm'
 
   ! Início da mensagem de erro de cap_put_field quando o campo não existe.
@@ -140,7 +140,7 @@ contains
     type(ESMF_State)     :: importState, exportState
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
     integer :: i
 
     rc = ESMF_SUCCESS
@@ -148,7 +148,7 @@ contains
     ! Campos de estado atmosferico bruto (JRA55): vento a 10 m, temperatura,
     ! umidade e pressao; radiacao descendente (sem decomposicao em bandas, o
     ! MED faz isso) e precipitacao.
-    call cpl_exportacoes(PONTO_DATM, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_DATM, cpl_current_config(), '', nomes)
     do i = 1, size(nomes)
       call NUOPC_Advertise(exportState, StandardName=trim(nomes(i)), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -176,7 +176,7 @@ contains
     real(ESMF_KIND_R8), pointer :: coordX(:,:), coordY(:,:)
     type(DATM_InternalStateWrapper) :: iswrap
     type(DATM_InternalState), pointer :: is
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -223,7 +223,7 @@ contains
     end do
 
     ! Realiza campos brutos
-    call cpl_exportacoes(PONTO_DATM, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_DATM, cpl_current_config(), '', nomes)
     call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
     if (rc/=ESMF_SUCCESS) return
 

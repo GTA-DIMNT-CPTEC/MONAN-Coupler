@@ -13,7 +13,7 @@
 !!   4. acrescente uma linha na lista de regrid_schemes.F90, e o arquivo no
 !!      Makefile (SRCS e dependências);
 !!   5. confira com tests/regrid/compara-esquema.bash <nome> '<opções>'.
-!! Depois, o esquema pode ser escolhido numa rota pela tabela ROTAS (coluna
+!! Depois, o esquema pode ser escolhido numa rota pela tabela ROUTES (coluna
 !! esquema) ou só pelo nuopc.input (&nuopc_regrid: regrid_scheme e
 !! regrid_options).
 !!

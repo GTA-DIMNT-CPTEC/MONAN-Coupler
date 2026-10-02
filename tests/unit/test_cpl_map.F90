@@ -1,23 +1,23 @@
 !> @file test_cpl_map.F90
 !! @brief Consistência do mapa de acoplamento (cpl_fields e cpl_map).
 !!
-!! Confere, sem MPI e sem ESMF inicializado, que as tabelas CAMPOS, MALHAS,
-!! TROCAS e ROTAS formam uma descrição coerente do acoplamento de hoje:
+!! Confere, sem MPI e sem ESMF inicializado, que as tabelas FIELDS, GRIDS,
+!! EXCHANGES e ROUTES formam uma descrição coerente do acoplamento de hoje:
 !!
-!!   estrutura   nomes únicos; todo campo de TROCAS e de EXPORTACOES está
-!!               em CAMPOS e todo campo de CAMPOS é usado; pontos 'COMPONENTE@malha' com
+!!   estrutura   nomes únicos; todo campo de EXCHANGES e de EXPORTS está
+!!               em FIELDS e todo campo de FIELDS é usado; pontos 'COMPONENTE@malha' com
 !!               malha conhecida e componente certo; condições válidas;
 !!               meio coerente com os componentes (conector entre dois
 !!               componentes, cap dentro de um, rota dentro do mediador,
 !!               entre as malhas da rota); rotas com reserva, máscara,
-!!               sem_valor e criar válidos; toda rota usada
+!!               no_value e criar válidos; toda rota usada
 !!   origem      em cada configuração, cada campo importado por um
 !!               componente tem uma única origem, e cada campo chega por
 !!               rota ou cap a um ponto por um só caminho
 !!   cadeia      em cada configuração, todo campo que parte de um ponto
 !!               intermediário (grade do cap atmosférico, grade do oceano no
 !!               mediador) chegou antes a ele; as exceções são as lacunas
-!!               conhecidas, da tabela LACUNAS do mapa (desde a R-FASE11-25;
+!!               conhecidas, da tabela GAPS do mapa (desde a R-FASE11-25;
 !!               antes, uma lista neste teste), e o teste exige que sejam
 !!               exatamente essas
 !!   contagens   campos de cada conector na configuração de produção iguais
@@ -28,19 +28,19 @@
 !!               ordem, a export_names (listas de listas_mediador.inc, as
 !!               do med_cap_types até a R-FASE11-04-FIX01)
 !!   listas      as listas que o mediador anuncia e realiza desde a
-!!               R-FASE11-05, geradas por cpl_chegadas com as chaves do
+!!               R-FASE11-05, geradas por cpl_arrivals com as chaves do
 !!               mediador (MED_CHAVES), iguais nome a nome e na mesma ordem
 !!               às de antes, em cada configuração: importação na malha de
 !!               fluxo, importação na grade do oceano, exportação e a
 !!               importação toda (a ordem do anúncio)
-!!   exportacoes cada linha de EXPORTACOES com campo do dicionário, ponto de
+!!   exportacoes cada linha de EXPORTS com campo do dicionário, ponto de
 !!               um modelo (não do mediador) e condição válida, sem
 !!               repetição; todo campo que sai de um modelo por conector numa
 !!               configuração é exportado por ele nessa configuração; as
 !!               exportações de cada modelo iguais, nome a nome e na mesma
 !!               ordem, às listas dos caps (listas_caps.inc)
 !!   caps        as listas que os caps dos modelos anunciam, geradas por
-!!               cpl_chegadas e cpl_exportacoes sem chaves (MOM6 e SIS2 desde
+!!               cpl_arrivals e cpl_exports sem chaves (MOM6 e SIS2 desde
 !!               a R-FASE11-06; MONAN-A, DATM e DOCN desde a R-FASE11-07),
 !!               iguais nome a nome e na mesma ordem às de antes, em toda
 !!               configuração
@@ -61,14 +61,14 @@
 !! Saída: uma linha PASSOU/FALHOU por caso e, no fim, "TODOS OS TESTES
 !! PASSARAM" ou o número de falhas; termina com código 1 se algum falhar.
 program test_cpl_map
-  use cpl_fields_mod,    only : CAMPOS, cpl_campo_indice
-  use cpl_map_mod,       only : MALHAS, TROCAS, ROTAS, cpl_config_t, cpl_troca_vale, &
-                                cpl_condicoes_validas, cpl_rota_indice, cpl_malha_indice, &
-                                cpl_ponto_componente, cpl_ponto_malha, cpl_troca_t
-  use cpl_map_mod,       only : cpl_chegadas, cpl_exportacoes, EXPORTACOES, cpl_config_atual
-  use cpl_map_mod,       only : METODOS_CONECTOR, cpl_metodo_conector
-  use cpl_map_mod,       only : LACUNAS, cpl_lacuna
-  use cpl_fields_mod,    only : CPL_NOME_LEN
+  use cpl_fields_mod,    only : FIELDS, cpl_field_index
+  use cpl_map_mod,       only : GRIDS, EXCHANGES, ROUTES, cpl_config_t, cpl_exchange_applies, &
+                                cpl_valid_conditions, cpl_route_index, cpl_grid_index, &
+                                cpl_point_component, cpl_point_grid, cpl_exchange_t
+  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_current_config
+  use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
+  use cpl_map_mod,       only : GAPS, cpl_is_gap
+  use cpl_fields_mod,    only : CPL_NAME_LEN
   use med_cap_types_mod, only : MED_CHAVES
   implicit none
 
@@ -76,7 +76,7 @@ program test_cpl_map
   include 'listas_caps.inc'
 
   integer, parameter :: NCFG = 5
-  character(len=16), parameter :: NOME_CFG(NCFG) = [character(len=16) :: &
+  character(len=16), parameter :: CFG_NAME(NCFG) = [character(len=16) :: &
     'producao', 'mom6_sem_sis2', 'mpas_docn', 'datm_mom6', 'datm_docn']
   type(cpl_config_t), parameter :: CFG(NCFG) = [                                       &
     cpl_config_t(datm=.false., docn=.false., med_to_mpas=.true.,  sis2=.true.),         &
@@ -88,480 +88,480 @@ program test_cpl_map
 
   !> Malhas onde um modelo produz campos, e a malha de fluxo do mediador,
   !! onde ele os calcula: pontos de partida que não precisam de chegada.
-  character(len=12), parameter :: PRODUCAO(*) = [character(len=12) :: &
+  character(len=12), parameter :: PRODUCTION(*) = [character(len=12) :: &
     'mpas', 'datm', 'ocn_mom6', 'docn', 'ice_sis2', 'atm_med']
 
-  integer :: nfalhas, k
+  integer :: nfailures, k
 
-  nfalhas = 0
+  nfailures = 0
 
-  call confere_campos()
-  call confere_malhas_e_rotas()
-  call confere_trocas()
-  call confere_metodos()
-  call confere_trocas_cap()
+  call check_fields()
+  call check_grids_and_routes()
+  call check_exchanges()
+  call check_methods()
+  call check_cap_exchanges()
   do k = 1, NCFG
-    call confere_origens(k)
-    call confere_cadeia(k)
+    call check_origins(k)
+    call check_chain(k)
   end do
-  call confere_contagens()
-  call confere_mediador()
+  call check_counts()
+  call check_mediator()
   do k = 1, NCFG
-    call confere_listas_mediador(k)
+    call check_mediator_lists(k)
   end do
-  call confere_exportacoes()
+  call check_exports()
   do k = 1, NCFG
-    call confere_exporta_conector(k)
+    call check_export_connector(k)
   end do
-  call confere_listas_caps()
+  call check_cap_lists()
 
-  if (nfalhas == 0) then
+  if (nfailures == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'
   else
-    write(*, '(I0, A)') nfalhas, ' TESTE(S) FALHARAM'
+    write(*, '(I0, A)') nfailures, ' TESTE(S) FALHARAM'
     error stop 1
   end if
 
 contains
 
-  !> Nomes de CAMPOS únicos e preenchidos; todo campo usado em TROCAS ou
-  !! em EXPORTACOES.
-  subroutine confere_campos()
-    integer :: i, j, nrep, nvazio, nsem_uso
+  !> Nomes de FIELDS únicos e preenchidos; todo campo usado em EXCHANGES ou
+  !! em EXPORTS.
+  subroutine check_fields()
+    integer :: i, j, nrep, nempty, nunused
 
-    nrep = 0; nvazio = 0; nsem_uso = 0
-    do i = 1, size(CAMPOS)
-      if (len_trim(CAMPOS(i)%nome) == 0 .or. len_trim(CAMPOS(i)%unidade) == 0 .or. &
-          len_trim(CAMPOS(i)%descricao) == 0) then
-        nvazio = nvazio + 1
-        call falha('campo sem nome, unidade ou descricao: '//trim(CAMPOS(i)%nome))
+    nrep = 0; nempty = 0; nunused = 0
+    do i = 1, size(FIELDS)
+      if (len_trim(FIELDS(i)%name) == 0 .or. len_trim(FIELDS(i)%units) == 0 .or. &
+          len_trim(FIELDS(i)%description) == 0) then
+        nempty = nempty + 1
+        call fail_at('campo sem nome, unidade ou descricao: '//trim(FIELDS(i)%name))
       end if
-      do j = i + 1, size(CAMPOS)
-        if (CAMPOS(i)%nome == CAMPOS(j)%nome) then
+      do j = i + 1, size(FIELDS)
+        if (FIELDS(i)%name == FIELDS(j)%name) then
           nrep = nrep + 1
-          call falha('campo repetido em CAMPOS: '//trim(CAMPOS(i)%nome))
+          call fail_at('campo repetido em CAMPOS: '//trim(FIELDS(i)%name))
         end if
       end do
-      if (.not. any(TROCAS%campo == CAMPOS(i)%nome) .and. &
-          .not. any(EXPORTACOES%campo == CAMPOS(i)%nome)) then
-        nsem_uso = nsem_uso + 1
-        call falha('campo sem troca nem exportacao: '//trim(CAMPOS(i)%nome))
+      if (.not. any(EXCHANGES%field == FIELDS(i)%name) .and. &
+          .not. any(EXPORTS%field == FIELDS(i)%name)) then
+        nunused = nunused + 1
+        call fail_at('campo sem troca nem exportacao: '//trim(FIELDS(i)%name))
       end if
     end do
-    call resultado('CAMPOS: nomes unicos', nrep == 0)
-    call resultado('CAMPOS: nome, unidade e descricao preenchidos', nvazio == 0)
-    call resultado('CAMPOS: todo campo aparece em TROCAS ou EXPORTACOES', nsem_uso == 0)
-  end subroutine confere_campos
+    call outcome('CAMPOS: nomes unicos', nrep == 0)
+    call outcome('CAMPOS: nome, unidade e descricao preenchidos', nempty == 0)
+    call outcome('CAMPOS: todo campo aparece em TROCAS ou EXPORTACOES', nunused == 0)
+  end subroutine check_fields
 
-  !> MALHAS e ROTAS: nomes únicos; rotas entre malhas do mediador, com
-  !! reserva, máscara, sem_valor e criar válidos; toda rota usada.
-  subroutine confere_malhas_e_rotas()
+  !> GRIDS e ROUTES: nomes únicos; rotas entre malhas do mediador, com
+  !! reserva, máscara, no_value e criar válidos; toda rota usada.
+  subroutine check_grids_and_routes()
     integer :: i, j, kr, nerr
 
     nerr = 0
-    do i = 1, size(MALHAS)
-      do j = i + 1, size(MALHAS)
-        if (MALHAS(i)%nome == MALHAS(j)%nome) then
+    do i = 1, size(GRIDS)
+      do j = i + 1, size(GRIDS)
+        if (GRIDS(i)%name == GRIDS(j)%name) then
           nerr = nerr + 1
-          call falha('malha repetida: '//trim(MALHAS(i)%nome))
+          call fail_at('malha repetida: '//trim(GRIDS(i)%name))
         end if
       end do
     end do
-    call resultado('MALHAS: nomes unicos', nerr == 0)
+    call outcome('MALHAS: nomes unicos', nerr == 0)
 
     nerr = 0
-    do i = 1, size(ROTAS)
-      do j = i + 1, size(ROTAS)
-        if (ROTAS(i)%nome == ROTAS(j)%nome) then
+    do i = 1, size(ROUTES)
+      do j = i + 1, size(ROUTES)
+        if (ROUTES(i)%name == ROUTES(j)%name) then
           nerr = nerr + 1
-          call falha('rota repetida: '//trim(ROTAS(i)%nome))
+          call fail_at('rota repetida: '//trim(ROUTES(i)%name))
         end if
       end do
-      if (.not. malha_do_mediador(ROTAS(i)%de) .or. .not. malha_do_mediador(ROTAS(i)%para)) then
+      if (.not. mediator_grid(ROUTES(i)%src) .or. .not. mediator_grid(ROUTES(i)%dst)) then
         nerr = nerr + 1
-        call falha('rota fora das malhas do mediador: '//trim(ROTAS(i)%nome))
+        call fail_at('rota fora das malhas do mediador: '//trim(ROUTES(i)%name))
       end if
-      if (ROTAS(i)%de == ROTAS(i)%para) then
+      if (ROUTES(i)%src == ROUTES(i)%dst) then
         nerr = nerr + 1
-        call falha('rota com origem igual ao destino: '//trim(ROTAS(i)%nome))
+        call fail_at('rota com origem igual ao destino: '//trim(ROUTES(i)%name))
       end if
-      if (len_trim(ROTAS(i)%metodos) == 0) then
+      if (len_trim(ROUTES(i)%methods) == 0) then
         nerr = nerr + 1
-        call falha('rota sem metodo: '//trim(ROTAS(i)%nome))
+        call fail_at('rota sem metodo: '//trim(ROUTES(i)%name))
       end if
-      if (len_trim(ROTAS(i)%reserva) > 0) then
-        kr = cpl_rota_indice(ROTAS(i)%reserva)
+      if (len_trim(ROUTES(i)%fallback) > 0) then
+        kr = cpl_route_index(ROUTES(i)%fallback)
         if (kr == 0 .or. kr >= i) then
           nerr = nerr + 1
-          call falha('reserva inexistente ou criada depois: '//trim(ROTAS(i)%nome))
-        else if (ROTAS(kr)%de /= ROTAS(i)%de .or. ROTAS(kr)%para /= ROTAS(i)%para) then
+          call fail_at('reserva inexistente ou criada depois: '//trim(ROUTES(i)%name))
+        else if (ROUTES(kr)%src /= ROUTES(i)%src .or. ROUTES(kr)%dst /= ROUTES(i)%dst) then
           nerr = nerr + 1
-          call falha('reserva entre outras malhas: '//trim(ROTAS(i)%nome))
+          call fail_at('reserva entre outras malhas: '//trim(ROUTES(i)%name))
         end if
       end if
-      if (len_trim(ROTAS(i)%mascara) > 0 .and. cpl_campo_indice(ROTAS(i)%mascara) == 0) then
+      if (len_trim(ROUTES(i)%mask) > 0 .and. cpl_field_index(ROUTES(i)%mask) == 0) then
         nerr = nerr + 1
-        call falha('mascara fora de CAMPOS: '//trim(ROTAS(i)%nome))
+        call fail_at('mascara fora de CAMPOS: '//trim(ROUTES(i)%name))
       end if
-      if (.not. any(ROTAS(i)%sem_valor == [character(len=12) :: 'zerar', 'manter', 'sentinela'])) then
+      if (.not. any(ROUTES(i)%no_value == [character(len=12) :: 'zerar', 'manter', 'sentinela'])) then
         nerr = nerr + 1
-        call falha('sem_valor invalido: '//trim(ROTAS(i)%nome))
+        call fail_at('sem_valor invalido: '//trim(ROUTES(i)%name))
       end if
-      if (.not. any(ROTAS(i)%criar == [character(len=16) :: 'inicio', 'primeiro_uso', 'mascara_mista'])) then
+      if (.not. any(ROUTES(i)%create == [character(len=16) :: 'inicio', 'primeiro_uso', 'mascara_mista'])) then
         nerr = nerr + 1
-        call falha('criar invalido: '//trim(ROTAS(i)%nome))
+        call fail_at('criar invalido: '//trim(ROUTES(i)%name))
       end if
-      if (ROTAS(i)%criar == 'mascara_mista' .and. &
-          (len_trim(ROTAS(i)%mascara) == 0 .or. len_trim(ROTAS(i)%reserva) == 0)) then
+      if (ROUTES(i)%create == 'mascara_mista' .and. &
+          (len_trim(ROUTES(i)%mask) == 0 .or. len_trim(ROUTES(i)%fallback) == 0)) then
         nerr = nerr + 1
-        call falha('criar=mascara_mista sem mascara ou reserva: '//trim(ROTAS(i)%nome))
+        call fail_at('criar=mascara_mista sem mascara ou reserva: '//trim(ROUTES(i)%name))
       end if
-      if (.not. any(TROCAS%meio == ROTAS(i)%nome)) then
+      if (.not. any(EXCHANGES%via == ROUTES(i)%name)) then
         nerr = nerr + 1
-        call falha('rota sem troca: '//trim(ROTAS(i)%nome))
+        call fail_at('rota sem troca: '//trim(ROUTES(i)%name))
       end if
     end do
-    call resultado('ROTAS: nomes, malhas, reservas, mascaras, sem_valor e criar', nerr == 0)
-    ! A ordem de ROTAS é a ordem em que a reserva precisa existir.
-    call resultado('ROTAS: seis rotas (Apendice A)', size(ROTAS) == 6)
-  end subroutine confere_malhas_e_rotas
+    call outcome('ROTAS: nomes, malhas, reservas, mascaras, sem_valor e criar', nerr == 0)
+    ! A ordem de ROUTES é a ordem em que a reserva precisa existir.
+    call outcome('ROTAS: seis rotas (Apendice A)', size(ROUTES) == 6)
+  end subroutine check_grids_and_routes
 
-  !> Cada linha de TROCAS: campo no dicionário, pontos válidos, condições
+  !> Cada linha de EXCHANGES: campo no dicionário, pontos válidos, condições
   !! válidas, meio coerente; nenhuma linha repetida.
-  subroutine confere_trocas()
+  subroutine check_exchanges()
     integer :: i, j, kr, nerr
-    character(len=16) :: cde, cpara, mde, mpara
+    character(len=16) :: comp_src_i, comp_dst_i, grid_src_i, grid_dst_i
 
     nerr = 0
-    do i = 1, size(TROCAS)
-      if (cpl_campo_indice(TROCAS(i)%campo) == 0) then
+    do i = 1, size(EXCHANGES)
+      if (cpl_field_index(EXCHANGES(i)%field) == 0) then
         nerr = nerr + 1
-        call falha('campo fora de CAMPOS: '//trim(TROCAS(i)%campo))
+        call fail_at('campo fora de CAMPOS: '//trim(EXCHANGES(i)%field))
       end if
-      if (.not. ponto_valido(TROCAS(i)%de) .or. .not. ponto_valido(TROCAS(i)%para)) then
+      if (.not. valid_point(EXCHANGES(i)%src) .or. .not. valid_point(EXCHANGES(i)%dst)) then
         nerr = nerr + 1
-        call falha('ponto invalido: '//descreve(i))
+        call fail_at('ponto invalido: '//describe(i))
       end if
-      if (.not. cpl_condicoes_validas(TROCAS(i)%quando)) then
+      if (.not. cpl_valid_conditions(EXCHANGES(i)%when)) then
         nerr = nerr + 1
-        call falha('condicao invalida: '//descreve(i))
+        call fail_at('condicao invalida: '//describe(i))
       end if
-      cde   = cpl_ponto_componente(TROCAS(i)%de)
-      cpara = cpl_ponto_componente(TROCAS(i)%para)
-      mde   = cpl_ponto_malha(TROCAS(i)%de)
-      mpara = cpl_ponto_malha(TROCAS(i)%para)
-      select case (trim(TROCAS(i)%meio))
+      comp_src_i = cpl_point_component(EXCHANGES(i)%src)
+      comp_dst_i = cpl_point_component(EXCHANGES(i)%dst)
+      grid_src_i = cpl_point_grid(EXCHANGES(i)%src)
+      grid_dst_i = cpl_point_grid(EXCHANGES(i)%dst)
+      select case (trim(EXCHANGES(i)%via))
       case ('conector')
-        if (cde == cpara) then
+        if (comp_src_i == comp_dst_i) then
           nerr = nerr + 1
-          call falha('conector dentro de um componente: '//descreve(i))
+          call fail_at('conector dentro de um componente: '//describe(i))
         end if
       case ('cap')
-        if (cde /= cpara .or. mde == mpara .or. cde == 'MED') then
+        if (comp_src_i /= comp_dst_i .or. grid_src_i == grid_dst_i .or. comp_src_i == 'MED') then
           nerr = nerr + 1
-          call falha('cap fora de um componente com duas malhas: '//descreve(i))
+          call fail_at('cap fora de um componente com duas malhas: '//describe(i))
         end if
       case default
-        kr = cpl_rota_indice(TROCAS(i)%meio)
+        kr = cpl_route_index(EXCHANGES(i)%via)
         if (kr == 0) then
           nerr = nerr + 1
-          call falha('rota inexistente: '//descreve(i))
-        else if (cde /= 'MED' .or. cpara /= 'MED' .or. &
-                 ROTAS(kr)%de /= mde .or. ROTAS(kr)%para /= mpara) then
+          call fail_at('rota inexistente: '//describe(i))
+        else if (comp_src_i /= 'MED' .or. comp_dst_i /= 'MED' .or. &
+                 ROUTES(kr)%src /= grid_src_i .or. ROUTES(kr)%dst /= grid_dst_i) then
           nerr = nerr + 1
-          call falha('rota entre malhas diferentes das da troca: '//descreve(i))
+          call fail_at('rota entre malhas diferentes das da troca: '//describe(i))
         end if
       end select
-      do j = i + 1, size(TROCAS)
-        if (TROCAS(i)%campo == TROCAS(j)%campo .and. TROCAS(i)%de == TROCAS(j)%de .and. &
-            TROCAS(i)%para == TROCAS(j)%para .and. TROCAS(i)%quando == TROCAS(j)%quando) then
+      do j = i + 1, size(EXCHANGES)
+        if (EXCHANGES(i)%field == EXCHANGES(j)%field .and. EXCHANGES(i)%src == EXCHANGES(j)%src .and. &
+            EXCHANGES(i)%dst == EXCHANGES(j)%dst .and. EXCHANGES(i)%when == EXCHANGES(j)%when) then
           nerr = nerr + 1
-          call falha('troca repetida: '//descreve(i))
+          call fail_at('troca repetida: '//describe(i))
         end if
       end do
     end do
-    call resultado('TROCAS: campos, pontos, condicoes e meios validos, sem repeticao', nerr == 0)
-  end subroutine confere_trocas
+    call outcome('TROCAS: campos, pontos, condicoes e meios validos, sem repeticao', nerr == 0)
+  end subroutine check_exchanges
 
   !> Coluna metodo (R-FASE11-22): preenchida, com um valor aceito pelo
   !! conector NUOPC, só nas trocas por conector; o mesmo método nas trocas
-  !! do mesmo campo entre os mesmos dois componentes (cpl_metodo_conector não
+  !! do mesmo campo entre os mesmos dois componentes (cpl_connector_method não
   !! depende da configuração); hoje, bilinear em todas, o padrão que o
   !! conector usava antes de a opção ser escrita.
-  subroutine confere_metodos()
-    integer :: i, j, nerr, nbil, ncon
-    character(len=16) :: cde, cpara
+  subroutine check_methods()
+    integer :: i, j, nerr, nbilinear, ncon
+    character(len=16) :: comp_src_i, comp_dst_i
 
-    nerr = 0; nbil = 0; ncon = 0
-    do i = 1, size(TROCAS)
-      if (trim(TROCAS(i)%meio) /= 'conector') then
-        if (len_trim(TROCAS(i)%metodo) > 0) then
+    nerr = 0; nbilinear = 0; ncon = 0
+    do i = 1, size(EXCHANGES)
+      if (trim(EXCHANGES(i)%via) /= 'conector') then
+        if (len_trim(EXCHANGES(i)%method) > 0) then
           nerr = nerr + 1
-          call falha('metodo fora de troca por conector: '//descreve(i))
+          call fail_at('metodo fora de troca por conector: '//describe(i))
         end if
         cycle
       end if
       ncon = ncon + 1
-      if (.not. any(METODOS_CONECTOR == TROCAS(i)%metodo)) then
+      if (.not. any(CONNECTOR_METHODS == EXCHANGES(i)%method)) then
         nerr = nerr + 1
-        call falha('metodo invalido: '//descreve(i)//' '//trim(TROCAS(i)%metodo))
+        call fail_at('metodo invalido: '//describe(i)//' '//trim(EXCHANGES(i)%method))
       end if
-      if (TROCAS(i)%metodo == 'bilinear') nbil = nbil + 1
-      cde   = cpl_ponto_componente(TROCAS(i)%de)
-      cpara = cpl_ponto_componente(TROCAS(i)%para)
-      do j = 1, size(TROCAS)
-        if (trim(TROCAS(j)%meio) /= 'conector' .or. TROCAS(j)%campo /= TROCAS(i)%campo) cycle
-        if (cpl_ponto_componente(TROCAS(j)%de) /= cde) cycle
-        if (cpl_ponto_componente(TROCAS(j)%para) /= cpara) cycle
-        if (TROCAS(j)%metodo /= TROCAS(i)%metodo) then
+      if (EXCHANGES(i)%method == 'bilinear') nbilinear = nbilinear + 1
+      comp_src_i = cpl_point_component(EXCHANGES(i)%src)
+      comp_dst_i = cpl_point_component(EXCHANGES(i)%dst)
+      do j = 1, size(EXCHANGES)
+        if (trim(EXCHANGES(j)%via) /= 'conector' .or. EXCHANGES(j)%field /= EXCHANGES(i)%field) cycle
+        if (cpl_point_component(EXCHANGES(j)%src) /= comp_src_i) cycle
+        if (cpl_point_component(EXCHANGES(j)%dst) /= comp_dst_i) cycle
+        if (EXCHANGES(j)%method /= EXCHANGES(i)%method) then
           nerr = nerr + 1
-          call falha('metodos diferentes para o mesmo campo e conector: '//descreve(i))
+          call fail_at('metodos diferentes para o mesmo campo e conector: '//describe(i))
         end if
       end do
-      if (cpl_metodo_conector(TROCAS(i)%campo, cde, cpara) /= TROCAS(i)%metodo) then
+      if (cpl_connector_method(EXCHANGES(i)%field, comp_src_i, comp_dst_i) /= EXCHANGES(i)%method) then
         nerr = nerr + 1
-        call falha('cpl_metodo_conector diferente da tabela: '//descreve(i))
+        call fail_at('cpl_metodo_conector diferente da tabela: '//describe(i))
       end if
     end do
-    call resultado('TROCAS: metodo valido so nas trocas por conector, um por campo e conector', &
+    call outcome('TROCAS: metodo valido so nas trocas por conector, um por campo e conector', &
                    nerr == 0)
-    call resultado('TROCAS: todas as trocas por conector com bilinear (padrao do NUOPC)', &
-                   nbil == ncon .and. ncon > 0)
-    call resultado('cpl_metodo_conector: vazio sem troca por conector', &
-                   len_trim(cpl_metodo_conector('So_t', 'MED', 'ATM')) == 0 .and. &
-                   len_trim(cpl_metodo_conector('Foxx_taux', 'MED', 'MED')) == 0 .and. &
-                   len_trim(cpl_metodo_conector('Sa_u10m_mpas', 'ATM', 'ATM')) == 0)
-    call resultado('cpl_metodo_conector: So_t do OCN para o MED e do MED para o ICE', &
-                   cpl_metodo_conector('So_t', 'OCN', 'MED') == 'bilinear' .and. &
-                   cpl_metodo_conector('So_t', 'MED', 'ICE') == 'bilinear')
-  end subroutine confere_metodos
+    call outcome('TROCAS: todas as trocas por conector com bilinear (padrao do NUOPC)', &
+                   nbilinear == ncon .and. ncon > 0)
+    call outcome('cpl_metodo_conector: vazio sem troca por conector', &
+                   len_trim(cpl_connector_method('So_t', 'MED', 'ATM')) == 0 .and. &
+                   len_trim(cpl_connector_method('Foxx_taux', 'MED', 'MED')) == 0 .and. &
+                   len_trim(cpl_connector_method('Sa_u10m_mpas', 'ATM', 'ATM')) == 0)
+    call outcome('cpl_metodo_conector: So_t do OCN para o MED e do MED para o ICE', &
+                   cpl_connector_method('So_t', 'OCN', 'MED') == 'bilinear' .and. &
+                   cpl_connector_method('So_t', 'MED', 'ICE') == 'bilinear')
+  end subroutine check_methods
 
   !> Trocas 'cap' do MONAN-A (R-FASE11-24), feitas pelo adaptador do MPAS
   !! (mpas_adaptador): as de ATM@mpas para ATM@atm_cap são exatamente os
-  !! campos que o MONAN-A exporta (cpl_exportacoes, os de mpas_export), e as
+  !! campos que o MONAN-A exporta (cpl_exports, os de mpas_export), e as
   !! de ATM@atm_cap para ATM@mpas, na mesma ordem, os que ele importa
-  !! (cpl_chegadas por conector, os de mpas_import). O cap consulta o mapa
+  !! (cpl_arrivals por conector, os de mpas_import). O cap consulta o mapa
   !! sem chaves (todas as configurações).
-  subroutine confere_trocas_cap()
-    character(len=CPL_NOME_LEN), allocatable :: exp(:), imp(:), ida(:), volta(:)
-    logical :: ok_ida, ok_volta
+  subroutine check_cap_exchanges()
+    character(len=CPL_NAME_LEN), allocatable :: exp(:), imp(:), outbound(:), inbound(:)
+    logical :: ok_outbound, ok_inbound
     integer :: t
 
-    allocate(ida(0), volta(0))
-    do t = 1, size(TROCAS)
-      if (trim(TROCAS(t)%meio) /= 'cap') cycle
-      if (TROCAS(t)%de == 'ATM@mpas' .and. TROCAS(t)%para == 'ATM@atm_cap') &
-        ida = [character(len=CPL_NOME_LEN) :: ida, TROCAS(t)%campo]
-      if (TROCAS(t)%de == 'ATM@atm_cap' .and. TROCAS(t)%para == 'ATM@mpas') &
-        volta = [character(len=CPL_NOME_LEN) :: volta, TROCAS(t)%campo]
+    allocate(outbound(0), inbound(0))
+    do t = 1, size(EXCHANGES)
+      if (trim(EXCHANGES(t)%via) /= 'cap') cycle
+      if (EXCHANGES(t)%src == 'ATM@mpas' .and. EXCHANGES(t)%dst == 'ATM@atm_cap') &
+        outbound = [character(len=CPL_NAME_LEN) :: outbound, EXCHANGES(t)%field]
+      if (EXCHANGES(t)%src == 'ATM@atm_cap' .and. EXCHANGES(t)%dst == 'ATM@mpas') &
+        inbound = [character(len=CPL_NAME_LEN) :: inbound, EXCHANGES(t)%field]
     end do
-    call cpl_exportacoes('ATM@atm_cap', CFG(1), '', exp)
-    call cpl_chegadas('ATM@atm_cap', .true., CFG(1), '', imp)
-    ok_ida = size(ida) == size(exp) .and. size(ida) == 13
-    if (ok_ida) ok_ida = all([(any(exp == ida(t)), t = 1, size(ida))])
-    ok_volta = size(volta) == size(imp) .and. size(volta) == 7
-    if (ok_volta) ok_volta = all(volta == imp)
-    call resultado('trocas cap ATM@mpas -> ATM@atm_cap: as 13 exportacoes do MONAN-A', ok_ida)
-    call resultado('trocas cap ATM@atm_cap -> ATM@mpas: as 7 importacoes, na mesma ordem', ok_volta)
-    ok_ida = .true.
-    do t = 1, size(LACUNAS)
-      ok_ida = ok_ida .and. cpl_campo_indice(LACUNAS(t)%campo) > 0 .and. &
-               ponto_valido(LACUNAS(t)%ponto) .and. cpl_condicoes_validas(LACUNAS(t)%quando)
+    call cpl_exports('ATM@atm_cap', CFG(1), '', exp)
+    call cpl_arrivals('ATM@atm_cap', .true., CFG(1), '', imp)
+    ok_outbound = size(outbound) == size(exp) .and. size(outbound) == 13
+    if (ok_outbound) ok_outbound = all([(any(exp == outbound(t)), t = 1, size(outbound))])
+    ok_inbound = size(inbound) == size(imp) .and. size(inbound) == 7
+    if (ok_inbound) ok_inbound = all(inbound == imp)
+    call outcome('trocas cap ATM@mpas -> ATM@atm_cap: as 13 exportacoes do MONAN-A', ok_outbound)
+    call outcome('trocas cap ATM@atm_cap -> ATM@mpas: as 7 importacoes, na mesma ordem', ok_inbound)
+    ok_outbound = .true.
+    do t = 1, size(GAPS)
+      ok_outbound = ok_outbound .and. cpl_field_index(GAPS(t)%field) > 0 .and. &
+               valid_point(GAPS(t)%point) .and. cpl_valid_conditions(GAPS(t)%when)
     end do
-    call resultado('LACUNAS: campos, pontos e condicoes validos', ok_ida)
-  end subroutine confere_trocas_cap
+    call outcome('LACUNAS: campos, pontos e condicoes validos', ok_outbound)
+  end subroutine check_cap_exchanges
 
   !> Na configuração k: cada (campo, destino) recebe de uma só troca, entre
   !! as que chegam por conector (importação) e entre as demais.
-  subroutine confere_origens(k)
+  subroutine check_origins(k)
     integer, intent(in) :: k
     integer :: i, j, n, nerr
-    logical :: conector_i
+    logical :: connector_i
 
     nerr = 0
-    do i = 1, size(TROCAS)
-      if (.not. cpl_troca_vale(TROCAS(i), CFG(k))) cycle
-      conector_i = TROCAS(i)%meio == 'conector'
+    do i = 1, size(EXCHANGES)
+      if (.not. cpl_exchange_applies(EXCHANGES(i), CFG(k))) cycle
+      connector_i = EXCHANGES(i)%via == 'conector'
       n = 0
-      do j = 1, size(TROCAS)
-        if (.not. cpl_troca_vale(TROCAS(j), CFG(k))) cycle
-        if (TROCAS(j)%campo /= TROCAS(i)%campo .or. TROCAS(j)%para /= TROCAS(i)%para) cycle
-        if ((TROCAS(j)%meio == 'conector') .neqv. conector_i) cycle
+      do j = 1, size(EXCHANGES)
+        if (.not. cpl_exchange_applies(EXCHANGES(j), CFG(k))) cycle
+        if (EXCHANGES(j)%field /= EXCHANGES(i)%field .or. EXCHANGES(j)%dst /= EXCHANGES(i)%dst) cycle
+        if ((EXCHANGES(j)%via == 'conector') .neqv. connector_i) cycle
         n = n + 1
       end do
       if (n /= 1) then
         nerr = nerr + 1
-        call falha(trim(NOME_CFG(k))//': mais de uma origem: '//descreve(i))
+        call fail_at(trim(CFG_NAME(k))//': mais de uma origem: '//describe(i))
       end if
     end do
-    call resultado(trim(NOME_CFG(k))//': cada campo com uma unica origem', nerr == 0)
-  end subroutine confere_origens
+    call outcome(trim(CFG_NAME(k))//': cada campo com uma unica origem', nerr == 0)
+  end subroutine check_origins
 
   !> Na configuração k: quem parte de um ponto intermediário chegou a ele
   !! (por conector, se parte por rota ou cap; por rota ou cap, se parte por
   !! conector). As faltas têm de ser exatamente as lacunas conhecidas.
-  subroutine confere_cadeia(k)
+  subroutine check_chain(k)
     integer, intent(in) :: k
-    integer :: i, j, l, nfaltas, nesperadas, nerr
-    logical :: chegou, esperada
+    integer :: i, j, l, nmissing, nexpected, nerr
+    logical :: arrived, is_expected
 
-    nfaltas = 0; nerr = 0
-    do i = 1, size(TROCAS)
-      if (.not. cpl_troca_vale(TROCAS(i), CFG(k))) cycle
-      if (any(PRODUCAO == cpl_ponto_malha(TROCAS(i)%de))) cycle
-      chegou = .false.
-      do j = 1, size(TROCAS)
-        if (.not. cpl_troca_vale(TROCAS(j), CFG(k))) cycle
-        if (TROCAS(j)%campo /= TROCAS(i)%campo .or. TROCAS(j)%para /= TROCAS(i)%de) cycle
-        if ((TROCAS(j)%meio == 'conector') .eqv. (TROCAS(i)%meio == 'conector')) cycle
-        chegou = .true.
+    nmissing = 0; nerr = 0
+    do i = 1, size(EXCHANGES)
+      if (.not. cpl_exchange_applies(EXCHANGES(i), CFG(k))) cycle
+      if (any(PRODUCTION == cpl_point_grid(EXCHANGES(i)%src))) cycle
+      arrived = .false.
+      do j = 1, size(EXCHANGES)
+        if (.not. cpl_exchange_applies(EXCHANGES(j), CFG(k))) cycle
+        if (EXCHANGES(j)%field /= EXCHANGES(i)%field .or. EXCHANGES(j)%dst /= EXCHANGES(i)%src) cycle
+        if ((EXCHANGES(j)%via == 'conector') .eqv. (EXCHANGES(i)%via == 'conector')) cycle
+        arrived = .true.
       end do
-      if (chegou) cycle
-      nfaltas = nfaltas + 1
-      esperada = cpl_lacuna(CFG(k), TROCAS(i)%campo, TROCAS(i)%de)
-      if (.not. esperada) then
+      if (arrived) cycle
+      nmissing = nmissing + 1
+      is_expected = cpl_is_gap(CFG(k), EXCHANGES(i)%field, EXCHANGES(i)%src)
+      if (.not. is_expected) then
         nerr = nerr + 1
-        call falha(trim(NOME_CFG(k))//': parte sem ter chegado: '//descreve(i))
+        call fail_at(trim(CFG_NAME(k))//': parte sem ter chegado: '//describe(i))
       end if
     end do
-    nesperadas = 0
-    do l = 1, size(LACUNAS)
-      if (cpl_lacuna(CFG(k), LACUNAS(l)%campo, LACUNAS(l)%ponto)) nesperadas = nesperadas + 1
+    nexpected = 0
+    do l = 1, size(GAPS)
+      if (cpl_is_gap(CFG(k), GAPS(l)%field, GAPS(l)%point)) nexpected = nexpected + 1
     end do
-    if (nfaltas /= nesperadas .and. nerr == 0) &
-      call falha(trim(NOME_CFG(k))//': lacuna conhecida que deixou de existir')
-    call resultado(trim(NOME_CFG(k))//': cadeia completa, exceto as lacunas conhecidas', &
-                   nerr == 0 .and. nfaltas == nesperadas)
-  end subroutine confere_cadeia
+    if (nmissing /= nexpected .and. nerr == 0) &
+      call fail_at(trim(CFG_NAME(k))//': lacuna conhecida que deixou de existir')
+    call outcome(trim(CFG_NAME(k))//': cadeia completa, exceto as lacunas conhecidas', &
+                   nerr == 0 .and. nmissing == nexpected)
+  end subroutine check_chain
 
   !> Campos por conector na produção, como no Apêndice A.
-  subroutine confere_contagens()
-    call resultado('producao: ATM para MED, 13 campos', n_conector('ATM', 'MED') == 13)
-    call resultado('producao: OCN para MED, 4 campos',  n_conector('OCN', 'MED') == 4)
-    call resultado('producao: ICE para MED, 6 campos',  n_conector('ICE', 'MED') == 6)
-    call resultado('producao: MED para OCN, 14 campos', n_conector('MED', 'OCN') == 14)
-    call resultado('producao: MED para ICE, 16 campos', n_conector('MED', 'ICE') == 16)
-    call resultado('producao: MED para ATM, 7 campos',  n_conector('MED', 'ATM') == 7)
-    call resultado('producao: OCN para ATM, nenhum campo', n_conector('OCN', 'ATM') == 0)
-  end subroutine confere_contagens
+  subroutine check_counts()
+    call outcome('producao: ATM para MED, 13 campos', n_connector('ATM', 'MED') == 13)
+    call outcome('producao: OCN para MED, 4 campos',  n_connector('OCN', 'MED') == 4)
+    call outcome('producao: ICE para MED, 6 campos',  n_connector('ICE', 'MED') == 6)
+    call outcome('producao: MED para OCN, 14 campos', n_connector('MED', 'OCN') == 14)
+    call outcome('producao: MED para ICE, 16 campos', n_connector('MED', 'ICE') == 16)
+    call outcome('producao: MED para ATM, 7 campos',  n_connector('MED', 'ATM') == 7)
+    call outcome('producao: OCN para ATM, nenhum campo', n_connector('OCN', 'ATM') == 0)
+  end subroutine check_counts
 
   !> Listas do mediador (med_cap_types) contra o mapa, nome a nome.
-  subroutine confere_mediador()
-    call resultado('mediador: importacao do MONAN-A igual a import_mpas_names', &
-      lista_igual(chegadas_por_conector('MED', CFG(1), 'ATM'), import_mpas_names))
-    call resultado('mediador: importacao do DATM igual a import_datm_names', &
-      lista_igual(chegadas_por_conector('MED', CFG(5), 'ATM'), import_datm_names))
-    call resultado('mediador: atm_med para ocn_med igual a export_names', &
-      lista_igual(atm_med_para_ocn_med(), export_names))
-    call resultado('mediador: todo campo exportado sai por algum conector', &
-      todos_exportados())
-  end subroutine confere_mediador
+  subroutine check_mediator()
+    call outcome('mediador: importacao do MONAN-A igual a import_mpas_names', &
+      same_list(arrivals_by_connector('MED', CFG(1), 'ATM'), import_mpas_names))
+    call outcome('mediador: importacao do DATM igual a import_datm_names', &
+      same_list(arrivals_by_connector('MED', CFG(5), 'ATM'), import_datm_names))
+    call outcome('mediador: atm_med para ocn_med igual a export_names', &
+      same_list(atm_med_to_ocn_med(), export_names))
+    call outcome('mediador: todo campo exportado sai por algum conector', &
+      all_exported())
+  end subroutine check_mediator
 
   !> Na configuração k, as listas geradas do mapa para o mediador são as que
   !! ele anunciava e realizava antes: forçantes do MONAN-A ou do DATM na
   !! malha de fluxo; So_t, So_u, So_v, So_omask e, com o SIS2, os *_sis2 na
   !! grade do oceano; as 31 exportações em todas as configurações.
-  subroutine confere_listas_mediador(k)
+  subroutine check_mediator_lists(k)
     integer, intent(in) :: k
-    character(len=CPL_NOME_LEN), allocatable :: atm(:), ocn(:), tudo(:), exp(:)
-    character(len=32), allocatable :: esp_atm(:), esp_ocn(:)
+    character(len=CPL_NAME_LEN), allocatable :: atm(:), ocn(:), all_names(:), exp(:)
+    character(len=32), allocatable :: want_atm(:), want_ocn(:)
 
     if (CFG(k)%datm) then
-      esp_atm = import_datm_names
+      want_atm = import_datm_names
     else
-      esp_atm = import_mpas_names
+      want_atm = import_mpas_names
     end if
     if (CFG(k)%sis2) then
-      esp_ocn = [character(len=32) :: MED_IMP_OCN, MED_IMP_SIS2]
+      want_ocn = [character(len=32) :: MED_IMP_OCN, MED_IMP_SIS2]
     else
-      esp_ocn = MED_IMP_OCN
+      want_ocn = MED_IMP_OCN
     end if
-    call cpl_chegadas('MED@atm_med', .true., CFG(k), MED_CHAVES, atm)
-    call cpl_chegadas('MED@ocn_med', .true., CFG(k), MED_CHAVES, ocn)
-    call cpl_chegadas('MED', .true., CFG(k), MED_CHAVES, tudo)
-    call cpl_chegadas('MED@ocn_med', .false., CFG(k), '', exp)
-    call resultado(trim(NOME_CFG(k))//': mediador, importacao na malha de fluxo', &
-      lista_igual(atm, esp_atm))
-    call resultado(trim(NOME_CFG(k))//': mediador, importacao na grade do oceano', &
-      lista_igual(ocn, esp_ocn))
-    call resultado(trim(NOME_CFG(k))//': mediador, importacao na ordem do anuncio', &
-      lista_igual(tudo, [character(len=32) :: esp_atm, esp_ocn]))
-    call resultado(trim(NOME_CFG(k))//': mediador, exportacao', lista_igual(exp, export_names))
-  end subroutine confere_listas_mediador
+    call cpl_arrivals('MED@atm_med', .true., CFG(k), MED_CHAVES, atm)
+    call cpl_arrivals('MED@ocn_med', .true., CFG(k), MED_CHAVES, ocn)
+    call cpl_arrivals('MED', .true., CFG(k), MED_CHAVES, all_names)
+    call cpl_arrivals('MED@ocn_med', .false., CFG(k), '', exp)
+    call outcome(trim(CFG_NAME(k))//': mediador, importacao na malha de fluxo', &
+      same_list(atm, want_atm))
+    call outcome(trim(CFG_NAME(k))//': mediador, importacao na grade do oceano', &
+      same_list(ocn, want_ocn))
+    call outcome(trim(CFG_NAME(k))//': mediador, importacao na ordem do anuncio', &
+      same_list(all_names, [character(len=32) :: want_atm, want_ocn]))
+    call outcome(trim(CFG_NAME(k))//': mediador, exportacao', same_list(exp, export_names))
+  end subroutine check_mediator_lists
 
-  !> Cada linha de EXPORTACOES: campo no dicionário, ponto de um modelo,
+  !> Cada linha de EXPORTS: campo no dicionário, ponto de um modelo,
   !! condição válida, sem repetição; exportações de cada modelo iguais às
   !! listas dos caps.
-  subroutine confere_exportacoes()
+  subroutine check_exports()
     integer :: i, j, nerr
 
     nerr = 0
-    do i = 1, size(EXPORTACOES)
-      if (cpl_campo_indice(EXPORTACOES(i)%campo) == 0) then
+    do i = 1, size(EXPORTS)
+      if (cpl_field_index(EXPORTS(i)%field) == 0) then
         nerr = nerr + 1
-        call falha('exportacao fora de CAMPOS: '//trim(EXPORTACOES(i)%campo))
+        call fail_at('exportacao fora de CAMPOS: '//trim(EXPORTS(i)%field))
       end if
-      if (.not. ponto_valido(EXPORTACOES(i)%ponto) .or. &
-          cpl_ponto_componente(EXPORTACOES(i)%ponto) == 'MED') then
+      if (.not. valid_point(EXPORTS(i)%point) .or. &
+          cpl_point_component(EXPORTS(i)%point) == 'MED') then
         nerr = nerr + 1
-        call falha('exportacao com ponto invalido: '//descreve_exp(i))
+        call fail_at('exportacao com ponto invalido: '//describe_exp(i))
       end if
-      if (.not. cpl_condicoes_validas(EXPORTACOES(i)%quando)) then
+      if (.not. cpl_valid_conditions(EXPORTS(i)%when)) then
         nerr = nerr + 1
-        call falha('exportacao com condicao invalida: '//descreve_exp(i))
+        call fail_at('exportacao com condicao invalida: '//describe_exp(i))
       end if
-      do j = i + 1, size(EXPORTACOES)
-        if (EXPORTACOES(i)%campo == EXPORTACOES(j)%campo .and. &
-            EXPORTACOES(i)%ponto == EXPORTACOES(j)%ponto) then
+      do j = i + 1, size(EXPORTS)
+        if (EXPORTS(i)%field == EXPORTS(j)%field .and. &
+            EXPORTS(i)%point == EXPORTS(j)%point) then
           nerr = nerr + 1
-          call falha('exportacao repetida: '//descreve_exp(i))
+          call fail_at('exportacao repetida: '//describe_exp(i))
         end if
       end do
     end do
-    call resultado('EXPORTACOES: campos, pontos e condicoes validos, sem repeticao', nerr == 0)
+    call outcome('EXPORTACOES: campos, pontos e condicoes validos, sem repeticao', nerr == 0)
 
-    call resultado('EXPORTACOES: MONAN-A igual a EXP_NAMES do mpas_cap_MONAN', &
-      lista_igual(exportadas('ATM@atm_cap'), mpas_exp_names))
-    call resultado('EXPORTACOES: DATM igual ao anuncio do DATM_cap', &
-      lista_igual(exportadas('ATM@datm'), datm_exp_names))
-    call resultado('EXPORTACOES: MOM6 igual a export_names do mom_cap_MONAN', &
-      lista_igual(exportadas('OCN@ocn_mom6'), mom_export_names))
-    call resultado('EXPORTACOES: DOCN igual a EXP_NAMES do DOCN_cap', &
-      lista_igual(exportadas('OCN@docn'), docn_exp_names))
-    call resultado('EXPORTACOES: SIS2 igual a export_names do sis_cap_MONAN', &
-      lista_igual(exportadas('ICE@ice_sis2'), sis_export_names))
-  end subroutine confere_exportacoes
+    call outcome('EXPORTACOES: MONAN-A igual a EXP_NAMES do mpas_cap_MONAN', &
+      same_list(exported('ATM@atm_cap'), mpas_exp_names))
+    call outcome('EXPORTACOES: DATM igual ao anuncio do DATM_cap', &
+      same_list(exported('ATM@datm'), datm_exp_names))
+    call outcome('EXPORTACOES: MOM6 igual a export_names do mom_cap_MONAN', &
+      same_list(exported('OCN@ocn_mom6'), mom_export_names))
+    call outcome('EXPORTACOES: DOCN igual a EXP_NAMES do DOCN_cap', &
+      same_list(exported('OCN@docn'), docn_exp_names))
+    call outcome('EXPORTACOES: SIS2 igual a export_names do sis_cap_MONAN', &
+      same_list(exported('ICE@ice_sis2'), sis_export_names))
+  end subroutine check_exports
 
   !> Na configuração k, todo campo que sai por conector do ponto de um
   !! modelo é exportado por esse ponto nessa configuração.
-  subroutine confere_exporta_conector(k)
+  subroutine check_export_connector(k)
     integer, intent(in) :: k
     integer :: i, j, nerr
-    logical :: achou
+    logical :: found
 
     nerr = 0
-    do i = 1, size(TROCAS)
-      if (TROCAS(i)%meio /= 'conector' .or. .not. cpl_troca_vale(TROCAS(i), CFG(k))) cycle
-      if (cpl_ponto_componente(TROCAS(i)%de) == 'MED') cycle
-      achou = .false.
-      do j = 1, size(EXPORTACOES)
-        if (EXPORTACOES(j)%campo /= TROCAS(i)%campo .or. EXPORTACOES(j)%ponto /= TROCAS(i)%de) cycle
-        if (exporta_vale(j, CFG(k))) achou = .true.
+    do i = 1, size(EXCHANGES)
+      if (EXCHANGES(i)%via /= 'conector' .or. .not. cpl_exchange_applies(EXCHANGES(i), CFG(k))) cycle
+      if (cpl_point_component(EXCHANGES(i)%src) == 'MED') cycle
+      found = .false.
+      do j = 1, size(EXPORTS)
+        if (EXPORTS(j)%field /= EXCHANGES(i)%field .or. EXPORTS(j)%point /= EXCHANGES(i)%src) cycle
+        if (export_applies(j, CFG(k))) found = .true.
       end do
-      if (.not. achou) then
+      if (.not. found) then
         nerr = nerr + 1
-        call falha(trim(NOME_CFG(k))//': sai por conector sem ser exportado: '//descreve(i))
+        call fail_at(trim(CFG_NAME(k))//': sai por conector sem ser exportado: '//describe(i))
       end if
     end do
-    call resultado(trim(NOME_CFG(k))//': todo campo que sai de um modelo e exportado por ele', &
+    call outcome(trim(CFG_NAME(k))//': todo campo que sai de um modelo e exportado por ele', &
                    nerr == 0)
-  end subroutine confere_exporta_conector
+  end subroutine check_export_connector
 
   !> Listas geradas para os caps dos modelos (sem chaves: valem em qualquer
   !! configuração) iguais às que eles anunciavam antes; a configuração
   !! passada não pode mudar o resultado.
-  subroutine confere_listas_caps()
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+  subroutine check_cap_lists()
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
     logical :: ok_imp_mom, ok_exp_mom, ok_imp_sis, ok_exp_sis
     logical :: ok_imp_mpas, ok_exp_mpas, ok_exp_datm, ok_imp_docn, ok_exp_docn
     integer :: kc
@@ -570,143 +570,143 @@ contains
     ok_imp_mpas = .true.; ok_exp_mpas = .true.; ok_exp_datm = .true.
     ok_imp_docn = .true.; ok_exp_docn = .true.
     do kc = 1, NCFG
-      call cpl_chegadas('ATM@atm_cap', .true., CFG(kc), '', nomes)
-      ok_imp_mpas = ok_imp_mpas .and. lista_igual(nomes, mpas_imp_names)
-      call cpl_exportacoes('ATM@atm_cap', CFG(kc), '', nomes)
-      ok_exp_mpas = ok_exp_mpas .and. lista_igual(nomes, mpas_exp_names)
-      call cpl_exportacoes('ATM@datm', CFG(kc), '', nomes)
-      ok_exp_datm = ok_exp_datm .and. lista_igual(nomes, datm_exp_names)
-      call cpl_chegadas('OCN@docn', .true., CFG(kc), '', nomes)
-      ok_imp_docn = ok_imp_docn .and. lista_igual(nomes, docn_imp_names)
-      call cpl_exportacoes('OCN@docn', CFG(kc), '', nomes)
-      ok_exp_docn = ok_exp_docn .and. lista_igual(nomes, docn_exp_names)
-      call cpl_chegadas('OCN@ocn_mom6', .true., CFG(kc), '', nomes)
-      ok_imp_mom = ok_imp_mom .and. lista_igual(nomes, mom_import_names)
-      call cpl_exportacoes('OCN@ocn_mom6', CFG(kc), '', nomes)
-      ok_exp_mom = ok_exp_mom .and. lista_igual(nomes, mom_export_names)
-      call cpl_chegadas('ICE@ice_sis2', .true., CFG(kc), '', nomes)
+      call cpl_arrivals('ATM@atm_cap', .true., CFG(kc), '', names)
+      ok_imp_mpas = ok_imp_mpas .and. same_list(names, mpas_imp_names)
+      call cpl_exports('ATM@atm_cap', CFG(kc), '', names)
+      ok_exp_mpas = ok_exp_mpas .and. same_list(names, mpas_exp_names)
+      call cpl_exports('ATM@datm', CFG(kc), '', names)
+      ok_exp_datm = ok_exp_datm .and. same_list(names, datm_exp_names)
+      call cpl_arrivals('OCN@docn', .true., CFG(kc), '', names)
+      ok_imp_docn = ok_imp_docn .and. same_list(names, docn_imp_names)
+      call cpl_exports('OCN@docn', CFG(kc), '', names)
+      ok_exp_docn = ok_exp_docn .and. same_list(names, docn_exp_names)
+      call cpl_arrivals('OCN@ocn_mom6', .true., CFG(kc), '', names)
+      ok_imp_mom = ok_imp_mom .and. same_list(names, mom_import_names)
+      call cpl_exports('OCN@ocn_mom6', CFG(kc), '', names)
+      ok_exp_mom = ok_exp_mom .and. same_list(names, mom_export_names)
+      call cpl_arrivals('ICE@ice_sis2', .true., CFG(kc), '', names)
       ok_imp_sis = ok_imp_sis .and. &
-        lista_igual(nomes, [character(len=32) :: sis_import_names_atm, sis_import_names_ocn])
-      call cpl_exportacoes('ICE@ice_sis2', CFG(kc), '', nomes)
-      ok_exp_sis = ok_exp_sis .and. lista_igual(nomes, sis_export_names)
+        same_list(names, [character(len=32) :: sis_import_names_atm, sis_import_names_ocn])
+      call cpl_exports('ICE@ice_sis2', CFG(kc), '', names)
+      ok_exp_sis = ok_exp_sis .and. same_list(names, sis_export_names)
     end do
-    call resultado('caps: importacao do MOM6 igual a de antes, em toda configuracao', ok_imp_mom)
-    call resultado('caps: exportacao do MOM6 igual a de antes, em toda configuracao', ok_exp_mom)
-    call resultado('caps: importacao do SIS2 igual a de antes, em toda configuracao', ok_imp_sis)
-    call resultado('caps: exportacao do SIS2 igual a de antes, em toda configuracao', ok_exp_sis)
-    call resultado('caps: importacao do MONAN-A igual a de antes, em toda configuracao', ok_imp_mpas)
-    call resultado('caps: exportacao do MONAN-A igual a de antes, em toda configuracao', ok_exp_mpas)
-    call resultado('caps: exportacao do DATM igual a de antes, em toda configuracao', ok_exp_datm)
-    call resultado('caps: importacao do DOCN igual a de antes, em toda configuracao', ok_imp_docn)
-    call resultado('caps: exportacao do DOCN igual a de antes, em toda configuracao', ok_exp_docn)
-    call cpl_chegadas('ATM@datm', .true., CFG(4), '', nomes)
-    call resultado('caps: o DATM nao importa nada', size(nomes) == 0)
-    ! Sem nuopc.input, cpl_config_atual dá a configuração padrão; o resultado
+    call outcome('caps: importacao do MOM6 igual a de antes, em toda configuracao', ok_imp_mom)
+    call outcome('caps: exportacao do MOM6 igual a de antes, em toda configuracao', ok_exp_mom)
+    call outcome('caps: importacao do SIS2 igual a de antes, em toda configuracao', ok_imp_sis)
+    call outcome('caps: exportacao do SIS2 igual a de antes, em toda configuracao', ok_exp_sis)
+    call outcome('caps: importacao do MONAN-A igual a de antes, em toda configuracao', ok_imp_mpas)
+    call outcome('caps: exportacao do MONAN-A igual a de antes, em toda configuracao', ok_exp_mpas)
+    call outcome('caps: exportacao do DATM igual a de antes, em toda configuracao', ok_exp_datm)
+    call outcome('caps: importacao do DOCN igual a de antes, em toda configuracao', ok_imp_docn)
+    call outcome('caps: exportacao do DOCN igual a de antes, em toda configuracao', ok_exp_docn)
+    call cpl_arrivals('ATM@datm', .true., CFG(4), '', names)
+    call outcome('caps: o DATM nao importa nada', size(names) == 0)
+    ! Sem nuopc.input, cpl_current_config dá a configuração padrão; o resultado
     ! sem chaves é o mesmo.
-    call cpl_chegadas('OCN@ocn_mom6', .true., cpl_config_atual(), '', nomes)
-    call resultado('caps: importacao do MOM6 com cpl_config_atual', &
-      lista_igual(nomes, mom_import_names))
-  end subroutine confere_listas_caps
+    call cpl_arrivals('OCN@ocn_mom6', .true., cpl_current_config(), '', names)
+    call outcome('caps: importacao do MOM6 com cpl_config_atual', &
+      same_list(names, mom_import_names))
+  end subroutine check_cap_lists
 
   ! --------------------------------------------------------------------------
   ! Auxiliares
   ! --------------------------------------------------------------------------
 
   !> Número de campos do conector ORIGEM -> DESTINO na produção.
-  integer function n_conector(origem, destino) result(n)
-    character(len=*), intent(in) :: origem, destino
+  integer function n_connector(origin, destination) result(n)
+    character(len=*), intent(in) :: origin, destination
     integer :: i
 
     n = 0
-    do i = 1, size(TROCAS)
-      if (TROCAS(i)%meio /= 'conector' .or. .not. cpl_troca_vale(TROCAS(i), CFG(1))) cycle
-      if (cpl_ponto_componente(TROCAS(i)%de) == origem .and. &
-          cpl_ponto_componente(TROCAS(i)%para) == destino) n = n + 1
+    do i = 1, size(EXCHANGES)
+      if (EXCHANGES(i)%via /= 'conector' .or. .not. cpl_exchange_applies(EXCHANGES(i), CFG(1))) cycle
+      if (cpl_point_component(EXCHANGES(i)%src) == origin .and. &
+          cpl_point_component(EXCHANGES(i)%dst) == destination) n = n + 1
     end do
-  end function n_conector
+  end function n_connector
 
   !> Campos que chegam por conector ao componente comp, vindos do componente
-  !! origem, na configuração c, na ordem de TROCAS.
-  function chegadas_por_conector(comp, c, origem) result(lista)
+  !! origem, na configuração c, na ordem de EXCHANGES.
+  function arrivals_by_connector(comp, c, origin) result(list)
     character(len=*),   intent(in) :: comp
     type(cpl_config_t), intent(in) :: c
-    character(len=*),   intent(in) :: origem
-    character(len=24), allocatable :: lista(:)
+    character(len=*),   intent(in) :: origin
+    character(len=24), allocatable :: list(:)
     integer :: i
 
-    allocate(lista(0))
-    do i = 1, size(TROCAS)
-      if (TROCAS(i)%meio /= 'conector' .or. .not. cpl_troca_vale(TROCAS(i), c)) cycle
-      if (cpl_ponto_componente(TROCAS(i)%para) /= comp) cycle
-      if (cpl_ponto_componente(TROCAS(i)%de) /= origem) cycle
-      lista = [character(len=24) :: lista, TROCAS(i)%campo]
+    allocate(list(0))
+    do i = 1, size(EXCHANGES)
+      if (EXCHANGES(i)%via /= 'conector' .or. .not. cpl_exchange_applies(EXCHANGES(i), c)) cycle
+      if (cpl_point_component(EXCHANGES(i)%dst) /= comp) cycle
+      if (cpl_point_component(EXCHANGES(i)%src) /= origin) cycle
+      list = [character(len=24) :: list, EXCHANGES(i)%field]
     end do
-  end function chegadas_por_conector
+  end function arrivals_by_connector
 
-  !> Campos que passam de MED@atm_med a MED@ocn_med, na ordem de TROCAS.
-  function atm_med_para_ocn_med() result(lista)
-    character(len=24), allocatable :: lista(:)
+  !> Campos que passam de MED@atm_med a MED@ocn_med, na ordem de EXCHANGES.
+  function atm_med_to_ocn_med() result(list)
+    character(len=24), allocatable :: list(:)
     integer :: i
 
-    allocate(lista(0))
-    do i = 1, size(TROCAS)
-      if (TROCAS(i)%de == 'MED@atm_med' .and. TROCAS(i)%para == 'MED@ocn_med') &
-        lista = [character(len=24) :: lista, TROCAS(i)%campo]
+    allocate(list(0))
+    do i = 1, size(EXCHANGES)
+      if (EXCHANGES(i)%src == 'MED@atm_med' .and. EXCHANGES(i)%dst == 'MED@ocn_med') &
+        list = [character(len=24) :: list, EXCHANGES(i)%field]
     end do
-  end function atm_med_para_ocn_med
+  end function atm_med_to_ocn_med
 
   !> Todo nome de export_names parte do mediador por conector em alguma
   !! configuração, e nenhum outro nome parte por conector.
-  logical function todos_exportados() result(ok)
+  logical function all_exported() result(ok)
     integer :: i
 
     ok = .true.
     do i = 1, size(export_names)
-      if (.not. any(TROCAS%campo == export_names(i) .and. TROCAS%de == 'MED@ocn_med' .and. &
-                    TROCAS%meio == 'conector')) then
+      if (.not. any(EXCHANGES%field == export_names(i) .and. EXCHANGES%src == 'MED@ocn_med' .and. &
+                    EXCHANGES%via == 'conector')) then
         ok = .false.
-        call falha('exportado sem conector: '//trim(export_names(i)))
+        call fail_at('exportado sem conector: '//trim(export_names(i)))
       end if
     end do
-    do i = 1, size(TROCAS)
-      if (TROCAS(i)%de /= 'MED@ocn_med' .or. TROCAS(i)%meio /= 'conector') cycle
-      if (.not. any(export_names == TROCAS(i)%campo)) then
+    do i = 1, size(EXCHANGES)
+      if (EXCHANGES(i)%src /= 'MED@ocn_med' .or. EXCHANGES(i)%via /= 'conector') cycle
+      if (.not. any(export_names == EXCHANGES(i)%field)) then
         ok = .false.
-        call falha('conector do mediador com campo nao exportado: '//descreve(i))
+        call fail_at('conector do mediador com campo nao exportado: '//describe(i))
       end if
     end do
-  end function todos_exportados
+  end function all_exported
 
-  !> Campos de EXPORTACOES no ponto, na ordem da tabela.
-  function exportadas(ponto) result(lista)
-    character(len=*), intent(in) :: ponto
-    character(len=24), allocatable :: lista(:)
+  !> Campos de EXPORTS no ponto, na ordem da tabela.
+  function exported(point) result(list)
+    character(len=*), intent(in) :: point
+    character(len=24), allocatable :: list(:)
     integer :: i
 
-    allocate(lista(0))
-    do i = 1, size(EXPORTACOES)
-      if (EXPORTACOES(i)%ponto == ponto) lista = [character(len=24) :: lista, EXPORTACOES(i)%campo]
+    allocate(list(0))
+    do i = 1, size(EXPORTS)
+      if (EXPORTS(i)%point == point) list = [character(len=24) :: list, EXPORTS(i)%field]
     end do
-  end function exportadas
+  end function exported
 
-  !> A linha j de EXPORTACOES vale na configuração c.
-  logical function exporta_vale(j, c)
+  !> A linha j de EXPORTS vale na configuração c.
+  logical function export_applies(j, c)
     integer,            intent(in) :: j
     type(cpl_config_t), intent(in) :: c
-    type(cpl_troca_t) :: t
+    type(cpl_exchange_t) :: t
 
-    t%quando = EXPORTACOES(j)%quando
-    exporta_vale = cpl_troca_vale(t, c)
-  end function exporta_vale
+    t%when = EXPORTS(j)%when
+    export_applies = cpl_exchange_applies(t, c)
+  end function export_applies
 
-  function descreve_exp(i) result(txt)
+  function describe_exp(i) result(txt)
     integer, intent(in) :: i
     character(len=:), allocatable :: txt
-    txt = trim(EXPORTACOES(i)%campo)//' '//trim(EXPORTACOES(i)%ponto)// &
-          ' ("'//trim(EXPORTACOES(i)%quando)//'")'
-  end function descreve_exp
+    txt = trim(EXPORTS(i)%field)//' '//trim(EXPORTS(i)%point)// &
+          ' ("'//trim(EXPORTS(i)%when)//'")'
+  end function describe_exp
 
-  logical function lista_igual(a, b) result(ok)
+  logical function same_list(a, b) result(ok)
     character(len=*), intent(in) :: a(:), b(:)
     integer :: i
 
@@ -721,47 +721,47 @@ contains
         write(*, '(A, I0, 4A)') '        posicao ', i, ': mapa ', trim(a(i)), ', lista ', trim(b(i))
       end if
     end do
-  end function lista_igual
+  end function same_list
 
-  logical function ponto_valido(ponto)
-    character(len=*), intent(in) :: ponto
+  logical function valid_point(point)
+    character(len=*), intent(in) :: point
     integer :: km
 
-    km = cpl_malha_indice(cpl_ponto_malha(ponto))
-    ponto_valido = km > 0
-    if (ponto_valido) ponto_valido = MALHAS(km)%componente == cpl_ponto_componente(ponto)
-  end function ponto_valido
+    km = cpl_grid_index(cpl_point_grid(point))
+    valid_point = km > 0
+    if (valid_point) valid_point = GRIDS(km)%component == cpl_point_component(point)
+  end function valid_point
 
-  logical function malha_do_mediador(nome)
-    character(len=*), intent(in) :: nome
+  logical function mediator_grid(name)
+    character(len=*), intent(in) :: name
     integer :: km
 
-    km = cpl_malha_indice(nome)
-    malha_do_mediador = km > 0
-    if (malha_do_mediador) malha_do_mediador = MALHAS(km)%componente == 'MED'
-  end function malha_do_mediador
+    km = cpl_grid_index(name)
+    mediator_grid = km > 0
+    if (mediator_grid) mediator_grid = GRIDS(km)%component == 'MED'
+  end function mediator_grid
 
-  function descreve(i) result(txt)
+  function describe(i) result(txt)
     integer, intent(in) :: i
     character(len=:), allocatable :: txt
-    txt = trim(TROCAS(i)%campo)//' '//trim(TROCAS(i)%de)//' -> '//trim(TROCAS(i)%para)// &
-          ' ('//trim(TROCAS(i)%meio)//', "'//trim(TROCAS(i)%quando)//'")'
-  end function descreve
+    txt = trim(EXCHANGES(i)%field)//' '//trim(EXCHANGES(i)%src)//' -> '//trim(EXCHANGES(i)%dst)// &
+          ' ('//trim(EXCHANGES(i)%via)//', "'//trim(EXCHANGES(i)%when)//'")'
+  end function describe
 
-  subroutine falha(msg)
+  subroutine fail_at(msg)
     character(len=*), intent(in) :: msg
     write(*, '(2A)') '        ', msg
-  end subroutine falha
+  end subroutine fail_at
 
-  subroutine resultado(nome, ok)
-    character(len=*), intent(in) :: nome
+  subroutine outcome(name, ok)
+    character(len=*), intent(in) :: name
     logical,          intent(in) :: ok
     if (ok) then
-      write(*, '(2A)') 'PASSOU  ', nome
+      write(*, '(2A)') 'PASSOU  ', name
     else
-      write(*, '(2A)') 'FALHOU  ', nome
-      nfalhas = nfalhas + 1
+      write(*, '(2A)') 'FALHOU  ', name
+      nfailures = nfailures + 1
     end if
-  end subroutine resultado
+  end subroutine outcome
 
 end program test_cpl_map

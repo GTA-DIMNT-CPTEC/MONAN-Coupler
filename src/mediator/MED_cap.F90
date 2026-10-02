@@ -45,8 +45,8 @@ module MED_cap_MONAN_mod
   use med_cap_types_mod,   only: MED_InternalState,            &
                                   MED_InternalStateWrapper,     &
                                   MED_CHAVES
-  use cpl_fields_mod,      only: CPL_NOME_LEN
-  use cpl_map_mod,         only: cpl_chegadas, cpl_config_atual
+  use cpl_fields_mod,      only: CPL_NAME_LEN
+  use cpl_map_mod,         only: cpl_arrivals, cpl_current_config
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
   use med_init_mod,        only: create_atm_grid, create_ocn_grid,           &
                                   realize_component_fields,                   &
@@ -171,7 +171,7 @@ contains
     integer :: n
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -191,7 +191,7 @@ contains
     if (is%use_med_to_mpas) &
       call ESMF_LogWrite('MED: use_med_to_mpas=true, RouteOcnToAtm ativo', ESMF_LOGMSG_INFO)
 
-    ! Importação e exportação lidas do mapa de acoplamento (cpl_chegadas),
+    ! Importação e exportação lidas do mapa de acoplamento (cpl_arrivals),
     ! com as chaves de MED_CHAVES, na ordem do mapa, que é a de antes:
     !   - forçantes do MONAN-A (_mpas) ou do DATM, nunca os dois: o NUOPC
     !     aborta em IPDv03p6 se um campo anunciado não tiver conector ativo;
@@ -202,7 +202,7 @@ contains
     !     OCN -> MED e ICE -> MED cheguem ao mesmo nome (Si_ifrac).
     ! A importação usa SharePolicyField="share", como antes; a exportação
     ! oferece a grade ("will provide").
-    call cpl_chegadas('MED', .true., cpl_config_atual(), MED_CHAVES, nomes)
+    call cpl_arrivals('MED', .true., cpl_current_config(), MED_CHAVES, nomes)
     do n = 1, size(nomes)
       call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="cannot provide", &
@@ -210,7 +210,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call cpl_chegadas('MED@ocn_med', .false., cpl_config_atual(), '', nomes)
+    call cpl_arrivals('MED@ocn_med', .false., cpl_current_config(), '', nomes)
     do n = 1, size(nomes)
       call NUOPC_Advertise(exportState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
@@ -298,7 +298,7 @@ contains
     !--------------------------------------------------------------------------
     ! Criar grade ATM regular (ATM_NX x ATM_NY)
     !--------------------------------------------------------------------------
-    ! Malha atm_med, construida por cpl_malha_latlon (cpl_grids), com a
+    ! Malha atm_med, construida por cpl_latlon_grid (cpl_grids), com a
     ! decomposicao de cpl_regdecomp: um DE por PET, como a grade do cap MPAS.
     call create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

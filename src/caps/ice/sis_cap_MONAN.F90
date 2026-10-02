@@ -41,10 +41,10 @@ module sis_cap_MONAN_mod
   use time_utils_mod, only : esmf2fms_time
 
   use mom6_supergrid_mod, only : mom6_supergrid_dims
-  use cpl_grids_mod, only : cpl_blocos_t, cpl_blocos_de_limites, cpl_malha_tripolar
+  use cpl_grids_mod, only : cpl_blocks_t, cpl_blocks_from_bounds, cpl_tripolar_grid
   use coupler_config_mod, only : cfg_mom6_mesh_ocn
-  use cpl_fields_mod, only : CPL_NOME_LEN
-  use cpl_map_mod, only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
+  use cpl_fields_mod, only : CPL_NAME_LEN
+  use cpl_map_mod, only : cpl_arrivals, cpl_exports, cpl_current_config
 
   ! API do SIS2: models/ocean/MOM6-examples/src/SIS2/src/{ice_model,
   ! ice_type,ice_boundary_types}.F90 (interfaces mínimas para compilar fora
@@ -86,9 +86,9 @@ module sis_cap_MONAN_mod
   ! ── Nomes de campo trocados com o mediador ────────────────────────────────
   ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
   ! ICE@ice_sis2: a importação são os 16 campos que chegam do mediador
-  ! (cpl_chegadas), 13 da forçante atmosférica (os Fioi_*, Faxa_rain,
+  ! (cpl_arrivals), 13 da forçante atmosférica (os Fioi_*, Faxa_rain,
   ! Faxa_snow, Sa_pslv e Faxa_coszen, ver AIB) e So_t, So_u e So_v (ver OIB);
-  ! a exportação, os 6 campos *_sis2 de EXPORTACOES (cpl_exportacoes). O
+  ! a exportação, os 6 campos *_sis2 de EXPORTS (cpl_exports). O
   ! conector "MED -> ICE" casa por StandardName; um nome que o MED não exporta
   ! produz "NUOPC INCOMPATIBILITY: Import Fields not all connected".
   ! taux/tauy/sen/evap/lwnet vêm dos Fioi_* (calculados com a temperatura de
@@ -166,17 +166,17 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     integer :: n
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
-    call cpl_chegadas(PONTO_ICE, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_ICE, .true., cpl_current_config(), '', nomes)
     do n = 1, size(nomes)
       call NUOPC_Advertise(importState, StandardName=trim(nomes(n)), &
         TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
-    call cpl_exportacoes(PONTO_ICE, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_ICE, cpl_current_config(), '', nomes)
     do n = 1, size(nomes)
       ! O campo de export do ICE é realizado numa grade PRÓPRIA (is%ice_grid,
       ! criada em InitializeRealize) e oferece essa geometria ao conector como
@@ -329,14 +329,14 @@ contains
   !> @brief Grade ESMF do gelo, com a decomposição escolhida pelo próprio SIS2.
   !!
   !! Cada PET pega os limites globais do seu bloco no domínio do SIS2, os PETs
-  !! trocam essa informação e cpl_blocos_de_limites (cpl_grids) monta os
+  !! trocam essa informação e cpl_blocks_from_bounds (cpl_grids) monta os
   !! tamanhos por coluna e por linha e o mapa bloco -> PET, conferindo cobertura e
   !! unicidade. Uma regra própria (por exemplo, a raiz quadrada do número de
   !! PETs) pode divergir do layout do SIS2 e levar export_si_ifrac a ler fora
   !! do array. Se a decomposição não for representável (blocos de terra
   !! eliminados por máscara, por exemplo), o cap para com mensagem clara.
   !!
-  !! A grade é a malha ice_sis2, construída por cpl_malha_tripolar: periódica
+  !! A grade é a malha ice_sis2, construída por cpl_tripolar_grid: periódica
   !! na direção leste-oeste, sem declarar polo, como a do mediador, com as
   !! coordenadas T do ocean_hgrid.nc, sem cantos. No
   !! fim, cada PET confere que o seu bloco ESMF é exatamente o bloco do SIS2.
@@ -351,7 +351,7 @@ contains
     integer :: gis, gie, gjs, gje
     integer :: loc4(4)
     integer, allocatable :: all4(:)
-    type(cpl_blocos_t) :: blocos
+    type(cpl_blocks_t) :: blocks
     character(len=256) :: msg_decomp
     logical :: ok_decomp
     real(ESMF_KIND_R8), pointer :: coordX(:,:)
@@ -367,8 +367,8 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
       'falha ao trocar os blocos do SIS2 entre PETs', line=__LINE__, file=__FILE__)) return
 
-    call cpl_blocos_de_limites(reshape(all4, (/4, petCount/)), petCount, &
-      nx_ice, ny_ice, blocos, msg_decomp, ok_decomp)
+    call cpl_blocks_from_bounds(reshape(all4, (/4, petCount/)), petCount, &
+      nx_ice, ny_ice, blocks, msg_decomp, ok_decomp)
     if (.not. ok_decomp) then
       call ESMF_LogSetError(ESMF_RC_ARG_BAD, msg='ICE(SIS2): B-ICE-DECOMP-01 ' // &
         'decomposicao do SIS2 nao representavel na grade ESMF: ' // &
@@ -378,12 +378,12 @@ contains
 
     if (localPet == 0) then
       write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
-        'segue a decomposicao do SIS2: ', size(blocos%cntx), ' x ', size(blocos%cnty), ' blocos'
+        'segue a decomposicao do SIS2: ', size(blocks%cntx), ' x ', size(blocks%cnty), ' blocos'
       call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
     end if
 
-    call cpl_malha_tripolar('ice_sis2', cfg_mom6_mesh_ocn, nx_ice, ny_ice, petCount, .false., &
-                            is%ice_grid, rc, blocos=blocos, tag='ICE(SIS2)')
+    call cpl_tripolar_grid('ice_sis2', cfg_mom6_mesh_ocn, nx_ice, ny_ice, petCount, .false., &
+                            is%ice_grid, rc, blocks=blocks, tag='ICE(SIS2)')
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Bloco deste PET (um DE por PET), para conferir com o do SIS2
@@ -435,9 +435,9 @@ contains
     integer,          intent(out)   :: rc
     integer :: k
     type(ESMF_Field) :: fld
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
-    call cpl_chegadas(PONTO_ICE, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_ICE, .true., cpl_current_config(), '', nomes)
     do k = 1, size(nomes)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
         name=trim(nomes(k)), rc=rc)
@@ -448,7 +448,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call cpl_exportacoes(PONTO_ICE, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_ICE, cpl_current_config(), '', nomes)
     do k = 1, size(nomes)
       fld = ESMF_FieldCreate(ice_grid, typekind=ESMF_TYPEKIND_R8, &
         name=trim(nomes(k)), rc=rc)

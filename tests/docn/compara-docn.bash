@@ -72,6 +72,10 @@ rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
 git -C "${RAIZ}" archive "${REV}" src tests/interfaces tools/dev/compila-local.bash \
   | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
+# Com nomes trocados desde REV (fase 12), a cópia de REV recebe os nomes de
+# hoje, para compilar com o programa de teste da árvore de trabalho
+"${RAIZ}/tools/dev/renomeia-identificadores.py" traduz "${REV}" "${SAIDA}/fonte_antiga" \
+  || { echo "ERRO: tradução dos nomes de ${REV}" >&2; exit 2; }
 
 for versao in antiga nova; do
   if [[ ${versao} == antiga ]]; then src="${SAIDA}/fonte_antiga"; else src="${RAIZ}"; fi

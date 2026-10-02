@@ -176,7 +176,7 @@ def acoplamento(caminho, instr, res):
             res['cpl_malhas'].append((caminho, n))
         # A criação de uma rota é uma chamada a regrid%add ou, desde a
         # R-FASE11-12, a cria_rota (med_cap_methods), que a envolve com a
-        # configuração de ROTAS; as chamadas a regrid%add dentro de cria_rota
+        # configuração de ROUTES; as chamadas a regrid%add dentro de cria_rota
         # não contam como pontos de criação.
         cria = re.search(r'\bcall\s+cria_rota\s*\(', cod, re.I) or (
             re.search(r'regrid\s*%\s*add\s*\(', cod, re.I) and nome != 'med_cap_methods.F90')

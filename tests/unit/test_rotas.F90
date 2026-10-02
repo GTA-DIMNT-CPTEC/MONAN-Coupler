@@ -1,8 +1,8 @@
 !> @file test_rotas.F90
-!! @brief Configuração das rotas do mediador lida de ROTAS (spec_da_rota).
+!! @brief Configuração das rotas do mediador lida de ROUTES (spec_da_rota).
 !!
 !! Desde a R-FASE11-12, o mediador cria as rotas por cria_rota, que lê a
-!! configuração na tabela ROTAS (cpl_map) por spec_da_rota. Até a
+!! configuração na tabela ROUTES (cpl_map) por spec_da_rota. Até a
 !! R-FASE11-11 (tag fase11-11-validada), cada chamada de criação passava a
 !! configuração à mão, e até a R-FASE11-12 (tag fase11-12-validada) cada
 !! chamada de interpolação passava zero_total, e RegridOrCopy trocava os NaN
@@ -17,9 +17,9 @@
 !! configuração lida da tabela é a mesma, campo a campo do regrid_spec_t
 !! (esquema, métodos, máscara na origem, zero_total, arquivo de pesos,
 !! classe do campo, preenchimento e troca de NaN), e que a rota de reserva é
-!! a mesma. Confere também que uma rota fora de ROTAS é recusada e que
+!! a mesma. Confere também que uma rota fora de ROUTES é recusada e que
 !! completar_da_rota devolve o preenchimento da rota (o que a SST usa
-!! enquanto a rota ocn2atm_sst não existe) ou nenhum, fora de ROTAS.
+!! enquanto a rota ocn2atm_sst não existe) ou nenhum, fora de ROUTES.
 !!
 !! Saída: uma linha PASSOU/FALHOU por caso e, no fim, "TODOS OS TESTES
 !! PASSARAM" ou o número de falhas; termina com código 1 se algum falhar.

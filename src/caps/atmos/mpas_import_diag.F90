@@ -20,7 +20,7 @@ module mpas_import_diag_mod
   ! Tipos MPAS e configurações necessários para o diagnóstico de importação
   use mpas_atm_types_mod,  only : atm_ocean_boundary_type, MPAS_RKIND
   use coupler_config_mod, only : cfg_import_diag_dir, cfg_grid_res_deg
-  use cpl_grids_mod,      only : indice_trunca, lon_m180a180_laco
+  use cpl_grids_mod,      only : index_trunc, lon_m180to180_loop
 
   implicit none
   private
@@ -615,11 +615,11 @@ contains
     cnt_all = 0
 
     do k = 1, npts
-      lon_n = lon_m180a180_laco(lon_v(k))
+      lon_n = lon_m180to180_loop(lon_v(k))
       ! Caixa que contém o ponto: o inverso exato do eixo centrado em caixas
       ! (com o limite a [1, n], truncar e tomar o piso dão o mesmo índice).
-      ic = indice_trunca(lon_n    + 180.0_ESMF_KIND_R8, dlon, nlon)
-      jc = indice_trunca(lat_v(k) +  90.0_ESMF_KIND_R8, dlat, nlat)
+      ic = index_trunc(lon_n      + 180.0_ESMF_KIND_R8, dlon, nlon)
+      jc = index_trunc(lat_v(k) +    90.0_ESMF_KIND_R8, dlat, nlat)
       cos_lat = max(cos(lat_v(k) * PI / 180.0_ESMF_KIND_R8), 0.009_ESMF_KIND_R8)
       ns = min(max(int(CELL_HALF / (cos_lat * dlon)) + 1, NSPAN_LAT), nlon/4)
 

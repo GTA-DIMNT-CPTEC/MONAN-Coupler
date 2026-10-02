@@ -58,7 +58,7 @@ call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.tru
 call is%regrid%apply('ocn2atm_sst', sst_ocn, sst_atm, rc)          ! a cada passo
 ```
 
-Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manager` faz, nesta ordem: a interpolação, com o `zero_total` da rota (zerar o destino inteiro antes, ou só os pontos alcançados); o preenchimento por vizinhança dos pontos fora da faixa válida (`spec%fill`, um `regrid_fill_t`, em cada DE local); e a troca de NaN no destino (`nan_value` em `regrid_spec`). As três usam a configuração da rota pedida, mesmo quando ela usa a interpolação da reserva. Argumentos opcionais de `apply`: `zero_total` e `fill` substituem os da rota nesta chamada; `n_invalid` e `n_left` devolvem quantos pontos estavam fora da faixa antes do preenchimento e quantos ficaram com o valor fixo, somados nos DEs locais (-1 quando não houve preenchimento). Até a R-FASE11-13, o preenchimento era feito por `regridder_t%apply`, com as opções da rota que interpola, só no primeiro DE local e sem contagens; nenhuma rota o usava. No mediador, as rotas são criadas por `cria_rota` (`med_cap_methods`), com a configuração da tabela `ROTAS` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
+Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manager` faz, nesta ordem: a interpolação, com o `zero_total` da rota (zerar o destino inteiro antes, ou só os pontos alcançados); o preenchimento por vizinhança dos pontos fora da faixa válida (`spec%fill`, um `regrid_fill_t`, em cada DE local); e a troca de NaN no destino (`nan_value` em `regrid_spec`). As três usam a configuração da rota pedida, mesmo quando ela usa a interpolação da reserva. Argumentos opcionais de `apply`: `zero_total` e `fill` substituem os da rota nesta chamada; `n_invalid` e `n_left` devolvem quantos pontos estavam fora da faixa antes do preenchimento e quantos ficaram com o valor fixo, somados nos DEs locais (-1 quando não houve preenchimento). Até a R-FASE11-13, o preenchimento era feito por `regridder_t%apply`, com as opções da rota que interpola, só no primeiro DE local e sem contagens; nenhuma rota o usava. No mediador, as rotas são criadas por `cria_rota` (`med_cap_methods`), com a configuração da tabela `ROUTES` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
 
 ## Como acrescentar um esquema
 
@@ -69,7 +69,7 @@ Desde a R-FASE11-23, o caminho mais curto é um esquema de pesos, a partir do mo
 3. Ler as opções com `regrid_option_real` e `regrid_option_int` e recusar as desconhecidas com `regrid_options_check`.
 4. Acrescentar uma linha na lista de `src/regrid/regrid_schemes.F90` (`call registra('<nome>', new_<nome>, rc)`) e o arquivo no `Makefile` (`SRCS` e dependências).
 5. Conferir com `tests/regrid/compara-esquema.bash <nome> '<opções>'` (seção 2.15 de `docs/conferencias-locais.md`).
-6. Selecioná-lo para uma rota: na coluna `esquema` de `ROTAS` (`src/coupling/cpl_map.F90`), ou só no `nuopc.input`, para experimentar:
+6. Selecioná-lo para uma rota: na coluna `scheme` de `ROUTES` (`src/coupling/cpl_map.F90`), ou só no `nuopc.input`, para experimentar:
 
 ```fortran
 &nuopc_regrid

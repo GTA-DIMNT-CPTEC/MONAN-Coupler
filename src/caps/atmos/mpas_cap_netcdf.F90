@@ -49,7 +49,7 @@ module mpas_cap_netcdf_mod
   use netcdf
   use coupler_utils_mod,  only : ChkErr, int_to_str
   use nc_writer_mod,      only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
-  use cpl_grids_mod,      only : indice_arredonda, lon_m180a180_laco
+  use cpl_grids_mod,      only : index_round, lon_m180to180_loop
 
   implicit none
   private
@@ -629,9 +629,9 @@ contains
     do k = 1, n
       val = data_in(k)
       if (abs(val) > outlier_thr .or. val /= val) cycle
-      lon_n = lon_m180a180_laco(lon_v(k))
-      ic = indice_arredonda(lon_n + 180.0_ESMF_KIND_R8, diag%dlon, diag%nlon)
-      jc = indice_arredonda(lat_v(k) + 90.0_ESMF_KIND_R8, diag%dlat, diag%nlat)
+      lon_n = lon_m180to180_loop(lon_v(k))
+      ic = index_round(lon_n + 180.0_ESMF_KIND_R8, diag%dlon, diag%nlon)
+      jc = index_round(lat_v(k) + 90.0_ESMF_KIND_R8, diag%dlat, diag%nlat)
       cos_lat = max(cos(lat_v(k)*PI/180.0_ESMF_KIND_R8), 0.009_ESMF_KIND_R8)
       ns = min(max(int(CELL_HALF/(cos_lat*diag%dlon))+1, NSPAN_LAT), diag%nlon/4)
       do dj = -NSPAN_LAT, NSPAN_LAT

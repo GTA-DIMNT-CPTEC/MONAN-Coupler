@@ -7,7 +7,7 @@
 !!
 !!   inicializar_dados
 !!              InitializeDataComplete: rotas de inicialização (coluna
-!!              criar='inicio' de ROTAS), espera da primeira SST do oceano e
+!!              criar='inicio' de ROUTES), espera da primeira SST do oceano e
 !!              valores de t=0 no exportState (R-FASE11-17)
 !!   ir_para_malha_de_fluxo
 !!              antes da física: leva os campos do oceano e do gelo da
@@ -41,7 +41,7 @@ module med_exchange_mod
   use NUOPC,               only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet, NUOPC_IsAtTime
   use coupler_utils_mod,   only: ChkErr
   use coupler_config_mod,  only: cfg_use_sis2_dynamic, cfg_write_fixdiag
-  use cpl_map_mod,         only: ROTAS
+  use cpl_map_mod,         only: ROUTES
   use med_cap_types_mod,   only: MED_InternalState, med_fluxo_t
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_methods_mod, only: cria_rota, RegridOrCopy, set_ocn_grid_mask
@@ -139,7 +139,7 @@ contains
       ESMF_LOGMSG_INFO)
   end subroutine inicializar_dados
 
-  !> Cria, na ordem de ROTAS, as rotas com criar='inicio', cada uma com o
+  !> Cria, na ordem de ROUTES, as rotas com criar='inicio', cada uma com o
   !! seu par de campos: atm2ocn de is%ocn_flx%taux (malha de fluxo) para
   !! exp_field (Foxx_taux, grade OCN), se ainda não existe; ocn2atm de So_t
   !! (grade OCN) para is%ocn%sst (malha de fluxo). Uma rota 'inicio' sem par
@@ -157,9 +157,9 @@ contains
     type(ESMF_Field) :: ocn_field
     integer :: k
 
-    do k = 1, size(ROTAS)
-      if (trim(ROTAS(k)%criar) /= 'inicio') cycle
-      select case (trim(ROTAS(k)%nome))
+    do k = 1, size(ROUTES)
+      if (trim(ROUTES(k)%create) /= 'inicio') cycle
+      select case (trim(ROUTES(k)%name))
       case ('atm2ocn')
         if (.not. is%regrid%has('atm2ocn')) then
           call cria_rota(is%regrid, 'atm2ocn', is%ocn_flx%taux, exp_field, rc)
@@ -173,7 +173,7 @@ contains
         if (ChkErr(rc, __LINE__, __FILE__)) return
       case default
         call ESMF_LogSetError(ESMF_RC_NOT_IMPL, &
-          msg='MED: rota de inicio sem campos em cria_rotas_inicio: '//trim(ROTAS(k)%nome), &
+          msg='MED: rota de inicio sem campos em cria_rotas_inicio: '//trim(ROUTES(k)%name), &
           line=__LINE__, file=__FILE__, rcToReturn=rc)
         return
       end select
@@ -181,7 +181,7 @@ contains
   end subroutine cria_rotas_inicio
 
   !> Fase A da inicialização: cria as rotas da coluna criar='inicio' de
-  !! ROTAS (cria_rotas_inicio), interpola as correntes e preenche o
+  !! ROUTES (cria_rotas_inicio), interpola as correntes e preenche o
   !! exportState com valores iniciais. Roda uma unica vez (enquanto a rota
   !! 'ocn2atm' nao existe).
   subroutine prepara_inicio(is, importState, exportState, exp_field, rc)
@@ -522,7 +522,7 @@ contains
   end subroutine ir_para_malha_de_fluxo
 
   !> Rotas da ida para a malha de fluxo criadas durante o passo, conforme a
-  !! coluna criar de ROTAS, nesta ordem (a ordem das linhas "rota" no
+  !! coluna criar de ROUTES, nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_sst  'mascara_mista': set_ocean_mask_for_sst grava a máscara
   !!                do oceano na grade e só cria a rota quando ela tem terra
@@ -555,7 +555,7 @@ contains
   end subroutine garante_rotas_malha_de_fluxo
 
   !> Prepara e cria a rota 'ocn2atm_sst' (coluna criar 'mascara_mista' de
-  !! ROTAS): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
+  !! ROUTES): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
   !! de um limiar de SST) e cria a rota no primeiro passo em que a máscara
   !! tem terra e mar no conjunto dos PETs. Até a R-FASE11-18, em med_ocean.
   subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
@@ -632,7 +632,7 @@ contains
   !! Antes de criar a rota, copia So_omask (1 = oceano, 0 = terra) para a
   !! máscara de is%ocn_grid (set_ocn_grid_mask), de modo que a rota não
   !! dependa de a SST ter sido interpolada antes. A configuração vem de
-  !! ROTAS: 'conserve', que conserva a área e é o adequado para uma fração,
+  !! ROUTES: 'conserve', que conserva a área e é o adequado para uma fração,
   !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
   !!
   !! Com cfg_write_fixdiag, registra quantos pontos de terra e de oceano
@@ -777,12 +777,12 @@ contains
 
   contains
 
-    subroutine aponta(campo, p)
-      type(ESMF_Field),            intent(in)  :: campo
+    subroutine aponta(field, p)
+      type(ESMF_Field),            intent(in)  :: field
       real(ESMF_KIND_R8), pointer, intent(out) :: p(:,:)
       integer :: rc_p
       nullify(p)
-      call ESMF_FieldGet(campo, farrayPtr=p, rc=rc_p)
+      call ESMF_FieldGet(field, farrayPtr=p, rc=rc_p)
       if (rc_p /= ESMF_SUCCESS) nullify(p)
     end subroutine aponta
 
@@ -814,7 +814,7 @@ contains
   end subroutine fracao_de_gelo_sem_sis2
 
   !> Rotas da exportação criadas durante o passo, conforme a coluna criar
-  !! de ROTAS ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no
+  !! de ROUTES ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_landmask  na primeira exportação (is%ocn%omask_done ainda
   !!                     falso), se So_omask está no importState;

@@ -3,10 +3,10 @@
 !! campos, método dos conectores, conferência do mapa e relatório dos
 !! conectores no log.
 !!
-!! cpl_dicionario_nuopc é chamada pelo driver (esm.F90) antes de criar os
-!! componentes: registra no dicionário do NUOPC os nomes de CAMPOS
+!! cpl_nuopc_dictionary é chamada pelo driver (esm.F90) antes de criar os
+!! componentes: registra no dicionário do NUOPC os nomes de FIELDS
 !! (cpl_fields), com a unidade de cada um, e desliga o acréscimo automático;
-!! um nome fora de CAMPOS para a rodada no anúncio, com a mensagem do NUOPC
+!! um nome fora de FIELDS para a rodada no anúncio, com a mensagem do NUOPC
 !! "<nome> is not a StandardName in the NUOPC_FieldDictionary!" (desde a
 !! R-FASE11-25).
 !!
@@ -14,10 +14,10 @@
 !! esm.F90, quando os componentes já anunciaram os campos e os conectores já
 !! montaram as suas listas (CplList), e antes da realização dos campos:
 !!
-!!   cpl_escreve_metodos    escreve em cada entrada da CplList a opção
+!!   cpl_write_methods      escreve em cada entrada da CplList a opção
 !!                          remapmethod com o método da troca no mapa
-!!                          (coluna metodo de TROCAS); desde a R-FASE11-22;
-!!   cpl_check_acoplamento  só escreve no log do PET 0, com o prefixo
+!!                          (coluna metodo de EXCHANGES); desde a R-FASE11-22;
+!!   cpl_check_coupling     só escreve no log do PET 0, com o prefixo
 !!                          CPL-REL:, duas coisas:
 !!     relatório dos conectores  para cada conector do driver, os campos da
 !!                               CplList e as opções de cada um;
@@ -33,12 +33,12 @@
 !! Cada diferença vira uma linha "CPL-REL: DIFERENCA: ..."; campos exportados
 !! que nenhum componente consome viram "CPL-REL: AVISO: ...", porque são
 !! normais (o MOM6 exporta So_s, por exemplo), e também as lacunas conhecidas
-!! da tabela LACUNAS do mapa ("AVISO: lacuna conhecida: ..."). Desde a
-!! R-FASE11-25, havendo diferença, cpl_check_acoplamento devolve erro em
+!! da tabela GAPS do mapa ("AVISO: lacuna conhecida: ..."). Desde a
+!! R-FASE11-25, havendo diferença, cpl_check_coupling devolve erro em
 !! todos os PETs, depois de escrever o relatório inteiro, e a inicialização
 !! para. Um erro do ESMF durante a consulta só é registrado.
 !!
-!! As rotinas cpl_confere_conector, cpl_confere_metodos e cpl_confere_estado
+!! As rotinas cpl_check_connector_fields, cpl_check_methods e cpl_check_state
 !! não usam o ESMF e
 !! são testadas em tests/unit/test_cpl_check.F90; a rotina do driver é
 !! exercitada por tests/cplcheck/.
@@ -54,60 +54,60 @@ module cpl_check_mod
   use coupler_utils_mod,  only : int_to_str, ChkErr
   use NUOPC,              only : NUOPC_FieldDictionaryHasEntry, NUOPC_FieldDictionaryAddEntry, &
                                  NUOPC_FieldDictionarySetAutoAdd
-  use cpl_fields_mod,     only : cpl_campo_indice, CAMPOS
-  use cpl_map_mod,        only : TROCAS, cpl_config_t, cpl_troca_vale, cpl_ponto_componente, &
-                                 cpl_config_atual, cpl_metodo_conector, CPL_METODO_LEN, &
-                                 cpl_lacuna
+  use cpl_fields_mod,     only : cpl_field_index, FIELDS
+  use cpl_map_mod,        only : EXCHANGES, cpl_config_t, cpl_exchange_applies, cpl_point_component, &
+                                 cpl_current_config, cpl_connector_method, CPL_METHOD_LEN, &
+                                 cpl_is_gap
 
   implicit none
   private
 
-  public :: cpl_check_acoplamento, cpl_escreve_metodos, cpl_dicionario_nuopc
-  public :: cpl_confere_conector, cpl_confere_metodos, cpl_confere_estado
-  public :: cpl_metodo_da_entrada
-  public :: CPL_PREFIXO, CPL_MSG_LEN
+  public :: cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
+  public :: cpl_check_connector_fields, cpl_check_methods, cpl_check_state
+  public :: cpl_method_of_entry
+  public :: CPL_PREFIX, CPL_MSG_LEN
 
-  character(len=*), parameter :: CPL_PREFIXO = 'CPL-REL: '
+  character(len=*), parameter :: CPL_PREFIX = 'CPL-REL: '
   integer,          parameter :: CPL_MSG_LEN = 200
 
   !> Opção do conector NUOPC que escolhe o método de interpolação.
-  character(len=*), parameter :: OPT_METODO = 'remapmethod='
+  character(len=*), parameter :: OPT_METHOD = 'remapmethod='
 
 contains
 
-  !> Dicionário do NUOPC com os campos de CAMPOS, e sem acréscimo automático.
+  !> Dicionário do NUOPC com os campos de FIELDS, e sem acréscimo automático.
   !!
-  !! Cada nome entra com a unidade da coluna unidade de CAMPOS ('1' se
+  !! Cada nome entra com a unidade da coluna unidade de FIELDS ('1' se
   !! vazia); um nome que o dicionário já tenha não é registrado de novo. O
   !! NUOPC grava a unidade no atributo Units de cada campo anunciado.
   !!
   !! @param[out] rc  código de retorno do ESMF
-  subroutine cpl_dicionario_nuopc(rc)
+  subroutine cpl_nuopc_dictionary(rc)
     integer, intent(out) :: rc
 
     integer :: k
-    logical :: existe
+    logical :: exists
 
     rc = ESMF_SUCCESS
-    do k = 1, size(CAMPOS)
-      existe = NUOPC_FieldDictionaryHasEntry(trim(CAMPOS(k)%nome), rc=rc)
+    do k = 1, size(FIELDS)
+      exists = NUOPC_FieldDictionaryHasEntry(trim(FIELDS(k)%name), rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
-      if (existe) cycle
-      if (len_trim(CAMPOS(k)%unidade) > 0) then
-        call NUOPC_FieldDictionaryAddEntry(standardName=trim(CAMPOS(k)%nome), &
-          canonicalUnits=trim(CAMPOS(k)%unidade), rc=rc)
+      if (exists) cycle
+      if (len_trim(FIELDS(k)%units) > 0) then
+        call NUOPC_FieldDictionaryAddEntry(standardName=trim(FIELDS(k)%name), &
+          canonicalUnits=trim(FIELDS(k)%units), rc=rc)
       else
-        call NUOPC_FieldDictionaryAddEntry(standardName=trim(CAMPOS(k)%nome), &
+        call NUOPC_FieldDictionaryAddEntry(standardName=trim(FIELDS(k)%name), &
           canonicalUnits='1', rc=rc)
       end if
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
     call NUOPC_FieldDictionarySetAutoAdd(.false., rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-  end subroutine cpl_dicionario_nuopc
+  end subroutine cpl_nuopc_dictionary
 
   !> Escreve em cada entrada da CplList dos conectores a opção remapmethod
-  !! com o método da troca no mapa (cpl_metodo_conector).
+  !! com o método da troca no mapa (cpl_connector_method).
   !!
   !! Entradas que já tragam remapmethod não são alteradas, nem as de campos
   !! sem troca por conector no mapa (a conferência do mapa, depois, acusa as
@@ -117,61 +117,61 @@ contains
   !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
   !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
   !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
-  !! @param[out]   n_metodo     entradas que receberam a opção
-  !! @param[out]   n_cheia      entradas sem espaço para a opção (o chamador
+  !! @param[out]   n_method     entradas que receberam a opção
+  !! @param[out]   n_full       entradas sem espaço para a opção (o chamador
   !!                            trata como erro)
   !! @param[out]   rc           código de retorno do ESMF
-  subroutine cpl_escreve_metodos(driver, rotulos, componentes, n_metodo, n_cheia, rc)
+  subroutine cpl_write_methods(driver, labels, components, n_method, n_full, rc)
     type(ESMF_GridComp), intent(inout) :: driver
-    character(len=*),    intent(in)    :: rotulos(:)
-    character(len=*),    intent(in)    :: componentes(:)
-    integer,             intent(out)   :: n_metodo, n_cheia
+    character(len=*),    intent(in)    :: labels(:)
+    character(len=*),    intent(in)    :: components(:)
+    integer,             intent(out)   :: n_method, n_full
     integer,             intent(out)   :: rc
 
-    type(ESMF_CplComp) :: conector
-    character(len=512), allocatable :: lista(:)
-    character(len=CPL_METODO_LEN) :: metodo
-    character(len=:), allocatable :: opcao
+    type(ESMF_CplComp) :: connector
+    character(len=512), allocatable :: list(:)
+    character(len=CPL_METHOD_LEN) :: method
+    character(len=:), allocatable :: option
     integer :: i, j, k, n, p
 
     rc = ESMF_SUCCESS
-    n_metodo = 0
-    n_cheia  = 0
-    do i = 1, size(rotulos)
-      do j = 1, size(rotulos)
+    n_method = 0
+    n_full   = 0
+    do i = 1, size(labels)
+      do j = 1, size(labels)
         if (i == j) cycle
-        call NUOPC_DriverGetComp(driver, srcCompLabel=trim(rotulos(i)), &
-                                 dstCompLabel=trim(rotulos(j)), comp=conector, &
+        call NUOPC_DriverGetComp(driver, srcCompLabel=trim(labels(i)), &
+                                 dstCompLabel=trim(labels(j)), comp=connector, &
                                  relaxedflag=.true., rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
-        if (.not. ESMF_CplCompIsCreated(conector)) cycle
-        call NUOPC_CompAttributeGet(conector, name='CplList', itemCount=n, rc=rc)
+        if (.not. ESMF_CplCompIsCreated(connector)) cycle
+        call NUOPC_CompAttributeGet(connector, name='CplList', itemCount=n, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
         if (n == 0) cycle
 
-        allocate(lista(n))
-        call NUOPC_CompAttributeGet(conector, name='CplList', valueList=lista, rc=rc)
+        allocate(list(n))
+        call NUOPC_CompAttributeGet(connector, name='CplList', valueList=list, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
         do k = 1, n
-          if (index(lista(k), OPT_METODO) > 0) cycle
-          p = index(lista(k), ':')
-          if (p == 0) p = len_trim(lista(k)) + 1
-          metodo = cpl_metodo_conector(lista(k)(1:p-1), componentes(i), componentes(j))
-          if (len_trim(metodo) == 0) cycle
-          opcao = ':'//OPT_METODO//trim(metodo)
-          if (len_trim(lista(k)) + len(opcao) > len(lista(k))) then
-            n_cheia = n_cheia + 1
+          if (index(list(k), OPT_METHOD) > 0) cycle
+          p = index(list(k), ':')
+          if (p == 0) p = len_trim(list(k)) + 1
+          method = cpl_connector_method(list(k)(1:p-1), components(i), components(j))
+          if (len_trim(method) == 0) cycle
+          option = ':'//OPT_METHOD//trim(method)
+          if (len_trim(list(k)) + len(option) > len(list(k))) then
+            n_full = n_full + 1
             cycle
           end if
-          lista(k) = trim(lista(k))//opcao
-          n_metodo = n_metodo + 1
+          list(k) = trim(list(k))//option
+          n_method = n_method + 1
         end do
-        call NUOPC_CompAttributeSet(conector, name='CplList', valueList=lista, rc=rc)
+        call NUOPC_CompAttributeSet(connector, name='CplList', valueList=list, rc=rc)
         if (ChkErr(rc, __LINE__, __FILE__)) return
-        deallocate(lista)
+        deallocate(list)
       end do
     end do
-  end subroutine cpl_escreve_metodos
+  end subroutine cpl_write_methods
 
   !> Relatório dos conectores e conferência do mapa, no log do PET 0; erro
   !! em todos os PETs se a conferência acha diferença.
@@ -184,10 +184,10 @@ contains
   !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
   !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
   !! @param[out]   rc           ESMF_FAILURE se houve diferença
-  subroutine cpl_check_acoplamento(driver, rotulos, componentes, rc)
+  subroutine cpl_check_coupling(driver, labels, components, rc)
     type(ESMF_GridComp), intent(inout) :: driver
-    character(len=*),    intent(in)    :: rotulos(:)
-    character(len=*),    intent(in)    :: componentes(:)
+    character(len=*),    intent(in)    :: labels(:)
+    character(len=*),    intent(in)    :: components(:)
     integer,             intent(out)   :: rc
 
     type(ESMF_VM) :: vm
@@ -202,7 +202,7 @@ contains
 
     ndif = 0
     if (localPet == 0) then
-      call confere_no_pet0(driver, rotulos, componentes, ndif(1))
+      call check_on_pet0(driver, labels, components, ndif(1))
       ! o relatório vai para o arquivo antes que um PET possa abortar a rodada
       if (ndif(1) > 0) call ESMF_LogFlush(rc=lrc)
     end if
@@ -215,258 +215,258 @@ contains
       call ESMF_LogFlush(rc=lrc)
       rc = ESMF_FAILURE
     end if
-  end subroutine cpl_check_acoplamento
+  end subroutine cpl_check_coupling
 
-  !> A conferência e o relatório, no PET 0 (ver cpl_check_acoplamento).
-  subroutine confere_no_pet0(driver, rotulos, componentes, ndif)
+  !> A conferência e o relatório, no PET 0 (ver cpl_check_coupling).
+  subroutine check_on_pet0(driver, labels, components, ndif)
     type(ESMF_GridComp), intent(inout) :: driver
-    character(len=*),    intent(in)    :: rotulos(:)
-    character(len=*),    intent(in)    :: componentes(:)
+    character(len=*),    intent(in)    :: labels(:)
+    character(len=*),    intent(in)    :: components(:)
     integer,             intent(out)   :: ndif
 
     type(cpl_config_t) :: cfg
     character(len=CPL_MSG_LEN), allocatable :: msgs(:)
-    integer :: naviso, i, j
+    integer :: nwarn, i, j
 
-    cfg = cpl_config_atual()
-    call escreve('configuracao do mapa: '//descreve_config(cfg))
+    cfg = cpl_current_config()
+    call write_line('configuracao do mapa: '//describe_config(cfg))
     allocate(msgs(0))
-    ndif = 0; naviso = 0
+    ndif = 0; nwarn = 0
 
-    do i = 1, size(rotulos)
-      do j = 1, size(rotulos)
+    do i = 1, size(labels)
+      do j = 1, size(labels)
         if (i == j) cycle
-        call confere_um_conector(driver, cfg, rotulos(i), rotulos(j), componentes(i), &
-                                 componentes(j), msgs, ndif)
+        call check_connector(driver, cfg, labels(i), labels(j), components(i), &
+                                 components(j), msgs, ndif)
       end do
     end do
-    do i = 1, size(rotulos)
-      call confere_um_componente(driver, cfg, rotulos(i), componentes(i), msgs, ndif, naviso)
+    do i = 1, size(labels)
+      call check_component(driver, cfg, labels(i), components(i), msgs, ndif, nwarn)
     end do
 
     do i = 1, size(msgs)
-      call escreve(msgs(i))
+      call write_line(msgs(i))
     end do
-    call escreve('conferencia do mapa: '//int_to_str(ndif)//' diferenca(s), '// &
-                 int_to_str(naviso)//' aviso(s)')
-  end subroutine confere_no_pet0
+    call write_line('conferencia do mapa: '//int_to_str(ndif)//' diferenca(s), '// &
+                 int_to_str(nwarn)//' aviso(s)')
+  end subroutine check_on_pet0
 
   !> Relatório da CplList do conector origem -> destino e conferência dela
   !! contra o mapa. Conector ausente só é diferença se o mapa prevê trocas.
-  subroutine confere_um_conector(driver, cfg, rot_de, rot_para, comp_de, comp_para, msgs, ndif)
+  subroutine check_connector(driver, cfg, label_src, label_dst, comp_src, comp_dst, msgs, ndif)
     type(ESMF_GridComp),                     intent(inout) :: driver
     type(cpl_config_t),                      intent(in)    :: cfg
-    character(len=*),                        intent(in)    :: rot_de, rot_para
-    character(len=*),                        intent(in)    :: comp_de, comp_para
+    character(len=*),                        intent(in)    :: label_src, label_dst
+    character(len=*),                        intent(in)    :: comp_src, comp_dst
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
     integer,                                 intent(inout) :: ndif
 
-    type(ESMF_CplComp) :: conector
-    character(len=512), allocatable :: lista(:)
-    character(len=512), allocatable :: nomes(:)
-    character(len=CPL_METODO_LEN), allocatable :: metodos(:)
+    type(ESMF_CplComp) :: connector
+    character(len=512), allocatable :: list(:)
+    character(len=512), allocatable :: names(:)
+    character(len=CPL_METHOD_LEN), allocatable :: methods(:)
     integer :: n, k, p, lrc, nprev
-    character(len=:), allocatable :: titulo
+    character(len=:), allocatable :: title
 
-    titulo = trim(rot_de)//' -> '//trim(rot_para)
-    call NUOPC_DriverGetComp(driver, srcCompLabel=rot_de, dstCompLabel=rot_para, &
-                             comp=conector, relaxedflag=.true., rc=lrc)
+    title = trim(label_src)//' -> '//trim(label_dst)
+    call NUOPC_DriverGetComp(driver, srcCompLabel=label_src, dstCompLabel=label_dst, &
+                             comp=connector, relaxedflag=.true., rc=lrc)
     if (lrc /= ESMF_SUCCESS) then
-      call escreve('AVISO: conector '//titulo//' nao consultado (erro do ESMF)')
+      call write_line('AVISO: conector '//title//' nao consultado (erro do ESMF)')
       return
     end if
-    if (.not. ESMF_CplCompIsCreated(conector)) then
-      nprev = previstas(cfg, comp_de, comp_para)
-      if (nprev > 0) call acrescenta(msgs, ndif, 'DIFERENCA: o mapa preve '//int_to_str(nprev)// &
-        ' campo(s) de '//trim(comp_de)//' para '//trim(comp_para)// &
-        ', mas o driver nao registrou o conector '//titulo)
+    if (.not. ESMF_CplCompIsCreated(connector)) then
+      nprev = expected_count(cfg, comp_src, comp_dst)
+      if (nprev > 0) call append_msg(msgs, ndif, 'DIFERENCA: o mapa preve '//int_to_str(nprev)// &
+        ' campo(s) de '//trim(comp_src)//' para '//trim(comp_dst)// &
+        ', mas o driver nao registrou o conector '//title)
       return
     end if
 
-    call NUOPC_CompAttributeGet(conector, name='CplList', itemCount=n, rc=lrc)
+    call NUOPC_CompAttributeGet(connector, name='CplList', itemCount=n, rc=lrc)
     if (lrc /= ESMF_SUCCESS) then
-      call escreve('AVISO: CplList do conector '//titulo//' nao consultada (erro do ESMF)')
+      call write_line('AVISO: CplList do conector '//title//' nao consultada (erro do ESMF)')
       return
     end if
-    allocate(lista(n), nomes(n), metodos(n))
+    allocate(list(n), names(n), methods(n))
     if (n > 0) then
-      call NUOPC_CompAttributeGet(conector, name='CplList', valueList=lista, rc=lrc)
+      call NUOPC_CompAttributeGet(connector, name='CplList', valueList=list, rc=lrc)
       if (lrc /= ESMF_SUCCESS) then
-        call escreve('AVISO: CplList do conector '//titulo//' nao consultada (erro do ESMF)')
+        call write_line('AVISO: CplList do conector '//title//' nao consultada (erro do ESMF)')
         return
       end if
     end if
 
-    call escreve('conector '//titulo//': '//int_to_str(n)//' campo(s)')
+    call write_line('conector '//title//': '//int_to_str(n)//' campo(s)')
     do k = 1, n
-      p = index(lista(k), ':')
+      p = index(list(k), ':')
       if (p == 0) then
-        nomes(k) = trim(lista(k))
-        call escreve('  '//trim(nomes(k))//'  (sem opcoes)')
+        names(k) = trim(list(k))
+        call write_line('  '//trim(names(k))//'  (sem opcoes)')
       else
-        nomes(k) = lista(k)(1:p-1)
-        call escreve('  '//trim(nomes(k))//'  '//trim(lista(k)(p+1:)))
+        names(k) = list(k)(1:p-1)
+        call write_line('  '//trim(names(k))//'  '//trim(list(k)(p+1:)))
       end if
-      metodos(k) = cpl_metodo_da_entrada(lista(k))
+      methods(k) = cpl_method_of_entry(list(k))
     end do
 
-    call cpl_confere_conector(cfg, comp_de, comp_para, nomes, msgs, ndif)
-    call cpl_confere_metodos(comp_de, comp_para, nomes, metodos, msgs, ndif)
-  end subroutine confere_um_conector
+    call cpl_check_connector_fields(cfg, comp_src, comp_dst, names, msgs, ndif)
+    call cpl_check_methods(comp_src, comp_dst, names, methods, msgs, ndif)
+  end subroutine check_connector
 
   !> Conferência do importState e do exportState de um componente.
-  subroutine confere_um_componente(driver, cfg, rotulo, comp, msgs, ndif, naviso)
+  subroutine check_component(driver, cfg, label, comp, msgs, ndif, nwarn)
     type(ESMF_GridComp),                     intent(inout) :: driver
     type(cpl_config_t),                      intent(in)    :: cfg
-    character(len=*),                        intent(in)    :: rotulo, comp
+    character(len=*),                        intent(in)    :: label, comp
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
-    integer,                                 intent(inout) :: ndif, naviso
+    integer,                                 intent(inout) :: ndif, nwarn
 
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: imp, exp
-    character(len=ESMF_MAXSTR), allocatable :: nomes_imp(:), nomes_exp(:)
+    character(len=ESMF_MAXSTR), allocatable :: imp_names(:), exp_names(:)
     integer :: lrc, nprev
 
-    call NUOPC_DriverGetComp(driver, compLabel=rotulo, comp=gcomp, relaxedflag=.true., rc=lrc)
+    call NUOPC_DriverGetComp(driver, compLabel=label, comp=gcomp, relaxedflag=.true., rc=lrc)
     if (lrc /= ESMF_SUCCESS) then
-      call escreve('AVISO: componente '//trim(rotulo)//' nao consultado (erro do ESMF)')
+      call write_line('AVISO: componente '//trim(label)//' nao consultado (erro do ESMF)')
       return
     end if
     if (.not. ESMF_GridCompIsCreated(gcomp)) then
-      nprev = previstas(cfg, comp, '') + previstas(cfg, '', comp)
-      if (nprev > 0) call acrescenta(msgs, ndif, 'DIFERENCA: o mapa preve '//int_to_str(nprev)// &
-        ' troca(s) por conector com '//trim(comp)//', mas o driver nao registrou '//trim(rotulo))
+      nprev = expected_count(cfg, comp, '') + expected_count(cfg, '', comp)
+      if (nprev > 0) call append_msg(msgs, ndif, 'DIFERENCA: o mapa preve '//int_to_str(nprev)// &
+        ' troca(s) por conector com '//trim(comp)//', mas o driver nao registrou '//trim(label))
       return
     end if
 
     call ESMF_GridCompGet(gcomp, importState=imp, exportState=exp, rc=lrc)
-    if (lrc == ESMF_SUCCESS) call nomes_do_estado(imp, nomes_imp, lrc)
-    if (lrc == ESMF_SUCCESS) call nomes_do_estado(exp, nomes_exp, lrc)
+    if (lrc == ESMF_SUCCESS) call state_names(imp, imp_names, lrc)
+    if (lrc == ESMF_SUCCESS) call state_names(exp, exp_names, lrc)
     if (lrc /= ESMF_SUCCESS) then
-      call escreve('AVISO: estados de '//trim(rotulo)//' nao consultados (erro do ESMF)')
+      call write_line('AVISO: estados de '//trim(label)//' nao consultados (erro do ESMF)')
       return
     end if
 
-    call cpl_confere_estado(cfg, comp, .true.,  nomes_imp, msgs, ndif, naviso)
-    call cpl_confere_estado(cfg, comp, .false., nomes_exp, msgs, ndif, naviso)
-  end subroutine confere_um_componente
+    call cpl_check_state(cfg, comp, .true.,     imp_names, msgs, ndif, nwarn)
+    call cpl_check_state(cfg, comp, .false., exp_names, msgs, ndif, nwarn)
+  end subroutine check_component
 
   !> Nomes padrão (StandardName) dos campos anunciados num State.
-  subroutine nomes_do_estado(estado, nomes, rc)
-    type(ESMF_State),                        intent(in)  :: estado
-    character(len=ESMF_MAXSTR), allocatable, intent(out) :: nomes(:)
+  subroutine state_names(state, names, rc)
+    type(ESMF_State),                        intent(in)  :: state
+    character(len=ESMF_MAXSTR), allocatable, intent(out) :: names(:)
     integer,                                 intent(out) :: rc
 
-    character(len=ESMF_MAXSTR), pointer :: lista(:)
+    character(len=ESMF_MAXSTR), pointer :: list(:)
 
-    nullify(lista)
-    call NUOPC_GetStateMemberLists(estado, StandardNameList=lista, rc=rc)
+    nullify(list)
+    call NUOPC_GetStateMemberLists(state, StandardNameList=list, rc=rc)
     if (rc /= ESMF_SUCCESS) return
-    if (associated(lista)) then
-      nomes = lista
-      deallocate(lista)
+    if (associated(list)) then
+      names = list
+      deallocate(list)
     else
-      allocate(nomes(0))
+      allocate(names(0))
     end if
-  end subroutine nomes_do_estado
+  end subroutine state_names
 
   !> Confere a lista de campos de um conector com as trocas do mapa.
   !!
-  !! Diferença: campo na lista sem troca ativa por conector de comp_de para
-  !! comp_para; troca ativa do mapa cujo campo não está na lista.
+  !! Diferença: campo na lista sem troca ativa por conector de comp_src para
+  !! comp_dst; troca ativa do mapa cujo campo não está na lista.
   !!
   !! @param[in]    cfg        configuração (chaves de &nuopc_mode)
-  !! @param[in]    comp_de    componente de origem no mapa ('ATM', 'OCN', ...)
-  !! @param[in]    comp_para  componente de destino no mapa
+  !! @param[in]    comp_src   componente de origem no mapa ('ATM', 'OCN', ...)
+  !! @param[in]    comp_dst   componente de destino no mapa
   !! @param[in]    nomes      campos da CplList, sem as opções
   !! @param[inout] msgs       mensagens acumuladas
   !! @param[inout] ndif       número de diferenças acumulado
-  subroutine cpl_confere_conector(cfg, comp_de, comp_para, nomes, msgs, ndif)
+  subroutine cpl_check_connector_fields(cfg, comp_src, comp_dst, names, msgs, ndif)
     type(cpl_config_t),                      intent(in)    :: cfg
-    character(len=*),                        intent(in)    :: comp_de, comp_para
-    character(len=*),                        intent(in)    :: nomes(:)
+    character(len=*),                        intent(in)    :: comp_src, comp_dst
+    character(len=*),                        intent(in)    :: names(:)
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
     integer,                                 intent(inout) :: ndif
 
     integer :: k, t
     character(len=:), allocatable :: par
 
-    par = trim(comp_de)//' -> '//trim(comp_para)
-    do k = 1, size(nomes)
-      if (conta_trocas(cfg, nomes(k), comp_de, comp_para) == 0) &
-        call acrescenta(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(nomes(k))// &
+    par = trim(comp_src)//' -> '//trim(comp_dst)
+    do k = 1, size(names)
+      if (count_exchanges(cfg, names(k), comp_src, comp_dst) == 0) &
+        call append_msg(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(names(k))// &
           ', que nao tem troca no mapa')
     end do
-    do t = 1, size(TROCAS)
-      if (.not. troca_por_conector(t, cfg, comp_de, comp_para)) cycle
-      if (.not. any(nomes == TROCAS(t)%campo)) &
-        call acrescenta(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(TROCAS(t)%campo)// &
+    do t = 1, size(EXCHANGES)
+      if (.not. exchange_via_connector(t, cfg, comp_src, comp_dst)) cycle
+      if (.not. any(names == EXCHANGES(t)%field)) &
+        call append_msg(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(EXCHANGES(t)%field)// &
           ' no conector '//par//', que nao o leva')
     end do
-  end subroutine cpl_confere_conector
+  end subroutine cpl_check_connector_fields
 
   !> Confere o método de cada campo da lista de um conector com o do mapa.
   !!
   !! Diferença: campo com troca por conector no mapa cuja entrada não traz
   !! remapmethod (o conector usaria o seu padrão) ou traz outro método.
-  !! Campos sem troca no mapa já são diferença em cpl_confere_conector.
+  !! Campos sem troca no mapa já são diferença em cpl_check_connector_fields.
   !!
-  !! @param[in]    comp_de    componente de origem no mapa
-  !! @param[in]    comp_para  componente de destino no mapa
+  !! @param[in]    comp_src   componente de origem no mapa
+  !! @param[in]    comp_dst   componente de destino no mapa
   !! @param[in]    nomes      campos da CplList, sem as opções
   !! @param[in]    metodos    remapmethod de cada entrada ('' se não tem)
   !! @param[inout] msgs       mensagens acumuladas
   !! @param[inout] ndif       número de diferenças acumulado
-  subroutine cpl_confere_metodos(comp_de, comp_para, nomes, metodos, msgs, ndif)
-    character(len=*),                        intent(in)    :: comp_de, comp_para
-    character(len=*),                        intent(in)    :: nomes(:), metodos(:)
+  subroutine cpl_check_methods(comp_src, comp_dst, names, methods, msgs, ndif)
+    character(len=*),                        intent(in)    :: comp_src, comp_dst
+    character(len=*),                        intent(in)    :: names(:), methods(:)
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
     integer,                                 intent(inout) :: ndif
 
-    character(len=CPL_METODO_LEN) :: previsto
+    character(len=CPL_METHOD_LEN) :: expected
     character(len=:), allocatable :: par
     integer :: k
 
-    par = trim(comp_de)//' -> '//trim(comp_para)
-    do k = 1, size(nomes)
-      previsto = cpl_metodo_conector(nomes(k), comp_de, comp_para)
-      if (len_trim(previsto) == 0) cycle
-      if (len_trim(metodos(k)) == 0) then
-        call acrescenta(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(nomes(k))// &
-          ' sem remapmethod, e o mapa preve '//trim(previsto))
-      else if (metodos(k) /= previsto) then
-        call acrescenta(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(nomes(k))// &
-          ' com remapmethod='//trim(metodos(k))//', e o mapa preve '//trim(previsto))
+    par = trim(comp_src)//' -> '//trim(comp_dst)
+    do k = 1, size(names)
+      expected = cpl_connector_method(names(k), comp_src, comp_dst)
+      if (len_trim(expected) == 0) cycle
+      if (len_trim(methods(k)) == 0) then
+        call append_msg(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(names(k))// &
+          ' sem remapmethod, e o mapa preve '//trim(expected))
+      else if (methods(k) /= expected) then
+        call append_msg(msgs, ndif, 'DIFERENCA: o conector '//par//' leva '//trim(names(k))// &
+          ' com remapmethod='//trim(methods(k))//', e o mapa preve '//trim(expected))
       end if
     end do
-  end subroutine cpl_confere_metodos
+  end subroutine cpl_check_methods
 
   !> Valor da opção remapmethod de uma entrada da CplList ('' se não tem).
-  pure function cpl_metodo_da_entrada(entrada) result(metodo)
-    character(len=*), intent(in) :: entrada
-    character(len=CPL_METODO_LEN) :: metodo
+  pure function cpl_method_of_entry(entry) result(method)
+    character(len=*), intent(in) :: entry
+    character(len=CPL_METHOD_LEN) :: method
     integer :: p, q
 
-    metodo = ''
-    p = index(entrada, ':'//OPT_METODO)
+    method = ''
+    p = index(entry, ':'//OPT_METHOD)
     if (p == 0) return
-    p = p + 1 + len(OPT_METODO)
-    q = index(entrada(p:), ':')
+    p = p + 1 + len(OPT_METHOD)
+    q = index(entry(p:), ':')
     if (q == 0) then
-      metodo = entrada(p:)
+      method = entry(p:)
     else
-      metodo = entrada(p:p+q-2)
+      method = entry(p:p+q-2)
     end if
-  end function cpl_metodo_da_entrada
+  end function cpl_method_of_entry
 
   !> Confere os campos anunciados num State de um componente com o mapa.
   !!
-  !! Importação: cada campo anunciado tem de estar em CAMPOS e ter uma única
+  !! Importação: cada campo anunciado tem de estar em FIELDS e ter uma única
   !! troca ativa por conector chegando ao componente; cada troca ativa que
   !! chega ao componente tem de estar anunciada. Exportação: cada troca ativa
   !! que parte do componente tem de estar anunciada; campo anunciado sem
   !! troca é aviso (exportado sem consumidor), não diferença. Campo
-  !! importado sem origem que é lacuna conhecida (LACUNAS, em cpl_map) também
+  !! importado sem origem que é lacuna conhecida (GAPS, em cpl_map) também
   !! é aviso, e não diferença.
   !!
   !! @param[in]    cfg         configuração (chaves de &nuopc_mode)
@@ -476,116 +476,116 @@ contains
   !! @param[inout] msgs        mensagens acumuladas
   !! @param[inout] ndif        número de diferenças acumulado
   !! @param[inout] naviso      número de avisos acumulado
-  subroutine cpl_confere_estado(cfg, comp, importacao, nomes, msgs, ndif, naviso)
+  subroutine cpl_check_state(cfg, comp, is_import, names, msgs, ndif, nwarn)
     type(cpl_config_t),                      intent(in)    :: cfg
     character(len=*),                        intent(in)    :: comp
-    logical,                                 intent(in)    :: importacao
-    character(len=*),                        intent(in)    :: nomes(:)
+    logical,                                 intent(in)    :: is_import
+    character(len=*),                        intent(in)    :: names(:)
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
-    integer,                                 intent(inout) :: ndif, naviso
+    integer,                                 intent(inout) :: ndif, nwarn
 
     integer :: k, t, n
 
-    if (importacao) then
-      do k = 1, size(nomes)
-        if (cpl_campo_indice(nomes(k)) == 0) &
-          call acrescenta(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(nomes(k))// &
+    if (is_import) then
+      do k = 1, size(names)
+        if (cpl_field_index(names(k)) == 0) &
+          call append_msg(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(names(k))// &
             ', que nao esta no dicionario de campos')
-        n = conta_trocas(cfg, nomes(k), '', comp)
-        if (n == 0 .and. cpl_lacuna(cfg, nomes(k), comp)) then
-          call acrescenta(msgs, naviso, 'AVISO: lacuna conhecida: '//trim(comp)//' importa '// &
-            trim(nomes(k))//', que nao tem origem nesta configuracao')
+        n = count_exchanges(cfg, names(k), '', comp)
+        if (n == 0 .and. cpl_is_gap(cfg, names(k), comp)) then
+          call append_msg(msgs, nwarn, 'AVISO: lacuna conhecida: '//trim(comp)//' importa '// &
+            trim(names(k))//', que nao tem origem nesta configuracao')
         else if (n == 0) then
-          call acrescenta(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(nomes(k))// &
+          call append_msg(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(names(k))// &
             ', que nao tem origem no mapa')
         else if (n > 1) then
-          call acrescenta(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(nomes(k))// &
+          call append_msg(msgs, ndif, 'DIFERENCA: '//trim(comp)//' importa '//trim(names(k))// &
             ', que tem '//int_to_str(n)//' origens no mapa')
         end if
       end do
-      do t = 1, size(TROCAS)
-        if (.not. troca_por_conector(t, cfg, '', comp)) cycle
-        if (.not. any(nomes == TROCAS(t)%campo)) &
-          call acrescenta(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(TROCAS(t)%campo)// &
+      do t = 1, size(EXCHANGES)
+        if (.not. exchange_via_connector(t, cfg, '', comp)) cycle
+        if (.not. any(names == EXCHANGES(t)%field)) &
+          call append_msg(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(EXCHANGES(t)%field)// &
             ' chegando a '//trim(comp)//', que nao o anuncia na importacao')
       end do
     else
-      do t = 1, size(TROCAS)
-        if (.not. troca_por_conector(t, cfg, comp, '')) cycle
-        if (.not. any(nomes == TROCAS(t)%campo)) &
-          call acrescenta(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(TROCAS(t)%campo)// &
+      do t = 1, size(EXCHANGES)
+        if (.not. exchange_via_connector(t, cfg, comp, '')) cycle
+        if (.not. any(names == EXCHANGES(t)%field)) &
+          call append_msg(msgs, ndif, 'DIFERENCA: o mapa preve '//trim(EXCHANGES(t)%field)// &
             ' partindo de '//trim(comp)//', que nao o anuncia na exportacao')
       end do
-      do k = 1, size(nomes)
-        if (conta_trocas(cfg, nomes(k), comp, '') == 0) &
-          call acrescenta(msgs, naviso, 'AVISO: '//trim(comp)//' exporta '//trim(nomes(k))// &
+      do k = 1, size(names)
+        if (count_exchanges(cfg, names(k), comp, '') == 0) &
+          call append_msg(msgs, nwarn, 'AVISO: '//trim(comp)//' exporta '//trim(names(k))// &
             ', que nenhum componente consome nesta configuracao')
       end do
     end if
-  end subroutine cpl_confere_estado
+  end subroutine cpl_check_state
 
-  !> Trocas ativas por conector do campo, de comp_de para comp_para ('' vale
+  !> Trocas ativas por conector do campo, de comp_src para comp_dst ('' vale
   !! qualquer componente).
-  integer function conta_trocas(cfg, campo, comp_de, comp_para) result(n)
+  integer function count_exchanges(cfg, field, comp_src, comp_dst) result(n)
     type(cpl_config_t), intent(in) :: cfg
-    character(len=*),   intent(in) :: campo, comp_de, comp_para
+    character(len=*),   intent(in) :: field, comp_src, comp_dst
     integer :: t
 
     n = 0
-    do t = 1, size(TROCAS)
-      if (TROCAS(t)%campo /= campo) cycle
-      if (troca_por_conector(t, cfg, comp_de, comp_para)) n = n + 1
+    do t = 1, size(EXCHANGES)
+      if (EXCHANGES(t)%field /= field) cycle
+      if (exchange_via_connector(t, cfg, comp_src, comp_dst)) n = n + 1
     end do
-  end function conta_trocas
+  end function count_exchanges
 
-  !> Trocas ativas por conector de comp_de para comp_para ('' vale qualquer).
-  integer function previstas(cfg, comp_de, comp_para) result(n)
+  !> Trocas ativas por conector de comp_src para comp_dst ('' vale qualquer).
+  integer function expected_count(cfg, comp_src, comp_dst) result(n)
     type(cpl_config_t), intent(in) :: cfg
-    character(len=*),   intent(in) :: comp_de, comp_para
+    character(len=*),   intent(in) :: comp_src, comp_dst
     integer :: t
 
     n = 0
-    do t = 1, size(TROCAS)
-      if (troca_por_conector(t, cfg, comp_de, comp_para)) n = n + 1
+    do t = 1, size(EXCHANGES)
+      if (exchange_via_connector(t, cfg, comp_src, comp_dst)) n = n + 1
     end do
-  end function previstas
+  end function expected_count
 
-  !> A troca t é por conector, vale em cfg e liga comp_de a comp_para
+  !> A troca t é por conector, vale em cfg e liga comp_src a comp_dst
   !! ('' vale qualquer componente).
-  logical function troca_por_conector(t, cfg, comp_de, comp_para) result(ok)
+  logical function exchange_via_connector(t, cfg, comp_src, comp_dst) result(ok)
     integer,            intent(in) :: t
     type(cpl_config_t), intent(in) :: cfg
-    character(len=*),   intent(in) :: comp_de, comp_para
+    character(len=*),   intent(in) :: comp_src, comp_dst
 
-    ok = TROCAS(t)%meio == 'conector'
-    if (ok) ok = cpl_troca_vale(TROCAS(t), cfg)
-    if (ok .and. len_trim(comp_de) > 0) ok = cpl_ponto_componente(TROCAS(t)%de) == comp_de
-    if (ok .and. len_trim(comp_para) > 0) ok = cpl_ponto_componente(TROCAS(t)%para) == comp_para
-  end function troca_por_conector
+    ok = EXCHANGES(t)%via == 'conector'
+    if (ok) ok = cpl_exchange_applies(EXCHANGES(t), cfg)
+    if (ok .and. len_trim(comp_src) > 0) ok = cpl_point_component(EXCHANGES(t)%src) == comp_src
+    if (ok .and. len_trim(comp_dst) > 0) ok = cpl_point_component(EXCHANGES(t)%dst) == comp_dst
+  end function exchange_via_connector
 
   !> Acrescenta uma mensagem à lista e soma um ao contador.
-  subroutine acrescenta(msgs, contador, msg)
+  subroutine append_msg(msgs, counter, msg)
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
-    integer,                                 intent(inout) :: contador
+    integer,                                 intent(inout) :: counter
     character(len=*),                        intent(in)    :: msg
 
     msgs = [character(len=CPL_MSG_LEN) :: msgs, msg]
-    contador = contador + 1
-  end subroutine acrescenta
+    counter = counter + 1
+  end subroutine append_msg
 
   !> As condições do mapa que valem na configuração, para o log.
-  function descreve_config(cfg) result(txt)
+  function describe_config(cfg) result(txt)
     type(cpl_config_t), intent(in) :: cfg
     character(len=:), allocatable :: txt
 
     txt = merge('datm', 'mpas', cfg%datm)//', '//merge('docn', 'mom6', cfg%docn)//', '// &
           trim(merge('med_to_mpas', 'ocn_to_mpas', cfg%med_to_mpas))
     if (cfg%sis2) txt = txt//', sis2'
-  end function descreve_config
+  end function describe_config
 
-  subroutine escreve(msg)
+  subroutine write_line(msg)
     character(len=*), intent(in) :: msg
-    call ESMF_LogWrite(CPL_PREFIXO//trim(msg), ESMF_LOGMSG_INFO)
-  end subroutine escreve
+    call ESMF_LogWrite(CPL_PREFIX//trim(msg), ESMF_LOGMSG_INFO)
+  end subroutine write_line
 
 end module cpl_check_mod

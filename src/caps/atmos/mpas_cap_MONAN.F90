@@ -59,8 +59,8 @@ module mpas_cap_MONAN_mod
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
   use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
-  use cpl_fields_mod,      only : CPL_NOME_LEN
-  use cpl_map_mod,         only : cpl_chegadas, cpl_exportacoes, cpl_config_atual
+  use cpl_fields_mod,      only : CPL_NAME_LEN
+  use cpl_map_mod,         only : cpl_arrivals, cpl_exports, cpl_current_config
 
   implicit none
   private
@@ -113,9 +113,9 @@ module mpas_cap_MONAN_mod
   !
   ! Os campos saem do mapa de acoplamento (src/coupling/cpl_map.F90), no
   ! ponto ATM@atm_cap: a importacao sao os 7 campos que chegam por conector
-  ! (cpl_chegadas: Sx_tsfc, Si_ifrac, So_u, So_v, Sf_zorl, Sf_albedo e
-  ! Sx_omask), e a exportacao, os 13 campos *_mpas de EXPORTACOES
-  ! (cpl_exportacoes), a forcante nativa do MONAN-A. O cap anuncia sempre as
+  ! (cpl_arrivals: Sx_tsfc, Si_ifrac, So_u, So_v, Sf_zorl, Sf_albedo e
+  ! Sx_omask), e a exportacao, os 13 campos *_mpas de EXPORTS
+  ! (cpl_exports), a forcante nativa do MONAN-A. O cap anuncia sempre as
   ! mesmas listas: nao consulta chaves de &nuopc_mode. O valor inicial de
   ! cada campo importado esta em valor_inicial_importacao.
   character(len=*), parameter :: PONTO_ATM = 'ATM@atm_cap'
@@ -188,11 +188,11 @@ contains
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
     integer :: i
-    character(len=CPL_NOME_LEN), allocatable :: imp(:), exp(:)
+    character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
     character(len=*), parameter :: subname = '(mpas_cap:InitializeAdvertise)'
     rc = ESMF_SUCCESS
-    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', imp)
-    call cpl_exportacoes(PONTO_ATM, cpl_config_atual(), '', exp)
+    call cpl_arrivals(PONTO_ATM, .true., cpl_current_config(), '', imp)
+    call cpl_exports(PONTO_ATM, cpl_current_config(), '', exp)
     do i = 1, size(imp)
       call NUOPC_Advertise(importState, StandardName=trim(imp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -220,7 +220,7 @@ contains
       real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)
       integer :: k
       integer :: n_local
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
     rc = ESMF_SUCCESS
 
     ! ── 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada ─
@@ -244,10 +244,10 @@ contains
     ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
     ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
     ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
-    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_ATM, .true., cpl_current_config(), '', nomes)
     call cap_realize_fields(importState, st%grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call cpl_exportacoes(PONTO_ATM, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_ATM, cpl_current_config(), '', nomes)
     call cap_realize_fields(exportState, st%grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
@@ -475,12 +475,12 @@ contains
     character(len=512) :: missing
     character(len=640) :: msg
     type(ESMF_VM)      :: vm
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
     n_missing = 0
     missing   = ''
-    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_ATM, .true., cpl_current_config(), '', nomes)
 
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -567,11 +567,11 @@ contains
     real(ESMF_KIND_R8), pointer    :: fptr2d(:,:)
     real(ESMF_KIND_R8)             :: valor
     logical                        :: conhecido
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
     integer :: i, fld_rank, localDeCount_imp
     rc = ESMF_SUCCESS
 
-    call cpl_chegadas(PONTO_ATM, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_ATM, .true., cpl_current_config(), '', nomes)
     do i = 1, size(nomes)
       call valor_inicial_importacao(nomes(i), valor, conhecido)
       if (.not. conhecido) then

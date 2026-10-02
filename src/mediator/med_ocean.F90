@@ -23,7 +23,7 @@ module med_ocean_mod
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: ZeroInternalField, completar_da_rota
   use med_ice_mod, only: update_ice_fields_on_atm_grid
-  use cpl_grids_mod, only: indice_trunca
+  use cpl_grids_mod, only: index_trunc
 
   implicit none
   private
@@ -147,7 +147,7 @@ contains
 
   !> Soma os pontos da SST completados pela rota em cont, para o relatório
   !! de acoplamento, e os registra no log. O preenchimento (coluna completar
-  !! da rota ocn2atm_sst, em ROTAS): média dos vizinhos válidos, em até 40
+  !! da rota ocn2atm_sst, em ROUTES): média dos vizinhos válidos, em até 40
   !! passadas; o que sobrar recebe 271,35 K; valores acima de 310 K recebem
   !! 271,35 K antes da difusão.
   !!
@@ -525,10 +525,10 @@ contains
 
     do j = lbound(fptr,2), ubound(fptr,2)
       lat_a = -90.0_ESMF_KIND_R8 + (real(j,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * dy_a
-      j_o   = indice_trunca(lat_a + 90.0_ESMF_KIND_R8, dy_o, ny_o)
+      j_o   = index_trunc(lat_a + 90.0_ESMF_KIND_R8, dy_o, ny_o)
       do i = lbound(fptr,1), ubound(fptr,1)
         lon_a = (real(i,ESMF_KIND_R8) - 0.5_ESMF_KIND_R8) * dx_a
-        i_o   = indice_trunca(lon_a, dx_o, nx_o)
+        i_o   = index_trunc(lon_a, dx_o, nx_o)
         fptr(i,j) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, f0(i_o, j_o)))
       end do
     end do

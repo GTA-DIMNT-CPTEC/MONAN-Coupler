@@ -7,7 +7,7 @@
 # tests/cplcheck/test_cplcheck_driver.F90, em que quatro componentes com os
 # rótulos do driver real (MPAS, MED, OCN, ICE) anunciam as listas de campos
 # de hoje e são ligados pelos seis conectores da produção. A especialização
-# ModifyCplLists chama cpl_escreve_metodos e cpl_check_acoplamento, como o
+# ModifyCplLists chama cpl_write_methods e cpl_check_coupling, como o
 # esm.F90. Em todos os casos, cada campo dos conectores tem de sair com
 # remapmethod=bilinear (o método do mapa). Três casos, cada um em NP
 # processos MPI:

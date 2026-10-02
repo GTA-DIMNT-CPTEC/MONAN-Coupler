@@ -17,10 +17,10 @@ module med_init_mod
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
   use med_cap_types_mod, only: MED_InternalState, MED_CHAVES, SST_BULK_FALLBACK
-  use cpl_fields_mod, only: CPL_NOME_LEN
-  use cpl_map_mod, only: cpl_chegadas, cpl_config_atual, cpl_config_t
-  use cpl_grids_mod, only: cpl_malha_latlon, cpl_malha_tripolar, ORIGEM_LESTE0, &
-                           ORIGEM_LESTE0_CANTO
+  use cpl_fields_mod, only: CPL_NAME_LEN
+  use cpl_map_mod, only: cpl_arrivals, cpl_current_config, cpl_config_t
+  use cpl_grids_mod, only: cpl_latlon_grid, cpl_tripolar_grid, ORIGIN_EAST0, &
+                           ORIGIN_EAST0_CORNER
   use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
                                  ZeroOcnFluxFields, FillInternalField
   use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
@@ -37,7 +37,7 @@ contains
 
   !> Malha de fluxo do mediador (atm_med): grade regular nx_atm x ny_atm,
   !! longitude a partir de 0 grau, com cantos para o método conservativo,
-  !! construída por cpl_malha_latlon (cpl_grids).
+  !! construída por cpl_latlon_grid (cpl_grids).
   subroutine create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     integer, intent(in) :: petCount
     integer, intent(in) :: nx_atm
@@ -45,7 +45,7 @@ contains
     type(ESMF_Grid), intent(inout) :: atm_grid
     integer, intent(inout) :: rc
 
-    call cpl_malha_latlon('atm_med', nx_atm, ny_atm, ORIGEM_LESTE0, .true., petCount, &
+    call cpl_latlon_grid('atm_med', nx_atm, ny_atm, ORIGIN_EAST0, .true., petCount, &
                           atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade ATM ' // &
@@ -54,8 +54,8 @@ contains
 
   !> Oceano no mediador (ocn_med), construído por cpl_grids: com o MOM6, a
   !! grade tripolar lida do supergrid (cfg_mom6_mesh_ocn), com centros e
-  !! cantos reais (cpl_malha_tripolar); com o DOCN, a grade regular do OISST
-  !! (cpl_malha_latlon, ORIGEM_LESTE0_CANTO). Os dois com a decomposição
+  !! cantos reais (cpl_tripolar_grid); com o DOCN, a grade regular do OISST
+  !! (cpl_latlon_grid, ORIGIN_EAST0_CORNER). Os dois com a decomposição
   !! cpl_regdecomp, um DE por PET, como a malha de fluxo. Os cantos são
   !! necessários ao método conservativo (peso por sobreposição de área, com
   !! os quatro cantos de cada célula); o stagger CENTER continua o de
@@ -76,7 +76,7 @@ contains
 
     if (cfg_use_docn) then
       ! DOCN/OISST: grade lat/lon regular de verdade; fórmula uniforme exata.
-      call cpl_malha_latlon('ocn_med', nx_ocn, ny_ocn, ORIGEM_LESTE0_CANTO, .true., &
+      call cpl_latlon_grid('ocn_med', nx_ocn, ny_ocn, ORIGIN_EAST0_CORNER, .true., &
                             petCount, ocn_grid, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     else
@@ -84,8 +84,8 @@ contains
       ! ocean_hgrid.nc (não uniformes; convergem no polo Norte). Sem isso, o
       ! conector NUOPC OCN->MED interpola usando posições erradas e a costa
       ! fica sistematicamente deslocada em todo o domínio.
-      call cpl_malha_tripolar('ocn_med', cfg_mom6_mesh_ocn, nx_ocn, ny_ocn, petCount, .true., &
-                              ocn_grid, rc, tag='MED B-OCNGRID-01', tag_cantos='MED B-CONSERVE-01')
+      call cpl_tripolar_grid('ocn_med', cfg_mom6_mesh_ocn, nx_ocn, ny_ocn, petCount, .true., &
+                              ocn_grid, rc, tag='MED B-OCNGRID-01', tag_corners='MED B-CONSERVE-01')
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
     call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade OCN ' // &
@@ -219,7 +219,7 @@ contains
   end subroutine check_corner_coordinates
 
   !> Realiza os campos anunciados em InitializeAdvertise, nas listas do mapa
-  !! de acoplamento (cpl_chegadas, chaves MED_CHAVES) e na mesma ordem de
+  !! de acoplamento (cpl_arrivals, chaves MED_CHAVES) e na mesma ordem de
   !! antes: a importação da malha de fluxo na grade ATM; a importação da
   !! grade do oceano (So_t, So_u, So_v, So_omask e, com o SIS2, os campos
   !! *_sis2) na grade OCN, a grade nativa desses campos (o SIS2 usa a mesma
@@ -231,19 +231,19 @@ contains
     type(ESMF_Grid), intent(in) :: atm_grid
     type(ESMF_Grid), intent(in) :: ocn_grid
     integer, intent(inout) :: rc
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
     type(cpl_config_t) :: cfg
 
-    cfg = cpl_config_atual()
-    call cpl_chegadas('MED@atm_med', .true., cfg, MED_CHAVES, nomes)
+    cfg = cpl_current_config()
+    call cpl_arrivals('MED@atm_med', .true., cfg, MED_CHAVES, nomes)
     call realize_on_grid(importState, atm_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call cpl_chegadas('MED@ocn_med', .true., cfg, MED_CHAVES, nomes)
+    call cpl_arrivals('MED@ocn_med', .true., cfg, MED_CHAVES, nomes)
     call realize_on_grid(importState, ocn_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call cpl_chegadas('MED@ocn_med', .false., cfg, '', nomes)
+    call cpl_arrivals('MED@ocn_med', .false., cfg, '', nomes)
     call realize_on_grid(exportState, ocn_grid, nomes, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 

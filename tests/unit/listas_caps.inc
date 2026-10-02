@@ -1,7 +1,7 @@
 ! listas_caps.inc: campos que os caps dos modelos anunciam, escritos aqui
 ! como referência independente do mapa de acoplamento para os testes
-! (test_cpl_map), que os comparam nome a nome com EXPORTACOES e com as
-! chegadas geradas por cpl_chegadas.
+! (test_cpl_map), que os comparam nome a nome com EXPORTS e com as
+! chegadas geradas por cpl_arrivals.
 !
 ! MOM6 e SIS2: listas de mom_cap_MONAN.F90 e sis_cap_MONAN.F90 até a
 ! R-FASE11-05 (tag fase11-05-validada), copiadas sem mudança, só com os

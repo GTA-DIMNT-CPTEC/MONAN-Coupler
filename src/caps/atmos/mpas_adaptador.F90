@@ -40,7 +40,7 @@ module mpas_adaptador_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
-  use cpl_grids_mod, only : cpl_malha_latlon, ORIGEM_OESTE180, indice_trunca, lon_m180a180_piso
+  use cpl_grids_mod, only : cpl_latlon_grid, ORIGIN_WEST180, index_trunc, lon_m180to180_floor
   ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
   ! para rugosidade e SST invalidas (ver fill_invalid_sst).
   use coupler_config_mod, only : cfg_zorl_default,          &
@@ -435,7 +435,7 @@ contains
   !! conectores ficam Grid->Grid.
   !!
   !! A grade e' a malha atm_cap do mapa de acoplamento, construida por
-  !! cpl_malha_latlon (cpl_grids): 64800 celulas, periodica em longitude,
+  !! cpl_latlon_grid (cpl_grids): 64800 celulas, periodica em longitude,
   !! centros de -179.5 a +179.5 graus em longitude e de -89.5 a +89.5 em
   !! latitude, um DE por PET, com a mesma decomposicao da malha de fluxo do
   !! mediador.
@@ -454,7 +454,7 @@ contains
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    call cpl_malha_latlon('atm_cap', ATM_NX, ATM_NY, ORIGEM_OESTE180, .false., petCount, &
+    call cpl_latlon_grid('atm_cap', ATM_NX, ATM_NY, ORIGIN_WEST180, .false., petCount, &
                           grid, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
@@ -653,9 +653,9 @@ contains
             ! deslocaria TODA a atribuição em 180° (dado do Atlântico no índice do
             ! Pacífico). Por isso lon é normalizada para [-180, +180) e indexada na
             ! mesma origem da grade.
-            lon_d = lon_m180a180_piso(lon_d)          ! → [-180, +180)
-            ig = indice_trunca(lon_d + 180.0_ESMF_KIND_R8, DLON, ATM_NX)
-            jg = indice_trunca(lat_d +  90.0_ESMF_KIND_R8, DLAT, ATM_NY)
+            lon_d = lon_m180to180_floor(lon_d)        ! → [-180, +180)
+            ig = index_trunc(lon_d + 180.0_ESMF_KIND_R8, DLON, ATM_NX)
+            jg = index_trunc(lat_d +    90.0_ESMF_KIND_R8, DLAT, ATM_NY)
             val = buf2d(ig, jg)
             ! Só sobrescreve com valor VÁLIDO (oceano). Pontos de fill (terra,
             ! ou sem cobertura do regrid MED) preservam o default já em data() —

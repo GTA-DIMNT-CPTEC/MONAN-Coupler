@@ -22,9 +22,11 @@ Regras da troca, nos fontes Fortran (.F90 e .inc de src/ e tests/):
   - nos comentários, só os nomes que não se confundem com palavras comuns:
     os que têm sublinhado e, escritos em maiúsculas, os que a tabela traz em
     maiúsculas (os nomes das tabelas do mapa, como TROCAS).
-Nos scripts (.py, .bash, .sh) e Makefiles, vale a regra dos comentários em
-todo o arquivo. Nos textos (.md, .txt), também, e, entre crases, os nomes sem
-sublinhado das trocas que valem em todos os arquivos. Em prosa, um nome
+Nos scripts (.py, .bash, .sh) e Makefiles, só os nomes com sublinhado, em
+todo o arquivo (nomes em maiúsculas ali podem ser variáveis do script ou
+textos de saída). Nos textos (.md, .txt), também, e, entre crases, os nomes sem
+sublinhado das trocas que valem em todos os arquivos; nos blocos de código
+Fortran dos textos, a regra dos fontes. Em prosa, um nome
 colado a um hífen (parte de um nome de arquivo) não muda. O histórico
 (docs/CHANGELOG.md) e as tabelas não mudam. O resultado nos arquivos que não
 são fontes Fortran deve ser lido no diff.
@@ -34,14 +36,25 @@ Uso (na raiz do repositório):
       aplica as trocas na árvore de trabalho
   tools/dev/renomeia-identificadores.py confere REV TABELA [TABELA ...]
       confere, sem alterar nada:
-        1. colisões: em nenhum fonte de REV que contém um nome antigo pode
-           existir o nome novo, nem dois antigos com o mesmo nome novo; o
-           nome novo não pode ser uma função intrínseca do Fortran;
+        1. colisões: em nenhuma unidade de escopo de REV (procedimento, ou
+           cabeçalho de módulo ou programa) que usa um nome antigo como
+           entidade pode ser visível o nome novo (na própria unidade ou nas
+           que a contêm), nem dois antigos podem virar o mesmo nome; o nome
+           novo não pode ser uma função intrínseca do Fortran. Componentes
+           de tipo (depois de %) e palavras-chave de argumento (nome=) não
+           contam como entidades;
         2. equivalência: cada fonte de REV, com as trocas aplicadas só ao
            código, tem de ser igual, símbolo a símbolo, ao fonte da árvore
            de trabalho (comentários e espaços não contam; textos entre
            aspas têm de ser idênticos).
       Código de saída 0 se tudo confere.
+
+  tools/dev/renomeia-identificadores.py traduz REV DIR
+      aplica, aos fontes Fortran de uma cópia de REV extraída em DIR (por
+      git archive), as tabelas de tools/dev/nomes/ que ainda não existiam
+      em REV. Serve aos testes de regressão que compilam REV com o programa
+      de teste da árvore de trabalho (tests/malhas, tests/completar,
+      tests/docn): a cópia traduzida é REV com os nomes de hoje.
 
 Quem tem trabalho num ramo antigo pode usar "aplica" com as tabelas de
 tools/dev/nomes/ para trazer o seu ramo para os nomes novos.
@@ -59,6 +72,7 @@ TEXT_EXT = ('.md', '.py', '.bash', '.sh', '.txt')
 TEXT_NAMES = ('Makefile',)
 IDENT = re.compile(r'[A-Za-z][A-Za-z0-9_]*')
 UPPER_IN_PROSE = set()   # nomes que a tabela traz em maiúsculas
+THIS = 'tools/dev/renomeia-identificadores.py'
 
 INTRINSICS = set('''
 abs achar acos adjustl adjustr aimag aint all allocated anint any asin associated
@@ -178,35 +192,87 @@ def styled(original, new):
     return new
 
 
-def wanted_in_prose(token):
-    return '_' in token or (token.isupper() and token.lower() in UPPER_IN_PROSE)
+def wanted_in_prose(token, upper=True):
+    return '_' in token or (upper and token.isupper() and token.lower() in UPPER_IN_PROSE)
 
 
 PROSE_IDENT = re.compile(r'(?<![-A-Za-z0-9_])[A-Za-z][A-Za-z0-9_]*(?![-A-Za-z0-9_])')
 
 
-def rename_tokens(text, names, prose):
+def rename_tokens(text, names, prose, upper=True, align=False):
     """Troca os nomes de um trecho. Em prosa (comentários e textos), um nome
-    colado a um hífen é parte de um nome de arquivo e não muda."""
-    def repl(m):
+    colado a um hífen é parte de um nome de arquivo e não muda. Com align,
+    a diferença de tamanho de cada nome trocado é compensada no próximo
+    espaço de duas ou mais colunas da mesma linha, para manter alinhadas as
+    colunas seguintes (os :: das declarações, os & das continuações)."""
+    pattern = PROSE_IDENT if prose else IDENT
+    out, pos, debt = [], 0, 0
+    for m in pattern.finditer(text):
         tok = m.group(0)
         new = names.get(tok.lower())
-        if new is None or (prose and not wanted_in_prose(tok)):
-            return tok
-        return styled(tok, new)
-    return (PROSE_IDENT if prose else IDENT).sub(repl, text)
+        if new is None or (prose and not wanted_in_prose(tok, upper)):
+            continue
+        gap = text[pos:m.start()]
+        if align and debt:
+            gap, debt = pay(gap, debt)
+        out.append(gap)
+        out.append(styled(tok, new))
+        if align:
+            debt += len(new) - len(tok)
+        pos = m.end()
+    rest = text[pos:]
+    if align and debt:
+        rest, debt = pay(rest, debt)
+    out.append(rest)
+    return ''.join(out)
+
+
+def pay(gap, debt):
+    """Compensa debt colunas no primeiro espaço de 2 ou mais colunas de gap,
+    antes do fim da linha; devolve o trecho e o que sobrou (0 no fim da
+    linha, que zera a conta)."""
+    line_end = gap.find('\n')
+    head = gap if line_end < 0 else gap[:line_end]
+    m = re.search(r'  +', head)
+    if m:
+        width = max(1, len(m.group(0)) - debt)
+        head = head[:m.start()] + ' ' * width + head[m.end():]
+        debt = 0
+    if line_end >= 0:
+        return head + gap[line_end:], 0
+    return head, debt
+
+
+def code_span_token(tok, names):
+    """Nome entre crases: os que a tabela traz em maiúsculas só mudam
+    escritos em maiúsculas (`malhas`, em minúsculas, é outra coisa que
+    MALHAS)."""
+    new = names.get(tok.lower())
+    if new is None or (tok.lower() in UPPER_IN_PROSE and not tok.isupper()):
+        return tok
+    return styled(tok, new)
 
 
 def rename_markdown(text, names, every):
     """Texto: fora das crases, a regra dos comentários; entre crases, também
-    os nomes sem sublinhado das trocas que valem em todos os arquivos."""
+    os nomes sem sublinhado das trocas que valem em todos os arquivos; nos
+    blocos de código Fortran (```fortran), a regra dos fontes, com todas as
+    trocas da tabela."""
+    out = []
+    for k, piece in enumerate(re.split(r'(```fortran\n.*?```)', text, flags=re.S)):
+        if k % 2 == 1:
+            out.append(rename_fortran(piece, every))
+        else:
+            out.append(rename_inline(piece, names, every))
+    return ''.join(out)
+
+
+def rename_inline(text, names, every):
     out = []
     for k, piece in enumerate(re.split(r'(`[^`\n]*`)', text)):
         out.append(rename_tokens(piece, every, prose=True))
         if k % 2 == 1:
-            out[-1] = PROSE_IDENT.sub(
-                lambda m: styled(m.group(0), names[m.group(0).lower()])
-                if m.group(0).lower() in names else m.group(0), out[-1])
+            out[-1] = PROSE_IDENT.sub(lambda m: code_span_token(m.group(0), names), out[-1])
     return ''.join(out)
 
 
@@ -214,9 +280,9 @@ def rename_fortran(text, names, comments=True):
     out = []
     for kind, piece in split_fortran(text):
         if kind == 'code':
-            out.append(rename_tokens(piece, names, prose=False))
+            out.append(rename_tokens(piece, names, prose=False, align=comments))
         elif kind == 'comment' and comments:
-            out.append(rename_tokens(piece, names, prose=True))
+            out.append(rename_tokens(piece, names, prose=True, align=True))
         else:
             out.append(piece)
     return ''.join(out)
@@ -247,6 +313,59 @@ def identifiers(text):
     return found
 
 
+UNIT_START = re.compile(
+    r'^\s*(?:(?:pure|elemental|impure|recursive|module|integer|logical|real|character|'
+    r'type\s*\([^)]*\)|real\s*\([^)]*\)|integer\s*\([^)]*\)|character\s*\([^)]*\)'
+    r'|logical\s*\([^)]*\))\s+)*(subroutine|function)\s+([a-z][a-z0-9_]*)', re.I)
+HOST_START = re.compile(r'^\s*(module|program)\s+([a-z][a-z0-9_]*)\s*$', re.I)
+UNIT_END = re.compile(r'^\s*end\s*(subroutine|function|module|program)\b', re.I)
+
+
+def statements(text):
+    """Instruções do código, sem comentários, com os textos entre aspas
+    trocados por "" e as linhas de continuação juntadas."""
+    code = ''.join(piece if kind == 'code' else ('""' if kind == 'string' else '')
+                   for kind, piece in split_fortran(text))
+    code = re.sub(r'&[ \t]*\n[ \t]*&?', ' ', code)
+    out = []
+    for line in code.split('\n'):
+        out.extend(x for x in line.split(';') if x.strip())
+    return out
+
+
+def scoping_units(text):
+    """Unidades de escopo de um fonte: o cabeçalho de cada módulo ou programa
+    e cada procedimento (inclusive os de blocos de interface), com o pai.
+    Para cada unidade, 'tokens' são todos os identificadores dela e
+    'entities' os que nomeiam entidades: sem os componentes (depois de %) e
+    sem as palavras-chave de argumento (nome= depois de ( ou ,)."""
+    units = [{'name': '(arquivo)', 'parent': None, 'tokens': set(), 'entities': set()}]
+    stack = [0]
+    for st in statements(text):
+        if st.lstrip().startswith('#'):
+            continue
+        m = UNIT_START.match(st) or HOST_START.match(st)
+        if m and not re.match(r'^\s*module\s+procedure\b', st, re.I):
+            units.append({'name': m.group(2).lower(), 'parent': stack[-1],
+                          'tokens': set(), 'entities': set()})
+            stack.append(len(units) - 1)
+        u = units[stack[-1]]
+        for mt in re.finditer(r'(%\s*)?\b([A-Za-z][A-Za-z0-9_]*)\b', st):
+            tok = mt.group(2).lower()
+            u['tokens'].add(tok)
+            if mt.group(1):
+                continue
+            before = st[:mt.start()].rstrip()
+            after = st[mt.end():]
+            if before.endswith(('(', ',')) and re.match(r'\s*=(?!=)', after) and not \
+                    re.match(r'^\s*(integer|real|logical|character|type|class)\b', st, re.I):
+                continue
+            u['entities'].add(tok)
+        if UNIT_END.match(st) and len(stack) > 1:
+            stack.pop()
+    return units
+
+
 def is_fortran(path):
     return path.endswith(FORTRAN_EXT) and (path.startswith('src/') or path.startswith('tests/'))
 
@@ -274,7 +393,7 @@ def apply(tables):
     for path in tracked_files():
         if not os.path.isfile(path):
             continue
-        if path.startswith('tools/dev/nomes/') or path == 'docs/CHANGELOG.md':
+        if path.startswith('tools/dev/nomes/') or path in ('docs/CHANGELOG.md', THIS):
             continue
         names = names_for(entries, path)
         if is_fortran(path):
@@ -284,7 +403,7 @@ def apply(tables):
             names = {o: n for o, n, pre in entries if pre is None}
             renamer = lambda t: rename_markdown(t, names, every)
         elif is_text(path):
-            renamer = lambda t: rename_tokens(t, names, prose=True)
+            renamer = lambda t: rename_tokens(t, names, prose=True, upper=False)
         else:
             continue
         if not names and not path.endswith(('.md', '.txt')):
@@ -316,23 +435,41 @@ def check(rev, tables):
         if len(new) > 63:
             print('COLISAO: %s -> %s: mais de 63 caracteres' % (old, new))
             problems += 1
-    present = {path: identifiers(text) for path, text in sources.items()}
     used = set()
-    for p, ids in sorted(present.items()):
+    for p, text in sorted(sources.items()):
         names = names_for(entries, files.get(p, p))
-        targets = {}
-        for old, new in names.items():
-            if old not in ids:
+        units = scoping_units(text)
+        for u in units:
+            visible = set(u['entities'])
+            a = u['parent']
+            while a is not None:
+                visible |= units[a]['entities']
+                a = units[a]['parent']
+            targets = {}
+            for old, new in names.items():
+                if old not in u['tokens']:
+                    continue
+                used.add(old)
+                if old not in u['entities']:
+                    continue          # só componente (%) ou palavra-chave de argumento
+                targets.setdefault(new, []).append(old)
+                if new in visible:
+                    print('COLISAO: %s -> %s: %s (%s) já vê %s' % (old, new, p, u['name'], new))
+                    problems += 1
+            for new, olds in targets.items():
+                if len(olds) > 1:
+                    print('COLISAO: %s viram %s em %s (%s)' % (','.join(olds), new, p, u['name']))
+                    problems += 1
+    # palavras-chave de argumento fora do alcance de uma troca limitada: o
+    # argumento mudou de nome, a chamada não (erro de compilação)
+    for p, text in sorted(sources.items()):
+        names = names_for(entries, files.get(p, p))
+        code = ' '.join(statements(text))
+        for old, new, prefixes in entries:
+            if prefixes is None or old in names:
                 continue
-            used.add(old)
-            targets.setdefault(new, []).append(old)
-            if new in ids:
-                print('COLISAO: %s -> %s: %s já tem %s' % (old, new, p, new))
-                problems += 1
-        for new, olds in targets.items():
-            if len(olds) > 1:
-                print('COLISAO: %s viram %s em %s' % (','.join(olds), new, p))
-                problems += 1
+            if re.search(r'[(,]\s*' + old + r'\s*=(?!=)', code, re.I):
+                print('AVISO: %s aparece como palavra-chave de argumento em %s, fora do alcance da troca' % (old, p))
     for old, new, _ in entries:
         if old not in used:
             print('AVISO: %s não aparece em nenhum fonte de %s em que a troca vale' % (old, rev))
@@ -366,12 +503,62 @@ def check(rev, tables):
     return 0 if problems == 0 else 1
 
 
+def new_tables(rev):
+    """Tabelas de tools/dev/nomes/ da árvore de trabalho que não existem em REV."""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    found = []
+    folder = os.path.join(root, 'tools', 'dev', 'nomes')
+    for name in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        rel = 'tools/dev/nomes/' + name
+        if not name.endswith('.txt'):
+            continue
+        r = subprocess.run(['git', '-C', root, 'cat-file', '-e', '%s:%s' % (rev, rel)],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if r.returncode != 0:
+            found.append(os.path.join(folder, name))
+    return found
+
+
+def translate(rev, folder):
+    tables = new_tables(rev)
+    if not tables:
+        print('nenhuma tabela nova desde %s: %s fica como está' % (rev, folder))
+        return 0
+    entries, files = read_tables(tables)
+    for old, new in sorted(files.items()):
+        src, dst = os.path.join(folder, old), os.path.join(folder, new)
+        if os.path.isfile(src):
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            os.rename(src, dst)
+    n = 0
+    for base, _, names in os.walk(folder):
+        for name in names:
+            path = os.path.relpath(os.path.join(base, name), folder).replace(os.sep, '/')
+            if not is_fortran(path):
+                continue
+            table = names_for(entries, path)
+            if not table:
+                continue
+            full = os.path.join(base, name)
+            with open(full, encoding='utf-8') as f:
+                text = f.read()
+            new_text = rename_fortran(text, table)
+            if new_text != text:
+                with open(full, 'w', encoding='utf-8') as f:
+                    f.write(new_text)
+                n += 1
+    print('%s traduzido com %d tabela(s): %d fonte(s) alterado(s)' % (folder, len(tables), n))
+    return 0
+
+
 def main():
     utf8_output()
     args = sys.argv[1:]
     if len(args) >= 2 and args[0] == 'aplica':
         apply(args[1:])
         return 0
+    if len(args) == 3 and args[0] == 'traduz':
+        return translate(args[1], args[2])
     if len(args) >= 3 and args[0] == 'confere':
         return check(args[1], args[2:])
     print(__doc__)

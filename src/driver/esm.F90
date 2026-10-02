@@ -48,9 +48,9 @@ module ESM_MONAN
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
-  use cpl_check_mod,      only : cpl_check_acoplamento, cpl_escreve_metodos, cpl_dicionario_nuopc
-  use cpl_map_mod,        only : cpl_config_atual, cpl_conectores_do_driver, &
-                                 CONECTOR_DE, CONECTOR_PARA, N_CONECTORES, TROCAS
+  use cpl_check_mod,      only : cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
+  use cpl_map_mod,        only : cpl_current_config, cpl_driver_connectors, &
+                                 CONNECTOR_SRC, CONNECTOR_DST, N_CONNECTORS, EXCHANGES
 
   implicit none
   private
@@ -95,9 +95,9 @@ contains
     rc = ESMF_SUCCESS
     use_ice = cfg_use_sis2_dynamic
 
-    ! Nomes de campo do acoplador (_mpas, Foxx_* etc.): os de CAMPOS, no
+    ! Nomes de campo do acoplador (_mpas, Foxx_* etc.): os de FIELDS, no
     ! dicionário do NUOPC, sem acréscimo automático (desde a R-FASE11-25)
-    call cpl_dicionario_nuopc(rc)
+    call cpl_nuopc_dictionary(rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompGet(driver, petCount=petCount, clock=driverClock, rc=rc)
@@ -147,8 +147,8 @@ contains
     end if
 
     ! ---- Conectores ---------------------------------------------------------
-    ! Escolhidos pelo mapa de acoplamento (TROCAS, coluna quando), na ordem
-    ! de CONECTOR_DE/CONECTOR_PARA.
+    ! Escolhidos pelo mapa de acoplamento (EXCHANGES, coluna quando), na ordem
+    ! de CONNECTOR_SRC/CONNECTOR_DST.
     call add_connectors(driver, driverClock, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -270,7 +270,7 @@ contains
   end subroutine add_model
 
   !> Registra os conectores que o mapa de acoplamento tem na configuração
-  !! atual, na ordem de CONECTOR_DE/CONECTOR_PARA (cpl_conectores_do_driver,
+  !! atual, na ordem de CONNECTOR_SRC/CONNECTOR_DST (cpl_driver_connectors,
   !! em cpl_map). Um conector do mapa que não está na lista é erro.
   !!
   !! @param[inout] driver       o driver
@@ -280,21 +280,21 @@ contains
     type(ESMF_GridComp), intent(inout) :: driver
     type(ESMF_Clock),    intent(in)    :: driverClock
     integer,             intent(out)   :: rc
-    integer :: ordem(N_CONECTORES), n, k, t
+    integer :: ordem(N_CONNECTORS), n, k, t
 
     rc = ESMF_SUCCESS
-    call cpl_conectores_do_driver(cpl_config_atual(), ordem, n, t)
+    call cpl_driver_connectors(cpl_current_config(), ordem, n, t)
     if (t > 0) then
       call ESMF_LogSetError(ESMF_RC_NOT_IMPL, &
-        msg='ESM: conector do mapa sem registro no driver: '//trim(TROCAS(t)%de)// &
-            ' -> '//trim(TROCAS(t)%para), &
+        msg='ESM: conector do mapa sem registro no driver: '//trim(EXCHANGES(t)%src)// &
+            ' -> '//trim(EXCHANGES(t)%dst), &
         line=__LINE__, file=__FILE__, rcToReturn=rc)
       return
     end if
 
     do k = 1, n
-      call add_connector(driver, trim(rotulo(CONECTOR_DE(ordem(k)))), &
-                         trim(rotulo(CONECTOR_PARA(ordem(k)))), driverClock, rc)
+      call add_connector(driver, trim(rotulo(CONNECTOR_SRC(ordem(k)))), &
+                         trim(rotulo(CONNECTOR_DST(ordem(k)))), driverClock, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
@@ -342,11 +342,11 @@ contains
   !! Entradas que já tragam a opção não são alteradas.
   !!
   !! Em seguida, escreve em cada entrada o método de interpolação do mapa de
-  !! acoplamento (remapmethod, coluna metodo de TROCAS; cpl_escreve_metodos).
+  !! acoplamento (remapmethod, coluna metodo de EXCHANGES; cpl_write_methods).
   !! Hoje é bilinear em todas, o padrão que o conector usava sem a opção.
   !!
   !! Depois, com as listas prontas, registra no log o relatório dos conectores
-  !! e a conferência do mapa de acoplamento (cpl_check_acoplamento), que não
+  !! e a conferência do mapa de acoplamento (cpl_check_coupling), que não
   !! muda as listas; desde a R-FASE11-25, uma diferença na conferência
   !! interrompe a inicialização aqui.
   subroutine ModifyCplLists(driver, rc)
@@ -388,14 +388,14 @@ contains
       int_to_str(n_order)//' entrada(s), srcTermProcessing=0 em '//int_to_str(n_src)// &
       ' entrada(s)', ESMF_LOGMSG_INFO)
 
-    call cpl_escreve_metodos(driver,                                                 &
+    call cpl_write_methods(driver,                                                   &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_metodo, n_cheia, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_LogWrite('ESM: metodo dos conectores pelo mapa: remapmethod em '// &
       int_to_str(n_metodo)//' entrada(s)', ESMF_LOGMSG_INFO)
 
-    call cpl_check_acoplamento(driver,                                               &
+    call cpl_check_coupling(driver,                                                  &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

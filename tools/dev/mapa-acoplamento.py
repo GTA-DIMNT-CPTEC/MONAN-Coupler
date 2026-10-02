@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """mapa-acoplamento.py: gera docs/acoplamento.md a partir do mapa de acoplamento.
 
-Lê as tabelas de src/coupling/cpl_fields.F90 (CAMPOS) e
-src/coupling/cpl_map.F90 (MALHAS, TROCAS, EXPORTACOES e ROTAS) e escreve
+Lê as tabelas de src/coupling/cpl_fields.F90 (FIELDS) e
+src/coupling/cpl_map.F90 (GRIDS, EXCHANGES, EXPORTS e ROUTES) e escreve
 uma versão legível do mapa em Markdown: resumo dos conectores por
 configuração, trocas de cada conector, trocas dentro dos componentes,
 exportações dos modelos, rotas do mediador, malhas e dicionário de campos. O Fortran é a fonte; o Markdown é gerado e
@@ -38,7 +38,7 @@ CONFIGS = collections.OrderedDict([
     ('datm_docn',     dict(datm=True,  docn=True,  med_to_mpas=False, sis2=False)),
 ])
 
-CONDICOES = {
+CONDITIONS = {
     'mpas':        lambda c: not c['datm'],
     'datm':        lambda c: c['datm'],
     'mom6':        lambda c: not c['docn'],
@@ -210,14 +210,14 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo):
 
 
 def le_mapa(raiz):
-    """Lê CAMPOS, MALHAS, TROCAS, EXPORTACOES, LACUNAS e ROTAS dos fontes."""
+    """Lê FIELDS, GRIDS, EXCHANGES, EXPORTS, GAPS e ROUTES dos fontes."""
     tabelas = {}
-    for arquivo, itens in (('src/coupling/cpl_fields.F90', [('cpl_campo_t', 'CAMPOS')]),
-                           ('src/coupling/cpl_map.F90', [('cpl_malha_ref_t', 'MALHAS'),
-                                                          ('cpl_troca_t', 'TROCAS'),
-                                                          ('cpl_exporta_t', 'EXPORTACOES'),
-                                                          ('cpl_lacuna_t', 'LACUNAS'),
-                                                          ('cpl_rota_t', 'ROTAS')])):
+    for arquivo, itens in (('src/coupling/cpl_fields.F90', [('cpl_field_t', 'FIELDS')]),
+                           ('src/coupling/cpl_map.F90', [('cpl_grid_ref_t', 'GRIDS'),
+                                                          ('cpl_exchange_t', 'EXCHANGES'),
+                                                          ('cpl_export_t', 'EXPORTS'),
+                                                          ('cpl_gap_t', 'GAPS'),
+                                                          ('cpl_route_t', 'ROUTES')])):
         caminho = os.path.join(raiz, arquivo)
         try:
             with open(caminho, encoding='utf-8') as f:
@@ -226,8 +226,8 @@ def le_mapa(raiz):
             raise ErroMapa('não foi possível ler {}: {}'.format(caminho, e))
         params = parametros_inteiros(instrs)
         if arquivo.endswith('cpl_map.F90'):
-            # CPL_NOME_LEN vem de cpl_fields
-            params.setdefault('CPL_NOME_LEN', tabelas['_params_fields']['CPL_NOME_LEN'])
+            # CPL_NAME_LEN vem de cpl_fields
+            params.setdefault('CPL_NAME_LEN', tabelas['_params_fields']['CPL_NAME_LEN'])
         else:
             tabelas['_params_fields'] = params
         for tipo, nome in itens:
@@ -236,11 +236,11 @@ def le_mapa(raiz):
 
 
 def vale(troca, cfg):
-    conds = [c.strip() for c in troca['quando'].split(',') if c.strip()]
+    conds = [c.strip() for c in troca['when'].split(',') if c.strip()]
     for c in conds:
-        if c not in CONDICOES:
+        if c not in CONDITIONS:
             raise ErroMapa('condição desconhecida: ' + c)
-    return all(CONDICOES[c](cfg) for c in conds)
+    return all(CONDITIONS[c](cfg) for c in conds)
 
 
 def comp(ponto):
@@ -296,8 +296,8 @@ def quando_md(q):
 
 
 def gera(t):
-    trocas, rotas, campos, malhas = t['TROCAS'], t['ROTAS'], t['CAMPOS'], t['MALHAS']
-    exporta = t['EXPORTACOES']
+    trocas, rotas, campos, malhas = t['EXCHANGES'], t['ROUTES'], t['FIELDS'], t['GRIDS']
+    exporta = t['EXPORTS']
     out = [
         '# Mapa de acoplamento do MONAN-Coupler',
         '',
@@ -309,14 +309,14 @@ def gera(t):
         '',
         'O mapa descreve o acoplamento que o código faz hoje. O mediador e os caps',
         'dos cinco modelos anunciam e realizam os campos a partir dele, na ordem',
-        'das linhas de `TROCAS` (importação) e de `EXPORTACOES` (exportação).',
+        'das linhas de `EXCHANGES` (importação) e de `EXPORTS` (exportação).',
         '',
         '{} campos, {} malhas, {} trocas, {} exportações e {} rotas.'.format(
             len(campos), len(malhas), len(trocas), len(exporta), len(rotas)),
         '',
         '## 1. Configurações',
         '',
-        'Cada troca vale numa lista de condições (coluna `quando`), escolhidas',
+        'Cada troca vale numa lista de condições (coluna `when`), escolhidas',
         'pelas chaves do grupo `&nuopc_mode` do `nuopc.input`:',
         '',
     ]
@@ -332,8 +332,8 @@ def gera(t):
     linhas = []
     for o, d in PARES:
         linhas.append(['{} para {}'.format(o, d)] + [
-            sum(1 for x in trocas if x['meio'] == 'conector' and vale(x, CONFIGS[n])
-                and comp(x['de']) == o and comp(x['para']) == d) for n in nomes])
+            sum(1 for x in trocas if x['via'] == 'conector' and vale(x, CONFIGS[n])
+                and comp(x['src']) == o and comp(x['dst']) == d) for n in nomes])
     out += md_tabela(['Conector'] + ['`{}`'.format(n) for n in nomes], linhas)
     out += [
         '',
@@ -342,7 +342,7 @@ def gera(t):
         'descrevem o que o cap do DATM anuncia, e a conferência do mapa',
         'interrompe uma rodada com `use_datm`.',
         '',
-        'Lacunas conhecidas (tabela `LACUNAS`): campos que um componente anuncia',
+        'Lacunas conhecidas (tabela `GAPS`): campos que um componente anuncia',
         'na importação e que, na configuração indicada, não têm origem. A',
         'conferência do mapa as registra como aviso, e não como diferença; nas',
         'lacunas do MONAN-A, o cap atmosférico interrompe a rodada por conta',
@@ -350,34 +350,34 @@ def gera(t):
         '',
     ]
     out += md_tabela(['Campo', 'Ponto', 'Quando', 'Motivo'],
-                     [[codigo(x['campo']), codigo(x['ponto']), quando_md(x['quando']),
-                       x['motivo']] for x in t['LACUNAS']])
+                     [[codigo(x['field']), codigo(x['point']), quando_md(x['when']),
+                       x['reason']] for x in t['GAPS']])
     out += [
         '',
         '## 2. Trocas por conector',
         '',
         'A coluna "Método" é o método de interpolação do conector NUOPC para o',
-        'campo (coluna `metodo` de `TROCAS`), que o driver escreve na `CplList`',
-        'como `remapmethod` (`cpl_escreve_metodos`, em `src/coupling/cpl_check.F90`).',
+        'campo (coluna `method` de `EXCHANGES`), que o driver escreve na `CplList`',
+        'como `remapmethod` (`cpl_write_methods`, em `src/coupling/cpl_check.F90`).',
         '',
     ]
     for o, d in PARES:
-        sel = [x for x in trocas if x['meio'] == 'conector'
-               and comp(x['de']) == o and comp(x['para']) == d]
+        sel = [x for x in trocas if x['via'] == 'conector'
+               and comp(x['src']) == o and comp(x['dst']) == d]
         if not sel:
             continue
         out += ['### {} para {}'.format(o, d), '']
         out += md_tabela(['Campo', 'De', 'Para', 'Método', 'Quando'],
-                         [[codigo(x['campo']), codigo(x['de']), codigo(x['para']),
-                           codigo(x['metodo']), quando_md(x['quando'])] for x in sel])
+                         [[codigo(x['field']), codigo(x['src']), codigo(x['dst']),
+                           codigo(x['method']), quando_md(x['when'])] for x in sel])
         out.append('')
     out += ['## 3. Trocas dentro dos componentes', '',
             'Passagens entre duas malhas do mesmo componente: código próprio do cap',
             '(`cap`) ou rota do mediador.', '']
-    sel = [x for x in trocas if x['meio'] != 'conector']
+    sel = [x for x in trocas if x['via'] != 'conector']
     out += md_tabela(['Campo', 'De', 'Para', 'Meio', 'Quando'],
-                     [[codigo(x['campo']), codigo(x['de']), codigo(x['para']),
-                       codigo(x['meio']), quando_md(x['quando'])] for x in sel])
+                     [[codigo(x['field']), codigo(x['src']), codigo(x['dst']),
+                       codigo(x['via']), quando_md(x['when'])] for x in sel])
     out += ['', '## 4. Exportações dos modelos', '',
             'Campos que cada modelo anuncia no estado de exportação, na ordem do',
             'anúncio. Um campo exportado pode não ter consumidor (o conector só leva',
@@ -387,38 +387,38 @@ def gera(t):
     linhas = []
     for e in exporta:
         usos = [n for n in nomes if vale(e, CONFIGS[n]) and any(
-            x['meio'] == 'conector' and x['campo'] == e['campo'] and x['de'] == e['ponto']
+            x['via'] == 'conector' and x['field'] == e['field'] and x['src'] == e['point']
             and vale(x, CONFIGS[n]) for x in trocas)]
-        linhas.append([codigo(e['campo']), codigo(e['ponto']), quando_md(e['quando']),
+        linhas.append([codigo(e['field']), codigo(e['point']), quando_md(e['when']),
                        ', '.join('`{}`'.format(n) for n in usos) or 'nenhuma'])
     out += md_tabela(['Campo', 'Ponto', 'Quando', 'Consumido em'], linhas)
     out += ['', '## 5. Rotas do mediador', '',
             'Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),',
             'interpolar (métodos, reserva, esquema), completar (preenchimento por',
             'vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.',
-            '"Campos" é o número de campos que passam pela rota em TROCAS.', '']
+            '"Campos" é o número de campos que passam pela rota em EXCHANGES.', '']
     linhas = []
     for r in rotas:
-        usos = sorted({x['campo'] for x in trocas if x['meio'] == r['nome']})
+        usos = sorted({x['field'] for x in trocas if x['via'] == r['name']})
         limites = []
-        for c, rot in (('limite_min', 'mín.'), ('limite_max', 'máx.'), ('nan_para', 'NaN para')):
-            if r[c] != 'CPL_AUSENTE':
+        for c, rot in (('min_limit', 'mín.'), ('max_limit', 'máx.'), ('nan_to', 'NaN para')):
+            if r[c] != 'CPL_UNSET':
                 limites.append('{} {}'.format(rot, numero(r[c])))
-        linhas.append([codigo(r['nome']), '{} para {}'.format(r['de'], r['para']),
-                       r['metodos'].replace(',', ', '), codigo(r['mascara']),
-                       codigo(r['reserva']), r['sem_valor'], preenchimento(r['completar']),
-                       ', '.join(limites), r['criar'], len(usos)])
+        linhas.append([codigo(r['name']), '{} para {}'.format(r['src'], r['dst']),
+                       r['methods'].replace(',', ', '), codigo(r['mask']),
+                       codigo(r['fallback']), r['no_value'], preenchimento(r['fill']),
+                       ', '.join(limites), r['create'], len(usos)])
     out += md_tabela(['Rota', 'Malhas', 'Métodos', 'Máscara', 'Reserva', 'Sem valor',
                       'Completar', 'Limitar', 'Criar', 'Campos'], linhas)
     out += ['', 'Esquema de todas as rotas: `{}` (trocável no grupo `&nuopc_regrid`).'.format(
-        '`, `'.join(sorted({r['esquema'] for r in rotas}))), '',
+        '`, `'.join(sorted({r['scheme'] for r in rotas}))), '',
         '## 6. Malhas', '']
     out += md_tabela(['Malha', 'Componente', 'Tipo', 'Descrição'],
-                     [[codigo(m['nome']), m['componente'], m['tipo'], m['descricao']]
+                     [[codigo(m['name']), m['component'], m['grid_type'], m['description']]
                       for m in malhas])
     out += ['', '## 7. Campos', '']
     out += md_tabela(['Campo', 'Unidade', 'Sinal', 'Descrição'],
-                     [[codigo(c['nome']), c['unidade'], c['sinal'], c['descricao']]
+                     [[codigo(c['name']), c['units'], c['sign_conv'], c['description']]
                       for c in campos])
     out.append('')
     return '\n'.join(out)

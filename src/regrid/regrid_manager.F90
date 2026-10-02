@@ -167,7 +167,7 @@ contains
     call ESMF_LogWrite(line, ESMF_LOGMSG_INFO)
   end subroutine report_route
 
-  !> Interpola pela rota, nesta ordem (a das etapas de ROTAS, em cpl_map):
+  !> Interpola pela rota, nesta ordem (a das etapas de ROUTES, em cpl_map):
   !! interpolação, preenchimento por vizinhança (spec%fill, etapa completar)
   !! e troca de NaN (spec%nan_replace). As três usam a configuração da rota
   !! pedida, mesmo quando ela usa a interpolação da reserva.

@@ -8,13 +8,13 @@ estão em `docs/arquitetura-acoplamento.md`.
 
 O mapa descreve o acoplamento que o código faz hoje. O mediador e os caps
 dos cinco modelos anunciam e realizam os campos a partir dele, na ordem
-das linhas de `TROCAS` (importação) e de `EXPORTACOES` (exportação).
+das linhas de `EXCHANGES` (importação) e de `EXPORTS` (exportação).
 
 59 campos, 8 malhas, 154 trocas, 41 exportações e 6 rotas.
 
 ## 1. Configurações
 
-Cada troca vale numa lista de condições (coluna `quando`), escolhidas
+Cada troca vale numa lista de condições (coluna `when`), escolhidas
 pelas chaves do grupo `&nuopc_mode` do `nuopc.input`:
 
 | Condição | Vale quando |
@@ -41,7 +41,7 @@ pelo mediador). O driver não registra o DATM: as trocas com `datm`
 descrevem o que o cap do DATM anuncia, e a conferência do mapa
 interrompe uma rodada com `use_datm`.
 
-Lacunas conhecidas (tabela `LACUNAS`): campos que um componente anuncia
+Lacunas conhecidas (tabela `GAPS`): campos que um componente anuncia
 na importação e que, na configuração indicada, não têm origem. A
 conferência do mapa as registra como aviso, e não como diferença; nas
 lacunas do MONAN-A, o cap atmosférico interrompe a rodada por conta
@@ -58,8 +58,8 @@ própria.
 ## 2. Trocas por conector
 
 A coluna "Método" é o método de interpolação do conector NUOPC para o
-campo (coluna `metodo` de `TROCAS`), que o driver escreve na `CplList`
-como `remapmethod` (`cpl_escreve_metodos`, em `src/coupling/cpl_check.F90`).
+campo (coluna `method` de `EXCHANGES`), que o driver escreve na `CplList`
+como `remapmethod` (`cpl_write_methods`, em `src/coupling/cpl_check.F90`).
 
 ### ATM para MED
 
@@ -315,7 +315,7 @@ algum conector.
 Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),
 interpolar (métodos, reserva, esquema), completar (preenchimento por
 vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.
-"Campos" é o número de campos que passam pela rota em TROCAS.
+"Campos" é o número de campos que passam pela rota em EXCHANGES.
 
 | Rota | Malhas | Métodos | Máscara | Reserva | Sem valor | Completar | Limitar | Criar | Campos |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

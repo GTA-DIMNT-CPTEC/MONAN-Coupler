@@ -57,8 +57,8 @@ program test_completar
   use coupler_config_mod,    only : config_read
   use mom6_supergrid_mod,    only : mom6_supergrid_dims
   use med_cap_types_mod,     only : MED_InternalState, MED_CHAVES
-  use cpl_fields_mod,        only : CPL_NOME_LEN
-  use cpl_map_mod,           only : cpl_chegadas, cpl_config_atual
+  use cpl_fields_mod,        only : CPL_NAME_LEN
+  use cpl_map_mod,           only : cpl_arrivals, cpl_current_config
   use med_init_mod,          only : create_atm_grid, create_ocn_grid, realize_component_fields, &
                                     create_internal_fields
 #ifdef COM_INICIO
@@ -91,7 +91,7 @@ program test_completar
   real(ESMF_KIND_R8), pointer :: ifrac_ptr(:,:) => null()
   character(len=32) :: arquivo
   character(len=ESMF_MAXSTR), allocatable :: nomes(:)
-  character(len=CPL_NOME_LEN), allocatable :: anuncio(:)
+  character(len=CPL_NAME_LEN), allocatable :: anuncio(:)
   type(ESMF_Clock)        :: relogio
   type(ESMF_Time)         :: t0, agora, carimbo
   type(ESMF_TimeInterval) :: dt
@@ -128,12 +128,12 @@ program test_completar
   imp = ESMF_StateCreate(name='importacao', rc=rc)
   exp = ESMF_StateCreate(name='exportacao', rc=rc)
   call NUOPC_FieldDictionarySetAutoAdd(.true., rc=rc)
-  call cpl_chegadas('MED', .true., cpl_config_atual(), MED_CHAVES, anuncio)
+  call cpl_arrivals('MED', .true., cpl_current_config(), MED_CHAVES, anuncio)
   do k = 1, size(anuncio)
     call NUOPC_Advertise(imp, StandardName=trim(anuncio(k)), rc=rc)
     if (rc /= ESMF_SUCCESS) error stop 'NUOPC_Advertise (importacao)'
   end do
-  call cpl_chegadas('MED@ocn_med', .false., cpl_config_atual(), '', anuncio)
+  call cpl_arrivals('MED@ocn_med', .false., cpl_current_config(), '', anuncio)
   do k = 1, size(anuncio)
     call NUOPC_Advertise(exp, StandardName=trim(anuncio(k)), rc=rc)
     if (rc /= ESMF_SUCCESS) error stop 'NUOPC_Advertise (exportacao)'

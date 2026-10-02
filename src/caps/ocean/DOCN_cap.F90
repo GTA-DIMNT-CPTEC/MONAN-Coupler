@@ -64,8 +64,8 @@ module DOCN_cap_mod
   use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &
                                  cap_fill_export_initial, cap_set_data_complete, &
                                  cap_stamp_export
-  use cpl_fields_mod,      only: CPL_NOME_LEN
-  use cpl_map_mod,         only: cpl_chegadas, cpl_exportacoes, cpl_config_atual
+  use cpl_fields_mod,      only: CPL_NAME_LEN
+  use cpl_map_mod,         only: cpl_arrivals, cpl_exports, cpl_current_config
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -116,8 +116,8 @@ module DOCN_cap_mod
   ! ── Campos trocados ───────────────────────────────────────────────────────
   ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
   ! OCN@docn: a importação são os 14 fluxos e estados que chegam do mediador
-  ! (cpl_chegadas: Foxx_*, Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac e
-  ! So_duu10n); a exportação, os 6 campos de EXPORTACOES (cpl_exportacoes):
+  ! (cpl_arrivals: Foxx_*, Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac e
+  ! So_duu10n); a exportação, os 6 campos de EXPORTS (cpl_exports):
   ! So_t [K], Si_ifrac [0-1], Sf_zorl [m], So_s [psu], So_u e So_v [m/s].
   ! O cap anuncia sempre as mesmas listas: não consulta chaves de &nuopc_mode.
   ! O valor inicial de cada campo exportado está em valor_inicial_exportacao.
@@ -198,12 +198,12 @@ contains
     integer,              intent(out)   :: rc
 
     integer :: i
-    character(len=CPL_NOME_LEN), allocatable :: imp(:), exp(:)
+    character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
 
     rc = ESMF_SUCCESS
 
-    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', imp)
-    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', exp)
+    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', imp)
+    call cpl_exports(PONTO_OCN, cpl_current_config(), '', exp)
 
     ! Anuncia todos os campos importados do mediador (MED→OCN).
     do i = 1, size(imp)
@@ -250,7 +250,7 @@ contains
       integer :: regDecomp_2d(2)
       integer :: localDeCount_docn
       integer :: lde_docn
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
 
     rc = ESMF_SUCCESS
 
@@ -337,12 +337,12 @@ contains
       end do  ! lde_docn
 
     ! Campos importados: todos os fluxos do mediador.
-    call cpl_chegadas(PONTO_OCN, .true., cpl_config_atual(), '', nomes)
+    call cpl_arrivals(PONTO_OCN, .true., cpl_current_config(), '', nomes)
     call cap_realize_fields(importState, grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Exportados
-    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
     call cap_realize_fields(exportState, grid, nomes, size(nomes), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -371,7 +371,7 @@ contains
     type(ESMF_State)               :: exportState
     type(ESMF_Clock)               :: clock_idc
     type(ESMF_Time)                :: startTime_idc
-    character(len=CPL_NOME_LEN), allocatable :: nomes(:)
+    character(len=CPL_NAME_LEN), allocatable :: nomes(:)
     real(ESMF_KIND_R8),          allocatable :: valores(:)
     integer :: k
 
@@ -382,7 +382,7 @@ contains
 
     ! Preencher exportState com valores iniciais fisicamente consistentes
     ! (valor_inicial_exportacao); os campos sem valor previsto começam em zero.
-    call cpl_exportacoes(PONTO_OCN, cpl_config_atual(), '', nomes)
+    call cpl_exports(PONTO_OCN, cpl_current_config(), '', nomes)
     allocate(valores(size(nomes)))
     do k = 1, size(nomes)
       valores(k) = valor_inicial_exportacao(nomes(k))

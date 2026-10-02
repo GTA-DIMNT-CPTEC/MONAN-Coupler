@@ -10,9 +10,9 @@
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
 !!   RegridOrCopy               interpola um campo da malha de fluxo para o exportState
-!!   spec_da_rota               configuração de uma rota na tabela ROTAS
-!!   completar_da_rota          preenchimento por vizinhança de uma rota de ROTAS
-!!   cria_rota                  cria uma rota com a configuração de ROTAS
+!!   spec_da_rota               configuração de uma rota na tabela ROUTES
+!!   completar_da_rota          preenchimento por vizinhança de uma rota de ROUTES
+!!   cria_rota                  cria uma rota com a configuração de ROUTES
 !!   set_ocn_grid_mask          copia So_omask para a máscara da grade OCN
 
 module med_cap_methods_mod
@@ -20,7 +20,7 @@ module med_cap_methods_mod
   use ESMF
   use regrid_manager_mod, only : regrid_spec, regrid_manager_t
   use regrid_base_mod,    only : regrid_spec_t, regrid_fill_t
-  use cpl_map_mod,        only : ROTAS, cpl_rota_indice, CPL_AUSENTE
+  use cpl_map_mod,        only : ROUTES, cpl_route_index, CPL_UNSET
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
   use coupler_config_mod, only: cfg_use_sis2_dynamic
@@ -236,7 +236,7 @@ contains
     ! A rota atm2ocn serve a qualquer par (grade ATM, grade OCN) e existe
     ! desde a fase A da inicialização (med_exchange, cria_rotas_inicio),
     ! que roda antes de qualquer chamada desta rotina. A rota zera o destino
-    ! antes e troca os NaN por zero (ROTAS: sem_valor 'zerar', nan_para 0).
+    ! antes e troca os NaN por zero (ROUTES: no_value 'zerar', nan_to 0).
     call is%regrid%apply('atm2ocn', src_field, dst_field, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, &
       msg="RegridOrCopy: falha no regrid de "//trim(dst_name), &
@@ -245,14 +245,14 @@ contains
   end subroutine RegridOrCopy
 
   !============================================================================
-  !> @brief Configuração da rota nome na tabela ROTAS (cpl_map): métodos em
+  !> @brief Configuração da rota nome na tabela ROUTES (cpl_map): métodos em
   !! ordem de preferência, esquema, máscara na origem (se a rota tem
   !! mascara), o que fazer com os pontos do destino que a interpolação não
-  !! alcança (sem_valor: 'zerar' zera o destino inteiro antes, zero_total;
+  !! alcança (no_value: 'zerar' zera o destino inteiro antes, zero_total;
   !! 'manter' e 'sentinela' preservam o valor anterior), a troca de NaN no
-  !! destino (nan_para), o preenchimento por vizinhança depois da
+  !! destino (nan_to), o preenchimento por vizinhança depois da
   !! interpolação (completar) e a rota de reserva ('' se não tem). ok = .false.
-  !! se a rota não está em ROTAS. O grupo &nuopc_regrid do nuopc.input
+  !! se a rota não está em ROUTES. O grupo &nuopc_regrid do nuopc.input
   !! continua podendo trocar o esquema e os métodos (regrid_manager,
   !! apply_config).
   !!
@@ -261,74 +261,74 @@ contains
   !! med_export), porque o preenchimento vale mesmo quando a rota não é
   !! aplicada.
   !============================================================================
-  subroutine spec_da_rota(nome, spec, reserva, ok)
-    character(len=*),    intent(in)  :: nome
+  subroutine spec_da_rota(name, spec, fallback, ok)
+    character(len=*),    intent(in)  :: name
     type(regrid_spec_t), intent(out) :: spec
-    character(len=*),    intent(out) :: reserva
+    character(len=*),    intent(out) :: fallback
     logical,             intent(out) :: ok
     integer :: k
 
-    reserva = ''
-    k = cpl_rota_indice(nome)
+    fallback = ''
+    k = cpl_route_index(name)
     ok = k > 0
     if (.not. ok) return
-    spec = regrid_spec(trim(ROTAS(k)%metodos), scheme=trim(ROTAS(k)%esquema), &
-                       mask_src=len_trim(ROTAS(k)%mascara) > 0, &
-                       zero_total=ROTAS(k)%sem_valor == 'zerar')
-    if (ROTAS(k)%nan_para /= CPL_AUSENTE) then
+    spec = regrid_spec(trim(ROUTES(k)%methods), scheme=trim(ROUTES(k)%scheme), &
+                       mask_src=len_trim(ROUTES(k)%mask) > 0, &
+                       zero_total=ROUTES(k)%no_value == 'zerar')
+    if (ROUTES(k)%nan_to /= CPL_UNSET) then
       spec%nan_replace = .true.
-      spec%nan_value   = ROTAS(k)%nan_para
+      spec%nan_value   = ROUTES(k)%nan_to
     end if
-    spec%fill = ROTAS(k)%completar
-    reserva = ROTAS(k)%reserva
+    spec%fill = ROUTES(k)%fill
+    fallback = ROUTES(k)%fallback
   end subroutine spec_da_rota
 
   !============================================================================
-  !> @brief Preenchimento por vizinhança (coluna completar de ROTAS) da rota
-  !! nome; desligado se a rota não está em ROTAS. Serve para completar como
+  !> @brief Preenchimento por vizinhança (coluna completar de ROUTES) da rota
+  !! nome; desligado se a rota não está em ROUTES. Serve para completar como
   !! a rota quando ela ainda não existe e outra interpola no lugar dela (a
   !! SST pela rota ocn2atm enquanto a máscara do oceano é uniforme).
   !============================================================================
-  function completar_da_rota(nome) result(fill)
-    character(len=*), intent(in) :: nome
+  function completar_da_rota(name) result(fill)
+    character(len=*), intent(in) :: name
     type(regrid_fill_t) :: fill
     integer :: k
 
     fill = regrid_fill_t()
-    k = cpl_rota_indice(nome)
-    if (k > 0) fill = ROTAS(k)%completar
+    k = cpl_route_index(name)
+    if (k > 0) fill = ROUTES(k)%fill
   end function completar_da_rota
 
   !============================================================================
-  !> @brief Cria a rota nome em regrid com a configuração de ROTAS, e com a
+  !> @brief Cria a rota nome em regrid com a configuração de ROUTES, e com a
   !! rota de reserva da tabela, quando houver.
   !============================================================================
-  subroutine cria_rota(regrid, nome, src, dst, rc)
+  subroutine cria_rota(regrid, name, src, dst, rc)
     type(regrid_manager_t), intent(inout) :: regrid
-    character(len=*),       intent(in)    :: nome
+    character(len=*),       intent(in)    :: name
     type(ESMF_Field),       intent(inout) :: src, dst
     integer,                intent(out)   :: rc
     type(regrid_spec_t) :: spec
-    character(len=32)   :: reserva
+    character(len=32)   :: fallback
     logical :: ok
 
-    call spec_da_rota(nome, spec, reserva, ok)
+    call spec_da_rota(name, spec, fallback, ok)
     if (.not. ok) then
-      call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='MED: rota fora de ROTAS: '//trim(nome), &
+      call ESMF_LogSetError(ESMF_RC_ARG_VALUE, msg='MED: rota fora de ROTAS: '//trim(name), &
         line=__LINE__, file=__FILE__, rcToReturn=rc)
       return
     end if
-    if (len_trim(reserva) > 0) then
-      call regrid%add(nome, spec, src, dst, rc, fallback=trim(reserva))
+    if (len_trim(fallback) > 0) then
+      call regrid%add(name, spec, src, dst, rc, fallback=trim(fallback))
     else
-      call regrid%add(nome, spec, src, dst, rc)
+      call regrid%add(name, spec, src, dst, rc)
     end if
   end subroutine cria_rota
 
   !============================================================================
   !> @brief Copia So_omask (1 = oceano, 0 = terra) do importState para o item
   !! de máscara de ocn_grid, DE a DE, e conta os pontos de terra e de
-  !! oceano deste PET. É a máscara que as rotas com mascara em ROTAS usam
+  !! oceano deste PET. É a máscara que as rotas com mascara em ROUTES usam
   !! na origem (valores excluídos: terra = 0).
   !!
   !! achou: So_omask está no importState; copiou: algum DE recebeu a

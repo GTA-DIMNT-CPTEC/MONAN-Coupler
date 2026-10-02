@@ -24,7 +24,7 @@ module med_ice_mod
                                COMPL_ICE_ANIDF, COMPL_ICE_T
   use med_diag_mod, only: registra_completa
   use med_cap_methods_mod, only: FillInternalField
-  use cpl_grids_mod, only: centro_lon_leste0, centro_lat_leste0
+  use cpl_grids_mod, only: center_lon_east0, center_lat_east0
 
   implicit none
   private
@@ -126,7 +126,7 @@ contains
   !> @brief Preenche os seis campos de gelo na grade ATM com a sentinela -999.
   !!
   !! A rota 'ocn2atm_ice' não zera o destino (sem_valor 'sentinela' em
-  !! ROTAS): só escreve onde a interpolação alcança algum ponto. As demais células ficam com -999, fora de qualquer
+  !! ROUTES): só escreve onde a interpolação alcança algum ponto. As demais células ficam com -999, fora de qualquer
   !! faixa válida, e a extrapolação por vizinhança as reconhece como
   !! inválidas. Com zero, que está dentro da faixa [0,1], essas células
   !! passariam por válidas.
@@ -306,8 +306,8 @@ contains
     do jj_geo = lbound(p_ifrac_out,2), ubound(p_ifrac_out,2)
       do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
         if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
-            lon_here = centro_lon_leste0(ii_geo, ATM_NX)
-            lat_here = centro_lat_leste0(jj_geo, ATM_NY)
+            lon_here = center_lon_east0(ii_geo, ATM_NX)
+            lat_here = center_lat_east0(jj_geo, ATM_NY)
             if (abs(lat_here) < LAT_MAX_GELO) then
               n_bad_geo = n_bad_geo + 1
               if (lat_bad < -900.0_ESMF_KIND_R8) then
