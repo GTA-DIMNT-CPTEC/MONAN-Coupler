@@ -166,13 +166,13 @@ contains
   !! @param[in]  petCount    PETs do componente
   !! @param[out] grade       a grade criada
   !! @param[out] rc          ESMF_SUCCESS, ou o código da falha
-  subroutine cpl_latlon_grid(name, nx, ny, lon_origin, corners, petCount, grade, rc)
+  subroutine cpl_latlon_grid(name, nx, ny, lon_origin, corners, petCount, grid, rc)
     character(len=*), intent(in)  :: name
     integer,          intent(in)  :: nx, ny
     character(len=*), intent(in)  :: lon_origin
     logical,          intent(in)  :: corners
     integer,          intent(in)  :: petCount
-    type(ESMF_Grid),  intent(out) :: grade
+    type(ESMF_Grid),  intent(out) :: grid
     integer,          intent(out) :: rc
 
     real(r8), pointer :: coordX(:,:), coordY(:,:)
@@ -197,13 +197,13 @@ contains
       return
     end if
 
-    call create_grid(grade, nx, ny, petCount, rc)
+    call create_grid(grid, nx, ny, petCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    call prepare_coordinates(grade, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
+    call prepare_coordinates(grid, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     do lde = 0, localDeCount - 1
-      call de_coordinates(grade, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
+      call de_coordinates(grid, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordX,2), ubound(coordX,2)
         do i = lbound(coordX,1), ubound(coordX,1)
@@ -231,10 +231,10 @@ contains
 
     ! Cantos: a borda da célula, meia célula antes do centro, por conta
     ! direta (a grade é regular), sem ler arquivo.
-    call prepare_coordinates(grade, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
+    call prepare_coordinates(grid, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     do lde = 0, localDeCount - 1
-      call de_coordinates(grade, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
+      call de_coordinates(grid, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       do j = lbound(coordX,2), ubound(coordX,2)
         do i = lbound(coordX,1), ubound(coordX,1)
@@ -275,14 +275,14 @@ contains
   !! @param[in]  blocos        decomposição do modelo (opcional)
   !! @param[in]  tag           prefixo das mensagens da leitura dos centros
   !! @param[in]  tag_corners   prefixo das mensagens da leitura dos cantos
-  subroutine cpl_tripolar_grid(name, file_name, nx, ny, petCount, corners, grade, rc, &
+  subroutine cpl_tripolar_grid(name, file_name, nx, ny, petCount, corners, grid, rc, &
                                 blocks, tag, tag_corners)
     character(len=*),   intent(in)  :: name
     character(len=*),   intent(in)  :: file_name
     integer,            intent(in)  :: nx, ny
     integer,            intent(in)  :: petCount
     logical,            intent(in)  :: corners
-    type(ESMF_Grid),    intent(out) :: grade
+    type(ESMF_Grid),    intent(out) :: grid
     integer,            intent(out) :: rc
     type(cpl_blocks_t), intent(in), optional :: blocks
     character(len=*),   intent(in), optional :: tag, tag_corners
@@ -293,13 +293,13 @@ contains
     rc = ESMF_SUCCESS
     nullify(coordX, coordY)
 
-    call create_grid(grade, nx, ny, petCount, rc, blocks)
+    call create_grid(grid, nx, ny, petCount, rc, blocks)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    call prepare_coordinates(grade, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
+    call prepare_coordinates(grid, ESMF_STAGGERLOC_CENTER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     do lde = 0, localDeCount - 1
-      call de_coordinates(grade, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
+      call de_coordinates(grid, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       call mom6_supergrid_tcoords(trim(file_name), coordX, coordY, rc, tag=tag)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(name)// &
@@ -308,10 +308,10 @@ contains
 
     if (.not. corners) return
 
-    call prepare_coordinates(grade, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
+    call prepare_coordinates(grid, ESMF_STAGGERLOC_CORNER, localDeCount, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     do lde = 0, localDeCount - 1
-      call de_coordinates(grade, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
+      call de_coordinates(grid, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       call mom6_supergrid_corners(trim(file_name), coordX, coordY, rc, tag=tag_corners)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(name)// &
@@ -333,12 +333,12 @@ contains
   !! @param[in]  petMap    PET de cada bloco (base 0)
   !! @param[out] grade     a grade criada
   !! @param[out] rc        ESMF_SUCCESS, ou o código da falha
-  subroutine cpl_block_grid(name, ni, nj, bounds, petMap, grade, rc)
+  subroutine cpl_block_grid(name, ni, nj, bounds, petMap, grid, rc)
     character(len=*), intent(in)  :: name
     integer,          intent(in)  :: ni, nj
     integer,          intent(in)  :: bounds(:,:)
     integer,          intent(in)  :: petMap(:)
-    type(ESMF_Grid),  intent(out) :: grade
+    type(ESMF_Grid),  intent(out) :: grid
     integer,          intent(out) :: rc
 
     type(ESMF_DistGrid) :: distGrid
@@ -364,14 +364,14 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(name)// &
         ': falha DistGridCreate', line=__LINE__, file=u_FILE_u)) return
 
-    grade = ESMF_GridCreate(distgrid=distGrid,               &
+    grid = ESMF_GridCreate(distgrid=distGrid,                &
               coordSys=ESMF_COORDSYS_SPH_DEG,                &
               gridEdgeLWidth=(/0,0/), gridEdgeUWidth=(/0,0/),&
               rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(name)// &
         ': falha GridCreate', line=__LINE__, file=u_FILE_u)) return
 
-    call ESMF_GridAddCoord(grade, staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
+    call ESMF_GridAddCoord(grid, staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_de_blocos: '//trim(name)// &
         ': falha GridAddCoord', line=__LINE__, file=u_FILE_u)) return
   end subroutine cpl_block_grid
@@ -383,20 +383,20 @@ contains
   !> Cria a grade periódica em longitude, com índices globais e coordenadas
   !! esféricas em graus: nos blocos dados ou, sem eles, na decomposição
   !! cpl_regdecomp de nx x ny em petCount PETs.
-  subroutine create_grid(grade, nx, ny, petCount, rc, blocks)
-    type(ESMF_Grid),    intent(out) :: grade
+  subroutine create_grid(grid, nx, ny, petCount, rc, blocks)
+    type(ESMF_Grid),    intent(out) :: grid
     integer,            intent(in)  :: nx, ny, petCount
     integer,            intent(out) :: rc
     type(cpl_blocks_t), intent(in), optional :: blocks
     integer :: regDecomp(2)
 
     if (present(blocks)) then
-      grade = ESMF_GridCreate1PeriDim(countsPerDEDim1=blocks%cntx, &
+      grid = ESMF_GridCreate1PeriDim(countsPerDEDim1=blocks%cntx, &
         countsPerDEDim2=blocks%cnty, periodicDim=1, petMap=blocks%pmap, &
         indexflag=ESMF_INDEX_GLOBAL, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
     else
       regDecomp = cpl_regdecomp(petCount, nx, ny)
-      grade = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx, ny/), &
+      grid = ESMF_GridCreate1PeriDim(minIndex=(/1,1/), maxIndex=(/nx, ny/), &
         regDecomp=regDecomp, periodicDim=1, indexflag=ESMF_INDEX_GLOBAL, &
         coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
     end if
@@ -404,32 +404,32 @@ contains
 
   !> Acrescenta as coordenadas no stagger dado (chamada coletiva, todos os
   !! PETs) e devolve o número de DEs locais.
-  subroutine prepare_coordinates(grade, stagger, localDeCount, rc)
-    type(ESMF_Grid),       intent(inout) :: grade
+  subroutine prepare_coordinates(grid, stagger, localDeCount, rc)
+    type(ESMF_Grid),       intent(inout) :: grid
     type(ESMF_StaggerLoc), intent(in)    :: stagger
     integer,               intent(out)   :: localDeCount
     integer,               intent(out)   :: rc
 
     localDeCount = 0
-    call ESMF_GridAddCoord(grade, staggerloc=stagger, rc=rc)
+    call ESMF_GridAddCoord(grid, staggerloc=stagger, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_GridGet(grade, localDeCount=localDeCount, rc=rc)
+    call ESMF_GridGet(grid, localDeCount=localDeCount, rc=rc)
   end subroutine prepare_coordinates
 
   !> Vetores das duas coordenadas do DE local lde, no stagger dado.
   !! ESMF_GridGetCoord é local e exige localDE= quando o PET tem mais de um
   !! DE.
-  subroutine de_coordinates(grade, stagger, lde, coordX, coordY, rc)
-    type(ESMF_Grid),       intent(in)  :: grade
+  subroutine de_coordinates(grid, stagger, lde, coordX, coordY, rc)
+    type(ESMF_Grid),       intent(in)  :: grid
     type(ESMF_StaggerLoc), intent(in)  :: stagger
     integer,               intent(in)  :: lde
     real(r8), pointer                  :: coordX(:,:), coordY(:,:)
     integer,               intent(out) :: rc
 
-    call ESMF_GridGetCoord(grade, coordDim=1, localDE=lde, &
+    call ESMF_GridGetCoord(grid, coordDim=1, localDE=lde, &
       staggerloc=stagger, farrayPtr=coordX, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_GridGetCoord(grade, coordDim=2, localDE=lde, &
+    call ESMF_GridGetCoord(grid, coordDim=2, localDE=lde, &
       staggerloc=stagger, farrayPtr=coordY, rc=rc)
   end subroutine de_coordinates
 

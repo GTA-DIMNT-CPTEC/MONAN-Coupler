@@ -142,7 +142,7 @@ type :: cpl_malha_t
   character(len=8)  :: lon_origin = ''       ! 'leste0' ou 'oeste180'
   integer           :: nx = 0, ny = 0
   logical           :: corners     = .false.  ! exigido pelo método conservativo
-  type(ESMF_Grid)   :: grade
+  type(ESMF_Grid)   :: grid
 end type cpl_malha_t
 
 function malha_latlon(name, nx, ny, lon_origin, corners, blocks, rc) result(m)

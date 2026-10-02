@@ -9,6 +9,12 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
 ## [Não lançado]
 
+- **`grade` → `grid` no catálogo de malhas (R-FASE12-06).** Complemento da fase 12: o argumento de saída das funções do catálogo de malhas (`cpl_latlon_grid`, `cpl_tripolar_grid`, `cpl_block_grid`) e das rotinas internas de `cpl_grids`, e a variável correspondente do teste das malhas, ainda se chamavam `grade`, palavra que também existe em inglês e por isso escapou da varredura da R-FASE12-05. Tabela: `tools/dev/nomes/R-FASE12-06.txt` (uma troca, limitada a `src/coupling` e `tests/malhas`). Nenhuma chamada usava `grade=` como palavra-chave. Textos entre aspas, comentários e cálculos ficam como estão.
+  - `docs/estado-do-projeto.md`: R-FASE12-05 concluída; a etapa nova no plano da fase 12 e a observação sobre o limite da varredura. `docs/arquitetura-acoplamento.md`: o nome no exemplo de código.
+  - Conferências locais: `confere-tudo.bash HEAD~1` sem nenhuma falha, inclusive `literais` (constantes de texto iguais) e `nomes`. Compilação sem avisos.
+  - Indicadores: nenhum muda.
+  - Validação: na Jaci, compilação e rodada com `valida_rodada.bash`; esperado PASS, 73 arquivos iguais à linha de base R-NOFMA-02, e o relatório de acoplamento igual ao da `fase12-05-validada`.
+
 - **Nomes em inglês em `src/shared`, no driver e no programa principal; encerramento da fase 12 (R-FASE12-05).** Quinta e última etapa da fase 12. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-05.txt` (10 trocas).
   - `diag_bitsum`: `acumula`, `acumula_2d` e `grava` → `accumulate`, `accumulate_2d` e `write_sum`; `PREFIXO` → `PREFIX`; argumento `rotulo` → `label`. `mom6_supergrid`: `lido` → `was_read`. Driver (`esm`): função interna `rotulo` → `comp_label`, e as variáveis `ordem`, `n_metodo` e `n_cheia` → `order`, `n_method` e `n_full_method`.
   - Os testes, que o plano deixava para uma sexta etapa, foram renomeados nas etapas das suas áreas; a fase termina aqui. Varredura final: nenhum identificador Fortran próprio em português em `src/` e `tests/` (o que sobra são as interfaces do MOM6, do FMS e do MPAS, a função intrínseca `achar` e abreviações em inglês).
@@ -16,7 +22,7 @@ aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
   - `docs/estado-do-projeto.md`: R-FASE12-04 concluída e encerramento da fase 12 (o que ficou em português, por decisão, e como levar um ramo antigo aos nomes novos).
   - Conferências locais: `confere-tudo.bash HEAD~1` sem nenhuma falha, inclusive `literais` (constantes de texto iguais) e `nomes`. Compilação sem avisos.
   - Indicadores: nenhum muda.
-  - Validação: na Jaci, compilação e rodada com `valida_rodada.bash`; esperado PASS, 73 arquivos iguais à linha de base R-NOFMA-02, e o relatório de acoplamento igual ao da `fase12-04-validada`.
+  - Validação: rodada na Jaci com PASS, 73 arquivos iguais à linha de base R-NOFMA-02, nenhum com diferença só de metadados (tag `fase12-05-validada`); relatório de acoplamento (85 linhas) igual ao da `fase12-04-validada`.
 
 - **Nomes em inglês nos caps dos modelos (R-FASE12-04).** Quarta etapa da fase 12. Troca os nomes de `src/caps` (sem os fontes de `upstream/`, que vêm do MOM6, nem os nomes das interfaces do MPAS, do MOM6, do FMS e do SIS2) e dos seus testes. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-04.txt` (63 trocas e quatro arquivos renomeados).
   - Adaptador do MPAS: `src/caps/atmos/mpas_adaptador.F90` → `mpas_adapter.F90`, módulo `mpas_adaptador_mod` → `mpas_adapter_mod` (`Makefile`, `compila-local.bash`, que aceita os três nomes que o adaptador já teve, e scripts dos testes atualizados).

@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE12-05 (02/10/2026), que encerra a fase 12 (nomes em inglês). Para retomar, comece pela seção 10.
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa sem precisar reconstruir o contexto. Atualizado na R-FASE12-06 (02/10/2026), complemento da fase 12 (nomes em inglês). Para retomar, comece pela seção 10.
 
 ## 1. O que é o projeto
 
@@ -86,6 +86,7 @@ Cada etapa é um patch com um único commit, aplicado com `git am` na ordem abai
 | R-FASE12-02 | nomes em inglês no mapa de acoplamento (`src/coupling`: tabelas, tipos, colunas, consultas e malhas) e nos seus testes; colisões por unidade de escopo e modo `traduz` |
 | R-FASE12-03 | nomes em inglês no mediador (`src/mediator`: fases, rotas, tipos e contagens) e nos seus testes |
 | R-FASE12-04 | nomes em inglês nos caps dos modelos (`src/caps`, sem `upstream/`), com o adaptador do MPAS em `mpas_adapter.F90`, e nos seus testes |
+| R-FASE12-05 | nomes em inglês em `src/shared`, no driver e no programa principal; encerramento da fase 12 |
 | R-FASE9-07 | encerramento da fase 9: indicadores finais, RPQ na sexta versão e procedimento de integração ao `develop`; só documentação |
 | R-FASE9-06 | zeragem dos fluxos do oceano numa rotina (`ZeroOcnFluxFields`), `ZeroInternalField` e `GetFieldPtrOptional` reaproveitando `FillInternalField` e `GetFieldPtr`, busca de campos do cap atmosférico em `find_local_field`; trechos repetidos de 54 para 42 |
 | R-FASE9-05 | leitura do supergrid do MOM6 (`mom6_supergrid_tcoords` e `mom6_supergrid_corners`) numa rotina privada; trechos repetidos de 67 para 54; conferida com teste avulso |
@@ -305,11 +306,12 @@ Cada etapa tem a sua tabela de trocas em `tools/dev/nomes/`, aplicada e conferid
 | 2 | R-FASE12-02 | mapa de acoplamento (`src/coupling`) e seus testes; `tools/dev/mapa-acoplamento.py` | concluída (PASS, 73 iguais, relatório igual ao da `fase12-01-validada`, tag `fase12-02-validada`) |
 | 3 | R-FASE12-03 | mediador (`src/mediator`) e seus testes | concluída (PASS, 73 iguais, relatório igual ao da `fase12-02-validada`, tag `fase12-03-validada`) |
 | 4 | R-FASE12-04 | caps dos modelos (`src/caps`, sem `upstream/`), inclusive o adaptador do MPAS, e seus testes | concluída (PASS, 73 iguais, relatório igual ao da `fase12-03-validada`, tag `fase12-04-validada`) |
-| 5 | R-FASE12-05 | `src/shared`, driver e programa principal; encerramento da fase (os testes, previstos para uma sexta etapa, foram renomeados com as suas áreas) | em validação |
+| 5 | R-FASE12-05 | `src/shared`, driver e programa principal; encerramento da fase (os testes, previstos para uma sexta etapa, foram renomeados com as suas áreas) | concluída (PASS, 73 iguais, relatório igual ao da `fase12-04-validada`, tag `fase12-05-validada`) |
+| 6 | R-FASE12-06 | `grade` → `grid` em `cpl_grids` e no teste das malhas (nome em português que a varredura não pegou, por ser também palavra inglesa) | em validação |
 
 Os testes de regressão que compilam a versão `REV` com o programa de teste da árvore de trabalho (`malhas`, `completar`, `docn`) não compilariam `REV` depois de uma troca de nome público que o teste usa. Desde a R-FASE12-02, eles traduzem a cópia de `REV` para os nomes de hoje com `renomeia-identificadores.py traduz`, aplicando as tabelas que ainda não existiam em `REV`; a cópia traduzida é `REV` com outros nomes, pela mesma regra que a conferência `nomes` confere.
 
-Encerramento da fase 12 (R-FASE12-05, 02/10/2026): nenhum identificador Fortran próprio em português em `src/` e `tests/`. A varredura final (vocabulário português contra inglês, por parte de cada nome) só encontra nomes que não são do acoplador ou que já são inglês abreviado: as interfaces do MOM6, do FMS e do MPAS (`get_param`, `param_file`, `jec`, `jsd`, `prec_rain`, `diag_manager_set_time_end_infra`), a função intrínseca `achar` e abreviações como `dst`, `fref` e `freg`. Ficam em português, por decisão: os textos entre aspas (mensagens de log, linhas `CPL-REL:`, valores das tabelas do mapa, opções dos esquemas), os comentários, os nomes dos diretórios de teste (`tests/malhas`, `tests/completar`, `tests/atmgrid`) e das conferências do `confere-tudo.bash`, e os nomes internos dos scripts em Python e Bash. As cinco tabelas de `tools/dev/nomes/` (cerca de 500 trocas) levam um ramo antigo aos nomes novos com `renomeia-identificadores.py aplica`.
+Encerramento da fase 12 (R-FASE12-05, 02/10/2026): nenhum identificador Fortran próprio em português em `src/` e `tests/`. A varredura final (vocabulário português contra inglês, por parte de cada nome) só encontra nomes que não são do acoplador ou que já são inglês abreviado: as interfaces do MOM6, do FMS e do MPAS (`get_param`, `param_file`, `jec`, `jsd`, `prec_rain`, `diag_manager_set_time_end_infra`), a função intrínseca `achar` e abreviações como `dst`, `fref` e `freg`. A varredura não pega palavras portuguesas que também existem em inglês: `grade` (malha), argumento das funções do catálogo de malhas, foi achado ao escrever a nota técnica resumida e trocado na R-FASE12-06. Ficam em português, por decisão: os textos entre aspas (mensagens de log, linhas `CPL-REL:`, valores das tabelas do mapa, opções dos esquemas), os comentários, os nomes dos diretórios de teste (`tests/malhas`, `tests/completar`, `tests/atmgrid`) e das conferências do `confere-tudo.bash`, e os nomes internos dos scripts em Python e Bash. As cinco tabelas de `tools/dev/nomes/` (cerca de 500 trocas) levam um ramo antigo aos nomes novos com `renomeia-identificadores.py aplica`.
 
 ### Integração de `refactor/principal` ao `develop`
 

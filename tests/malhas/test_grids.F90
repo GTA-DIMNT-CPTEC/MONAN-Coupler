@@ -103,18 +103,18 @@ contains
   end subroutine write_nml
 
   !> Para cada DE local: limites e valores do item de máscara (centros).
-  subroutine write_mask(un, grade)
+  subroutine write_mask(un, grid)
     integer,         intent(in) :: un
-    type(ESMF_Grid), intent(in) :: grade
+    type(ESMF_Grid), intent(in) :: grid
     integer(ESMF_KIND_I4), pointer :: m(:,:)
     integer :: nde, lde, rc
 
-    call ESMF_GridGet(grade, localDeCount=nde, rc=rc)
+    call ESMF_GridGet(grid, localDeCount=nde, rc=rc)
     if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGet'
     write(un) nde
     do lde = 0, nde - 1
       nullify(m)
-      call ESMF_GridGetItem(grade, itemflag=ESMF_GRIDITEM_MASK, staggerloc=ESMF_STAGGERLOC_CENTER, &
+      call ESMF_GridGetItem(grid, itemflag=ESMF_GRIDITEM_MASK, staggerloc=ESMF_STAGGERLOC_CENTER, &
                             localDE=lde, farrayPtr=m, rc=rc)
       if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGetItem'
       write(un) lde, lbound(m), ubound(m)
@@ -124,20 +124,20 @@ contains
 
   !> Para cada DE local: limites computacionais, limites do vetor e valores,
   !! das duas coordenadas.
-  subroutine write_grid(un, grade, stagger)
+  subroutine write_grid(un, grid, stagger)
     integer,                intent(in) :: un
-    type(ESMF_Grid),        intent(in) :: grade
+    type(ESMF_Grid),        intent(in) :: grid
     type(ESMF_StaggerLoc),  intent(in) :: stagger
     real(ESMF_KIND_R8), pointer :: c(:,:)
     integer :: nde, lde, dim, clb(2), cub(2), rc
 
-    call ESMF_GridGet(grade, localDeCount=nde, rc=rc)
+    call ESMF_GridGet(grid, localDeCount=nde, rc=rc)
     if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGet'
     write(un) nde
     do lde = 0, nde - 1
       do dim = 1, 2
         nullify(c)
-        call ESMF_GridGetCoord(grade, coordDim=dim, localDE=lde, staggerloc=stagger, &
+        call ESMF_GridGetCoord(grid, coordDim=dim, localDE=lde, staggerloc=stagger, &
                                computationalLBound=clb, computationalUBound=cub, &
                                farrayPtr=c, rc=rc)
         if (rc /= ESMF_SUCCESS) error stop 'ESMF_GridGetCoord'
