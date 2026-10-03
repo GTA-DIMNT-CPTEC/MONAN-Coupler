@@ -1,355 +1,58 @@
 # Conferências locais antes de uma rodada na Jaci
 
-Uma etapa de refatoração só é aprovada pela rodada completa na Jaci, comparada bit a bit com a linha de base (ver [`validacao-refatoracao.md`](validacao-refatoracao.md)). Cada rodada, porém, custa uma compilação e uma fila. Este guia descreve o que pode ser conferido antes, fora da Jaci, numa máquina com ESMF, NetCDF-Fortran e MPI instalados, sem as bibliotecas do MPAS, do MOM6 e do FMS. Essas conferências pegam a maior parte dos erros de compilação e de refatoração, mas não substituem a rodada.
+Uma etapa só é aprovada pela rodada completa na Jaci, comparada bit a bit com a linha de base ([`validacao-refatoracao.md`](validacao-refatoracao.md)). Antes dela, estas conferências, feitas fora da Jaci e sem as bibliotecas do MPAS, do MOM6 e do FMS, pegam a maior parte dos erros de compilação e de refatoração. A versão longa, com cada teste explicado em detalhe, está em [`historico/conferencias-locais-ate-fase12.md`](historico/conferencias-locais-ate-fase12.md).
 
 ## 1. O que é preciso
 
-| Item | Observação |
-| --- | --- |
-| gfortran e MPI (MPICH ou Open MPI) | com `mpif90` no PATH; outro compilador pela variável `FC` |
-| NetCDF-Fortran | com `nf-config` no PATH |
-| ESMF 8.9.1 compilado | a variável `ESMFMKFILE` aponta para o `esmf.mk` da instalação |
-| Python 3.6 ou mais novo, e git | para os scripts de conferência; os de `tools/dev/` rodam também com o `python3` do sistema na Jaci (3.6) |
-| `ncgen` (pacote netcdf-bin) | para os dados sintéticos dos testes do supergrid e do DOCN |
+gfortran e MPI (`mpif90` no PATH), NetCDF-Fortran (`nf-config`), ESMF 8.9.1 compilado (`ESMFMKFILE` apontando para o `esmf.mk`), Python 3.6 ou mais novo, git e `ncgen`. Os fontes que dependem dos modelos compilam contra as interfaces mínimas de `tests/interfaces/` (seção 4). A instalação passo a passo está em [`estado-do-projeto.md`](estado-do-projeto.md), seção 8.
 
-Nenhuma biblioteca dos modelos é necessária. Os fontes que dependem delas são compilados contra as interfaces mínimas de `tests/interfaces/` (seção 3).
-
-## 2. As ferramentas
-
-| Ferramenta | Pergunta que responde |
-| --- | --- |
-| `tools/dev/confere-tudo.bash [REV]` | todas as conferências abaixo, de uma vez: alguma falhou? |
-| `tools/dev/indicadores.py [REV ...]` | como estão os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos)? |
-| `tools/dev/compila-local.bash` | o código compila, com as opções de aviso e de ponto flutuante do Makefile? |
-| `tools/dev/confere-literais.py REV` | alguma mensagem de log, nome de campo, atributo ou formato mudou desde o commit `REV`? |
-| `tools/dev/confere-instrucoes.py REV arquivo [...]` | numa etapa que só move código, alguma instrução foi alterada? |
-| `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam os mesmos arquivos que no commit `REV`? |
-| `tests/bulk/compara-bulk.bash REV` | a física bulk do mediador calcula os mesmos valores, bit a bit, que no commit `REV`? |
-| `tests/unit/roda-unitarios.bash` | as fórmulas do acoplador calculam o valor que a fórmula publicada dá? |
-| `tests/atmgrid/compara-grade-atm.bash REV` | o cap atmosférico leva as células MPAS à grade regular 360 x 180 com os mesmos valores, bit a bit, que no commit `REV`? |
-| `tests/malhas/compara-malhas.bash REV` | as malhas do mediador (fluxo e oceano, com o MOM6 e com o DOCN), a grade do cap atmosférico e a malha do SIS2 têm a mesma decomposição e as mesmas coordenadas, bit a bit, que no commit `REV` (a do SIS2, que a construção de antes), com vários números de processos? |
-| `tests/completar/compara-completar.bash REV` | a SST na malha de fluxo e os campos exportados ao oceano, com os pontos completados por vizinhança, e as contagens do relatório de acoplamento saem iguais, bit a bit, aos do commit `REV`, com vários números de processos? |
-| `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 (`ocean_hgrid.nc`) dá as mesmas dimensões, coordenadas e mensagens que no commit `REV`? |
-| `tests/docn/compara-docn.bash REV` | o oceano de dados (DOCN) exporta os mesmos campos, com os mesmos carimbos de tempo, diagnósticos e mensagens, que no commit `REV`? |
-| `tools/dev/mapa-acoplamento.py [-c]` | o `docs/acoplamento.md` está em dia com o mapa de acoplamento de `src/coupling/`? |
-| `tests/cplcheck/confere-cplcheck.bash` | num driver NUOPC com as listas de campos de hoje, a conferência do mapa (`cpl_check`) dá 0 diferenças, e acusa os defeitos plantados? |
-| `tests/regrid/compara-esquema.bash ESQUEMA [OPCOES]` | um esquema de interpolação (por exemplo, um novo, escrito a partir do modelo `regrid_idw.F90`) erra quanto, comparado a uma referência, e dá o mesmo campo, bit a bit, com 1 e com vários processos? |
-
-### 2.0 Todas as conferências de uma vez
+## 2. Tudo de uma vez
 
 ```bash
 export ESMFMKFILE=/caminho/para/esmf.mk
-tools/dev/confere-tudo.bash HEAD
+export MPIRUN="mpirun.openmpi --allow-run-as-root --oversubscribe"   # Open MPI como root
+tools/dev/confere-tudo.bash HEAD          # antes do commit; depois dele, HEAD~1
 ```
 
-Executa, em sequência, as conferências das seções 2.1 a 2.6 e 2.8 a 2.16 e o teste do framework de interpolação (`tests/regrid`), e termina com um resumo e a tabela de indicadores (seção 2.7). Cada conferência tem o seu log em `build-local/confere/logs/`. A saída se parece com esta:
+Leva cerca de onze minutos e termina com um resumo (OK, FALHOU ou PULADO por conferência) e as tabelas de indicadores. Logs em `build-local/confere/logs/`. Opções: `-i` exige instruções idênticas (etapas que só mudam comentários); `-t lista` roda só algumas conferências (ex.: `-t compilacao,literais`); `-o dir` troca o diretório de trabalho. `MPIRUN`, `NP` e `FC` são repassadas aos testes.
 
-```
-Resumo (referência: HEAD)
-  compilacao   OK                              35 s
-  avisos       OK                              33 s
-  literais     OK                               0 s
-  regrid       OK                              27 s
-  esquemas     OK                               8 s
-  gravadores   OK                              86 s
-  bulk         OK                              82 s
-  grade        OK                              83 s
-  malhas       OK                              75 s
-  completar    OK                             100 s
-  unitarios    OK                              31 s
-  mapa         OK                               0 s
-  cplcheck     OK                              45 s
-  supergrid    OK                               4 s
-  docn         OK                             178 s
-```
-
-O que cada linha confere:
-
-| Conferência | Falha quando |
-| --- | --- |
-| `compilacao` | algum fonte não compila (seção 2.1) |
-| `avisos` | algum fonte tem mais avisos do que na versão `REV`, compilada com as mesmas interfaces mínimas |
-| `literais` | alguma constante de texto mudou (seção 2.2) |
-| `nomes` | só quando há tabela nova em `tools/dev/nomes/` desde `REV`: a árvore de trabalho não é `REV` com as trocas de nome da tabela, ou alguma troca colide com um nome existente (seção 2.16) |
-| `instrucoes` | só com a opção `-i`: algum `.F90` alterado tem instrução diferente de `REV` (seção 2.3); use em etapas que só mudam comentários ou espaços |
-| `regrid` | os testes de `tests/regrid` não imprimem `TODOS OS TESTES PASSARAM` |
-| `esquemas` | o esquema modelo `idw`, em `compara-esquema.bash`, não roda ou dá campos diferentes com 1 e com 4 processos (seção 2.15) |
-| `gravadores`, `bulk`, `grade` | os testes de regressão das seções 2.4 a 2.6 acusam diferença |
-| `malhas` | o teste de regressão da seção 2.13 acusa diferença |
-| `completar` | o teste de regressão da seção 2.14 acusa diferença |
-| `unitarios` | algum teste com valor esperado ou o teste de consistência do mapa de acoplamento (seção 2.8) falha |
-| `mapa` | `docs/acoplamento.md` não é o que `tools/dev/mapa-acoplamento.py` gera do mapa (seção 2.11) |
-| `cplcheck` | a conferência do mapa no driver de teste não dá o esperado (seção 2.12) |
-| `supergrid`, `docn` | os testes de regressão das seções 2.9 e 2.10 acusam diferença |
-
-A opção `-t` escolhe só algumas conferências (`-t compilacao,literais,bulk`), e `-o` troca o diretório de trabalho. As variáveis `MPIRUN`, `NP` e `FC` são repassadas aos testes. O comando leva cerca de onze minutos numa máquina de 4 núcleos, três deles no teste do DOCN, e sai com código 0 se nenhuma conferência falhou. Depois do commit da etapa, a referência passa a ser `HEAD~1`.
-
-Foi conferido ao contrário: uma variável sem uso acrescentada a `nc_writer.F90` faz falhar `avisos` e, com `-i`, `instrucoes`.
-
-### 2.1 Compilação
-
-```bash
-export ESMFMKFILE=/caminho/para/esmf.mk
-tools/dev/compila-local.bash
-```
-
-Compila os fontes na ordem do Makefile, em `build-local/`, e mostra uma linha por fonte com o resultado e o número de avisos. Ficam de fora o driver e o programa principal. O log de cada fonte fica em `build-local/<fonte>.log`.
-
-Para saber se uma mudança criou avisos, compile também a versão anterior (extraída com `git archive`, por exemplo) em outro diretório, com `-s` e `-o`, e compare.
-
-### 2.2 Constantes de texto
-
-```bash
-tools/dev/confere-literais.py HEAD
-```
-
-Compara os literais de texto (fora dos comentários) de cada fonte alterado desde `HEAD` com os da árvore de trabalho. Mensagens de log são lidas por ferramentas de `tools/` e comparadas entre rodadas, e nomes de campos e atributos acabam nos arquivos NetCDF: numa refatoração, não devem mudar. Toda diferença tem de ser explicada, e as esperadas (por exemplo, o formato de uma variável morta que foi removida) são anunciadas no CHANGELOG. Quando um trecho muda de arquivo (na divisão de um módulo, por exemplo), cada arquivo mostra só quantos literais saíram e entraram, e o que vale é a soma de todos os arquivos, que tem de continuar igual. Sai com código 1 se a soma tiver diferença.
-
-### 2.3 Instruções
-
-```bash
-tools/dev/confere-instrucoes.py HEAD src/mediator/MED_cap.F90
-tools/dev/confere-instrucoes.py HEAD src/mediator/*.F90
-```
-
-Junta as linhas de continuação, retira comentários, espaços e diferença de maiúsculas, e compara o conjunto de instruções do arquivo no commit e na árvore de trabalho. Com vários arquivos, compara a soma de todos (um arquivo novo conta como vazio no commit): é a forma de conferir um trecho que mudou de arquivo. Numa etapa que divide uma rotina em procedimentos, as únicas instruções acrescentadas devem ser as chamadas, as declarações, os cabeçalhos e os retornos das etapas novas; as removidas devem ser só as que viraram chamada e o código morto anunciado. A comparação ignora a ordem: a ordem das operações, em especial das coletivas do MPI, que precisam acontecer na mesma sequência em todos os processos, é conferida lendo o diff.
-
-É a principal conferência dos fontes que só compilam de verdade na Jaci, como `mpas_atm_model.F90` (com `mpas_atm_setup.F90` e `mpas_atm_fluxes.F90`) e `mom_cap_MONAN.F90`.
-
-### 2.4 Teste dos gravadores de diagnóstico
-
-```bash
-tests/writers/compara-gravadores.bash HEAD
-```
-
-Compila a versão do commit e a da árvore de trabalho, liga a cada uma o seu programa `tests/writers/test_writers.F90` (o do commit na versão antiga, com os `tests/unit/*.inc` do commit, que ele inclui; o da árvore de trabalho na nova, para que uma etapa possa mudar a interface dos gravadores) e o executa com 4 processos MPI e dados sintéticos. O programa chama `med_write_import_fields` (mediador) e `write_mpas_import_diag` (cap atmosférico) duas vezes cada, com valores inválidos, máscara de terra e, na segunda chamada, membros de `atm_bnd` ausentes. Chama também `WriteDOCNDiag` (oceano de dados) três vezes, cada uma com um arquivo `&nuopc_docn` lido por `config_read` e com arquivos NetCDF de SST, gelo e correntes que o próprio programa grava numa grade 36 x 18: sem correntes e com o gelo em fração; com correntes, gelo em porcentagem e nomes diferentes para a dimensão de tempo; e com o arquivo de SST ausente, que só gera um aviso no log. Esse teste é a única verificação do `WriteDOCNDiag`, porque a rodada da linha de base não usa o DOCN. O script compara byte a byte os arquivos NetCDF gravados e compara as mensagens dos gravadores no log do ESMF. Sai com código 0 se tudo for idêntico. Com a mudança ainda não gravada, compare com `HEAD`; depois do commit, com `HEAD~1`.
-
-O lançador do MPI pode ser trocado pela variável `MPIRUN` (padrão: `mpiexec`). O número de processos (`NP`, padrão 4) tem de ser par, porque a grade do teste é dividida em 2 x NP/2 blocos.
-
-### 2.5 Teste da física bulk do mediador
-
-```bash
-tests/bulk/compara-bulk.bash HEAD
-```
-
-Funciona como o teste dos gravadores. O programa `tests/bulk/test_bulk_ncar.F90` cria, na grade ATM 360 x 180, todos os campos do estado interno do mediador que `calc_bulk_ncar` lê ou escreve, preenche as entradas com dados sintéticos e chama `calc_bulk_ncar` três vezes, em instantes diferentes. Depois de cada chamada, grava todos esses campos. O script compara os arquivos das duas versões byte a byte e compara as mensagens da física bulk no log do ESMF.
-
-Os dados cobrem os casos que mudam o caminho do cálculo: vento nulo, ar mais quente e mais frio que a superfície (os dois ramos do fator de estabilidade), temperatura do gelo fora da faixa física, fração de gelo abaixo do limiar dos fluxos sobre o gelo, máscara de terra e forçantes ausentes. Como compara bit a bit, o teste confirma que mudar código de lugar, por exemplo para uma função, não alterou nenhuma operação de ponto flutuante. O teste foi conferido ao contrário também: alterar um parâmetro do fator de estabilidade faz o resultado diferir.
-
-Sem o SIS2, que é o padrão do teste, `calc_bulk_ncar` terminava recalculando a fração de gelo pelo limiar de SST. Desde a R-FASE11-19, esse cálculo é a fase `ice_fraction_without_sis2`, de `med_exchange`, e o programa da árvore de trabalho a chama logo depois de `calc_bulk_ncar`, como o `MediatorAdvance`; por isso o script liga todos os objetos do mediador que a versão compilada tiver. Conferido ao contrário: chamar a fase antes da física faz os campos diferirem.
-
-Desde a R-FASE11-20, a física recebe arrays (`med_flux_t`) em vez do estado interno, e o programa da árvore de trabalho chama a fase `compute_fluxes` (`med_exchange`), que os associa aos mesmos campos e chama `calc_bulk_ncar`; a versão de referência continua chamando `calc_bulk_ncar` com o estado interno. Conferido ao contrário: calcular a rugosidade antes da tensão do vento faz os campos diferirem.
-
-Ficam de fora o caminho do DOCN e o caminho com `cfg_use_sis2_dynamic = .true.`, porque o teste usa os valores padrão da configuração. Com o padrão, `calc_bulk_ncar` também calcula a fração de gelo pelo limiar de SST (`legacy_ice_fraction`), que fica coberta.
-
-### 2.6 Teste da grade do cap atmosférico
-
-```bash
-tests/atmgrid/compara-grade-atm.bash HEAD
-```
-
-Funciona como os dois anteriores. O programa `tests/atmgrid/test_mpas_export.F90` cria a grade 360 x 180 do cap atmosférico (`mpas_create_grid`) e três campos de exportação, monta em cada processo células MPAS sintéticas e chama `mpas_export` duas vezes. Cada chamada passa por `state_set_field_1d` e `map_cells_to_regular_grid`: soma e contagem por caixa de 1 grau, soma entre processos em ordem de rank, média, preenchimento das caixas vazias e cópia para a porção local da grade. Os campos são reunidos no processo 0 e gravados; o script compara os arquivos byte a byte, a linha `MPAS-DIAG` da saída padrão e as mensagens do log do ESMF (entre elas a marca `BUG-SPARSE-02`, com o número de caixas vazias antes e depois do preenchimento).
-
-As células seguem uma sequência quase aleatória (razão áurea) própria de cada processo, em faixas de longitude que se sobrepõem: há caixas com células de até três processos, e a ordem da soma entre eles muda o último bit. O teste foi conferido ao contrário: inverter a ordem da soma entre processos ou a ordem das linhas no preenchimento faz o resultado diferir.
-
-### 2.7 Indicadores de código limpo
-
-```bash
-tools/dev/indicadores.py fase5-07-validada .
-tools/dev/indicadores.py -l .
-```
-
-Mede, nos fontes próprios de `src/` (sem `upstream/`), os indicadores do roteiro de código limpo (`docs/roteiro-codigo-limpo.md`): arquivos com mais de 1 000 linhas, rotinas com mais de 100 e de 150 linhas de código, variáveis de módulo (públicas, protegidas e privadas), variáveis locais que conservam o valor entre chamadas (`save` explícito, ou implícito por valor na declaração), trechos de 6 linhas repetidos e comentários com marcas de histórico. Cada versão pedida vira uma coluna (`.` é a árvore de trabalho); com `-l`, lista os itens da última versão. A tabela sai em Markdown, pronta para o CHANGELOG. Os indicadores acompanham a evolução do código; não decidem se uma etapa está certa.
-
-Uma segunda tabela traz os indicadores da fase 11 (arquitetura de acoplamento, [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4.4):
-
-| Indicador | O que conta |
-| --- | --- |
-| arquivos com nomes de campos anunciados ou realizados à mão | arquivos fora de `src/coupling/` (onde fica o mapa de acoplamento) com uma instrução de 3 ou mais nomes de campos (`Sa_`, `So_`, `Si_`, `Faxa_`, `Foxx_` e semelhantes), com `NUOPC_Advertise` ou `NUOPC_Realize` de um nome escrito no código, ou com `ESMF_FieldCreate(name=...)` de um nome num arquivo que chama `NUOPC_Realize` |
-| chamadas e arquivos com `ESMF_GridCreate*` fora de `src/coupling` | construções de malha fora do catálogo de malhas |
-| rotas criadas (`regrid%add`) fora de `med_exchange` | pontos de criação de rota espalhados pelo mediador |
-| chamadas de rota em módulos de física | `regrid%apply` em `med_bulk_ncar.F90` |
-| arquivos que carimbam o tempo dos campos | arquivos que chamam `NUOPC_SetTimestamp` |
-
-As contagens são feitas nas instruções, sem comentários nem o conteúdo das mensagens. A regra das fórmulas de índice de grade regular (9 rotinas) não se automatiza bem e é conferida à mão, com a lista do documento de arquitetura.
-
-### 2.8 Testes com valor esperado
-
-```bash
-tests/unit/roda-unitarios.bash
-```
-
-Os testes de regressão das seções 2.4 a 2.6 comparam duas versões do código e respondem se o resultado mudou; não dizem se o resultado está certo. Os testes de `tests/unit/` respondem a essa outra pergunta: comparam o resultado de rotinas do acoplador com valores esperados calculados à parte, diretamente da fórmula publicada, em precisão de 40 algarismos (biblioteca mpmath do Python), com tolerância relativa de 1e-12. A tolerância existe porque a ordem das operações no código não é a do cálculo de referência; um erro de fórmula (sinal, constante, ramo, limite) muda o resultado muito além dela.
-
-O script compila a árvore de trabalho, liga cada programa `tests/unit/test_*.F90` e o executa; cada programa imprime PASSOU ou FALHOU por caso. Não usam MPI. `test_formulas_bulk.F90` cobre três fórmulas da física bulk do mediador (`med_bulk_ncar`):
-
-| Rotina | O que calcula | Casos |
+| Conferência | Ferramenta | Falha quando |
 | --- | --- | --- |
-| `ice_temp_eff` | temperatura do gelo usada nos fluxos: `Si_t_sis2` na faixa (180 K; 273,16 K], senão 271,35 K | dentro, nos dois limites e fora da faixa |
-| `louis_stability` | número de Richardson bulk e fator de estabilidade de Louis (1979) | estável, neutro, instável, e os dois casos extremos que batem no piso (0,05) e no teto (3) |
-| `ocean_direct_albedo` | cosseno do zênite na célula da grade ATM e albedo da água para feixe direto (Briegleb et al., 1986) | sol a pino, noite, sol a 60° e a 78° de latitude, declinação diferente de zero; inclui os casos que batem no piso de 0,03 |
+| `compilacao` | `tools/dev/compila-local.bash` | algum fonte não compila |
+| `avisos` | compila também `REV` | algum fonte tem mais avisos que em `REV` |
+| `literais` | `tools/dev/confere-literais.py REV` | alguma constante de texto (mensagem, nome de campo, atributo, formato) mudou; um trecho que só mudou de arquivo conta pela soma |
+| `nomes` | `tools/dev/renomeia-identificadores.py confere REV` | há tabela nova em `tools/dev/nomes/` e a árvore não é `REV` com essas trocas de nome, ou uma troca colide com um nome visível |
+| `instrucoes` | `tools/dev/confere-instrucoes.py REV` | só com `-i`: algum `.F90` alterado tem instrução diferente |
+| `regrid` | `make -C tests/regrid run` | os testes do framework de interpolação falham |
+| `esquemas` | `tests/regrid/compara-esquema.bash idw` | o esquema modelo não roda ou dá campos diferentes com 1 e 4 processos |
+| `gravadores` | `tests/writers/compara-gravadores.bash REV` | os gravadores de diagnóstico gravam arquivos diferentes |
+| `bulk` | `tests/bulk/compara-bulk.bash REV` | a física bulk dá valores diferentes, bit a bit |
+| `grade` | `tests/atmgrid/compara-grade-atm.bash REV` | a passagem das células MPAS para a grade do cap muda |
+| `malhas` | `tests/malhas/compara-malhas.bash REV` | as malhas do mediador, do cap atmosférico ou do SIS2 mudam, com 1, 4, 6 e 8 processos |
+| `completar` | `tests/completar/compara-completar.bash REV` | a SST, os campos exportados ou as contagens dos pontos completados mudam |
+| `unitarios` | `tests/unit/roda-unitarios.bash` | um teste com valor esperado ou o teste de consistência do mapa falha |
+| `mapa` | `tools/dev/mapa-acoplamento.py -c` | `docs/acoplamento.md` está desatualizado |
+| `cplcheck` | `tests/cplcheck/confere-cplcheck.bash` | a conferência do mapa num driver NUOPC de teste não dá o esperado |
+| `supergrid` | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 muda |
+| `docn` | `tests/docn/compara-docn.bash REV` | o oceano de dados exporta campos, carimbos ou mensagens diferentes |
 
-O teste foi conferido ao contrário, com cinco alterações de propósito no código, uma de cada vez: trocar `<=` por `<` no limite de 273,16 K, trocar um coeficiente do fator de Louis, trocar o expoente 1,7 do albedo, mudar o teto do fator e inverter o sinal da longitude no ângulo horário. Todas fizeram o teste falhar.
+Os testes que compilam `REV` com o programa de teste de hoje (`malhas`, `completar`, `docn`) traduzem antes a cópia de `REV` para os nomes atuais (`renomeia-identificadores.py traduz`), aplicando as tabelas de `tools/dev/nomes/` que `REV` ainda não tinha.
 
-`test_atm_grid.F90` cobre as duas etapas de cálculo de `map_cells_to_regular_grid` (`mpas_cell_binning`), que leva as células MPAS à grade regular 360 x 180 do cap atmosférico:
+## 3. Outras ferramentas
 
-| Rotina | O que confere | Casos |
-| --- | --- | --- |
-| `bin_cells_local` | cada célula cai na caixa de 1 grau certa, com soma e contagem por caixa | duas células na mesma caixa, longitude negativa (vai para a coluna 360), latitudes de 90° e -90° (linhas 180 e 1), célula além de `n` ignorada |
-| `fill_empty_bins` | caixa sem célula recebe a média dos vizinhos preenchidos | vizinha ainda vazia não conta, caixa recém-preenchida serve de vizinha na mesma passada, longitude periódica, borda norte, zero passadas, grade toda vazia |
-
-Os valores esperados do preenchimento foram calculados em aritmética exata (frações do Python) para o campo f(i, j) = i + 1000 j. Na borda norte, a linha 181 vira a própria linha 180, e dois vizinhos contam duas vezes; o teste registra esse comportamento atual, que só pode mudar numa etapa própria, com nova linha de base.
-
-Conferido ao contrário: tirar a longitude periódica do preenchimento, tirar a volta da longitude para [0°, 360°), arredondar a latitude em vez de truncar, mudar a marca 0,5 das caixas preenchidas e ignorar o `n` fizeram o teste falhar (o último, pela verificação de limites de array, que aborta o programa).
-
-`test_cpl_map.F90` não calcula nada: confere a consistência do mapa de acoplamento (`src/coupling/cpl_fields.F90` e `cpl_map.F90`) nas cinco configurações de `&nuopc_mode` que ele declara (produção; MOM6 sem SIS2; MONAN-A com DOCN; DATM com MOM6; DATM com DOCN):
-
-| Grupo | O que confere |
+| Ferramenta | Para quê |
 | --- | --- |
-| estrutura | nomes únicos; todo campo de `EXCHANGES` está em `FIELDS` e todo campo de `FIELDS` é usado; pontos `COMPONENTE@malha` com malha conhecida; condições válidas; conector entre dois componentes, `cap` dentro de um, rota dentro do mediador e entre as malhas da rota; rotas com reserva anterior, máscara, `no_value` e `create` válidos; toda rota usada |
-| origem | em cada configuração, cada campo importado por um componente tem uma única origem |
-| cadeia | em cada configuração, todo campo que parte da grade do cap atmosférico ou da grade do oceano no mediador chegou antes a ela; as exceções têm de ser exatamente as lacunas conhecidas da tabela `GAPS` do mapa (desde a R-FASE11-25; antes, uma lista no teste) que valem na configuração (com o DOCN, `So_omask` não chega ao mediador; com o DOCN e o MONAN-A, `Sx_tsfc`, `Sf_albedo` e `Sx_omask` não chegam ao MONAN-A); campos, pontos e condições da tabela válidos |
-| contagens | campos de cada conector na produção iguais aos do Apêndice A do documento de arquitetura |
-| mediador | campos que chegam ao mediador iguais, nome a nome e na mesma ordem, a `import_mpas_names` e `import_datm_names`; campos que voltam da malha de fluxo para a do oceano iguais a `export_names` (`med_cap_types`) |
-| trocas `cap` (desde a R-FASE11-24) | as trocas `cap` de `ATM@mpas` para `ATM@atm_cap` são as 13 exportações do MONAN-A, e as de volta, na mesma ordem, as 7 importações; conferido ao contrário: trocar a ordem de duas trocas de volta faz o teste falhar |
-| método (desde a R-FASE11-22) | coluna `method` preenchida só nas trocas por conector, com um valor aceito pelo conector NUOPC; o mesmo método nas trocas do mesmo campo entre os mesmos dois componentes; `bilinear` em todas, o padrão que o conector usava antes; `cpl_connector_method` igual à tabela e vazio sem troca por conector |
+| `tools/dev/indicadores.py [REV ...]` | indicadores de código limpo e da arquitetura de acoplamento, em tabelas prontas para o CHANGELOG |
+| `tests/regrid/compara-esquema.bash <nome> '<opções>'` | conferir um esquema de interpolação novo contra uma referência do ESMF |
+| `tools/dev/renomeia-identificadores.py aplica <tabela>` | trocar nomes de identificadores por uma tabela (e trazer um ramo antigo para os nomes atuais) |
 
-Conferido ao contrário: tirar a condição `docn` do `So_t` do DOCN (duas origens), trocar a ordem de duas linhas da volta para a grade do oceano, acrescentar um `So_omask` exportado pelo DOCN (lacuna que deixa de existir) e citar uma rota inexistente fizeram o teste falhar.
+## 4. Interfaces mínimas
 
-`test_routes.F90` (desde a R-FASE11-12) confere a configuração que o mediador lê da tabela `ROUTES` para criar cada uma das seis rotas (`route_spec`, em `med_cap_methods`), campo a campo do `regrid_spec_t` e a rota de reserva, contra a configuração que cada chamada passava até a R-FASE11-11, copiada no teste; e que uma rota fora da tabela é recusada. Desde a R-FASE11-13, a referência inclui o `zero_total` que as chamadas de interpolação passavam (o mesmo em todas as chamadas de cada rota) e a troca de NaN que `RegridOrCopy` fazia; desde a R-FASE11-14, o preenchimento por vizinhança que `med_ocean` (SST) e `med_export` (fração de gelo exportada) faziam depois da interpolação, e o que `route_fill` devolve (o da SST, que a rota `ocn2atm` usa enquanto a `ocn2atm_sst` não existe). Conferido ao contrário: trocar a reserva de `atm2ocn_ice` na tabela faz o teste falhar.
+`tests/interfaces/mpas_stubs.F90`, `mom_stubs.F90` e `sis_stubs.F90` declaram, só com as assinaturas, o que o acoplador usa do MPAS, do MOM6, do FMS e do SIS2. Com elas, os caps e `mpas_atm_*` compilam fora da Jaci e o compilador confere tipos, argumentos e `intent`. Uma interface pode estar errada: um erro de compilação só é atribuído à mudança se a versão anterior compilar com as mesmas interfaces.
 
-`test_fill_counts.F90` confere a contagem dos pontos completados por vizinhança, que alimenta as linhas `completar` do relatório de acoplamento: as contagens de `neighbor_fill` (`n_invalid` e `n_left`) no caminho normal, com `overflow_to_fill` e com a difusão pulada pelo limiar; que os valores preenchidos saem iguais bit a bit com e sem as contagens; que, com as opções da SST, `n_invalid` é igual à contagem que `fill_sst_gaps` fazia à parte até a R-FASE11-13 (desde a R-FASE11-14 o relatório usa a de `neighbor_fill`); e a acumulação de `record_fill`.
+## 5. Antes de entregar
 
-Desde a R-FASE11-05, `test_cpl_map.F90` confere também as listas que o mediador anuncia e realiza, geradas do mapa por `cpl_arrivals` com as chaves do mediador, contra as listas que ele usava antes (`tests/unit/listas_mediador.inc`, cópia sem mudança das de `med_cap_types` na tag `fase11-04-fix01`), nome a nome e na mesma ordem, nas cinco configurações.
-
-Desde a R-FASE11-06, faz o mesmo com as listas dos caps do MOM6 e do SIS2 (e, desde a R-FASE11-07, com as do MONAN-A, do DATM e do DOCN), geradas por `cpl_arrivals` e `cpl_exports`, contra as de antes (`tests/unit/listas_caps.inc`, cópia sem mudança das das tags `fase11-05-validada` e `fase11-06-validada`), e confere a tabela `EXPORTS`: campos do dicionário, pontos de modelos, condições válidas, nenhuma repetição, as exportações de cada um dos cinco modelos iguais às listas dos caps (as do MONAN-A, do DATM e do DOCN também estão em `listas_caps.inc`) e, em cada configuração, todo campo que sai de um modelo por conector exportado por ele.
-
-`test_connectors.F90` (desde a R-FASE11-21) confere, nas doze configurações válidas do mapa, que os conectores que o driver registra, escolhidos pelo mapa (`cpl_driver_connectors`), são os mesmos e na mesma ordem que as condições do driver de antes davam (copiadas no teste, da tag `fase11-20-validada`), e que nenhum conector do mapa fica sem lugar na lista do driver. Conferido ao contrário: trocar a ordem de dois conectores na lista, ou tirar um par dela, faz o teste falhar.
-
-`test_cpl_check.F90` confere as duas rotinas de conferência de `cpl_check` (`cpl_check_connector_fields` e `cpl_check_state`) com as listas de campos que os caps anunciam hoje, escritas no teste a partir dos caps e não do mapa: na produção, nenhuma diferença e três avisos (o MOM6 exporta `So_s`, `Fioo_q` e `Si_ifrac`, que ninguém consome); CplList com um campo a menos e com um a mais; importação fora do mapa e do dicionário; campo previsto e não anunciado na importação e na exportação; e a lacuna conhecida do MONAN-A com o DOCN, que aparece como três diferenças. Desde a R-FASE11-22, confere também `cpl_check_methods` (o `remapmethod` de cada entrada contra o método do mapa: igual, ausente, outro método e campo sem troca, que não é conferido ali) e a leitura da opção numa entrada (`cpl_method_of_entry`). Conferido ao contrário: trocar o método de uma troca por conector no mapa para `patch` faz falhar este teste e o `test_cpl_map`. Desde a R-FASE11-25, a lacuna do MONAN-A com o DOCN sai como três avisos, e não diferenças, e o teste monta, nas doze configurações válidas do mapa, os estados e as `CplList` como os caps e os conectores os montam na rodada: sem o DATM, nenhuma diferença, e cada lacuna da tabela `GAPS` que vale na configuração aparece como aviso; com o DATM, que o driver não registra, há diferenças. Conferido ao contrário: tirar a lacuna do `Sf_zorl` da tabela faz o teste acusar uma diferença no MONAN-A com o MOM6 e o contorno direto do oceano; no `cplcheck`, não devolver erro com diferença faz o caso `defeito` falhar.
-
-Para acrescentar um teste: escrever `tests/unit/test_<assunto>.F90` no mesmo formato (valores esperados calculados à parte e registrados no comentário do programa) e, se ele usar outros módulos, incluir os objetos na lista `OBJS` do script.
-
-### 2.9 Teste da leitura do supergrid do MOM6
-
-```bash
-tests/supergrid/compara-supergrid.bash HEAD
-```
-
-A rodada da linha de base lê um único supergrid, sempre sem erro. Este teste compila `src/shared/mom6_supergrid.F90` do commit `REV` e o da árvore de trabalho, liga a cada um o programa `tests/supergrid/test_supergrid.F90` e o executa sobre três supergrids sintéticos gerados por `tests/supergrid/gera-supergrid.py`:
-
-| Arquivo | Para que serve |
-| --- | --- |
-| `hgrid.nc` | supergrid de 21 x 15 pontos, com longitudes de -329,6° a 93,3° (exercita a passagem para [0°, 360°)) e linhas e colunas inclinadas, para que um erro de índice (par ou ímpar, i e j trocados) apareça nos valores |
-| `impar.nc` | dimensões ímpares, que geram o aviso de `mom6_supergrid_dims` |
-| `sem_xy.nc` | sem as variáveis `x` e `y`, o que faz a leitura falhar |
-
-O programa chama as três rotinas públicas (`mom6_supergrid_dims`, `mom6_supergrid_tcoords` e `mom6_supergrid_corners`), com e sem prefixo de mensagem, também com um arquivo que não existe, e grava os códigos de retorno, as dimensões e as coordenadas lidas numa porção local (3:8, 2:6). Têm de ser idênticos, bit a bit, esse arquivo e as mensagens do módulo no log do ESMF, sem data e hora. Leva poucos segundos, porque compila um só fonte.
-
-Conferido ao contrário: somar 1e-11 à correção de 360° da longitude faz o arquivo diferir, e mudar um espaço na mensagem de aviso faz o log diferir. O teste é a conferência das etapas que movem a construção da malha tripolar (fase 11, bloco C).
-
-### 2.10 Teste do oceano de dados (DOCN)
-
-```bash
-tests/docn/compara-docn.bash HEAD
-```
-
-A rodada da linha de base não usa o DOCN. Este teste o executa num driver NUOPC mínimo, `tests/docn/test_docn.F90`, com o DOCN como componente OCN e um componente fonte (SRC) que exporta os 14 campos que o DOCN importa e importa os 6 que ele exporta, ligados por dois conectores. O relógio vai de 29/03/2026 06h a 30/03/2026 18h, em 4 passos de 9 h. Os dados vêm de `tests/docn/gera-dados-docn.py`, numa grade de 72 x 36 pontos com 10 instantes diários:
-
-| Arquivo | O que exercita |
-| --- | --- |
-| `sst.nc` | interpolação no tempo da SST, com valores abaixo de 0 °C |
-| `ice.nc` | fração de gelo em porcentagem, com valores abaixo de 0 e acima de 100 (conversão e limite a [0, 1]) |
-| `cur.nc` | correntes com pontos de preenchimento (-999) e valores de 12 m/s, que o DOCN descarta |
-
-São quatro casos, com e sem arquivo de correntes, e em cada um só a inicialização (argumento `inicio`) ou a rodada completa, sempre com 4 processos MPI. Cada processo grava os campos exportados pelo DOCN, com os limites e o carimbo de tempo; o DOCN grava os diagnósticos de importação. Têm de ser idênticos, bit a bit, esses arquivos e as mensagens do DOCN no log do ESMF, sem data e hora.
-
-O script compila as duas versões inteiras (`compila-local.bash`) e leva cerca de três minutos. Conferido ao contrário: dividir a fração de gelo por 100,0000001 em vez de 100 faz os campos exportados diferirem. O teste é a conferência das etapas que mexem no DOCN (fase 11, blocos B e F).
-
-### 2.11 Mapa de acoplamento em Markdown
-
-```bash
-tools/dev/mapa-acoplamento.py        # gera docs/acoplamento.md
-tools/dev/mapa-acoplamento.py -c     # só confere se ele está em dia
-```
-
-O mapa de acoplamento é escrito em Fortran (`src/coupling/cpl_fields.F90` e `cpl_map.F90`), para que os componentes possam usá-lo nas etapas seguintes da fase 11. O script lê as tabelas desses dois fontes e gera `docs/acoplamento.md`, com o resumo dos conectores por configuração, as trocas de cada conector, as trocas dentro dos componentes, as rotas do mediador, as malhas e o dicionário de campos. Toda mudança no mapa é seguida da geração do Markdown; a conferência `mapa` acusa quando ele ficou para trás. O script também acusa um texto mais longo que o campo que o recebe, que o compilador só cortaria com aviso. Escrito para o Python 3.6 da Jaci.
-
-### 2.12 Conferência do mapa num driver NUOPC
-
-```bash
-tests/cplcheck/confere-cplcheck.bash
-```
-
-Desde a R-FASE11-03, o driver chama `cpl_check_coupling` (`src/coupling/cpl_check.F90`) no fim do `ModifyCplLists`: o relatório dos conectores e a conferência do mapa saem no log do PET 0, em linhas com o prefixo `CPL-REL:`. Desde a R-FASE11-22, antes da conferência, o driver chama `cpl_write_methods`, que escreve o método do mapa (`remapmethod`) em cada entrada da `CplList`. Este teste exercita as duas rotinas num driver NUOPC mínimo, `tests/cplcheck/test_cplcheck_driver.F90`: quatro componentes de teste com os rótulos do driver real (`MPAS`, `MED`, `OCN`, `ICE`) anunciam as listas de campos de hoje e são ligados pelos seis conectores da produção, com um `nuopc.input` da produção (`use_med_to_mpas` e `use_sis2_dynamic`). Desde a R-FASE11-25, a conferência interrompe a inicialização quando acha diferença, e o dicionário do NUOPC é o do acoplador (`cpl_nuopc_dictionary`) nos casos `normal`, `mediador` e `dicionario`. São quatro casos, em 4 processos MPI:
-
-| Caso | O que tem de sair no log do PET 0 |
-| --- | --- |
-| `normal` | os seis conectores com 13, 7, 14, 16, 4 e 6 campos; `conferencia do mapa: 0 diferenca(s), 3 aviso(s)` |
-| `defeito` | o OCN importa `So_teste` e o MED não anuncia `So_omask` (com o acréscimo automático do dicionário, para que `So_teste` chegue à conferência): conector OCN para MED com 3 campos e 4 diferenças; a inicialização para logo depois do relatório, com a mensagem `inicializacao interrompida` (até a R-FASE11-24, terminava assim mesmo) |
-| `dicionario` | as listas do `defeito`, com o dicionário do acoplador: o anúncio de `So_teste` para a inicialização com a mensagem do NUOPC (`So_teste is not a StandardName in the NUOPC_FieldDictionary!`), antes de qualquer linha do relatório |
-| `mediador` | o MED é o mediador real (`MED_cap`), que anuncia os campos a partir do mapa: os mesmos seis conectores, 0 diferenças e 3 avisos; a inicialização para de propósito logo depois da conferência, antes da realização, que precisaria das grades reais |
-
-Nos três casos, cada campo dos conectores tem de sair no relatório com `remapmethod=bilinear`. O teste confere também que só o PET 0 escreve. No caso `mediador`, todos os PETs esperam numa barreira até o PET 0 terminar o relatório, antes da parada de propósito; sem ela, o primeiro PET a sair com erro abortava o MPI e podia cortar o log do PET 0. Os relatórios ficam em `build-local/cplcheck/relatorio_<caso>.txt`. Leva menos de um minuto. Conferido ao contrário: sem a fase 0 dos componentes de teste, nenhum campo é anunciado, e a conferência acusa todas as trocas da produção; com `cpl_write_methods` sem acrescentar a opção, a conferência acusa as 60 entradas sem `remapmethod`.
-
-### 2.13 Teste das malhas
-
-```bash
-tests/malhas/compara-malhas.bash HEAD
-```
-
-Desde a R-FASE11-08, a malha de fluxo do mediador (`atm_med`, criada por `create_atm_grid` em `med_init`) e a grade do cap atmosférico (`atm_cap`, criada por `mpas_create_grid` em `mpas_cap_methods`, e desde a R-FASE11-24 no adaptador do MPAS, `mpas_adapter`) são construídas por `cpl_latlon_grid` (`src/coupling/cpl_grids.F90`). Este teste compila a versão do commit `REV` e a da árvore de trabalho, liga a cada uma o programa `tests/malhas/test_grids.F90`, que chama as duas rotinas (cujas interfaces não mudaram), e o executa com 1, 4, 6 e 8 processos MPI (variável `LISTA_NP`). Cada processo grava, para cada DE local, os limites computacionais e os vetores de coordenadas dos centros (as duas malhas) e dos cantos (só a do mediador), inteiros, com os seus limites. Têm de ser idênticos, bit a bit, esses arquivos e as mensagens das duas rotinas no log do ESMF, sem data e hora. Com 4 processos, os DEs do norte têm uma linha a mais de cantos (a borda em 90°), e ela entra na comparação. Desde a R-FASE11-24, o programa pega `mpas_create_grid` do adaptador do MPAS quando a versão compilada o tem (o script compila com `-DCOM_ADAPTADOR`), e de `mpas_cap_methods` nas versões anteriores.
-
-A rodada da linha de base usa uma só contagem de processos para cada malha (128 no MONAN-A, 20 no mediador); o teste cobre outras decomposições, entre elas a de 1 processo e a de 6 (3 x 2). Leva pouco mais de um minuto, a maior parte compilando. Conferido ao contrário: somar 10^-13 à latitude dos cantos faz todos os arquivos diferirem.
-
-Desde a R-FASE11-10, o programa também cria o oceano no mediador (`create_ocn_grid`) em duas configurações, gravadas por ele mesmo e lidas por `config_read`: com o MOM6, lendo o supergrid sintético `hgrid.nc` de `tests/supergrid/gera-supergrid.py` (grade T de 10 x 7, com longitudes de -329,6° a 93,3° e linhas inclinadas), com centros, cantos e a máscara; e com o DOCN, numa grade de 36 x 18. As mensagens comparadas incluem as da leitura do supergrid e as da conferência dos cantos (`FIX-DIAG-CONSERVE`). A malha do SIS2 não pode ser criada fora da Jaci pelo cap, que precisa do modelo; por isso o script roda depois, só na árvore de trabalho, `tests/malhas/test_model_grids.F90` (até a R-FASE11-10, `test_malha_gelo.F90`), com 4, 6 e 8 processos, que compara no mesmo programa: `cpl_blocks_from_bounds` com uma cópia sem mudança da rotina de antes (`ICE_DecompFromBlocks`, tag `fase11-09-validada`) em onze layouts, válidos e inválidos (mesma resposta, mesma mensagem, mesmos blocos); e a malha de `cpl_tripolar_grid` com blocos com a grade criada como o cap criava, com os blocos em ordem x mais rápido e y mais rápido, bit a bit. Desde a R-FASE11-11, compara também a grade do cap do MOM6 (`cpl_block_grid`) com a criada como `create_ocean_grid` criava (DELayout, DistGrid com `deBlockList`, grade sem halo), num layout que não é produto e em layouts produto com o mapa de PETs invertido: mesmo número de DEs locais e mesmos limites dos vetores de coordenadas. Conferido ao contrário: pôr a meia célula na longitude do centro da grade do DOCN faz os arquivos diferirem.
-
-`tests/unit/test_cpl_grids.F90` confere as mesmas funções com valores esperados: a decomposição (`cpl_regdecomp`) nos casos do comentário da rotina e, de 1 a 600 processos, colunas x linhas = processos; os centros e os cantos nas bordas das duas malhas; e que as duas regras de centro dão os mesmos graus, a menos de 180 na longitude.
-
-Desde a R-FASE11-09, o mesmo teste confere as fórmulas de índice e de longitude de `cpl_grids` contra as expressões que elas substituíram, escritas no teste como estavam nas rotinas: o resultado tem de ser igual, bit a bit, em cerca de 820 mil coordenadas (passos de 0,001 entre -400 e 400, os múltiplos de 0,25 entre -720 e 720 e os seus vizinhos imediatos, -0 e valores grandes), cinco passos de grade e quatro tamanhos. Uma comparação de código de máquina (`objdump`) não serviria aqui, porque a fórmula passa de expressão no lugar a chamada de função em outro módulo. Conferido ao contrário: trocar `nint` por `int` no índice por arredondamento faz o teste falhar. O teste mostrou também duas coisas que ficaram registradas em `cpl_grids`: com o limite a [1, n], o índice por piso (`floor`) e o por truncamento (`int`) são sempre iguais, e ficaram uma função só; e somar 360 uma vez não é o mesmo que somar até a longitude ficar em [0, 360) (com -1e-17, um dá 360 e o outro 0), por isso a cópia do cap atmosférico manteve a sua soma única.
-
-### 2.14 Teste dos campos completados
-
-```bash
-tests/completar/compara-completar.bash HEAD
-```
-
-Desde a R-FASE11-14, a SST na malha de fluxo e a fração de gelo exportada ao oceano são completadas por vizinhança pela rota (coluna `fill` de `ROUTES`), e não mais por chamadas à parte em `med_ocean` e `med_export`. Este teste compila a versão do commit `REV` e a da árvore de trabalho, liga a cada uma o programa `tests/completar/test_fill.F90` e o executa com 1, 4, 6 e 8 processos MPI (variável `LISTA_NP`). O programa monta o mediador como na inicialização (anúncio dos campos pelo mapa, `create_atm_grid`, `create_ocn_grid` com o supergrid sintético, `realize_component_fields`, `create_internal_fields`, `idc_create_routes`) e roda três passos de `update_ocean_fields_on_atm_grid` e `export_to_components`, com uma SST que tem pontos abaixo de 270 K, acima de 310 K e NaN, e uma fração de gelo entre -0,2 e 1,2. No passo 1 a máscara do oceano é uniforme, e a SST passa pela rota `ocn2atm`, completada como a `ocn2atm_sst`; nos passos 2 e 3 a máscara tem terra, e a rota `ocn2atm_sst` é criada e usada. Têm de ser idênticos, bit a bit: a SST e (desde a R-FASE11-18) os campos do gelo na malha de fluxo e todos os campos do `exportState`, com o carimbo de tempo de cada um (desde a R-FASE11-15), em cada passo e em cada PET; e as contagens de pontos completados. No log do ESMF, sem data e hora, as linhas `CPL-REL:` do relatório (rotas e `report_fills`) têm de ser as mesmas e na mesma ordem; as demais mensagens do mediador e do framework de interpolação, as mesmas, em qualquer ordem (a R-FASE11-18 antecipou a criação de rotas dentro do passo, e com ela algumas mensagens). Desde a R-FASE11-18, o SIS2 está ligado, como na produção, com campos `*_sis2` sintéticos, e há um quinto caso, `mista4` (4 processos, argumento `mista`), em que a máscara do oceano já tem terra no passo 1 e todas as rotas do passo são criadas no mesmo passo. Conferido ao contrário: trocar a ordem de criação da `ocn2atm_sst` e da `ocn2atm_ice`, ou da `ocn2atm_landmask` e da `atm2ocn_ice`, faz o relatório diferir. Conferido ao contrário: tirar o preenchimento da SST no passo da máscara uniforme faz os arquivos e os logs diferirem.
-
-O programa usa só interfaces que existem desde a R-FASE11-12 (tag `fase11-12-validada`), com exceção das fases de `med_exchange`. Desde a R-FASE11-15, a exportação é a fase `deliver`; quando o `med_exchange.F90` da versão compilada a tem, o script compila o programa com `-DCOM_ENTREGAR`, e ele chama `deliver`; sem ela, repete a sequência que o `MediatorAdvance` fazia até a R-FASE11-14 (`export_to_components`, `stamp_export_fields` e, com `use_med_to_mpas`, `RouteOcnToAtm`). Do mesmo modo, desde a R-FASE11-16, `-DCOM_IR_PARA` faz o programa chamar `go_to_flux_grid`; sem ela, ele chama `update_ocean_fields_on_atm_grid` e `update_ice_fraction_from_docn`, como o `MediatorAdvance` até a R-FASE11-15. E, desde a R-FASE11-17, `-DCOM_INICIO` faz o programa montar as rotas da inicialização por `prepare_start` (`med_exchange`); sem ela, por `idc_create_routes` (`med_init`). Conferido ao contrário: criar as rotas de `create_start_routes` na ordem inversa da tabela faz os logs diferirem. O relógio tem passo de 1 h, o carimbo dos campos é o fim do passo (como no modo concorrente) e `use_med_to_mpas` fica ligado só no passo 2, para que os dois carimbos difiram. Conferido ao contrário: carimbar pelo relógio antes de carimbar os campos, em `deliver`, faz os arquivos diferirem. O teste da física bulk (seção 2.5) não passa por esses caminhos: ele chama `calc_bulk_ncar` com os campos já na malha de fluxo.
-
-### 2.15 Teste de um esquema de interpolação
-
-```bash
-tests/regrid/compara-esquema.bash idw 'vizinhos=4,expoente=2'
-```
-
-Desde a R-FASE11-23, um esquema de interpolação pode ser escrito só com pesos, a partir do modelo `src/regrid/regrid_idw.F90` (seção 3.8 do documento de arquitetura e `docs/interpolacao-plugavel.md`). Este script é a conferência de quem escreve um esquema: compila `tests/regrid/test_scheme.F90` e interpola o campo analítico f = 2 + cos(lat) cos(lon) de uma grade global de 4 graus para uma de 1 grau, com o esquema pedido (e as suas opções) e com uma referência, um método do esquema `esmf` (padrão: `bilinear`; terceiro argumento). Roda com 1 processo e com `NP` (padrão 4) e mostra, para cada rodada, o método usado, o erro máximo e o médio do esquema e da referência contra a função (só onde |lat| < 85 graus) e a diferença máxima entre os dois. Passa se as duas rodadas terminam e o campo do esquema é o mesmo, bit a bit, com 1 e com `NP` processos. Um esquema que não roda (opção desconhecida, por exemplo) aparece como falha, com as mensagens de erro do log. O `confere-tudo.bash` roda o modelo `idw`, que hoje dá erro máximo de 2,6e-2 e médio de 4,9e-3 (o bilinear do ESMF, 1,1e-3 e 3,0e-4). Leva menos de 10 segundos.
-
-### 2.16 Troca de nomes de identificadores
-
-```bash
-tools/dev/renomeia-identificadores.py confere HEAD tools/dev/nomes/R-FASE12-01.txt
-```
-
-Na fase 12, os identificadores Fortran passam do português para o inglês, uma área do código por etapa. Cada etapa tem uma tabela em `tools/dev/nomes/`, com uma troca por linha (`nome_antigo novo_nome`, com um terceiro campo opcional que limita a troca a alguns diretórios, para nomes locais comuns como `campo`) e as linhas `@arquivo` dos fontes renomeados. A mesma ferramenta faz a troca (`aplica`) e a confere (`confere REV`). A conferência tem duas partes:
-
-| Parte | Falha quando |
-| --- | --- |
-| colisões | numa unidade de escopo de `REV` (um procedimento, ou o cabeçalho de um módulo ou programa) que usa um nome antigo, o nome novo já é visível (na própria unidade ou nas que a contêm), dois nomes antigos viram o mesmo, ou o nome novo é uma função intrínseca do Fortran; componentes de tipo (depois de `%`) e palavras-chave de argumento (`nome=`) não contam, porque não colidem com variáveis |
-| equivalência | algum fonte de `REV`, com as trocas aplicadas só ao código, não é igual, símbolo a símbolo, ao da árvore de trabalho (comentários e espaços não contam; textos entre aspas têm de ser idênticos) |
-
-A equivalência mostra que a etapa só trocou nomes: o que o compilador recebe é o mesmo programa, com outros nomes. A conferência das colisões por unidade de escopo é suficiente porque, no Fortran, um nome só fica visível numa unidade por declaração, por `use` ou por associação com o hospedeiro: se o nome novo não é visível onde o antigo é usado, a troca não pode capturar outro objeto ali (um nome importado sem `only` que passasse a coincidir com o novo daria erro de compilação, e não um resultado diferente). A conferência também avisa quando o nome antigo de uma troca limitada a alguns diretórios aparece como palavra-chave de argumento (`nome=`) num fonte fora deles: o argumento mudou de nome e a chamada, não. Na troca, a diferença de tamanho de cada nome é compensada no espaço seguinte da linha, para manter alinhados os `::` e os `&` das continuações. Nos comentários, a ferramenta só troca os nomes com sublinhado, os escritos em CamelCase e os nomes de tabela escritos em maiúsculas, para não mexer em palavras comuns do texto (um nome de uma palavra só, como a fase `entregar`, é revisto à mão); nos scripts e documentos (menos o CHANGELOG), também, e o resultado é lido no diff. O `confere-tudo.bash` roda esta conferência (`nomes`) com as tabelas que ainda não existiam em `REV`. Leva cerca de um segundo. O modo `traduz REV DIR` aplica essas mesmas tabelas a uma cópia de `REV` extraída em `DIR`; é o que os testes das seções 2.10, 2.13 e 2.14 fazem antes de compilar `REV` com o programa de teste de hoje.
-
-## 3. Interfaces mínimas
-
-Os arquivos `tests/interfaces/mpas_stubs.F90`, `tests/interfaces/mom_stubs.F90` e `tests/interfaces/sis_stubs.F90` declaram os módulos, tipos e rotinas do MPAS, do MOM6, do FMS e do SIS2 que o acoplador usa, só com as assinaturas e sem nenhum cálculo. Com eles, `mpas_atm_types.F90`, `mpas_atm_setup.F90`, `mpas_atm_fluxes.F90`, `mpas_atm_model.F90`, `time_utils.F90`, `mom_cap_MONAN.F90` e `sis_cap_MONAN.F90` compilam fora da Jaci, e o compilador confere tipos, argumentos e `intent`.
-
-Uma interface mínima pode estar errada; por isso, antes de confiar nela para uma mudança, compile com ela a versão anterior do arquivo. Se a versão anterior não compilar, a interface é que precisa de ajuste, seguindo a assinatura real no código do modelo. Um erro de compilação só é atribuído à mudança se a versão anterior compilar com as mesmas interfaces.
-
-## 4. Ordem sugerida antes de entregar uma etapa
-
-1. `tools/dev/confere-tudo.bash HEAD` (com `-i` se a etapa só muda comentários ou espaços): resumo sem nenhuma conferência FALHOU; diferenças de literais só as anunciadas.
-2. Em etapas que só movem código: ler a saída de `tools/dev/confere-instrucoes.py HEAD <arquivo>` em cada arquivo alterado. As instruções acrescentadas devem ser só chamadas, declarações e cabeçalhos das etapas novas; essa leitura não se automatiza.
-3. Copiar para o CHANGELOG as linhas dos indicadores que mudaram.
-4. Rodada na Jaci com `tools/dev/valida_rodada.bash`.
+1. `confere-tudo.bash` sem nenhuma FALHOU; diferenças de literais, só as anunciadas no CHANGELOG.
+2. Em etapas que só movem código, ler a saída de `confere-instrucoes.py HEAD <arquivo>`: as instruções acrescentadas devem ser só chamadas, declarações e cabeçalhos.
+3. Indicadores que mudaram, no CHANGELOG.
+4. Rodada na Jaci com `tools/dev/valida_rodada.bash` ([`estado-do-projeto.md`](estado-do-projeto.md), seção 5).

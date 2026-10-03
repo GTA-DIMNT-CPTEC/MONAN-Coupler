@@ -3,7 +3,7 @@
 !!
 !! O mediador troca campos com os componentes em fases fixas, na
 !! inicialização e a cada passo (ver docs/arquitetura-acoplamento.md, seção
-!! 3.7). Este módulo reúne as fases à medida que saem de MED_cap:
+!! 2). Este módulo reúne as fases à medida que saem de MED_cap:
 !!
 !!   initialize_data
 !!              InitializeDataComplete: rotas de inicialização (coluna

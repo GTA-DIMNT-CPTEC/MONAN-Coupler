@@ -68,7 +68,7 @@ Desde a R-FASE11-23, o caminho mais curto é um esquema de pesos, a partir do mo
 2. Escrever `compute_weights`. Ela recebe os pontos de origem (todos, ordenados pelo índice global) e os de destino (os locais), com longitude e latitude em graus, máscara e índice global, e devolve três arrays: o fator, o índice de origem e o índice de destino de cada peso. Não usa o ESMF: a base (`weights_regridder_t`) guarda os pesos no ESMF (`ESMF_FieldSMMStore`, com `srcTermProcessing = 0`), aplica-os na ordem do índice de origem (`termorder = srcseq`), o que dá o mesmo resultado, bit a bit, com qualquer número de processos, e os libera.
 3. Ler as opções com `regrid_option_real` e `regrid_option_int` e recusar as desconhecidas com `regrid_options_check`.
 4. Acrescentar uma linha na lista de `src/regrid/regrid_schemes.F90` (`call registra('<nome>', new_<nome>, rc)`) e o arquivo no `Makefile` (`SRCS` e dependências).
-5. Conferir com `tests/regrid/compara-esquema.bash <nome> '<opções>'` (seção 2.15 de `docs/conferencias-locais.md`).
+5. Conferir com `tests/regrid/compara-esquema.bash <nome> '<opções>'` (seção 3 de `docs/conferencias-locais.md`).
 6. Selecioná-lo para uma rota: na coluna `scheme` de `ROUTES` (`src/coupling/cpl_map.F90`), ou só no `nuopc.input`, para experimentar:
 
 ```fortran

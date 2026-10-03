@@ -17,7 +17,8 @@ Uso (na raiz do repositório):
 
 Saída: duas tabelas em Markdown, prontas para o CHANGELOG: a dos
 indicadores de código limpo (fases 5 a 9) e a da arquitetura de
-acoplamento (fase 11, docs/arquitetura-acoplamento.md, seção 4.4). Código
+acoplamento (fase 11, docs/historico/arquitetura-acoplamento-fase11.md,
+seção 4.4). Código
 de saída 0, ou 2 se uma versão não existir.
 
 Como se mede:

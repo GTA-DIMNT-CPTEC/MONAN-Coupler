@@ -30,7 +30,7 @@ textos de saída). Nos textos (.md, .txt), também, e, entre crases, os nomes se
 sublinhado das trocas que valem em todos os arquivos; nos blocos de código
 Fortran dos textos, a regra dos fontes. Em prosa, um nome
 colado a um hífen (parte de um nome de arquivo) não muda. O histórico
-(docs/CHANGELOG.md) e as tabelas não mudam. O resultado nos arquivos que não
+(docs/CHANGELOG.md e docs/historico/) e as tabelas não mudam. O resultado nos arquivos que não
 são fontes Fortran deve ser lido no diff.
 
 Uso (na raiz do repositório):
@@ -399,7 +399,7 @@ def apply(tables):
     for path in tracked_files():
         if not os.path.isfile(path):
             continue
-        if path.startswith('tools/dev/nomes/') or path in ('docs/CHANGELOG.md', THIS):
+        if path.startswith(('tools/dev/nomes/', 'docs/historico/')) or path in ('docs/CHANGELOG.md', THIS):
             continue
         names = names_for(entries, path)
         if is_fortran(path):

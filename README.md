@@ -164,7 +164,8 @@ Guias de uso das ferramentas:
 | [`conferencias-locais.md`](docs/conferencias-locais.md) | `confere-tudo.bash`, `indicadores.py`, `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash`, `tests/unit/roda-unitarios.bash`, `tests/supergrid/compara-supergrid.bash`, `tests/docn/compara-docn.bash`, `mapa-acoplamento.py`, `tests/cplcheck/confere-cplcheck.bash` |
 | [`historico-scripts.md`](docs/historico-scripts.md) | histórico das versões dos scripts Python de `tools/` |
 | [`roteiro-codigo-limpo.md`](docs/roteiro-codigo-limpo.md) | roteiro das fases 6 a 11 (código limpo), com indicadores e metas |
-| [`arquitetura-acoplamento.md`](docs/arquitetura-acoplamento.md) | arquitetura de acoplamento (malhas, campos e trocas) e plano da fase 11 |
+| [`arquitetura-acoplamento.md`](docs/arquitetura-acoplamento.md) | arquitetura de acoplamento: as peças e como incluir um campo, um componente ou um esquema de interpolação |
+| [`historico/`](docs/historico) | versões completas do CHANGELOG, do estado do projeto, das conferências locais e do plano da fase 11, até a fase 12 |
 | [`acoplamento.md`](docs/acoplamento.md) | mapa de acoplamento em tabelas (campos, trocas por conector e por configuração, exportações dos modelos, rotas do mediador), gerado por `tools/dev/mapa-acoplamento.py` |
 | [`conformidade-dtn01.md`](docs/conformidade-dtn01.md) | levantamento de conformidade com o padrão de codificação DTN-01 |
 

@@ -6,7 +6,7 @@
 !! e em que configuração. Ele não comanda nada: nenhum componente o usa
 !! ainda. As etapas seguintes da fase 11 passam a conferi-lo na execução
 !! (R-FASE11-03) e a gerar dele as listas de campos (R-FASE11-05 em diante).
-!! Plano em docs/arquitetura-acoplamento.md; versão legível em
+!! Arquitetura em docs/arquitetura-acoplamento.md; versão legível em
 !! docs/acoplamento.md, gerada por tools/dev/mapa-acoplamento.py.
 !!
 !! Pontos. Origem e destino de uma troca são escritos 'COMPONENTE@malha':
@@ -460,7 +460,7 @@ module cpl_map_mod
   !--------------------------------------------------------------------------
   ! ROUTES
   !--------------------------------------------------------------------------
-  ! Criação e uso hoje (Apêndice A de docs/arquitetura-acoplamento.md):
+  ! Criação e uso hoje (Apêndice A de docs/historico/arquitetura-acoplamento-fase11.md):
   !   atm2ocn           idc_create_routes (med_init), ou antes em RegridOrCopy
   !                     (med_cap_methods), se a exportação vier primeiro;
   !                     RegridOrCopy troca NaN por zero depois da interpolação

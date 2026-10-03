@@ -21,7 +21,7 @@
 !!               antes, uma lista neste teste), e o teste exige que sejam
 !!               exatamente essas
 !!   contagens   campos de cada conector na configuração de produção iguais
-!!               aos do Apêndice A de docs/arquitetura-acoplamento.md
+!!               aos do Apêndice A de docs/historico/arquitetura-acoplamento-fase11.md
 !!   mediador    campos que chegam ao mediador por conector iguais, na mesma
 !!               ordem, a import_mpas_names e import_datm_names; campos que
 !!               voltam da malha de fluxo para a do oceano iguais, na mesma

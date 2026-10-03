@@ -239,7 +239,7 @@ contains
   !! SST~=T_FILL_LAND, que zera ifrac também em água aberta próxima da borda
   !! do gelo (SST no congelamento é esperada ali, não é sinal de terra). O
   !! mediador não anuncia "Si_ifrac", então a busca falha, e a fração sai
-  !! do limiar de SST (docs/estado-do-projeto.md, seção 8).
+  !! do limiar de SST (docs/estado-do-projeto.md, seção 6).
   !============================================================================
   subroutine legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
     type(MED_InternalState), intent(inout) :: is

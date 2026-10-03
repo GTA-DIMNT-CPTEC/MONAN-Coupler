@@ -3,8 +3,8 @@
 Arquivo gerado por `tools/dev/mapa-acoplamento.py` a partir de
 `src/coupling/cpl_fields.F90` e `src/coupling/cpl_map.F90`. Não editar à
 mão: mudar o Fortran e gerar de novo. A consistência das tabelas é
-conferida por `tests/unit/test_cpl_map.F90`; a arquitetura e o plano
-estão em `docs/arquitetura-acoplamento.md`.
+conferida por `tests/unit/test_cpl_map.F90`; a arquitetura está em
+`docs/arquitetura-acoplamento.md`.
 
 O mapa descreve o acoplamento que o código faz hoje. O mediador e os caps
 dos cinco modelos anunciam e realizam os campos a partir dele, na ordem

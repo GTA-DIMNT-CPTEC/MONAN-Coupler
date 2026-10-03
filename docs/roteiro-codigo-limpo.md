@@ -119,7 +119,7 @@ Situação depois da R-FASE9-03: todas as metas da seção 3 foram atingidas, me
 | Configurações aceitas mas não executadas | `use_datm` | `use_datm` | depende da fase 10 |
 | Comentários desatualizados conhecidos | grade "640×320" | nenhum | atingida |
 
-O RPQ foi atualizado (sexta versão) e a integração ao `develop` foi autorizada; o procedimento está na seção 8 de `docs/estado-do-projeto.md`. Seguem a fase 10 e, depois dela, o DTN-01.
+O RPQ foi atualizado (sexta versão) e a integração ao `develop` foi autorizada; o procedimento está na seção 7 de `docs/estado-do-projeto.md`. Seguem a fase 10 e, depois dela, o DTN-01.
 
 ### Fase 10: trilha de decisões (pode mudar resultados)
 
@@ -139,7 +139,7 @@ Estes itens não são limpeza no sentido estrito: removem remendos ou corrigem e
 
 A limpeza das fases 1 a 9 deixou cada arquivo com um assunto, mas a descrição do acoplamento (que campos vão de onde para onde, em que malha e por qual interpolação) continua espalhada por mais de dez arquivos. A fase 11 reúne essa descrição em três conceitos (malha, campo e troca) e em três arquivos de `src/coupling/` (`cpl_grids.F90`, `cpl_fields.F90` e `cpl_map.F90`), com a execução das trocas do mediador em `med_exchange.F90`. As regras são as mesmas das fases anteriores: nenhuma etapa muda resultados, um patch por etapa e validação bit a bit na Jaci.
 
-O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), as conferências por tipo de mudança, os indicadores e as metas, está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4. Este roteiro não o repete; registra só o andamento.
+O plano completo, com as 26 etapas (R-FASE11-01 a R-FASE11-26, em seis blocos), as conferências por tipo de mudança, os indicadores e as metas, está em [`historico/arquitetura-acoplamento-fase11.md`](historico/arquitetura-acoplamento-fase11.md), seção 4. Este roteiro não o repete; registra só o andamento.
 
 | Etapa | Situação |
 | --- | --- |
