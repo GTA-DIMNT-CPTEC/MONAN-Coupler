@@ -28,6 +28,8 @@
 #               entre eles o da consistência do mapa de acoplamento
 #   mapa        docs/acoplamento.md em dia com o mapa de acoplamento
 #               (tools/dev/mapa-acoplamento.py -c)
+#   curtocircuito  nenhuma guarda que conte com o curto-circuito do .and.
+#               (tools/dev/confere-curto-circuito.py)
 #   cplcheck    conferência do mapa num driver NUOPC com as listas de campos
 #               de hoje (tests/cplcheck/confere-cplcheck.bash)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
@@ -53,12 +55,12 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa cplcheck supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
 
-uso() { sed -n '2,52p' "$0"; exit 2; }
+uso() { sed -n '2,54p' "$0"; exit 2; }
 
 while getopts "it:o:h" opt; do
   case "${opt}" in
@@ -213,6 +215,7 @@ quer malhas     && executa malhas tests/malhas/compara-malhas.bash "${REV}" "${S
 quer completar  && executa completar tests/completar/compara-completar.bash "${REV}" "${SAIDA}/completar"
 quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
 quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
+quer curtocircuito && executa curtocircuito python3 tools/dev/confere-curto-circuito.py
 quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"
@@ -224,7 +227,7 @@ echo
 echo "Resumo (referência: ${REV})"
 falhas=0
 for nome in ${ORDEM}; do
-  printf '  %-12s %-28s %5s s\n' "${nome}" "${RESULTADO[${nome}]}" "${TEMPO[${nome}]}"
+  printf '  %-14s %-28s %5s s\n' "${nome}" "${RESULTADO[${nome}]}" "${TEMPO[${nome}]}"
   [[ ${RESULTADO[${nome}]} == FALHOU ]] && falhas=$((falhas + 1))
 done
 echo

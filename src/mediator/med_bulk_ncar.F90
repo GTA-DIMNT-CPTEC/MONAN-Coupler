@@ -353,8 +353,7 @@ contains
       ! pular células sem tas físico (tas < 100 K = sem dado)
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      sst_eff = effective_sst(sst, i, j)
       ! clamp ±500 W/m²
       fptr(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, &
         rho_air * Cp_air * Ch_neut * wspd * (tas(i,j) - sst_eff)))
@@ -383,8 +382,7 @@ contains
       ! 500 hPa e' um limiar seguro para "ausencia de dado".
       if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      sst_eff = effective_sst(sst, i, j)
       qsat = eps_q * es_coef_a * &
         exp(es_coef_b*(sst_eff-T_freeze)/(sst_eff-T_freeze+es_coef_c)) / &
         max(psl(i,j), 1.0_ESMF_KIND_R8)
@@ -401,13 +399,27 @@ contains
     do j=j1,j2; do i=i1,i2
       ! pular células sem lwdn real (lwdn=0 indica ausência)
       if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
-      sst_eff = merge(sst(i,j), SST_BULK_FALLBACK, &
-        associated(sst) .and. sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8)
+      sst_eff = effective_sst(sst, i, j)
       fptr(i,j) = max( &
         max(lwdn(i,j), 0.0_ESMF_KIND_R8) - 0.97_ESMF_KIND_R8 * sigma_sb * sst_eff**4, &
         -300.0_ESMF_KIND_R8)
     end do; end do
   end subroutine compute_ocean_fluxes
+
+  !> SST usada nos fluxos sobre agua aberta: sst(i,j) dentro de (271, 308) K;
+  !! fora da faixa, ou sem SST (ponteiro nulo), SST_BULK_FALLBACK. Os testes
+  !! ficam em if separados porque o Fortran nao garante o curto-circuito do
+  !! .and.: com o ponteiro nulo, sst(i,j) nao pode ser lido.
+  pure function effective_sst(sst, i, j) result(sst_eff)
+    real(ESMF_KIND_R8), pointer, intent(in) :: sst(:,:)
+    integer,                     intent(in) :: i, j
+    real(ESMF_KIND_R8) :: sst_eff
+
+    sst_eff = SST_BULK_FALLBACK
+    if (associated(sst)) then
+      if (sst(i,j) > 271.0_ESMF_KIND_R8 .and. sst(i,j) < 308.0_ESMF_KIND_R8) sst_eff = sst(i,j)
+    end if
+  end function effective_sst
 
 
   subroutine compute_roughness_length(fluxes, j1, j2, i1, i2)

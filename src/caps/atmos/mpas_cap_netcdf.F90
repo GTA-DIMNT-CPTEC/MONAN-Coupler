@@ -249,8 +249,9 @@ contains
     if (rc /= ESMF_SUCCESS) then; rc = ESMF_SUCCESS; return; end if
     do idx = 1, diag%n_raw
       if (trim(diag%raw_names(idx)) == trim(fname)) then
-        if (allocated(diag%raw_local) .and. size(diag%raw_local,1) >= nLocal) &
-          diag%raw_local(1:nLocal, idx) = data1d(1:nLocal)
+        if (allocated(diag%raw_local)) then
+          if (size(diag%raw_local,1) >= nLocal) diag%raw_local(1:nLocal, idx) = data1d(1:nLocal)
+        end if
         return
       end if
     end do
@@ -258,8 +259,8 @@ contains
     diag%n_raw = diag%n_raw + 1
     diag%raw_names(diag%n_raw) = trim(fname)
     ! diag%raw_local já alocado em netcdf_init_coords com tamanho nLocal correto
-    if (allocated(diag%raw_local) .and. size(diag%raw_local,1) >= nLocal) then
-      diag%raw_local(1:nLocal, diag%n_raw) = data1d(1:nLocal)
+    if (allocated(diag%raw_local)) then
+      if (size(diag%raw_local,1) >= nLocal) diag%raw_local(1:nLocal, diag%n_raw) = data1d(1:nLocal)
     end if
   end subroutine netcdf_push_raw_field
 
@@ -590,8 +591,9 @@ contains
             if (rc==ESMF_SUCCESS) then
               if (rk==1) then
                 call ESMF_FieldGet(field, farrayPtr=fp1, rc=rc)
-                if (rc==ESMF_SUCCESS .and. associated(fp1) .and. size(fp1)>=nLocal) &
-                  sendBuf(1:nLocal)=fp1(1:nLocal)
+                if (rc==ESMF_SUCCESS .and. associated(fp1)) then
+                  if (size(fp1)>=nLocal) sendBuf(1:nLocal)=fp1(1:nLocal)
+                end if
                 if (associated(fp1)) nullify(fp1)
               else
                 call ESMF_FieldGet(field, farrayPtr=fp2, rc=rc)

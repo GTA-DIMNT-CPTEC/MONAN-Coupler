@@ -31,7 +31,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
 | 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
-| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 23 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura | em execução; 01 e 02 validadas (`fase13-02-validada`); 03 (C2, falha de leitura no PET 0 do DOCN) em validação |
+| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 23 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura | em execução; 01 a 03 validadas (`fase13-03-validada`); 04 (C3, guardas sem curto-circuito) em validação |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
 
@@ -89,7 +89,6 @@ Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um,
 | fração de gelo sem o SIS2 | o mediador procura `Si_ifrac` que não anuncia; a fração sai do OISST ou do limiar de SST (`med_ocean`) |
 | `Foxx_sen` e `Fioi_sen` | `standard_name` diz "para cima", mas o cálculo é positivo para a superfície (só metadados) |
 | grade do OISST no mediador | centro da célula sem a meia célula em longitude (`ORIGIN_EAST0_CORNER`); suaviza o campo do DOCN |
-| `wind_10m_fallback` | `size` de ponteiro possivelmente não associado; só com `-fcheck=all` e sem `zgrid` |
 | `ReadJRAFieldInterp` (DATM) | mesma falha que a R-FASE13-03 corrigiu no DOCN: só o PET 0 sabe que a leitura falhou; corrigir quando o DATM for validado |
 | `mpi_f08` | opcional; sem ganho de desempenho, fora da sequência |
 

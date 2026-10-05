@@ -506,12 +506,14 @@ contains
         if (localrc /= ESMF_SUCCESS) cycle
         if (fdr == 1) then
           call ESMF_FieldGet(field, farrayPtr=fp1d, rc=localrc)
-          if (localrc /= ESMF_SUCCESS .or. .not. associated(fp1d) .or. size(fp1d)==0) cycle
+          if (localrc /= ESMF_SUCCESS .or. .not. associated(fp1d)) cycle
+          if (size(fp1d) == 0) cycle
           vals = fp1d
           nullify(fp1d)
         else
           call ESMF_FieldGet(field, farrayPtr=fp2d, rc=localrc)
-          if (localrc /= ESMF_SUCCESS .or. .not. associated(fp2d) .or. size(fp2d)==0) cycle
+          if (localrc /= ESMF_SUCCESS .or. .not. associated(fp2d)) cycle
+          if (size(fp2d) == 0) cycle
           vals = pack(fp2d, .true.)
           nullify(fp2d)
         end if
@@ -639,8 +641,7 @@ contains
         buf2d = reshape(buf1d, [ATM_NX, ATM_NY])
 
         ! 3) Mapeamento geográfico nearest-neighbor para TODAS as células MPAS.
-        if (present(lon_rad) .and. present(lat_rad) .and. &
-            size(lon_rad) >= n .and. size(lat_rad) >= n) then
+        if (have_cell_coords(n, lon_rad, lat_rad)) then
           do icell = 1, n
             lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
             lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
@@ -781,8 +782,7 @@ contains
       ! valor (Sa_pslv chegou a 2017 hPa). Por isso somam-se valores e contagens
       ! de todos os PETs, e o ponto recebe a media (zero onde nao ha celula):
       !   buf_global(ig,jg) = sum_global(ig,jg) / count_global(ig,jg)
-      if (present(lon_rad) .and. present(lat_rad) .and. &
-          size(lon_rad) >= n .and. size(lat_rad) >= n) then
+      if (have_cell_coords(n, lon_rad, lat_rad)) then
 
           call map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
           if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -801,5 +801,17 @@ contains
     end if
     rc = ESMF_SUCCESS
   end subroutine state_set_field_1d
+
+  !> Há coordenadas das células: lon_rad e lat_rad presentes, cada um com ao
+  !! menos n elementos. Os testes ficam em if separados porque o Fortran não
+  !! garante o curto-circuito do .and., e size de um argumento ausente não
+  !! pode ser avaliado.
+  pure logical function have_cell_coords(n, lon_rad, lat_rad) result(ok)
+    integer,          intent(in)           :: n
+    real(MPAS_RKIND), intent(in), optional :: lon_rad(:), lat_rad(:)
+
+    ok = .false.
+    if (present(lon_rad) .and. present(lat_rad)) ok = size(lon_rad) >= n .and. size(lat_rad) >= n
+  end function have_cell_coords
 
 end module mpas_adapter_mod

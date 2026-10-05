@@ -211,11 +211,12 @@ contains
         nv = size(atm_state%pool_uZonal, 1)  ! número de níveis verticais
         do k = 1, n
           ! Altura do centro do nível 1 a partir de zgrid (se disponível)
-          if (associated(atm_state%pool_zgrid) .and. size(atm_state%pool_zgrid,1) > 1) then
-            ! zgrid(1,k) = base do nível 1; (1,k)+(2,k))/2 = centro
-            z_sfc = 0.5_MPAS_RKIND * (atm_state%pool_zgrid(1,k) + atm_state%pool_zgrid(2,k))
-          else
-            z_sfc = Z_SFC_DEFAULT
+          ! zgrid(1,k) = base do nível 1; (1,k)+(2,k))/2 = centro. Os testes
+          ! ficam em if separados: size de um ponteiro nulo não pode ser lido.
+          z_sfc = Z_SFC_DEFAULT
+          if (associated(atm_state%pool_zgrid)) then
+            if (size(atm_state%pool_zgrid,1) > 1) &
+              z_sfc = 0.5_MPAS_RKIND * (atm_state%pool_zgrid(1,k) + atm_state%pool_zgrid(2,k))
           end if
           z_sfc = max(z_sfc, 2.0_MPAS_RKIND)  ! mínimo 2 m
           ! Fator de perfil logarítmico neutro

@@ -32,9 +32,10 @@ Leva cerca de onze minutos e termina com um resumo (OK, FALHOU ou PULADO por con
 | `completar` | `tests/completar/compara-completar.bash REV` | a SST, os campos exportados ou as contagens dos pontos completados mudam |
 | `unitarios` | `tests/unit/roda-unitarios.bash` | um teste com valor esperado ou o teste de consistência do mapa falha |
 | `mapa` | `tools/dev/mapa-acoplamento.py -c` | `docs/acoplamento.md` está desatualizado |
+| `curtocircuito` | `tools/dev/confere-curto-circuito.py` | uma instrução de `src/` usa, na mesma expressão, um nome que ela testa com `associated`, `allocated` ou `present` (o Fortran não garante o curto-circuito do `.and.`; separar em `if` aninhados) |
 | `cplcheck` | `tests/cplcheck/confere-cplcheck.bash` | a conferência do mapa num driver NUOPC de teste não dá o esperado |
 | `supergrid` | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 muda |
-| `docn` | `tests/docn/compara-docn.bash REV` | o oceano de dados exporta campos, carimbos ou mensagens diferentes |
+| `docn` | `tests/docn/compara-docn.bash REV` | o oceano de dados exporta campos, carimbos ou mensagens diferentes, ou, com o arquivo de SST ausente, a falha não chega a todos os PETs |
 
 Os testes que compilam `REV` com o programa de teste de hoje (`malhas`, `completar`, `docn`) traduzem antes a cópia de `REV` para os nomes atuais (`renomeia-identificadores.py traduz`), aplicando as tabelas de `tools/dev/nomes/` que `REV` ainda não tinha.
 
