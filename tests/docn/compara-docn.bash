@@ -17,6 +17,11 @@
 # Em cada caso têm de ser idênticos, bit a bit: os campos exportados pelo
 # DOCN em cada PET, com os carimbos de tempo (saida_*.bin); os arquivos de
 # diagnóstico; e as mensagens do DOCN no log do ESMF, sem data e hora.
+# E um caso só da árvore de trabalho:
+#   arquivo_ausente  completo  arquivo de SST inexistente: a leitura falha no
+#                              PET 0, que avisa os demais; a rodada tem de
+#                              terminar com erro em menos de 120 s, e a falha
+#                              tem de estar no log de todos os PETs
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/docn/compara-docn.bash REV [SAIDA]
@@ -30,7 +35,7 @@
 set -uo pipefail
 
 REV=${1:-}
-[[ -n "${REV}" ]] || { sed -n '2,29p' "$0"; exit 2; }
+[[ -n "${REV}" ]] || { sed -n '2,33p' "$0"; exit 2; }
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=$(mkdir -p "${2:-${RAIZ}/build-local/docn}" && cd "${2:-${RAIZ}/build-local/docn}" && pwd)
 MPIRUN=${MPIRUN:-mpiexec}
@@ -133,5 +138,26 @@ for c in com_correntes sem_correntes; do
     done
   done
 done
+echo "== arquivo_ausente completo (só a versão nova)"
+run="${SAIDA}/nova/run_arquivo_ausente"
+rm -rf "${run}"; mkdir -p "${run}/diag_import"
+sed "s|${SAIDA}/dados/sst.nc|${SAIDA}/dados/nao_existe.nc|" "${SAIDA}/nuopc_sem_correntes.input" > "${run}/nuopc.input"
+grep -q nao_existe.nc "${run}/nuopc.input" || { echo "ERRO: nuopc.input do arquivo ausente" >&2; exit 2; }
+# shellcheck disable=SC2086
+( cd "${run}" && timeout 120 ${MPIRUN} -n "${NP}" ../test_docn > run.log 2>&1 )
+st=$?
+if [[ ${st} -eq 124 ]]; then
+  echo "  TRAVOU         a rodada não terminou em 120 s"; difere=1
+elif [[ ${st} -eq 0 ]]; then
+  echo "  DIFERE         a rodada terminou sem erro com o arquivo ausente"; difere=1
+else
+  n=$(grep -l 'o PET 0 nao conseguiu ler' "${run}"/PET*.teste 2> /dev/null | wc -l)
+  if [[ ${n} -eq ${NP} ]]; then
+    echo "  erro em todos  código ${st}; falha da leitura no log dos ${NP} PETs"
+  else
+    echo "  DIFERE         código ${st}; falha da leitura no log de ${n} de ${NP} PETs"; difere=1
+  fi
+fi
+
 if [[ ${difere} -eq 0 ]]; then echo "RESULTADO: DOCN idêntico"; else echo "RESULTADO: há diferenças"; fi
 exit ${difere}

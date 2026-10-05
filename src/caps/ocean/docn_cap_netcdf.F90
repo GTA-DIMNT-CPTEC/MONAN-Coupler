@@ -135,7 +135,9 @@ contains
   !!
   !! Idêntica em estrutura a ReadJRAFieldInterp do DATM_cap.F90.
   !! Estratégia paralela: PET0 lê campo global via ReadGlobalField e distribui
-  !! via ESMF_VMBroadcast. Cada PET copia o seu subdomínio local.
+  !! via ESMF_VMBroadcast. Cada PET copia o seu subdomínio local. Antes dos
+  !! dados, o PET 0 distribui a situação da leitura: se ela falhou, todos os
+  !! PETs retornam com rc = ESMF_FAILURE.
   !!
   !! Parâmetros de epoch e dt_data configurados em &nuopc_docn:
   !!   docn_epoch_year, docn_epoch_month, docn_epoch_day
@@ -170,6 +172,7 @@ contains
     real(ESMF_KIND_R8)      :: f0_data(nx,ny), f1_data(nx,ny)
     real(ESMF_KIND_R8), allocatable :: buf_global(:)
     integer :: i1, i2, j1, j2, i, j, localPet
+    integer :: read_status(1)          ! 0: o PET 0 leu os dois instantes
     character(len=256) :: msg
 
     rc      = ESMF_SUCCESS
@@ -235,15 +238,29 @@ contains
     alpha = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, alpha))
 
     ! PET0 lê os dois snapshots e interpola
+    read_status = 0
     if (localPet == 0) then
       call ReadGlobalField(filename, varname, tidx0, nx, ny, f0_data, rc)
-      if (rc /= ESMF_SUCCESS) return
-      call ReadGlobalField(filename, varname, tidx1, nx, ny, f1_data, rc)
-      if (rc /= ESMF_SUCCESS) return
+      if (rc == ESMF_SUCCESS) call ReadGlobalField(filename, varname, tidx1, nx, ny, f1_data, rc)
+      if (rc == ESMF_SUCCESS) then
+        ! Interpolação temporal linear in-place
+        f0_data = f0_data + alpha * (f1_data - f0_data)
+        buf_global = reshape(f0_data, [nx*ny])
+      else
+        read_status = 1
+      end if
+    end if
 
-      ! Interpolação temporal linear in-place
-      f0_data = f0_data + alpha * (f1_data - f0_data)
-      buf_global = reshape(f0_data, [nx*ny])
+    ! O PET 0 distribui primeiro a situação da leitura. Se ela falhou, todos
+    ! os PETs retornam com erro; sem isso, os demais esperariam no broadcast
+    ! dos dados, que o PET 0 nunca faria, até o fim do tempo da fila.
+    call ESMF_VMBroadcast(vm, bcstData=read_status, count=1, rootPet=0, rc=rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (read_status(1) /= 0) then
+      call ESMF_LogWrite('DOCN ReadOcnFieldInterp: o PET 0 nao conseguiu ler ' // &
+        trim(varname) // ' de ' // trim(filename), ESMF_LOGMSG_ERROR)
+      rc = ESMF_FAILURE
+      return
     end if
 
     ! Broadcast do campo global interpolado para todos os PETs
