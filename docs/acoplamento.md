@@ -10,7 +10,7 @@ O mapa descreve o acoplamento que o código faz hoje. O mediador e os caps
 dos cinco modelos anunciam e realizam os campos a partir dele, na ordem
 das linhas de `EXCHANGES` (importação) e de `EXPORTS` (exportação).
 
-59 campos, 8 malhas, 154 trocas, 41 exportações e 6 rotas.
+59 campos, 8 malhas, 151 trocas, 41 exportações e 6 rotas.
 
 ## 1. Configurações
 
@@ -23,6 +23,32 @@ pelas chaves do grupo `&nuopc_mode` do `nuopc.input`:
 | `mom6` / `docn` | componente oceânico é o MOM6 / o DOCN (`use_docn`) |
 | `med_to_mpas` / `ocn_to_mpas` | contorno oceânico da atmosfera pelo mediador / direto do oceano (`use_med_to_mpas`) |
 | `sis2` | gelo dinâmico (`use_sis2_dynamic`) |
+
+As quatro chaves formam 16 combinações. A tabela `COUPLER_MODES`
+(`src/shared/coupler_config.F90`) diz o que acontece com cada uma, e é
+consultada pela leitura do `nuopc.input` e pelo mapa: `suportada` é a
+produção, com ou sem o SIS2; `nao_validada` é aceita com aviso no início
+da rodada; `recusada` para a rodada na leitura, e a nota é a mensagem.
+Os valores padrão das chaves formam a configuração de produção.
+
+| `use_datm` | `use_docn` | `use_med_to_mpas` | `use_sis2_dynamic` | Situação | Nota |
+| --- | --- | --- | --- | --- | --- |
+| F | F | T | T | `suportada` | producao: MONAN-A, MOM6 e SIS2, contorno pelo mediador |
+| F | F | T | F | `suportada` | MONAN-A e MOM6 sem o SIS2, contorno pelo mediador |
+| F | T | F | F | `nao_validada` | o DOCN nao exporta Sx_tsfc, Sf_albedo e Sx_omask, que o MONAN-A importa. |
+| F | T | T | F | `nao_validada` | DOCN com contorno pelo mediador nunca foi executado. |
+| T | F | T | T | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| T | F | T | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| T | T | F | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| T | T | T | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| F | F | F | T | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
+| F | F | F | F | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
+| T | F | F | T | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
+| T | F | F | F | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
+| F | T | F | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
+| F | T | T | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
+| T | T | F | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
+| T | T | T | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
 
 Campos por conector em cada configuração conferida pelo teste:
 
@@ -53,7 +79,6 @@ própria.
 | `Sx_tsfc` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sx_tsfc |
 | `Sf_albedo` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sf_albedo |
 | `Sx_omask` | `ATM@atm_cap` | `mpas`, `ocn_to_mpas` | o oceano nao exporta Sx_omask |
-| `Sf_zorl` | `ATM@atm_cap` | `mpas`, `mom6`, `ocn_to_mpas` | o MOM6 nao exporta Sf_zorl |
 
 ## 2. Trocas por conector
 
@@ -185,9 +210,6 @@ como `remapmethod` (`cpl_write_methods`, em `src/coupling/cpl_check.F90`).
 | `So_u` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
 | `So_v` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
 | `Sf_zorl` | `OCN@docn` | `ATM@atm_cap` | `bilinear` | `mpas`, `docn`, `ocn_to_mpas` |
-| `Si_ifrac` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
-| `So_u` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
-| `So_v` | `OCN@ocn_mom6` | `ATM@atm_cap` | `bilinear` | `mpas`, `mom6`, `ocn_to_mpas` |
 
 ## 3. Trocas dentro dos componentes
 

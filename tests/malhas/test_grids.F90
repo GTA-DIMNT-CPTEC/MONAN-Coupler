@@ -86,13 +86,21 @@ program test_grids
 contains
 
   !> Configuração com use_docn dado, o supergrid sintético e a grade do DOCN.
+  !! Com o DOCN, desliga o SIS2 e o contorno pelo mediador, ligados por
+  !! padrão desde a R-FASE13-01 (o SIS2 com o DOCN é recusado na leitura).
   subroutine write_nml(file_name, use_docn)
     character(len=*), intent(in) :: file_name, use_docn
     integer :: u
     open(newunit=u, file=file_name, status='replace', action='write')
     write(u,'(A)') '&nuopc_mode'
     write(u,'(2A)') '  use_docn = ', use_docn
+    if (use_docn == '.true.') write(u,'(A)') '  use_med_to_mpas = .false.'
     write(u,'(A)') '/'
+    if (use_docn == '.true.') then
+      write(u,'(A)') '&nuopc_petlayout'
+      write(u,'(A)') '  use_sis2_dynamic = .false.'
+      write(u,'(A)') '/'
+    end if
     write(u,'(A)') '&nuopc_docn'
     write(u,'(A)') '  docn_nx = 36, docn_ny = 18'
     write(u,'(A)') '/'

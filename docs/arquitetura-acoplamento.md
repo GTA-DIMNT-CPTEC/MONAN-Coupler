@@ -61,7 +61,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 
 1. **Malha**: linha em `GRIDS`; o cap a constrói pelo catálogo (`cpl_grids`). Malha de tipo novo: função nova em `cpl_grids`.
 2. **Campos e passagens**: `FIELDS`, `EXCHANGES`, `EXPORTS` (seção 4); rotas novas do mediador em `ROUTES`.
-3. **Chave e condições** (componente opcional): chave em `&nuopc_mode` e `coupler_config`; campo em `cpl_config_t` e em `cpl_current_config`; condições em `CONDITIONS` e `condition_holds`; regras em `cpl_config_is_valid`; configurações em `mapa-acoplamento.py` e no teste do mapa.
+3. **Chave e condições** (componente opcional): chave em `&nuopc_mode` e `coupler_config`; campo em `cpl_config_t` e em `cpl_current_config`; condições em `CONDITIONS` e `condition_holds`; combinação aceita, não validada ou recusada na tabela `COUPLER_MODES` (`coupler_config`), que `config_read`, `cpl_config_is_valid` e `mapa-acoplamento.py` consultam; configurações conferidas em `mapa-acoplamento.py` e no teste do mapa.
 4. **Cap**: como o do DOCN. Constante `POINT_<COMP>`, listas por `cpl_arrivals` e `cpl_exports`, rotinas de `cap_common` (`cap_realize_fields`, `cap_put_field`, `cap_stamp_export`); o que é do modelo fica num adaptador.
 5. **Driver** (`esm.F90`): `add_model` e a divisão de PETs; os pares de conectores em `CONNECTOR_SRC`/`CONNECTOR_DST` (um conector do mapa fora da lista para a inicialização); as linhas em `SetRunSequence`.
 6. **Compilação**: `SRCS` e dependências no `Makefile`; `compila-local.bash`, se compilar fora da Jaci.

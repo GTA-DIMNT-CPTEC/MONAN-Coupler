@@ -30,7 +30,8 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 6 a 9 | código limpo: conferências num comando, testes com valor esperado, estado explícito, módulos coesos, duplicação | 31 | concluída (`fase9-07-validada`) |
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
-| 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | 01 a 06 validadas (`fase12-06-validada`); 07 (só documentação) em validação |
+| 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
+| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 22 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura | em execução; 01 (bloco 0, C1) em validação |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
 
@@ -74,6 +75,8 @@ bash tools/dev/valida_rodada.bash compara <nome>
 | atributos NetCDF mudados ("só metadados") | não reprova; conferir com `ncdump -h` |
 
 ## 6. Decisões em aberto e defeitos conhecidos
+
+**Foco atual (decisão do GT, out/2026).** O esforço se concentra nos componentes de produção: MONAN-A (ATM), MOM6 com SIS2 (OCN) e SIS2 dinâmico (ICE). Os modos DOCN e DATM são mantidos (não serão removidos) e serão validados em momento oportuno; até lá, continuam compilados e conferidos pelos testes locais. Problemas conhecidos desses modos: o DOCN com o contorno direto para na inicialização (o MONAN-A importa `Sx_tsfc`, `Sf_albedo` e `Sx_omask`, que o DOCN não exporta); a combinação DOCN com contorno pelo mediador nunca foi executada; o DATM está no mapa, mas o driver não o registra. Desde a R-FASE13-01, essas combinações são aceitas com aviso no início da rodada, e as que nunca funcionam (MOM6 com contorno direto, SIS2 com DOCN) são recusadas na leitura; a regra está só na tabela `COUPLER_MODES` (`src/shared/coupler_config.F90`).
 
 Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um, se decidido, vira uma etapa própria da fase 10.
 

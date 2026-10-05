@@ -58,7 +58,7 @@ program test_connectors
       end do
     end do
   end do
-  call outcome('todas as configuracoes validas conferidas (12)', ncases == 12)
+  call outcome('todas as configuracoes aceitas conferidas (8)', ncases == 8)
 
   if (nfailures == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'

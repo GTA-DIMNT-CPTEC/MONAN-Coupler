@@ -16,7 +16,7 @@
 !!                    importa Sx_tsfc, Sf_albedo e Sx_omask sem origem: desde
 !!                    a R-FASE11-25, lacunas conhecidas (tabela GAPS),
 !!                    três avisos e nenhuma diferença
-!!   configuracoes    nas doze configurações válidas, os estados e as CplList
+!!   configuracoes    nas oito configurações aceitas (COUPLER_MODES), os estados e as CplList
 !!                    que os caps e os conectores montam a partir do mapa (como
 !!                    na rodada): sem o DATM, nenhuma diferença, e cada lacuna
 !!                    da configuração aparece como aviso; com o DATM, que o
@@ -104,7 +104,7 @@ program test_cpl_check
                  ndif == 0 .and. nwarn == 3 .and. has_item('Sx_tsfc') .and. has_item('Sf_albedo') &
                  .and. has_item('Sx_omask'))
 
-  ! --- as doze configurações válidas, como na rodada --------------------------
+  ! --- as oito configurações aceitas, como na rodada --------------------------
   call check_configurations()
 
   ! --- método de cada campo (remapmethod) ---------------------------------------

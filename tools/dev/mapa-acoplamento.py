@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """mapa-acoplamento.py: gera docs/acoplamento.md a partir do mapa de acoplamento.
 
-Lê as tabelas de src/coupling/cpl_fields.F90 (FIELDS) e
-src/coupling/cpl_map.F90 (GRIDS, EXCHANGES, EXPORTS e ROUTES) e escreve
-uma versão legível do mapa em Markdown: resumo dos conectores por
-configuração, trocas de cada conector, trocas dentro dos componentes,
+Lê as tabelas de src/coupling/cpl_fields.F90 (FIELDS),
+src/coupling/cpl_map.F90 (GRIDS, EXCHANGES, EXPORTS e ROUTES) e
+src/shared/coupler_config.F90 (COUPLER_MODES) e escreve uma versão legível
+do mapa em Markdown: combinações de componentes aceitas, resumo dos
+conectores por configuração, trocas de cada conector, trocas dentro dos componentes,
 exportações dos modelos, rotas do mediador, malhas e dicionário de campos. O Fortran é a fonte; o Markdown é gerado e
 não deve ser editado à mão.
 
@@ -30,6 +31,7 @@ import re
 import sys
 
 # Configurações conferidas por tests/unit/test_cpl_map.F90, na mesma ordem.
+# Todas precisam ser aceitas pela tabela COUPLER_MODES (conferido em gera).
 CONFIGS = collections.OrderedDict([
     ('producao',      dict(datm=False, docn=False, med_to_mpas=True,  sis2=True)),
     ('mom6_sem_sis2', dict(datm=False, docn=False, med_to_mpas=True,  sis2=False)),
@@ -143,12 +145,57 @@ def chamadas(s, nome):
         i = j
 
 
-def texto(v):
-    """Valor de um argumento: texto sem aspas, ou a expressão como está."""
+def texto(v, consts=None):
+    """Valor de um argumento: texto sem aspas, ou a expressão como está.
+
+    Com consts (constantes de texto do fonte), resolve também o nome de uma
+    constante e a concatenação ('a' // NOME) de textos entre aspas e de
+    constantes."""
     v = v.strip()
+    if consts is not None and (v in consts or len(concatenacao(v)) > 1):
+        valores = []
+        for p in concatenacao(v):
+            if len(p) >= 2 and p[0] == p[-1] and p[0] in "'\"":
+                valores.append(p[1:-1])
+            elif p in consts:
+                valores.append(consts[p])
+            else:
+                return v
+        return ''.join(valores)
     if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
         return v[1:-1]
     return v
+
+
+def concatenacao(s):
+    """Partes de s separadas por '//' fora de aspas."""
+    partes, atual, aspa, i = [], '', None, 0
+    while i < len(s):
+        c = s[i]
+        if aspa:
+            if c == aspa:
+                aspa = None
+        elif c in "'\"":
+            aspa = c
+        elif s.startswith('//', i):
+            partes.append(atual.strip())
+            atual, i = '', i + 2
+            continue
+        atual += c
+        i += 1
+    partes.append(atual.strip())
+    return partes
+
+
+def constantes_texto(instrs):
+    """Constantes de texto declaradas (character(len=*), parameter :: NOME = 'x')."""
+    c = {}
+    for s in instrs:
+        m = re.match(r"character\s*\(\s*len\s*=\s*\*\s*\)\s*,\s*parameter\s*::\s*(\w+)\s*=\s*(.*)$",
+                     s, re.I)
+        if m:
+            c[m.group(1)] = texto(m.group(2), c)
+    return c
 
 
 def componentes(instrs, tipo, params):
@@ -185,11 +232,12 @@ def parametros_inteiros(instrs):
     return p
 
 
-def tabela_fortran(instrs, tipo, nome, params, arquivo):
-    """Linhas da tabela 'type(tipo), parameter :: nome(*) = [...]'."""
+def tabela_fortran(instrs, tipo, nome, params, arquivo, consts=None):
+    """Linhas da tabela 'type(tipo), parameter[, public] :: nome(*) = [...]'."""
     comps = componentes(instrs, tipo, params)
     for s in instrs:
-        if re.match(r'type\s*\(\s*' + tipo + r'\s*\)\s*,\s*parameter\s*::\s*' + nome + r'\b', s, re.I):
+        if re.match(r'type\s*\(\s*' + tipo + r'\s*\)\s*,\s*parameter\s*(,\s*public\s*)?::\s*'
+                    + nome + r'\b', s, re.I):
             linhas = []
             for args in chamadas(s, tipo):
                 linha = collections.OrderedDict((c, d) for c, _, d in comps)
@@ -199,7 +247,7 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo):
                         chave, valor = m.group(1), m.group(2)
                     else:
                         chave, valor = comps[k][0], a
-                    linha[chave] = texto(valor)
+                    linha[chave] = texto(valor, consts)
                 for c, comp, _ in comps:
                     if comp is not None and len(linha[c].encode('utf-8')) > comp:
                         raise ErroMapa('{}: {}: "{}" tem mais de {} caracteres'.format(
@@ -210,9 +258,10 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo):
 
 
 def le_mapa(raiz):
-    """Lê FIELDS, GRIDS, EXCHANGES, EXPORTS, GAPS e ROUTES dos fontes."""
+    """Lê FIELDS, GRIDS, EXCHANGES, EXPORTS, GAPS, ROUTES e COUPLER_MODES dos fontes."""
     tabelas = {}
-    for arquivo, itens in (('src/coupling/cpl_fields.F90', [('cpl_field_t', 'FIELDS')]),
+    for arquivo, itens in (('src/shared/coupler_config.F90', [('coupler_mode_t', 'COUPLER_MODES')]),
+                           ('src/coupling/cpl_fields.F90', [('cpl_field_t', 'FIELDS')]),
                            ('src/coupling/cpl_map.F90', [('cpl_grid_ref_t', 'GRIDS'),
                                                           ('cpl_exchange_t', 'EXCHANGES'),
                                                           ('cpl_export_t', 'EXPORTS'),
@@ -228,10 +277,11 @@ def le_mapa(raiz):
         if arquivo.endswith('cpl_map.F90'):
             # CPL_NAME_LEN vem de cpl_fields
             params.setdefault('CPL_NAME_LEN', tabelas['_params_fields']['CPL_NAME_LEN'])
-        else:
+        elif arquivo.endswith('cpl_fields.F90'):
             tabelas['_params_fields'] = params
         for tipo, nome in itens:
-            tabelas[nome] = tabela_fortran(instrs, tipo, nome, params, arquivo)
+            tabelas[nome] = tabela_fortran(instrs, tipo, nome, params, arquivo,
+                                           constantes_texto(instrs))
     return tabelas
 
 
@@ -327,6 +377,33 @@ def gera(t):
          'contorno oceânico da atmosfera pelo mediador / direto do oceano (`use_med_to_mpas`)'],
         ['`sis2`', 'gelo dinâmico (`use_sis2_dynamic`)'],
     ])
+    modos = t['COUPLER_MODES']
+    chaves = ('datm', 'docn', 'med_to_mpas', 'sis2')
+
+    def situacao(cfg):
+        for m in modos:
+            if all((m[k].lower() == '.true.') == cfg[k] for k in chaves):
+                return m['status']
+        raise ErroMapa('combinação ausente de COUPLER_MODES: {}'.format(cfg))
+
+    for n, cfg in CONFIGS.items():
+        if situacao(cfg) == 'recusada':
+            raise ErroMapa('configuração {} recusada em COUPLER_MODES'.format(n))
+    sim = {'.true.': 'T', '.false.': 'F'}
+    out += [
+        '',
+        'As quatro chaves formam 16 combinações. A tabela `COUPLER_MODES`',
+        '(`src/shared/coupler_config.F90`) diz o que acontece com cada uma, e é',
+        'consultada pela leitura do `nuopc.input` e pelo mapa: `suportada` é a',
+        'produção, com ou sem o SIS2; `nao_validada` é aceita com aviso no início',
+        'da rodada; `recusada` para a rodada na leitura, e a nota é a mensagem.',
+        'Os valores padrão das chaves formam a configuração de produção.',
+        '',
+    ]
+    out += md_tabela(['`use_datm`', '`use_docn`', '`use_med_to_mpas`', '`use_sis2_dynamic`',
+                      'Situação', 'Nota'],
+                     [[sim[m[k].lower()] for k in chaves] + [codigo(m['status']), m['note']]
+                      for m in modos])
     out += ['', 'Campos por conector em cada configuração conferida pelo teste:', '']
     nomes = list(CONFIGS)
     linhas = []

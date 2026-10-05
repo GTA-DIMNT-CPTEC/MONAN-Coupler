@@ -44,6 +44,9 @@
 !!   med_to_mpas / ocn_to_mpas contorno oceânico da atmosfera pelo mediador
 !!                             ou direto do oceano (use_med_to_mpas)
 !!   sis2                      gelo dinâmico (use_sis2_dynamic)
+!! As consultas que percorrem configurações (cpl_arrivals, cpl_exports)
+!! consideram só as combinações aceitas pela tabela COUPLER_MODES
+!! (coupler_config), a mesma que config_read consulta.
 !!
 !! O DATM está descrito como o cap dele anuncia os campos, mas o driver
 !! (esm.F90) não o registra hoje: com use_datm=.true. o componente ATM
@@ -103,7 +106,7 @@ module cpl_map_mod
   use ESMF,                  only : ESMF_KIND_R8
   use coupler_constants_mod, only : T_FREEZE_SEAWATER
   use coupler_config_mod,    only : cfg_use_datm, cfg_use_docn, cfg_use_med_to_mpas, &
-                                    cfg_use_sis2_dynamic
+                                    cfg_use_sis2_dynamic, COUPLER_MODES, coupler_mode_index
   use regrid_base_mod,       only : regrid_fill_t
   use cpl_fields_mod,        only : CPL_NAME_LEN
 
@@ -369,18 +372,15 @@ module cpl_map_mod
     cpl_exchange_t('Sf_zorl',        'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
     cpl_exchange_t('Sf_albedo',      'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
     cpl_exchange_t('Sx_omask',       'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    ! 10. Contorno oceânico direto do oceano (use_med_to_mpas=.false.): só
-    !     os nomes que o oceano exporta e o MONAN-A importa. Sx_tsfc,
+    ! 10. Contorno oceânico direto do DOCN (use_med_to_mpas=.false.): só
+    !     os nomes que o DOCN exporta e o MONAN-A importa. Sx_tsfc,
     !     Sf_albedo e Sx_omask ficam sem origem, e o cap atmosférico
-    !     interrompe a rodada (verify_import_connected). Com o MOM6, esta
-    !     combinação é desaconselhada no nuopc.input.
+    !     interrompe a rodada (verify_import_connected). Com o MOM6, o
+    !     contorno direto é recusado na leitura (COUPLER_MODES).
     cpl_exchange_t('Si_ifrac',       'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
     cpl_exchange_t('So_u',           'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
     cpl_exchange_t('So_v',           'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
     cpl_exchange_t('Sf_zorl',        'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('Si_ifrac',       'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('So_u',           'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('So_v',           'OCN@ocn_mom6', 'ATM@atm_cap',  'conector',         'mpas,mom6,ocn_to_mpas',  'bilinear'), &
     ! 11. MONAN-A: da grade do cap para as células (caixa do centro, mpas_adapter)
     cpl_exchange_t('Sx_tsfc',        'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
     cpl_exchange_t('Si_ifrac',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
@@ -450,12 +450,12 @@ module cpl_map_mod
     !            campo        ponto          quando                  motivo
     ! O mediador anuncia So_omask também com o DOCN, que não o exporta
     cpl_gap_t('So_omask',  'MED@ocn_med', 'docn',                 'o DOCN nao exporta So_omask'),       &
-    ! Contorno direto do oceano (use_med_to_mpas=.false.): o oceano não
-    ! exporta estes campos; o cap atmosférico interrompe a rodada
+    ! Contorno direto do DOCN (use_med_to_mpas=.false.; com o MOM6 é
+    ! recusado): o DOCN não exporta estes campos; o cap atmosférico
+    ! interrompe a rodada
     cpl_gap_t('Sx_tsfc',   'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_tsfc'),      &
     cpl_gap_t('Sf_albedo', 'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sf_albedo'),    &
-    cpl_gap_t('Sx_omask',  'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_omask'),     &
-    cpl_gap_t('Sf_zorl',   'ATM@atm_cap', 'mpas,mom6,ocn_to_mpas', 'o MOM6 nao exporta Sf_zorl') ]
+    cpl_gap_t('Sx_omask',  'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_omask') ]
 
   !--------------------------------------------------------------------------
   ! ROUTES
@@ -521,10 +521,14 @@ contains
     cfg%sis2        = cfg_use_sis2_dynamic
   end function cpl_current_config
 
-  !> Combinação de chaves aceita por config_read: o SIS2 exige o MOM6.
+  !> Combinação de chaves aceita por config_read: não recusada na tabela
+  !! COUPLER_MODES (coupler_config), suportada ou não validada.
   pure logical function cpl_config_is_valid(cfg) result(ok)
     type(cpl_config_t), intent(in) :: cfg
-    ok = .not. (cfg%sis2 .and. cfg%docn)
+    integer :: k
+
+    k = coupler_mode_index(cfg%datm, cfg%docn, cfg%med_to_mpas, cfg%sis2)
+    ok = COUPLER_MODES(k)%status /= 'recusada'
   end function cpl_config_is_valid
 
   !> Campos que chegam a um ponto, na ordem de EXCHANGES e sem repetição.

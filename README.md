@@ -61,6 +61,16 @@ Modos de execução. O eixo espacial `split` dá a cada componente um bloco pró
 
 A chave `seq_repro = .true.` só tem efeito com `coupling_mode = 'sequential'`, `use_sis2_dynamic = .true.` e `pet_layout = 'split'`. Ela faz a RunSequence sequencial emitir o mesmo fluxo de dados do concorrente, tornando as duas rodadas comparáveis, sem alterar o modo concorrente. Fora desse contexto é ignorada, com aviso. O default `.false.` preserva o sequencial recomendado.
 
+Os componentes são escolhidos por quatro chaves: `use_datm`, `use_docn` e `use_med_to_mpas` (grupo `&nuopc_mode`) e `use_sis2_dynamic` (grupo `&nuopc_petlayout`). Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e SIS2, com o contorno da atmosfera pelo mediador. A tabela `COUPLER_MODES`, em `src/shared/coupler_config.F90`, diz o que acontece com cada combinação, e é a mesma que o mapa de acoplamento consulta:
+
+| Situação | Combinações | Efeito na leitura |
+| --- | --- | --- |
+| suportada | MONAN-A e MOM6 com o contorno pelo mediador, com ou sem o SIS2 | aceita |
+| não validada | as que usam o DOCN ou o DATM | aceita, com aviso que diz o problema conhecido |
+| recusada | MOM6 com `use_med_to_mpas = .false.`; SIS2 com o DOCN | erro fatal, com mensagem que diz o que mudar |
+
+A lista completa, combinação por combinação, está na seção 1 de [`docs/acoplamento.md`](docs/acoplamento.md).
+
 ## Estrutura de diretórios
 
 ```text

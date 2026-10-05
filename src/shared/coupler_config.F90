@@ -17,6 +17,10 @@
 !!   &nuopc_petlayout  modo de acoplamento e divisão de PETs
 !!   &nuopc_regrid     (opcional) esquema de interpolação por rota
 !!
+!! Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e
+!! SIS2, com o contorno da atmosfera pelo mediador. Que combinações de
+!! componentes são aceitas está na tabela COUPLER_MODES, abaixo.
+!!
 !! Regras de leitura:
 !!   - grupo ausente do arquivo: mantém os valores padrão, com aviso;
 !!   - grupo presente mas com erro (chave desconhecida, valor inválido):
@@ -94,13 +98,13 @@ module coupler_config_mod
   integer,            public, protected :: cfg_atm_pet_count    = 0
   integer,            public, protected :: cfg_ocn_pet_count    = 0
   integer,            public, protected :: cfg_ice_pet_count    = 0
-  logical,            public, protected :: cfg_use_sis2_dynamic = .false.
+  logical,            public, protected :: cfg_use_sis2_dynamic = .true.
   logical,            public, protected :: cfg_seq_repro        = .false.
 
   ! &nuopc_mode
   logical,            public, protected :: cfg_use_datm           = .false.
   logical,            public, protected :: cfg_use_docn           = .false.
-  logical,            public, protected :: cfg_use_med_to_mpas    = .false.
+  logical,            public, protected :: cfg_use_med_to_mpas    = .true.
   logical,            public, protected :: cfg_use_docn_ice       = .false.
   logical,            public, protected :: cfg_docn_ice_init_only = .false.
 
@@ -114,7 +118,84 @@ module coupler_config_mod
   character(len=32),  public, protected :: cfg_regrid_class(MAX_REGRID_OVERRIDES)   = ''
   character(len=128), public, protected :: cfg_regrid_options(MAX_REGRID_OVERRIDES) = ''
 
+  !--------------------------------------------------------------------------
+  ! Configurações de componentes
+  !--------------------------------------------------------------------------
+  ! As quatro chaves que escolhem os componentes (use_datm, use_docn e
+  ! use_med_to_mpas, de &nuopc_mode, e use_sis2_dynamic, de
+  ! &nuopc_petlayout) formam 16 combinações. Esta tabela diz o que acontece
+  ! com cada uma, e é o único lugar onde essa regra está escrita: config_read
+  ! a consulta para aceitar ou recusar a rodada, o mapa de acoplamento
+  ! (cpl_config_is_valid) só considera as combinações aceitas, e
+  ! tools/dev/mapa-acoplamento.py a lê para a documentação.
+  !
+  ! Situações:
+  !   'suportada'     validada a cada etapa da refatoração (a de produção) ou
+  !                   esperada sem diferença dela (a mesma sem o SIS2)
+  !   'nao_validada'  aceita, com aviso no início da rodada; a nota diz o
+  !                   problema conhecido (docs/estado-do-projeto.md, seção 6)
+  !   'recusada'      a rodada para na leitura; a nota é a mensagem de erro e
+  !                   diz o que mudar
+  type, public :: coupler_mode_t
+    logical            :: datm
+    logical            :: docn
+    logical            :: med_to_mpas
+    logical            :: sis2
+    character(len=16)  :: status
+    character(len=128) :: note
+  end type coupler_mode_t
+
+  character(len=*), parameter :: NOTE_MOM6_DIRECT = &
+    'use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera.'
+  character(len=*), parameter :: NOTE_SIS2_DOCN = &
+    'use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6).'
+  character(len=*), parameter :: NOTE_DATM = &
+    'o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A.'
+
+  type(coupler_mode_t), parameter, public :: COUPLER_MODES(*) = [                                      &
+    !              datm     docn     med_to_mpas sis2   situação        nota
+    coupler_mode_t(.false., .false., .true.,  .true.,  'suportada',    'producao: MONAN-A, MOM6 e SIS2, ' // &
+                                                                       'contorno pelo mediador'),           &
+    coupler_mode_t(.false., .false., .true.,  .false., 'suportada',    'MONAN-A e MOM6 sem o SIS2, ' //     &
+                                                                       'contorno pelo mediador'),           &
+    coupler_mode_t(.false., .true.,  .false., .false., 'nao_validada', 'o DOCN nao exporta Sx_tsfc, ' //    &
+                                                                       'Sf_albedo e Sx_omask, que o MONAN-A importa.'), &
+    coupler_mode_t(.false., .true.,  .true.,  .false., 'nao_validada', 'DOCN com contorno pelo mediador ' // &
+                                                                       'nunca foi executado.'),             &
+    coupler_mode_t(.true.,  .false., .true.,  .true.,  'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t(.true.,  .false., .true.,  .false., 'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t(.true.,  .true.,  .false., .false., 'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t(.true.,  .true.,  .true.,  .false., 'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t(.false., .false., .false., .true.,  'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t(.false., .false., .false., .false., 'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t(.true.,  .false., .false., .true.,  'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t(.true.,  .false., .false., .false., 'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t(.false., .true.,  .false., .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t(.false., .true.,  .true.,  .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t(.true.,  .true.,  .false., .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t(.true.,  .true.,  .true.,  .true.,  'recusada',     NOTE_SIS2_DOCN) ]
+
+  public :: coupler_mode_index
+
 contains
+
+  !> Posição em COUPLER_MODES da combinação das quatro chaves. A tabela tem
+  !! as 16 combinações (conferido por tests/unit/test_cpl_map.F90), então o
+  !! resultado nunca é 0.
+  pure integer function coupler_mode_index(datm, docn, med_to_mpas, sis2) result(k)
+    logical, intent(in) :: datm, docn, med_to_mpas, sis2
+    integer :: i
+
+    k = 0
+    do i = 1, size(COUPLER_MODES)
+      if ((COUPLER_MODES(i)%datm .eqv. datm) .and. (COUPLER_MODES(i)%docn .eqv. docn) .and. &
+          (COUPLER_MODES(i)%med_to_mpas .eqv. med_to_mpas) .and.                            &
+          (COUPLER_MODES(i)%sis2 .eqv. sis2)) then
+        k = i
+        return
+      end if
+    end do
+  end function coupler_mode_index
 
   !> Lê o arquivo de configuração e preenche as variáveis cfg_*.
   !!
@@ -181,6 +262,7 @@ contains
     character(len=512) :: fpath
     logical :: exists, is_root
     integer :: unit, ios
+    integer :: mode               ! posição da combinação em COUPLER_MODES
 
     rc = CFG_OK
     is_root = launcher_rank() == 0
@@ -266,12 +348,16 @@ contains
       'restart_n (&nuopc_ocn) sao obsoletas e nao tem efeito; remova-as do nuopc.input.'
 
     ! 5. Validar (erro fatal)
+    mode = coupler_mode_index(use_datm, use_docn, use_med_to_mpas, use_sis2_dynamic)
     if (.not. valid_config()) then
       rc = CFG_FATAL
       return
     end if
 
     ! 6. Avisos (a rodada continua)
+    if (is_root .and. COUPLER_MODES(mode)%status == 'nao_validada') write(*,'(A)') TAG// &
+      'AVISO: combinacao de componentes nao validada: '//trim(COUPLER_MODES(mode)%note)// &
+      ' Ver docs/estado-do-projeto.md, secao 6.'
     if (is_root .and. trim(log_kind) == 'multi_on_error') write(*,'(A)') TAG//'AVISO: ' // &
       'log_kind=multi_on_error pode deixar logs/PET*.esmApp.log incompletos em ' // &
       'rodadas bem-sucedidas; as ferramentas de balanceamento dependem deles.'
@@ -391,8 +477,8 @@ contains
                max(atm_pet_count, ocn_pet_count, ice_pet_count) > 0) then
         call fatal('pet_layout=shared nao aceita contagens de PET; ' // &
                    'use pet_layout=split ou zere as contagens.')
-      else if (use_sis2_dynamic .and. use_docn) then
-        call fatal('use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6).')
+      else if (COUPLER_MODES(mode)%status == 'recusada') then
+        call fatal(trim(COUPLER_MODES(mode)%note))
       else if (.not. use_sis2_dynamic .and. ice_pet_count > 0) then
         call fatal('ice_pet_count > 0 exige use_sis2_dynamic=.true.')
       else if (use_docn_ice .and. len_trim(docn_ice_file) == 0) then

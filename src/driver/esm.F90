@@ -503,11 +503,6 @@ contains
       steps(1:n) = [character(len=LW) :: O2A, 'MPAS', A2M, O2M, 'MED', M2O, 'OCN']
     end if
 
-    ! O DOCN não tem estado oceânico ao qual o SIS2 possa se acoplar.
-    if (cfg_use_sis2_dynamic .and. .not. mom6) call ESMF_LogWrite('ESM: AVISO: ' // &
-      'use_sis2_dynamic=.true. com use_med_to_mpas=.false.: o ICE e registrado ' // &
-      'mas nunca executado.', ESMF_LOGMSG_WARNING)
-
     ! Período do laço = passo do relógio do driver (dt_coupling)
     call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

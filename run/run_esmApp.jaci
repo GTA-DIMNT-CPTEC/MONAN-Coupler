@@ -871,7 +871,8 @@ OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || O
 ICE_PET=$(_nuopc_pet ice_pet_count || true); [[ "${ICE_PET}" =~ ^[0-9]+$ ]] || ICE_PET=0
 USE_SIS2=$(_nuopc_pet use_sis2_dynamic || true)
 USE_SIS2=$(printf '%s' "${USE_SIS2}" | tr -d ". '\"" | tr '[:upper:]' '[:lower:]')
-case "${USE_SIS2}" in t|true) USE_SIS2=1 ;; *) USE_SIS2=0 ;; esac
+# Ausente vale .true., o padrão de config_read (configuração de produção).
+case "${USE_SIS2}" in f|false) USE_SIS2=0 ;; *) USE_SIS2=1 ;; esac
 
 # Modo desconhecido é ERRO, não recuo silencioso para sequential: um typo em
 # coupling_mode faria o script procurar a partição errada (NPES em vez de

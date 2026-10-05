@@ -39,6 +39,12 @@
 !!               configuração é exportado por ele nessa configuração; as
 !!               exportações de cada modelo iguais, nome a nome e na mesma
 !!               ordem, às listas dos caps (listas_caps.inc)
+!!   modos       a tabela COUPLER_MODES (coupler_config) tem as 16
+!!               combinações das quatro chaves, uma vez cada, com situação
+!!               conhecida e nota; as suportadas são exatamente as duas de
+!!               produção; as configurações conferidas aqui são aceitas; e
+!!               toda linha de EXCHANGES, EXPORTS e GAPS vale em alguma
+!!               combinação aceita (desde a R-FASE13-01)
 !!   caps        as listas que os caps dos modelos anunciam, geradas por
 !!               cpl_arrivals e cpl_exports sem chaves (MOM6 e SIS2 desde
 !!               a R-FASE11-06; MONAN-A, DATM e DOCN desde a R-FASE11-07),
@@ -67,7 +73,8 @@ program test_cpl_map
                                 cpl_point_component, cpl_point_grid, cpl_exchange_t
   use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_current_config
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
-  use cpl_map_mod,       only : GAPS, cpl_is_gap
+  use cpl_map_mod,       only : GAPS, cpl_is_gap, cpl_config_is_valid
+  use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index
   use cpl_fields_mod,    only : CPL_NAME_LEN
   use med_cap_types_mod, only : MED_KEYS
   implicit none
@@ -96,6 +103,7 @@ program test_cpl_map
   nfailures = 0
 
   call check_fields()
+  call check_modes()
   call check_grids_and_routes()
   call check_exchanges()
   call check_methods()
@@ -152,6 +160,109 @@ contains
     call outcome('CAMPOS: nome, unidade e descricao preenchidos', nempty == 0)
     call outcome('CAMPOS: todo campo aparece em TROCAS ou EXPORTACOES', nunused == 0)
   end subroutine check_fields
+
+  !> COUPLER_MODES: as 16 combinações, uma vez cada, com situação e nota;
+  !! as suportadas são as duas de produção (com e sem o SIS2); as
+  !! configurações deste teste são aceitas; toda linha de EXCHANGES, EXPORTS
+  !! e GAPS vale em alguma combinação aceita.
+  subroutine check_modes()
+    type(cpl_config_t) :: c
+    integer :: i, j, k, nerr, nsupported
+    logical :: used
+
+    nerr = 0
+    if (size(COUPLER_MODES) /= 16) then
+      nerr = nerr + 1
+      call fail_at('COUPLER_MODES nao tem 16 linhas')
+    end if
+    do k = 0, 15
+      j = 0
+      do i = 1, size(COUPLER_MODES)
+        if ((COUPLER_MODES(i)%datm .eqv. btest(k, 0)) .and. (COUPLER_MODES(i)%docn .eqv. btest(k, 1)) &
+            .and. (COUPLER_MODES(i)%med_to_mpas .eqv. btest(k, 2))                                  &
+            .and. (COUPLER_MODES(i)%sis2 .eqv. btest(k, 3))) j = j + 1
+      end do
+      if (j /= 1) then
+        nerr = nerr + 1
+        write(*, '(A, I0, A, I0)') '        combinacao ', k, ' aparece vezes: ', j
+      end if
+    end do
+    nsupported = 0
+    do i = 1, size(COUPLER_MODES)
+      select case (trim(COUPLER_MODES(i)%status))
+      case ('suportada')
+        nsupported = nsupported + 1
+        if (COUPLER_MODES(i)%datm .or. COUPLER_MODES(i)%docn .or. &
+            .not. COUPLER_MODES(i)%med_to_mpas) then
+          nerr = nerr + 1
+          call fail_at('suportada fora da producao: '//trim(COUPLER_MODES(i)%note))
+        end if
+      case ('nao_validada', 'recusada')
+      case default
+        nerr = nerr + 1
+        call fail_at('situacao desconhecida: '//trim(COUPLER_MODES(i)%status))
+      end select
+      if (len_trim(COUPLER_MODES(i)%note) == 0) then
+        nerr = nerr + 1
+        call fail_at('combinacao sem nota')
+      end if
+    end do
+    call outcome('MODOS: 16 combinacoes, situacao conhecida e nota', nerr == 0)
+    call outcome('MODOS: suportadas = producao com e sem SIS2', nsupported == 2 .and. nerr == 0)
+
+    nerr = 0
+    do k = 1, NCFG
+      if (.not. cpl_config_is_valid(CFG(k))) then
+        nerr = nerr + 1
+        call fail_at('configuracao do teste recusada: '//trim(CFG_NAME(k)))
+      end if
+    end do
+    if (trim(COUPLER_MODES(coupler_mode_index(.false., .false., .true., .true.))%status) /= &
+        'suportada') then
+      nerr = nerr + 1
+      call fail_at('producao nao suportada')
+    end if
+    call outcome('MODOS: configuracoes do teste aceitas; producao suportada', nerr == 0)
+
+    nerr = 0
+    do i = 1, size(EXCHANGES)
+      used = .false.
+      do k = 0, 15
+        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
+        if (cpl_config_is_valid(c)) used = used .or. cpl_exchange_applies(EXCHANGES(i), c)
+      end do
+      if (.not. used) then
+        nerr = nerr + 1
+        call fail_at('troca sem combinacao aceita: '//describe(i))
+      end if
+    end do
+    do i = 1, size(EXPORTS)
+      used = .false.
+      do k = 0, 15
+        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
+        if (cpl_config_is_valid(c)) used = used .or. &
+          cpl_exchange_applies(cpl_exchange_t(when=EXPORTS(i)%when), c)
+      end do
+      if (.not. used) then
+        nerr = nerr + 1
+        call fail_at('exportacao sem combinacao aceita: '//trim(EXPORTS(i)%field))
+      end if
+    end do
+    do i = 1, size(GAPS)
+      used = .false.
+      do k = 0, 15
+        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
+        if (cpl_config_is_valid(c)) used = used .or. &
+          cpl_exchange_applies(cpl_exchange_t(when=GAPS(i)%when), c)
+      end do
+      if (.not. used) then
+        nerr = nerr + 1
+        call fail_at('lacuna sem combinacao aceita: '//trim(GAPS(i)%field))
+      end if
+    end do
+    call outcome('MODOS: toda linha de TROCAS, EXPORTACOES e LACUNAS vale em combinacao aceita', &
+                 nerr == 0)
+  end subroutine check_modes
 
   !> GRIDS e ROUTES: nomes únicos; rotas entre malhas do mediador, com
   !! reserva, máscara, no_value e criar válidos; toda rota usada.

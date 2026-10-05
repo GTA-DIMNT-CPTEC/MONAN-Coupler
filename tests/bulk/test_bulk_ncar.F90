@@ -20,15 +20,20 @@
 !! interno; o programa chama a fase compute_fluxes, de med_exchange, que os
 !! associa aos mesmos campos e chama calc_bulk_ncar.
 !!
-!! Sem o SIS2 (o padrão aqui), calc_bulk_ncar terminava recalculando a
+!! Sem o SIS2, calc_bulk_ncar terminava recalculando a
 !! fração de gelo pelo limiar de SST (legacy_ice_fraction). Desde a
 !! R-FASE11-19, esse cálculo é a fase ice_fraction_without_sis2, de
 !! med_exchange, chamada logo depois; o teste a chama no mesmo ponto, e os
 !! campos gravados continuam os de antes.
+!!
+!! O teste roda sem o SIS2. Até a R-FASE12-07 esse era o valor padrão de
+!! use_sis2_dynamic; desde a R-FASE13-01, que fez dos padrões a configuração
+!! de produção (com o SIS2), o programa lê um nuopc.input que o desliga.
 program test_bulk_ncar
   use ESMF
   use med_cap_types_mod, only: MED_InternalState
   use med_exchange_mod,  only: compute_fluxes, ice_fraction_without_sis2
+  use coupler_config_mod, only: config_read
   implicit none
 
   integer, parameter :: NX = 360, NY = 180, NCALLS = 3
@@ -51,6 +56,19 @@ program test_bulk_ncar
   if (rc /= ESMF_SUCCESS) stop 2
   call ESMF_VMGetGlobal(vm, rc=rc)
   call ESMF_VMGet(vm, localPet=pet, petCount=npet, rc=rc)
+  if (pet == 0) then
+    open(newunit=u, file='sem_sis2.nml', status='replace', action='write')
+    write(u,'(A)') '&nuopc_petlayout'
+    write(u,'(A)') '  use_sis2_dynamic = .false.'
+    write(u,'(A)') '/'
+    close(u)
+  end if
+  call ESMF_VMBarrier(vm, rc=rc)
+  call config_read(rc, 'sem_sis2.nml')
+  if (rc /= 0) then
+    call ESMF_LogWrite('test_bulk_ncar: config_read falhou', ESMF_LOGMSG_ERROR)
+    call ESMF_Finalize(endflag=ESMF_END_ABORT)
+  end if
   if (mod(npet, 2) /= 0) then
     call ESMF_LogWrite('test_bulk_ncar: o numero de PETs tem de ser par', ESMF_LOGMSG_ERROR)
     call ESMF_Finalize(endflag=ESMF_END_ABORT)
