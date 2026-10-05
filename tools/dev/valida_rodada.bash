@@ -111,7 +111,26 @@ prepara)
     echo "       cd \$COUPLER_ROOT && source run/setenv-gnu.bash && make clean && make" >&2
     exit 1
   fi
+  # O executável tem de ser o da revisão em HEAD: sem mudanças fora de commit
+  # nos fontes e compilado depois do último commit que mudou src/ ou o
+  # Makefile. Um git am sem make deixaria a rodada validar o binário anterior.
+  pendentes=$(git -C "${COUPLER_ROOT}" status --porcelain -- src Makefile)
+  if [[ -n "${pendentes}" ]]; then
+    echo "ERRO: há mudanças fora de commit nos fontes; a rodada não seria a de HEAD:" >&2
+    echo "${pendentes}" | sed 's/^/       /' >&2
+    exit 1
+  fi
+  t_fontes=$(git -C "${COUPLER_ROOT}" log -1 --format=%ct -- src Makefile)
+  t_exe=$(date -r "${COUPLER_ROOT}/bin/esmApp" +%s)
+  if [[ -n "${t_fontes}" && "${t_exe}" -lt "${t_fontes}" ]]; then
+    echo "ERRO: bin/esmApp ($(date -d "@${t_exe}" '+%Y-%m-%d %H:%M')) é mais antigo que o último" >&2
+    echo "       commit que mudou os fontes: $(git -C "${COUPLER_ROOT}" log -1 \
+         --format='%h, %cd' --date=format:'%Y-%m-%d %H:%M' -- src Makefile)." >&2
+    echo "       Recompile com make, no ambiente de run/setenv-gnu.bash, e rode o prepara de novo." >&2
+    exit 1
+  fi
   echo "Executável: ${COUPLER_ROOT}/bin/esmApp ($(date -r "${COUPLER_ROOT}/bin/esmApp" '+%Y-%m-%d %H:%M'))"
+  echo "Fontes    : $(git -C "${COUPLER_ROOT}" log -1 --format='%h, %cd' --date=format:'%Y-%m-%d %H:%M' -- src Makefile) (último commit em src/ ou no Makefile)"
   echo "Revisão   : $(git -C "${COUPLER_ROOT}" log --oneline -1 | cat)"
   mkdir -p "${DIR}" || falha "não foi possível criar ${DIR}"
   rsync -a \

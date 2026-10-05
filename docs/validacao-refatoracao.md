@@ -39,7 +39,7 @@ bash $COUPLER_ROOT/tools/dev/valida_rodada.bash compara teste_01
 
 | Comando | O que faz |
 | --- | --- |
-| `prepara NOME` | confere que `bin/esmApp` existe e não contém código de outra instalação; mostra data e revisão; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da linha de base |
+| `prepara NOME` | confere que `bin/esmApp` existe, não contém código de outra instalação e foi compilado depois do último commit que mudou `src/` ou o `Makefile`, e que esses fontes não têm mudanças fora de commit; mostra a data do executável e o commit dos fontes; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da linha de base |
 | `submete NOME` | roda o `--check` e submete com 152 PETs; espera o job terminar |
 | `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados; extrai o relatório de acoplamento (seção 2.1) e o compara com o da rodada aprovada mais recente; compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças; se a comparação nem começou (por exemplo, linha de base que não confere com o seu `SHA256SUMS`), diz isso e sai com código 2; sai com o código do `compara-linha-base.bash` (0 PASS, 1 FAIL, 2 comparação não feita) |
 

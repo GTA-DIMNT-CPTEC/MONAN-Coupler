@@ -31,7 +31,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
 | 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
-| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 22 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura | em execução; 01 (bloco 0, C1) em validação |
+| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 23 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura | em execução; 01 validada (`fase13-01-validada`); 02 (conferência do executável no `prepara`) em validação |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
 
@@ -68,6 +68,7 @@ bash tools/dev/valida_rodada.bash compara <nome>
 | Armadilha | Como evitar |
 | --- | --- |
 | `COUPLER_ROOT` definido depois do `setenv` (liga as bibliotecas da produção) | defini-lo antes; o `prepara` acusa |
+| `git am` sem `make` (a rodada valida o binário anterior) | `make` depois do `git am`; o `prepara` recusa executável mais antigo que o último commit em `src/` ou no `Makefile`, e fontes com mudanças fora de commit |
 | `source setenv ... \| grep` (`ESMFMKFILE` indefinido) | redirecionar a saída para arquivo |
 | blocos longos colados no terminal | um comando por vez |
 | FMA ligada (diferença no último bit) | `FP_CONTRACT=off`, o padrão |
