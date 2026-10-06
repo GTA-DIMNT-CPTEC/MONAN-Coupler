@@ -41,12 +41,13 @@ module med_exchange_mod
   use NUOPC,               only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet, NUOPC_IsAtTime
   use coupler_utils_mod,   only: ChkErr
   use coupler_config_mod,  only: cfg_use_sis2_dynamic
-  use coupler_log_mod,     only: log_debug_enabled
+  use coupler_log_mod,     only: COMP_MED, log_info, log_warning, log_debug, log_debug_enabled
   use cpl_map_mod,         only: ROUTES
   use med_cap_types_mod,   only: MED_InternalState, med_flux_t
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
   use med_cap_methods_mod, only: create_route, RegridOrCopy, set_ocn_grid_mask
   use med_export_mod,      only: export_to_components
+  use med_diag_mod,        only: log_ocean_mask
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
                                  update_ice_fraction_from_docn, regrid_ocean_currents, &
                                  legacy_ice_fraction
@@ -136,8 +137,7 @@ contains
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", value="true", rc=rc)
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", value="true", rc=rc)
 
-    call ESMF_LogWrite('MED: InitializeDataComplete SATISFIED (So_t em t=0)', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'InitializeDataComplete SATISFIED (So_t em t=0)')
   end subroutine initialize_data
 
   !> Cria, na ordem de ROUTES, as rotas com create='inicio', cada uma com o
@@ -205,7 +205,7 @@ contains
     ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
     ! de update_ice_fields_on_atm_grid.
 
-    call ESMF_LogWrite('MED: IDC fase A: rotas de interpolacao criadas', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'IDC fase A: rotas de interpolacao criadas')
   end subroutine prepare_start
 
   !> Espera da primeira SST (portão de dados da inicialização): So_t já foi
@@ -333,12 +333,12 @@ contains
 
     if (n_phys_g(1) == 0) then
       sst_ready = .false.
-      call ESMF_LogWrite('MED: IDC — So_t carimbado mas SEM valor fisico '// &
-        '(nenhuma celula em [270,310] K no globo)', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'IDC: So_t carimbado mas sem valor fisico '// &
+        '(nenhuma celula em [270,310] K no globo)')
     else
-      write(msg_gate,'(A,I0,A)') 'MED: IDC — So_t com ', n_phys_g(1), &
+      write(msg_gate,'(A,I0,A)') 'IDC: So_t com ', n_phys_g(1), &
         ' celulas em [270,310] K'
-      call ESMF_LogWrite(trim(msg_gate), ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, trim(msg_gate))
     end if
   end subroutine sst_has_physical_values
 
@@ -365,12 +365,10 @@ contains
       ! entendida, abortar aqui arriscaria derrubar execucoes que hoje
       ! funcionam. O aviso e' alto e nomeia o que inspecionar; o
       ! comportamento anterior a este gate e' preservado.
-      call ESMF_LogWrite('MED: AVISO — So_t sem valores fisicos apos '// &
-        'varias iteracoes do laco de dependencia de dados; prosseguindo.', &
-        ESMF_LOGMSG_WARNING)
-      call ESMF_LogWrite('  A SST em t=0 pode estar nula. Inspecione '// &
-        '"So_t BRUTO" no passo 1 antes de '// &
-        'confiar nos fluxos.', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'So_t sem valores fisicos apos varias iteracoes '// &
+        'do laco de dependencia de dados; prosseguindo. A SST em t=0 pode estar '// &
+        'nula: com log_level=''debug'', inspecione "DIAG sst raw" no passo 1 '// &
+        'antes de confiar nos fluxos.')
       call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
         value="true", rc=rc)
       call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
@@ -381,8 +379,8 @@ contains
       value="true", rc=rc)
     call NUOPC_CompAttributeSet(gcomp, name="InitializeDataComplete", &
       value="false", rc=rc)
-    call ESMF_LogWrite('MED: IDC aguardando So_t do OCN — '// &
-      'nova iteracao do laco de dependencia de dados', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'IDC aguardando So_t do OCN: '// &
+      'nova iteracao do laco de dependencia de dados')
   end subroutine idc_wait_for_sst
 
   !> Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
@@ -405,13 +403,12 @@ contains
 
     call is%regrid%apply('ocn2atm', ocn_field, is%ocn%sst, localrc)
     if (localrc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('MED: IDC — regrid So_t->ATM falhou; '// &
-        'mantido SST_BULK_FALLBACK', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'IDC: interpolacao de So_t para a ATM falhou; '// &
+        'mantido SST_BULK_FALLBACK')
     else
       call RegridOrCopy(is%ocn%sst, exportState, "So_t", is, localrc)
       if (localrc /= ESMF_SUCCESS) &
-        call ESMF_LogWrite('MED: IDC — RegridOrCopy So_t falhou', &
-          ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_MED, 'IDC: RegridOrCopy So_t falhou')
     end if
   end subroutine idc_publish_initial_sst
 
@@ -579,10 +576,8 @@ contains
     ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
     call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, found, got_omask)
     if (.not. found) then
-      call ESMF_LogWrite( &
-        'MED: So_omask indisponivel no importState - usando ' // &
-        'fallback por limiar de SST (menos confiavel na costa)', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'So_omask indisponivel no importState: ' // &
+        'mascara pelo limiar de SST (menos confiavel na costa)')
     end if
 
     ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
@@ -618,8 +613,7 @@ contains
     if (n_land_g(1) == 0 .or. n_sea_g(1) == 0) then
       ! Máscara ainda uniforme (bootstrap): So_t usa a rota ocn2atm neste
       ! passo e a rota mascarada é tentada de novo no próximo.
-      call ESMF_LogWrite('MED: mascara oceanica uniforme, rota ocn2atm_sst adiada', &
-        ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'mascara oceanica uniforme, rota ocn2atm_sst adiada')
     else
       ! Conservativo contorna a deformação da costura tripolar; bilinear
       ! mascarado se a grade não tiver cantos; ocn2atm como último recurso.
@@ -637,8 +631,7 @@ contains
   !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
   !!
   !! Com log_level='debug', registra quantos pontos de terra e de oceano
-  !! este PET viu na máscara (FIX-DIAG-ICEMASK-01), para confirmar que
-  !! So_omask foi encontrada e não está toda em terra ou toda em oceano.
+  !! este PET viu na máscara (log_ocean_mask, em med_diag).
   !============================================================================
   subroutine add_ice_route(is, importState, f_ifrac_src)
     type(MED_InternalState), intent(inout) :: is
@@ -648,19 +641,9 @@ contains
     integer :: n_land_ice
     integer :: n_sea_ice
     logical :: found, copied
-    character(len=200) :: diag_msg_mask
 
-    ! conta terra/oceano vistos por ESTE PET, para confirmar que So_omask
-    ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
-    ! tudo-terra nem tudo-oceano por engano).
     call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, found, copied)
-    if (log_debug_enabled()) then
-        write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
-          'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
-          found, ' n_land=', n_land_ice, &
-          ' n_sea=', n_sea_ice
-        call ESMF_LogWrite(trim(diag_msg_mask), ESMF_LOGMSG_INFO)
-    end if
+    if (log_debug_enabled()) call log_ocean_mask(found, n_land_ice, n_sea_ice)
     call create_route(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
   end subroutine add_ice_route
 
@@ -695,8 +678,7 @@ contains
     if (is%use_med_to_mpas) then
       call stamp_state_clock(exportState, clock, is, rc)
       if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('MED: RouteOcnToAtm retornou erro — continuando', &
-          ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_MED, 'carimbo do relogio no exportState falhou; continuando')
         rc = ESMF_SUCCESS
       end if
     end if
@@ -887,9 +869,7 @@ contains
 
     ! Guard: routehandles devem estar criados
     if (.not. is%regrid%has('ocn2atm')) then
-      call ESMF_LogWrite( &
-        'MED RouteOcnToAtm: rota ocn2atm ainda nao criada; pulando', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'carimbo do relogio: rota ocn2atm ainda nao criada; pulando')
       rc = ESMF_SUCCESS
       return
     end if
@@ -900,8 +880,7 @@ contains
       msg='MED RouteOcnToAtm: falha NUOPC_SetTimestamp', &
       line=__LINE__, file=__FILE__)) return
 
-    call ESMF_LogWrite('MED RouteOcnToAtm: regrid OCN->ATM concluido (Fase 2)', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_MED, 'exportState carimbado com o tempo do relogio')
 
   end subroutine stamp_state_clock
 

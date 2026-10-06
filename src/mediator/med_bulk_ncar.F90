@@ -21,7 +21,8 @@ module med_bulk_ncar_mod
                                     T_ICE_MIN, T_ICE_MAX
 
   use coupler_config_mod, only: cfg_docn_ice_init_only      ! 1
-  use coupler_log_mod, only: log_debug_enabled
+  use coupler_log_mod, only: COMP_MED, log_warning, log_debug, log_debug_enabled
+  use med_diag_mod, only: log_ice_stability
   use med_cap_types_mod, only: med_flux_t,           &
                                 rho_air,              &
                                 Cd_neut,              &
@@ -234,9 +235,7 @@ contains
       end do; end do
     else
       ! Fallback: sem correntes disponíveis, usa vento absoluto²
-      call ESMF_LogWrite( &
-        'MED: AVISO BUG-CALC-DUU: uocn/vocn nulos — So_duu10n calculado com vento absoluto', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'uocn/vocn nulos: So_duu10n calculado com o vento absoluto')
       do j=j1,j2; do i=i1,i2
         fptr(i,j) = uas(i,j)**2 + vas(i,j)**2
       end do; end do
@@ -467,9 +466,7 @@ contains
           p_zorl(i,j) = z0_total
         end do
       end do
-      call ESMF_LogWrite( &
-        'MED Sprint C: Sf_zorl calculado via Charnock + Smith', &
-        ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, 'Sf_zorl calculado por Charnock + Smith')
     end if
   end subroutine compute_roughness_length
 
@@ -537,11 +534,11 @@ contains
       fptr_ice => fluxes%lwnet_ice
       call ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
 
-      call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
-        'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, 'Fioi_taux/tauy/sen/evap/lwnet calculados com a ' // &
+        'temperatura do gelo')
     else
-      call ESMF_LogWrite('MED(Fase3-ICE): f_tice_atm nao associado — ' // &
-        'Fioi_* permanecem no fallback inicial', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'f_tice_atm nao associado: Fioi_* ficam com o ' // &
+        'valor inicial')
     end if
     rc = ESMF_SUCCESS
   end subroutine compute_ice_fluxes
@@ -622,7 +619,7 @@ contains
   !!
   !! Células com tas < 100 K (sem dado da atmosfera) ficam como estão.
   !! Conta, antes do limite, as células com |fluxo| > 490 W/m2 e, com
-  !! log_level='debug', registra a primeira delas (FIX-DIAG-ICESTAB-01):
+  !! log_level='debug', registra a primeira delas (log_ice_stability):
   !! saturação frequente indica vento ou diferença de temperatura extremos.
   !! No ramo instável, stab_fac pode passar de 1 (reforço da troca).
   !============================================================================
@@ -645,7 +642,6 @@ contains
     real(ESMF_KIND_R8) :: tice_sat
     real(ESMF_KIND_R8) :: rib_sat
     real(ESMF_KIND_R8) :: stab_sat
-    character(len=320) :: diag_msg10
 
     n_sat = 0; i_sat = -1; j_sat = -1
     wspd_sat = 0.0_ESMF_KIND_R8; dt_sat = 0.0_ESMF_KIND_R8
@@ -675,16 +671,8 @@ contains
       fptr_ice(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, raw_sen))
     end do; end do
 
-    if (log_debug_enabled() .and. n_sat > 0) then
-        write(diag_msg10,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3, &
-          &A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-          'FIX-DIAG-ICESTAB-01: n_saturado=', n_sat, &
-          ' primeira_celula(i,j)=(', i_sat, ',', j_sat, &
-          ') wspd=', wspd_sat, ' tas=', tas_sat, ' tice=', tice_sat, &
-          ' deltaT=', dt_sat, ' Rib=', rib_sat, ' stab_fac=', stab_sat, &
-          ' valor_bruto=', raw_sat
-        call ESMF_LogWrite(trim(diag_msg10), ESMF_LOGMSG_WARNING)
-    end if
+    if (log_debug_enabled()) call log_ice_stability(n_sat, i_sat, j_sat, &
+      [wspd_sat, tas_sat, tice_sat, dt_sat, rib_sat, stab_sat, raw_sat])
   end subroutine ice_sensible_heat
 
   !============================================================================
@@ -808,9 +796,8 @@ contains
       ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
       ! mesmo valor em Fioi_swnet_* (nao ha' base para calcular algo
       ! diferente).
-      call ESMF_LogWrite('MED(bulk_ncar): f_ifrac_atm/f_alb_*_ice nao ' // &
-        'associados — SW usa albedo_ocn constante (sem Fase 2/4)', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'f_ifrac_atm/f_alb_*_ice nao associados: ' // &
+        'onda curta com albedo_ocn constante')
       call sw_band_fallback(fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir)
       call sw_band_fallback(fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif)
       call sw_band_fallback(fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir)

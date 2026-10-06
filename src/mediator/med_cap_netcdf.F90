@@ -19,6 +19,7 @@ module med_cap_netcdf_mod
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
 
   use med_cap_types_mod, only: MED_InternalState, med_diag_config_t
+  use coupler_log_mod, only: COMP_MED, log_info, log_warning, log_debug
 
   implicit none
   private
@@ -27,8 +28,10 @@ module med_cap_netcdf_mod
   public :: med_write_import_fields   !< escreve campos importados em NetCDF
 
 
-  ! Prefixo das mensagens de med_write_import_fields e das suas etapas.
-  character(len=*), parameter :: subname = 'MED:med_write_import_fields'
+  ! Início das mensagens de med_write_import_fields e das suas etapas; com a
+  ! marca do componente, contexto das mensagens de erro de nc_writer.
+  character(len=*), parameter :: ROUTINE = 'med_write_import_fields'
+  character(len=*), parameter :: subname = COMP_MED//':'//ROUTINE
 
 contains
 
@@ -60,9 +63,7 @@ contains
 
     inquire(file='mom6_output.nml', exist=exists)
     if (.not. exists) then
-      call ESMF_LogWrite( &
-        'MED: mom6_output.nml nao encontrado — diag import desabilitado', &
-        ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'mom6_output.nml nao encontrado: diag import desabilitado')
       return
     end if
 
@@ -78,9 +79,8 @@ contains
     diag%write_import = write_import_diag
     diag%import_dir   = trim(import_diag_dir)
 
-    call ESMF_LogWrite( &
-      'MED: mom6_output.nml lido — diag import = ' // &
-      merge('T', 'F', diag%write_import), ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'mom6_output.nml lido: diag import = ' // &
+      merge('T', 'F', diag%write_import))
 
   end subroutine med_read_import_config
 
@@ -138,7 +138,7 @@ contains
     rc = ESMF_SUCCESS
     if (.not. is%diag%write_import) return
     if (is%par%comm == -1) then
-      call ESMF_LogWrite(subname//': MPI comm nao inicializado', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, ROUTINE//': MPI comm nao inicializado')
       return
     end if
 
@@ -162,7 +162,7 @@ contains
     rc = ESMF_SUCCESS
 
     if (nx_local == 0 .or. ny_local == 0) then
-      call ESMF_LogWrite(subname//': dimensoes locais indeterminaveis', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, ROUTINE//': dimensoes locais indeterminaveis')
       deallocate(fieldNameList); return
     end if
 
@@ -180,7 +180,7 @@ contains
       if (.not. ok) then
         ios = nf90_close(ncid)
         deallocate(fieldNameList)
-        call ESMF_LogWrite(subname//': ERRO NetCDF '//trim(fname), ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_MED, ROUTINE//': erro NetCDF '//trim(fname))
         rc = ESMF_SUCCESS
         return
       end if
@@ -228,7 +228,7 @@ contains
 
     if (is%par%local_pet == 0) then
       ios = nf90_close(ncid)
-      call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, ROUTINE//': escrito '//trim(fname))
     end if
   end subroutine med_write_import_fields
 
@@ -434,14 +434,13 @@ contains
       if (mask_ok) then
         n_ocn_g = count(mask_global >= 0.5_ESMF_KIND_R8)
         write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
-          'MED B-DIAGMASK-01: mascara do diagnostico — oceano ', &
+          'mascara do diagnostico: oceano ', &
           100.0*real(n_ocn_g)/real(nx_global*ny_global), '% (', n_ocn_g, &
           ' de ', nx_global*ny_global, ' celulas)'
-        call ESMF_LogWrite(trim(logmsg_mask), ESMF_LOGMSG_INFO)
+        call log_debug(COMP_MED, trim(logmsg_mask))
       else
-        call ESMF_LogWrite(subname//': AVISO — mascara So_omask vazia ou '// &
-          'indisponivel; continentes NAO serao mascarados neste arquivo', &
-          ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_MED, ROUTINE//': mascara So_omask vazia ou '// &
+          'indisponivel; continentes nao serao mascarados neste arquivo')
       end if
     end if
   end subroutine gather_ocean_mask
@@ -502,9 +501,9 @@ contains
       ! a propria mascara vira variavel do arquivo.
       case ('Sx_omask');       call ESMF_FieldGet(is%ocn%omask,  farrayPtr=fptr2d, rc=rc)
       case default
-        call ESMF_LogWrite(subname//': AVISO — campo "'// &
+        call log_warning(COMP_MED, ROUTINE//': campo "'// &
           trim(name)//'" nao tem mapeamento no select case; '// &
-          'a variavel sera gravada apenas com _FillValue', ESMF_LOGMSG_WARNING)
+          'a variavel sera gravada apenas com _FillValue')
         nullify(fptr2d)
         rc = ESMF_SUCCESS
     end select

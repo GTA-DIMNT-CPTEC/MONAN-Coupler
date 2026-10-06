@@ -26,7 +26,7 @@ module MED_cap_MONAN_mod
   use coupler_utils_mod, only: ChkErr
   use cap_common_mod, only: cap_initialize_p0
   use mom6_supergrid_mod, only : mom6_supergrid_dims
-  use coupler_log_mod, only: log_debug_enabled
+  use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  &
                                   cfg_use_datm, cfg_use_med_to_mpas, &
@@ -56,7 +56,7 @@ module MED_cap_MONAN_mod
                                   zero_med_fluxes
   use med_exchange_mod,    only: initialize_data, go_to_flux_grid, &
                                   compute_fluxes, ice_fraction_without_sis2, deliver
-  use med_diag_mod,        only: log_ifrac_export_bitsum, report_fills
+  use med_diag_mod,        only: log_ice_export, report_fills
 
   implicit none
   private
@@ -156,7 +156,7 @@ contains
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
     rc = ESMF_SUCCESS
-    call ESMF_LogWrite('MED: CheckImport desabilitado (no-op)', ESMF_LOGMSG_INFO)
+    call log_debug(COMP_MED, 'CheckImport desabilitado (no-op)')
   end subroutine CheckImportNoop
 
   !============================================================================
@@ -184,12 +184,12 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     if (is%use_mpas_atm) then
-      call ESMF_LogWrite('MED: fonte atmosferica = MPAS', ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'fonte atmosferica = MPAS')
     else
-      call ESMF_LogWrite('MED: fonte atmosferica = DATM', ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'fonte atmosferica = DATM')
     end if
     if (is%use_med_to_mpas) &
-      call ESMF_LogWrite('MED: use_med_to_mpas=true, RouteOcnToAtm ativo', ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'use_med_to_mpas=true: contorno da atmosfera pelo mediador')
 
     ! Importação e exportação lidas do mapa de acoplamento (cpl_arrivals),
     ! com as chaves de MED_KEYS, na ordem do mapa, que é a de antes:
@@ -217,7 +217,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call ESMF_LogWrite('MED: InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'InitializeAdvertise concluido')
   end subroutine InitializeAdvertise
 
   !============================================================================
@@ -289,10 +289,10 @@ contains
         msg="MED: falha ao ler dimensoes reais de ocean_hgrid.nc " // &
             "(NIGLOBAL/NJGLOBAL do MOM6) - verifique cfg_mom6_mesh_ocn", &
         line=__LINE__, file=__FILE__)) return
-      write(msg_tmp,'(A,I0,A,I0,A)') 'MED: grade T real do MOM6 lida de ' // &
+      write(msg_tmp,'(A,I0,A,I0,A)') 'grade T real do MOM6 lida de ' // &
         trim(cfg_mom6_mesh_ocn) // ' = ', nx_ocn, ' x ', ny_ocn, &
         ' (NIGLOBAL x NJGLOBAL)'
-      call ESMF_LogWrite(trim(msg_tmp), ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, trim(msg_tmp))
     end if
 
     !--------------------------------------------------------------------------
@@ -357,7 +357,7 @@ contains
         line=__LINE__, file=__FILE__)) return
 
 
-    call ESMF_LogWrite('MED: InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
 
@@ -401,7 +401,7 @@ contains
   ! update_ice_fraction_from_docn), compute_fluxes (med_exchange:
   ! calc_bulk_ncar), ice_fraction_without_sis2 (med_exchange), apply_native_fluxes,
   ! deliver (med_exchange: export_to_components e carimbo de tempo),
-  ! log_ifrac_export_bitsum e med_write_import_fields.
+  ! log_ice_export (med_diag) e med_write_import_fields.
   !============================================================================
   subroutine MediatorAdvance(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
@@ -562,10 +562,10 @@ contains
     if (allocated(shum_g)) deallocate(shum_g)
     if (allocated(snow_g)) deallocate(snow_g)
 
-    call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'MediatorAdvance concluido')
 
-    ! Si_ifrac como sai do mediador (etapa 4 de 4 do FIX-DIAG-BITSUM-01)
-    if (log_debug_enabled()) call log_ifrac_export_bitsum(exportState)
+    ! Si_ifrac como sai do mediador (etapa 4 das somas de bits)
+    if (log_debug_enabled()) call log_ice_export(exportState)
 
     call med_write_import_fields(exportState, stampTime, is, rc)
     if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal

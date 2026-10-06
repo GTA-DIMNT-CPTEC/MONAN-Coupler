@@ -16,6 +16,7 @@ module med_export_mod
   use med_diag_mod, only: record_fill
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, route_fill
   use coupler_constants_mod, only: T_ICE_MIN
+  use coupler_log_mod, only: COMP_MED, log_info, log_warning, log_debug
 
   implicit none
   private
@@ -105,8 +106,8 @@ contains
     ! mapa de acoplamento). So_t acima permanece SST pura para o SIS2.
     call RegridOrCopy(is%sfc%tsfc,   exportState, "Sx_tsfc",        is, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('MED: RegridOrCopy Sx_tsfc FALHOU — exportState ' // &
-        'mantem fallback (ver FillInternalField f_tsfc_atm)', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'RegridOrCopy Sx_tsfc falhou: exportState ' // &
+        'mantem o valor inicial (FillInternalField de f_tsfc_atm)')
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
@@ -123,15 +124,13 @@ contains
     ! O cap MPAS (mpas_import) também clampa |V_ocn| <= 5 m/s defensivamente.
     call RegridOrCopy(is%ocn%u, exportState, "So_u", is, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('MED: RegridOrCopy So_u FALHOU — exportState mantem zeros', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'RegridOrCopy So_u falhou: exportState mantem zeros')
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
     call RegridOrCopy(is%ocn%v, exportState, "So_v", is, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('MED: RegridOrCopy So_v FALHOU — exportState mantem zeros', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'RegridOrCopy So_v falhou: exportState mantem zeros')
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
@@ -144,8 +143,7 @@ contains
     ! em vez de manter o default fixo de 0.01 m.
     call RegridOrCopy(is%sfc%zorl, exportState, "Sf_zorl", is, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('MED: RegridOrCopy Sf_zorl FALHOU — exportState mantem default 0.01 m', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'RegridOrCopy Sf_zorl falhou: exportState mantem 0.01 m')
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
@@ -191,9 +189,8 @@ contains
       ! Sem dado para compor — Sx_tsfc degrada para SST pura.
       if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
         p_tsfc_out(:,:) = p_sst_src(:,:)
-      call ESMF_LogWrite('MED(B-TSFC-DUALEXPORT-01): AVISO — ponteiros ' // &
-        'de So_t/Si_t_sis2/Si_ifrac indisponiveis, Sx_tsfc degradado ' // &
-        'para SST pura', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'ponteiros de So_t/Si_t_sis2/Si_ifrac ' // &
+        'indisponiveis: Sx_tsfc so com a SST')
     end if
   end subroutine export_surface_temperature
 
@@ -294,11 +291,9 @@ contains
         where (land_mask) p_snow  = 0.0_ESMF_KIND_R8
       rc = ESMF_SUCCESS
 
-      ! Log diagnostico
-        write(logmsg, '(A,I0,A)') &
-          'MED Sprint A.5.1: fluxos zerados em ', n_land_masked, &
-          ' celulas de terra (mascara real So_omask, ver B-LANDMASK-01)'
-        call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+      write(logmsg, '(A,I0,A)') 'fluxos zerados em ', n_land_masked, &
+        ' celulas de terra (mascara So_omask)'
+      call log_debug(COMP_MED, trim(logmsg))
 
       deallocate(land_mask)
     end if
@@ -316,16 +311,15 @@ contains
     if (rc_lm == ESMF_SUCCESS) then
       if (is%regrid%has('ocn2atm_landmask')) then
         call is%regrid%apply('ocn2atm_landmask', omask_src_field, is%ocn%omask, rc_lm)
-        call ESMF_LogWrite('MED: mascara terra/oceano real regridada para a grade ATM', &
-          ESMF_LOGMSG_INFO)
+        call log_info(COMP_MED, 'mascara terra/oceano interpolada para a grade ATM')
       else
         ! is%ocn%omask continua 1.0 (tudo oceano)
-        call ESMF_LogWrite('MED: falha no regrid da mascara So_omask; ' // &
-          'mantido tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_MED, 'rota ocn2atm_landmask ausente: mascara ' // &
+          'mantida em tudo oceano (1.0)')
       end if
     else
-      call ESMF_LogWrite('MED B-LANDMASK-01: So_omask indisponivel -- ' // &
-        'mantendo fallback tudo-oceano (1.0)', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_MED, 'So_omask indisponivel: mascara mantida em ' // &
+        'tudo oceano (1.0)')
     end if
     is%ocn%omask_done = .true.
   end subroutine regrid_land_mask

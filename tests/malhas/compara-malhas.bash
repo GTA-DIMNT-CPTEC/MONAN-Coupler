@@ -87,8 +87,12 @@ done
 
 difere=0
 # Linhas de log retiradas de propósito (tests/log-retirado.txt) ficam fora
-# da comparação com REV, que ainda as grava
+# da comparação com REV, que ainda as grava; as mensagens de REV passam
+# antes pelas traduções de texto (tests/log-traduzido.sed). Compara-se a
+# mensagem sem data, hora e severidade ("PETn texto").
 retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
+traduzido() { sed -Ef "${RAIZ}/tests/log-traduzido.sed" "$1"; }
+mensagem() { sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//'; }
 padrao='MED|FIX-DIAG|mpas_create_grid|cpl_malha|ERROR|WARNING'
 for np in ${LISTA_NP}; do
   n=0
@@ -102,8 +106,8 @@ for np in ${LISTA_NP}; do
   echo "  ${np} PET(s): ${n} arquivo(s) comparados"
   for pet in "${SAIDA}/antiga/run_${np}"/PET*.teste_malhas; do
     nome=$(basename "${pet}")
-    if ! diff -q <(grep -E "${padrao}" "${pet}" | retirado | cut -d' ' -f3-) \
-                 <(grep -E "${padrao}" "${SAIDA}/nova/run_${np}/${nome}" | retirado | cut -d' ' -f3-) > /dev/null; then
+    if ! diff -q <(traduzido "${pet}" | grep -E "${padrao}" | retirado | mensagem) \
+                 <(grep -E "${padrao}" "${SAIDA}/nova/run_${np}/${nome}" | retirado | mensagem) > /dev/null; then
       echo "  log DIFERE     ${np} PETs: ${nome}"; difere=1
     fi
   done

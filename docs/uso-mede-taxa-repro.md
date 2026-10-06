@@ -57,7 +57,7 @@ O script confere que o `nccmp` está disponível antes de começar.
 | Instrumento | Como ligar | O que acrescenta ao relatório |
 | --- | --- | --- |
 | checksums internos do SIS2 | `DEBUG_CHKSUMS = True`, `DEBUG_SLOW_ICE = True`, `DEBUG_FAST_ICE = True` no `SIS_override` | as etapas do ciclo do gelo em que a divergência aparece (`gelo_r<k>.txt`) |
-| diagnósticos do mediador | `log_level = 'debug'` em `&nuopc_driver` (o padrão, `'info'`, não grava esses diagnósticos; o script avisa no início) | as linhas `FIX-DIAG` do PET 0 (`meddiag_r<k>.txt`) e o checksum exato do `Si_ifrac` por PET (`bitsum_r<k>.txt`, seção 6) |
+| diagnósticos do mediador | `log_level = 'debug'` em `&nuopc_driver` (o padrão, `'info'`, não grava esses diagnósticos; o script avisa no início) | as linhas `DIAG` do mediador no PET 0 (`meddiag_r<k>.txt`) e o checksum exato do `Si_ifrac` por PET (`bitsum_r<k>.txt`, seção 6) |
 | importações por instante | `IMPORT_GLOBS` (seção 3) | o que a atmosfera e o oceano receberam do mediador, troca a troca |
 
 Os checksums do SIS2 acrescentam alguns segundos por troca e muitas linhas ao `esmApp_run.log`. Em produção, devem ser desligados.
@@ -112,7 +112,7 @@ wc -l bitsum_r1.txt gelo_r1.txt
 | --- | --- | --- |
 | `IMPORT_GLOBS` | `diag_import/monan2_import_*.nc` | arquivos de importação preservados e comparados por instante |
 | `OCEAN_GLOBS` | `*monan_tos*.nc` | saídas do MOM6 pelo `diag_table` comparadas (o `tos` na grade nativa, que é a SST que alimenta a atmosfera) |
-| `PET_LOG` | `logs/PET00.esmApp.log` | log do PET 0, de onde saem as linhas `FIX-DIAG` do mediador; seu diretório é também onde o `bitsum` procura os logs de todos os PETs |
+| `PET_LOG` | `logs/PET00.esmApp.log` | log do PET 0, de onde saem as linhas `DIAG` do mediador; seu diretório é também onde o `bitsum` procura os logs de todos os PETs |
 | `RUN_LOG` | `logs/esmApp_run.log` | saída padrão do job, onde caem os checksums do SIS2 |
 | `ARQ` | `reprodiag.nc` | arquivo do stream comparado |
 | `POLL` | 30 | intervalo de consulta ao `qstat`, em segundos |
@@ -134,13 +134,13 @@ wc -l bitsum_r1.txt gelo_r1.txt
 | `ocean_r<k>.stats`, `seaice_r<k>.stats` | balanços globais do MOM6 e do SIS2 |
 | `ocn_r<k>/` | saídas do oceano pelo `diag_table` (`OCEAN_GLOBS`) |
 | `imp_r<k>/` | importações por instante (`IMPORT_GLOBS`) |
-| `meddiag_r<k>.txt` | linhas `FIX-DIAG` do mediador no PET 0 |
+| `meddiag_r<k>.txt` | linhas `DIAG ocean_mask` e `DIAG ice_fraction raw` do mediador no PET 0 |
 | `bitsum_r<k>.txt` | checksum exato do `Si_ifrac`, por troca, etapa e PET (seção 6) |
 | `gelo_r<k>.txt` | checksums inteiros (`c=`) das etapas do ciclo do SIS2 |
 
 Ao final, o relatório compara tudo, par a par.
 
-## 6. O checksum exato por PET (`FIX-DIAG-BITSUM-01`)
+## 6. O checksum exato por PET (`DIAG ice_fraction bitsum`)
 
 É o instrumento que localizou a causa da não reprodutibilidade, e o mais fino do relatório.
 
@@ -182,7 +182,7 @@ cmpbs 1 2 3          # par r1 x r2, trocas 1 a 3
 | Primeiro `monan_export` | a exportação da atmosfera antes de qualquer troca | se divergir, a semente está na inicialização |
 | `ocean.stats` e `seaice.stats` | balanços globais | checagem robusta e independente de layout |
 | Etapas do ciclo do gelo | checksums `c=` do SIS2 em nove pontos do ciclo | a leitura automática "primeira etapa divergente" usa o `part_size` e é só indicativa |
-| Diagnóstico do mediador (`ICEMASK`) | máscara e fração de gelo bruta no PET 0 | o `max` é impresso com 4 algarismos: "idêntico" aqui não exclui diferença de último bit, e a "LEITURA" automática desta seção é heurística antiga |
+| Diagnóstico do mediador (`DIAG ocean_mask`, `DIAG ice_fraction raw`) | máscara e fração de gelo bruta no PET 0 | o `max` é impresso com 4 algarismos: "idêntico" aqui não exclui diferença de último bit, e a "LEITURA" automática desta seção é heurística antiga |
 | Checksum exato do `Si_ifrac` | as quatro etapas, por PET | a seção mais precisa (seção 6) |
 | Importações | cada `monan2_import` e `mom6_import`, por instante | o que cada componente recebeu |
 | Saídas do oceano | `monan_tos` do `diag_table` | |

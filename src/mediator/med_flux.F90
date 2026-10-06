@@ -17,6 +17,7 @@ module med_flux_mod
   use med_cap_types_mod, only: MED_InternalState, L_evap, SHUM_OCEAN_DEFAULT
   use med_cap_methods_mod, only: ZeroInternalField, ZeroOcnFluxFields, GetFieldPtr, GetFieldPtrOptional
   use med_diag_mod, only: log_atm_forcing_summary
+  use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
 
   implicit none
   private
@@ -147,8 +148,7 @@ contains
         ! GetFieldPtrOptional devolve mpas_available=false para eles, o que e'
         ! normal. Retorno silencioso (rc=SUCCESS): o calculo bulk e' local, e
         ! esses PETs simplesmente nao contribuem para os campos internos.
-        call ESMF_LogWrite('MED: PET sem dados MPAS locais — skip bulk (B-45)', &
-          ESMF_LOGMSG_INFO)
+        call log_debug(COMP_MED, 'PET sem dados MPAS locais: bulk pulado')
         rc = ESMF_SUCCESS; return
       end if
       ! DATM fallback (apenas quando use_mpas_atm=false)
@@ -162,8 +162,7 @@ contains
       call select_optional_mpas_forcing(shum_mpas, snow_mpas, i1_glob, i2_glob, j1_glob, j2_glob, &
                                         shum, snow, shum_local, snow_local)
 
-      call ESMF_LogWrite('MED: Usando MPAS como fonte atmosferica primaria', &
-        ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, 'forcante atmosferica do MPAS')
     end if
     proceed = .true.
   end subroutine get_atm_forcing
@@ -203,8 +202,7 @@ contains
     shum => shum_datm; psl  => psl_datm;  swdn => swdn_datm
     lwdn => lwdn_datm; rain => rain_datm; snow => snow_datm
 
-    call ESMF_LogWrite('MED: Usando DATM (JRA55) como fonte atmosferica (fallback)', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_MED, 'forcante atmosferica do DATM (JRA55)')
   end subroutine get_datm_forcing
 
   !> Umidade e neve do MPAS, opcionais: aponta shum e snow para os campos do
@@ -225,8 +223,7 @@ contains
       allocate(shum_local(i1_glob:i2_glob, j1_glob:j2_glob))
       shum_local = SHUM_OCEAN_DEFAULT
       shum => shum_local
-      call ESMF_LogWrite('MED: Sa_shum_mpas ausente (Fase 2) ' &
-        //'-- usando SHUM_DEFAULT=0.010 kg/kg', ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'Sa_shum_mpas ausente: umidade SHUM_OCEAN_DEFAULT')
     end if
 
     ! snow opcional — zero quando ausente
@@ -236,8 +233,7 @@ contains
       allocate(snow_local(i1_glob:i2_glob, j1_glob:j2_glob))
       snow_local = 0.0_ESMF_KIND_R8
       snow => snow_local
-      call ESMF_LogWrite('MED: Faxa_snow_mpas ausente (Fase 2) ' &
-        //'-- precipitacao solida = 0.0', ESMF_LOGMSG_INFO)
+      call log_info(COMP_MED, 'Faxa_snow_mpas ausente: precipitacao solida = 0.0')
     end if
   end subroutine select_optional_mpas_forcing
 
@@ -297,10 +293,9 @@ contains
     where (shum_g <= 0.0_ESMF_KIND_R8) shum_g = SHUM_OCEAN_DEFAULT
     call allreduce_atm_tile(snow, i1, i2, j1, j2, comm, tmp_local, snow_g)
 
-    ! DIAGNÓSTICO vai para stdout (= esmApp_run.log).
-    ! Espera-se n_nz_uas > 30000 de 64800 celulas (cobertura global).
-    call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, &
-                                 first_summary, rc)
+    if (log_debug_enabled()) &
+      call log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, &
+                                   first_summary, rc)
 
     deallocate(tmp_local)
   end subroutine gather_atm_forcing
@@ -411,13 +406,11 @@ contains
     if (associated(sen_mpas) .and. associated(lat_mpas) .and. &
         associated(taux_mpas) .and. associated(tauy_mpas)) then
       call substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
-      call ESMF_LogWrite( &
-        'MED(Fase3): fluxos nativos MONAN-A (sen/evap/taux/tauy) aplicados ' // &
-        'sobre o resultado do bulk NCAR', ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, 'fluxos nativos do MONAN-A (sen/evap/taux/tauy) ' // &
+        'aplicados sobre o resultado do bulk NCAR')
     else
-      call ESMF_LogWrite( &
-        'MED(Fase3): Faxa_sen/lat/taux/tauy_mpas ausentes -- mantendo bulk ' // &
-        'NCAR (calc_bulk_ncar) para sen/evap/taux/tauy', ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, 'Faxa_sen/lat/taux/tauy_mpas ausentes: sen/evap/taux/tauy ' // &
+        'do bulk NCAR')
     end if
   end subroutine apply_native_fluxes
 

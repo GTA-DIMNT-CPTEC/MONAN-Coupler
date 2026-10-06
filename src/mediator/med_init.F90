@@ -13,6 +13,7 @@
 module med_init_mod
   use ESMF
   use coupler_utils_mod, only: ChkErr
+  use coupler_log_mod, only: COMP_MED, log_info, log_warning
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
@@ -48,8 +49,7 @@ contains
     call cpl_latlon_grid('atm_med', nx_atm, ny_atm, ORIGIN_EAST0, .true., petCount, &
                           atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade ATM ' // &
-      'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'stagger CORNER da grade ATM preenchido')
   end subroutine create_atm_grid
 
   !> Oceano no mediador (ocn_med), construído por cpl_grids: com o MOM6, a
@@ -88,8 +88,7 @@ contains
                               ocn_grid, rc, tag='MED B-OCNGRID-01', tag_corners='MED B-CONSERVE-01')
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
-    call ESMF_LogWrite('MED B-CONSERVE-01: stagger CORNER da grade OCN ' // &
-      'preenchido (sem erro ate aqui)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, 'stagger CORNER da grade OCN preenchido')
 
     ! Sanidade dos cantos lidos no último DE local: valores numa faixa física
     ! plausível (lon em [0,360), lat em [-90,90]), e não um bloco de zeros
@@ -177,14 +176,12 @@ contains
         end do
         dlon_avg = dlon_avg / real(iN_c - lbound(coordX,1) + 1, ESMF_KIND_R8)
         if (dist_corner_min < 1.0e-3_ESMF_KIND_R8) &
-          call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
-            'celula quase degenerada encontrada perto do polo ' // &
-            '(distancia canto-canto < 1e-3 grau)', ESMF_LOGMSG_WARNING)
+          call log_warning(COMP_MED, 'grade OCN: celula quase degenerada perto ' // &
+            'do polo (distancia canto-canto < 1e-3 grau)')
         if (dlon_max_found > 5.0_ESMF_KIND_R8 * max(dlon_avg, 1.0e-6_ESMF_KIND_R8)) &
-          call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
-            'salto de longitude muito maior que a media entre ' // &
-            'vizinhos na linha mais ao norte (possivel fold mal ' // &
-            'capturado ou descontinuidade de indice)', ESMF_LOGMSG_WARNING)
+          call log_warning(COMP_MED, 'grade OCN: salto de longitude muito maior ' // &
+            'que a media entre vizinhos na linha mais ao norte (dobra mal ' // &
+            'capturada ou descontinuidade de indice)')
     end if
   end subroutine check_corner_coordinates
 

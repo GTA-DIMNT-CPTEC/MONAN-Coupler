@@ -28,8 +28,9 @@
 # interpretação no fim da saída.
 #
 # Recolhe o checksum exato do Si_ifrac que o
-# mediador grava por PET (FIX-DIAG-BITSUM-01, quatro etapas do caminho
-# gelo -> atmosfera) em bitsum_r<k>.txt, e compara os pares por etapa.
+# mediador grava por PET ("DIAG ice_fraction bitsum", quatro etapas do
+# caminho gelo -> atmosfera) em bitsum_r<k>.txt, e compara os pares por etapa.
+# Os diagnosticos do mediador so' saem com log_level='debug' (&nuopc_driver).
 #
 # INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 #=============================================================================
@@ -66,9 +67,16 @@ OCEAN_GLOBS="${OCEAN_GLOBS:-*monan_tos*.nc}"
 # um campo identico": o monan2_import e' escrito depois da importacao, na
 # grade regular de 1 grau, e existe um arquivo por troca de acoplamento.
 IMPORT_GLOBS="${IMPORT_GLOBS:-diag_import/monan2_import_*.nc}"
-# Log do PET0, onde o mediador grava as linhas FIX-DIAG que
+# Log do PET0, onde o mediador grava as linhas DIAG que
 # separam as etapas do caminho do gelo (mascara -> regrid bruto -> extrapolacao).
 PET_LOG="${PET_LOG:-logs/PET00.esmApp.log}"
+# Linhas de diagnostico do mediador (src/mediator/med_diag.F90):
+#   DIAG_MASK    mascara de origem, gravada uma vez por execucao (rota do gelo)
+#   DIAG_RAW     ifrac bruto, depois da interpolacao e antes da extrapolacao
+#   DIAG_BITSUM  soma de bits do Si_ifrac, por PET, em quatro etapas
+DIAG_MASK="MED: DIAG ocean_mask"
+DIAG_RAW="MED: DIAG ice_fraction raw"
+DIAG_BITSUM="MED: DIAG ice_fraction bitsum"
 # Diretorio dos logs de todos os PETs.
 LOG_DIR="$(dirname "${PET_LOG}")"
 # Saida padrao do job. O #PBS -o aponta para este arquivo e o PBS
@@ -192,13 +200,13 @@ _cpl="$(grep -E '^\s*coupling_mode'  nuopc.input | head -1 | tr -s ' ')"
 info "configuracao:${_atm}"
 info "configuracao:${_dtc}"
 info "configuracao:${_cpl}"
-# Os diagnósticos do mediador (linhas FIX-DIAG) só saem
+# Os diagnósticos do mediador (linhas DIAG) só saem
 # com log_level='debug' em &nuopc_driver; sem eles, o relatório fica sem as
 # linhas do mediador e sem o checksum do Si_ifrac.
 if grep -qiE "^\s*log_level\s*=\s*['\"]debug['\"]" nuopc.input; then
   ok "log_level='debug': diagnosticos do mediador ligados"
 else
-  info "log_level diferente de 'debug': sem FIX-DIAG do mediador (meddiag_r*.txt e bitsum_r*.txt vazios)"
+  info "log_level diferente de 'debug': sem DIAG do mediador (meddiag_r*.txt e bitsum_r*.txt vazios)"
 fi
 info "execucoes: ${RUNS}   pares a comparar: $(( RUNS * (RUNS - 1) / 2 ))"
 
@@ -306,8 +314,8 @@ for k in $(seq 1 "${RUNS}"); do
   # Preserva as linhas de diagnostico do mediador.
   #
   # Sao elas que dizem em QUAL etapa do caminho do gelo a divergencia entra:
-  #   ICEMASK-01  mascara de origem, gravada uma vez no RegridStore
-  #   ICEMASK-02  ifrac bruto, POS-regrid e PRE-extrapolacao, por troca
+  #   DIAG_MASK  mascara de origem, gravada uma vez no RegridStore
+  #   DIAG_RAW   ifrac bruto, POS-regrid e PRE-extrapolacao, por troca
   # A pasta logs/ e' reescrita a cada execucao, entao sem esta copia as
   # quatro rodadas se perdem.
   if [[ -s "${PET_LOG}" ]]; then
@@ -321,16 +329,16 @@ for k in $(seq 1 "${RUNS}"); do
     # verdade e' so' acumulo, e foi o que produziu o falso veredito "a mascara
     # de origem varia".
     #
-    # A fronteira do ciclo e' a ULTIMA ocorrencia de ICEMASK-01, que o
+    # A fronteira do ciclo e' a ULTIMA ocorrencia de DIAG_MASK, que o
     # mediador emite uma vez por execucao, no RegridStore do gelo.
-    grep -E "FIX-DIAG-ICEMASK-0[12]" "${PET_LOG}" \
+    grep -E "${DIAG_MASK}|${DIAG_RAW}" "${PET_LOG}" \
       | sed -E 's/^[0-9]+ +[0-9.]+ +INFO +PET[0-9]+ +//' \
-      | awk '/ICEMASK-01/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' \
+      | awk -v m="${DIAG_MASK}" 'index($0, m){n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' \
       > "meddiag_r${k}.txt" || true
     if [[ -s "meddiag_r${k}.txt" ]]; then
-      ok "execucao ${k}: $(wc -l < "meddiag_r${k}.txt") linha(s) FIX-DIAG em meddiag_r${k}.txt"
+      ok "execucao ${k}: $(wc -l < "meddiag_r${k}.txt") linha(s) DIAG em meddiag_r${k}.txt"
     else
-      info "execucao ${k}: nenhuma linha FIX-DIAG-ICEMASK em ${PET_LOG}"
+      info "execucao ${k}: nenhuma linha '${DIAG_MASK}' em ${PET_LOG}"
       rm -f "meddiag_r${k}.txt"
     fi
   else
@@ -339,8 +347,8 @@ for k in $(seq 1 "${RUNS}"); do
 
   # Checksum exato do Si_ifrac, por PET e por etapa.
   #
-  # O mediador (FIX-DIAG-BITSUM-01) grava uma linha por PET em cada etapa:
-  #   etapa1 origem (Si_ifrac_sis2, grade do oceano)   etapa2 pos-regrid
+  # O mediador (DIAG_BITSUM) grava uma linha por PET em cada etapa:
+  #   etapa1 origem (Si_ifrac_sis2, grade do oceano)   etapa2 pos-interpolacao
   #   etapa3 pos-extrapolacao                           etapa4 exportState
   # Cada linha vira "t=<troca> <etapa> <PET> n=.. hi=.. lo=..", ordenada por
   # troca, etapa e PET, para que diff entre execucoes aponte a primeira
@@ -350,8 +358,8 @@ for k in $(seq 1 "${RUNS}"); do
     _p="${_BS_PRE[${_f}]:-0}"
     _t="$(wc -l < "${_f}")"
     (( _t < _p )) && _p=0   # log truncado ou movido durante a execucao
-    tail -n +"$(( _p + 1 ))" "${_f}" | grep -E "FIX-DIAG-BITSUM-01" \
-      | sed -E 's/^.*(PET[0-9]+) +FIX-DIAG-BITSUM-01: +/\1 /'
+    tail -n +"$(( _p + 1 ))" "${_f}" | grep -F "${DIAG_BITSUM} " \
+      | sed -E "s/^.*(PET[0-9]+) +${DIAG_BITSUM} +/\\1 /"
   done | awk '
       { pet = $1; et = $2; t = ++cnt[pet " " et]
         if (match($0, / n=[0-9]+ hi=[0-9]+ lo=[0-9]+( ERRO=[0-9]+)?/))
@@ -361,9 +369,9 @@ for k in $(seq 1 "${RUNS}"); do
         printf "t=%04d %s %s %s\n", t, et, pet, v }' \
     | sort -k1,1 -k2,2 -k3,3 > "bitsum_r${k}.txt"
   if [[ -s "bitsum_r${k}.txt" ]]; then
-    ok "execucao ${k}: $(wc -l < "bitsum_r${k}.txt") checksum(s) FIX-DIAG-BITSUM em bitsum_r${k}.txt"
+    ok "execucao ${k}: $(wc -l < "bitsum_r${k}.txt") checksum(s) DIAG ice_fraction bitsum em bitsum_r${k}.txt"
   else
-    info "execucao ${k}: nenhuma linha FIX-DIAG-BITSUM nos logs de PET (binario sem o diagnostico?)"
+    info "execucao ${k}: nenhuma linha '${DIAG_BITSUM}' nos logs de PET (log_level diferente de 'debug'?)"
     rm -f "bitsum_r${k}.txt"
   fi
 
@@ -592,7 +600,7 @@ if [[ -s "gelo_r1.txt" ]]; then
     echo "   ANTES dela no ciclo; se for um 'End', ela entra DENTRO da rotina."
   else
     echo "   Nenhuma etapa do gelo divergiu nos checksums."
-    echo "   Se a origem (FIX-DIAG-ICESRC-01) divergir mesmo assim, a semente"
+    echo "   Se a origem (DIAG ice_fraction source) divergir mesmo assim, a semente"
     echo "   esta entre a ultima etapa medida e a montagem do campo exportado."
   fi
 fi
@@ -617,23 +625,24 @@ if [[ -s "meddiag_r1.txt" ]]; then
       # Aqui o que interessa e' valor divergente na MESMA posicao, entao a
       # comparacao e' linha a linha ate' o menor dos dois, e a diferenca de
       # comprimento e' reportada a parte, como aviso, nao como divergencia.
-      for _et in 01 02; do
-        grep -h "ICEMASK-${_et}" "meddiag_r${i}.txt" > /tmp/_a_$$.txt
-        grep -h "ICEMASK-${_et}" "meddiag_r${j}.txt" > /tmp/_b_$$.txt
+      for _et in mask raw; do
+        [[ "${_et}" == "mask" ]] && _pad="${DIAG_MASK}" || _pad="${DIAG_RAW}"
+        grep -hF "${_pad}" "meddiag_r${i}.txt" > /tmp/_a_$$.txt
+        grep -hF "${_pad}" "meddiag_r${j}.txt" > /tmp/_b_$$.txt
         _na="$(wc -l < /tmp/_a_$$.txt)"; _nb="$(wc -l < /tmp/_b_$$.txt)"
         _nmin=$(( _na < _nb ? _na : _nb ))
         if [[ "${_nmin}" -gt 0 ]]; then
           head -n "${_nmin}" /tmp/_a_$$.txt > /tmp/_at_$$.txt
           head -n "${_nmin}" /tmp/_b_$$.txt > /tmp/_bt_$$.txt
           if ! cmp -s /tmp/_at_$$.txt /tmp/_bt_$$.txt; then
-            [[ "${_et}" == "01" ]] && _nd_mask=$(( _nd_mask + 1 )) \
+            [[ "${_et}" == "mask" ]] && _nd_mask=$(( _nd_mask + 1 )) \
                                    || _nd_raw=$(( _nd_raw + 1 ))
           fi
           rm -f /tmp/_at_$$.txt /tmp/_bt_$$.txt
         fi
         if [[ "${_na}" -ne "${_nb}" ]]; then
-          printf '   AVISO ICEMASK-%s: r%s tem %s linha(s), r%s tem %s.\n' \
-                 "${_et}" "${i}" "${_na}" "${j}" "${_nb}"
+          printf '   AVISO %s: r%s tem %s linha(s), r%s tem %s.\n' \
+                 "${_pad}" "${i}" "${_na}" "${j}" "${_nb}"
           printf '         Numero de ciclos diferente, nao valor diferente:\n'
           printf '         o log de PET pode nao ter sido truncado entre rodadas.\n'
         fi
@@ -641,9 +650,9 @@ if [[ -s "meddiag_r1.txt" ]]; then
       done
     done
   done
-  printf '   mascara de origem (ICEMASK-01)      %d de %d pares divergem\n' \
+  printf '   mascara de origem (DIAG ocean_mask)        %d de %d pares divergem\n' \
          "${_nd_mask}" "${_np_md}"
-  printf '   ifrac bruto pos-regrid (ICEMASK-02) %d de %d pares divergem\n' \
+  printf '   ifrac bruto (DIAG ice_fraction raw)        %d de %d pares divergem\n' \
          "${_nd_raw}" "${_np_md}"
   echo
   if (( _nd_mask > 0 )); then
@@ -672,7 +681,7 @@ fi
 #-----------------------------------------------------------------------------
 if [[ -s "bitsum_r1.txt" ]]; then
   echo
-  echo "== Checksum exato do Si_ifrac no mediador (FIX-DIAG-BITSUM-01) =="
+  echo "== Checksum exato do Si_ifrac no mediador (DIAG ice_fraction bitsum) =="
   echo
   echo "   Cobertura na troca 1 da execucao 1 (PETs que gravaram e pontos somados):"
   for _e in etapa1 etapa2 etapa3 etapa4; do
@@ -716,7 +725,7 @@ if [[ -s "bitsum_r1.txt" ]]; then
   echo "     etapa1 difere           : o Si_ifrac ja' chega diferente do gelo (cap do SIS2)"
   echo "     etapa1 igual, 2 difere  : o regrid CONSERVE mascarado (rh_ocn2atm_ice)"
   echo "     etapa2 igual, 3 difere  : a extrapolacao (NeighborFillExtrapolate)"
-  echo "     etapa3 igual, 4 difere  : o RouteOcnToAtm ou a copia para o exportState"
+  echo "     etapa3 igual, 4 difere  : a copia para o exportState (fase deliver)"
   echo "     as quatro iguais        : a diferenca entra depois do mediador"
   echo "                               (conector MED->MPAS ou importacao do MPAS)"
 fi
@@ -868,7 +877,7 @@ echo "                         ${PREFIXO_EXP}1.nc .. ${PREFIXO_EXP}${RUNS}.nc"
 echo "                         ocean_r*.stats  seaice_r*.stats"
 echo "                         ocn_r*/ (saidas do diag_table)"
 echo "                         imp_r*/ (monan2_import por instante)"
-echo "                         meddiag_r*.txt (FIX-DIAG do mediador)"
+echo "                         meddiag_r*.txt (DIAG do mediador)"
 echo "                         bitsum_r*.txt (checksum exato do Si_ifrac, por PET)"
 echo "                         gelo_r*.txt (checksums de part_size do SIS2)"
 echo "   Outras variaveis:     --var t2m, --var skintemp, --var xice"

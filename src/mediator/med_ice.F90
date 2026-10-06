@@ -3,28 +3,25 @@
 !!
 !! update_ice_fields_on_atm_grid e as suas etapas: sentinelas, interpolação
 !! da fração, dos albedos e da temperatura do gelo pela rota mascarada
-!! 'ocn2atm_ice', extrapolação por vizinhança e diagnósticos do log. A rota
-!! é criada pela fase go_to_flux_grid (med_exchange) desde a
-!! R-FASE11-18.
-!!
-!! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
+!! 'ocn2atm_ice' e extrapolação por vizinhança. A rota é criada pela fase
+!! go_to_flux_grid (med_exchange). Os diagnósticos do caminho da fração de
+!! gelo ficam em med_diag.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module med_ice_mod
   use ESMF
-  use coupler_constants_mod, only: ATM_NX, ATM_NY, T_FREEZE_SEAWATER, T_ICE_MIN, &
-                                   T_ICE_MAX, ALB_ICE_DEFAULT
-  use diag_bitsum_mod, only: diag_bitsum_log
+  use coupler_constants_mod, only: T_FREEZE_SEAWATER, T_ICE_MIN, T_ICE_MAX, &
+                                   ALB_ICE_DEFAULT
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_manager_t
-  use coupler_log_mod, only: log_debug_enabled
+  use coupler_log_mod, only: COMP_MED, log_debug, log_debug_enabled
   use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_ICE_IFRAC, &
                                COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
                                COMPL_ICE_ANIDF, COMPL_ICE_T
-  use med_diag_mod, only: record_fill
+  use med_diag_mod, only: record_fill, log_ice_source, log_ice_destination, log_ice_raw, &
+                          log_ice_extrapolated, check_ice_geography
   use med_cap_methods_mod, only: FillInternalField
-  use cpl_grids_mod, only: center_lon_east0, center_lat_east0
 
   implicit none
   private
@@ -56,7 +53,6 @@ contains
     integer :: rc_ice
     real(ESMF_KIND_R8), pointer :: p_ifrac_out(:,:)
     integer :: rc_nfe
-    integer :: rc_bs
     integer :: n_invalid_pts, n_fixed_pts
 
     call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
@@ -71,9 +67,9 @@ contains
       call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_ice)
 
     if (log_debug_enabled() .and. rc_ice == ESMF_SUCCESS) &
-      call log_ice_destination(is)
+      call log_ice_destination(is%ice%ifrac)
 
-    if (log_debug_enabled()) call log_ifrac_raw(is)
+    if (log_debug_enabled()) call log_ice_raw(is%ice%ifrac)
 
     call regrid_ice_member(is%regrid, importState, "Si_avsdr_sis2", is%ice%alb_vdr)
     call regrid_ice_member(is%regrid, importState, "Si_avsdf_sis2", is%ice%alb_vdf)
@@ -91,11 +87,7 @@ contains
       call record_fill(is%run%fill_counts(COMPL_ICE_IFRAC), n_invalid_pts, n_fixed_pts)
     end if
 
-    ! Checksum exato de is%ice%ifrac depois da extrapolação.
-    if (log_debug_enabled()) then
-        call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
-                             is%ice%ifrac, rc_bs)
-    end if
+    if (log_debug_enabled()) call log_ice_extrapolated(is%ice%ifrac)
 
     ! Alerta de gelo em latitude implausível: gravado em qualquer log_level.
     if (associated(p_ifrac_out)) &
@@ -117,9 +109,8 @@ contains
       vmin=T_ICE_MIN, vmax=T_ICE_MAX, vfill=T_FREEZE_SEAWATER), &
       is%run%fill_counts(COMPL_ICE_T))
 
-    call ESMF_LogWrite('MED(B-ICEREGRID-01): Si_ifrac_sis2/Si_a*_sis2/' // &
-      'Si_t_sis2 regridados via rh_ocn2atm_ice + extrapolacao de vizinhanca', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_MED, 'Si_ifrac_sis2, Si_a*_sis2 e Si_t_sis2 interpolados ' // &
+      'pela rota ocn2atm_ice e completados por vizinhanca')
   end subroutine update_ice_fields_on_atm_grid
 
 
@@ -145,104 +136,6 @@ contains
     call FillInternalField(is%ice%alb_idf,  -999.0_ESMF_KIND_R8, rc_ice)
     call FillInternalField(is%ice%tice,     -999.0_ESMF_KIND_R8, rc_ice)
   end subroutine fill_ice_sentinels
-
-  !============================================================================
-  !> @brief Diagnóstico da fração de gelo na grade do oceano, antes da interpolação.
-  !!
-  !! FIX-DIAG-ICESRC-01 registra mínimo, máximo e soma de Si_ifrac_sis2 no
-  !! DE local, com quinze algarismos, e o checksum exato do campo (etapa 1
-  !! de 4). Os valores são locais ao PET: compare sempre o mesmo PET entre
-  !! execuções. Com o ICESRC-02, permite saber se uma divergência entre
-  !! execuções já vem do SIS2 ou nasce na interpolação.
-  !============================================================================
-  subroutine log_ice_source(f_ifrac_src)
-    type(ESMF_Field), intent(in) :: f_ifrac_src
-    real(ESMF_KIND_R8), pointer :: p_ifrac_in(:,:)
-    character(len=300) :: diag_msg_src
-    integer :: rc_src
-    integer :: rc_bs
-
-    call ESMF_FieldGet(f_ifrac_src, farrayPtr=p_ifrac_in, rc=rc_src)
-    if (rc_src == ESMF_SUCCESS .and. associated(p_ifrac_in)) then
-      write(diag_msg_src,'(A,ES24.16,A,ES24.16,A,ES24.16,A,I0)') &
-        'FIX-DIAG-ICESRC-01: Si_ifrac_sis2 (ORIGEM, pre-regrid)' // &
-        ' min=', minval(p_ifrac_in), &
-        ' max=', maxval(p_ifrac_in), &
-        ' soma=', sum(p_ifrac_in),   &
-        ' n_local=', size(p_ifrac_in)
-      call ESMF_LogWrite(trim(diag_msg_src), ESMF_LOGMSG_INFO)
-    else
-      call ESMF_LogWrite('FIX-DIAG-ICESRC-01: farrayPtr de ' // &
-        'Si_ifrac_sis2 indisponivel; origem NAO medida', &
-        ESMF_LOGMSG_WARNING)
-    end if
-
-    call diag_bitsum_log('etapa1 Si_ifrac_sis2 ORIGEM pre-regrid', &
-                         f_ifrac_src, rc_bs)
-  end subroutine log_ice_source
-
-  !============================================================================
-  !> @brief Diagnóstico da fração de gelo na grade ATM, logo após a interpolação.
-  !!
-  !! FIX-DIAG-ICESRC-02 registra, com quinze algarismos, o máximo e a soma
-  !! das células mapeadas e o número de células com a sentinela -999 (não
-  !! mapeadas), antes da extrapolação. Em seguida, o checksum exato do
-  !! campo (etapa 2 de 4).
-  !============================================================================
-  subroutine log_ice_destination(is)
-    type(MED_InternalState), intent(in) :: is
-    real(ESMF_KIND_R8), pointer :: p_ifrac_dst(:,:)
-    character(len=300) :: diag_msg_dst
-    integer :: rc_dst
-    integer :: n_sent
-    integer :: rc_bs
-
-    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p_ifrac_dst, rc=rc_dst)
-    if (rc_dst == ESMF_SUCCESS .and. associated(p_ifrac_dst)) then
-      ! A sentinela -999 marca celula nao mapeada pelo regrid; ela
-      ! domina min e soma, entao entra contada a parte para que o
-      ! numero de nao mapeadas seja comparavel entre execucoes.
-      n_sent = count(p_ifrac_dst < -900.0_ESMF_KIND_R8)
-      write(diag_msg_dst,'(A,ES24.16,A,ES24.16,A,I0,A,I0)') &
-        'FIX-DIAG-ICESRC-02: f_ifrac_atm (DESTINO, pos-regrid)' // &
-        ' max=', maxval(p_ifrac_dst), &
-        ' soma_validos=', &
-        sum(p_ifrac_dst, mask=(p_ifrac_dst > -900.0_ESMF_KIND_R8)), &
-        ' n_sentinela=', n_sent, &
-        ' n_local=', size(p_ifrac_dst)
-      call ESMF_LogWrite(trim(diag_msg_dst), ESMF_LOGMSG_INFO)
-    end if
-
-    call diag_bitsum_log('etapa2 f_ifrac_atm DESTINO pos-regrid', &
-                         is%ice%ifrac, rc_bs)
-  end subroutine log_ice_destination
-
-  !============================================================================
-  !> @brief Diagnóstico FIX-DIAG-ICEMASK-02 da fração de gelo interpolada.
-  !!
-  !! Registra mínimo e máximo antes da extrapolação e conta as células
-  !! exatamente iguais a zero. Muitas células em zero indicam problema na
-  !! interpolação ou na máscara, e não na física do SIS2.
-  !============================================================================
-  subroutine log_ifrac_raw(is)
-    type(MED_InternalState), intent(in) :: is
-    real(ESMF_KIND_R8), pointer :: p_ifrac_raw(:,:)
-    character(len=250) :: diag_msg_raw
-    integer :: n_exact_zero
-    integer :: n_total
-    integer :: rc_ice
-
-    call ESMF_FieldGet(is%ice%ifrac, farrayPtr=p_ifrac_raw, rc=rc_ice)
-    if (associated(p_ifrac_raw)) then
-      n_exact_zero = count(p_ifrac_raw == 0.0_ESMF_KIND_R8)
-      n_total = size(p_ifrac_raw)
-      write(diag_msg_raw,'(A,ES10.3,A,ES10.3,A,I0,A,I0)') &
-        'FIX-DIAG-ICEMASK-02: ifrac (bruto, pre-extrapolacao) min=', &
-        minval(p_ifrac_raw), ' max=', maxval(p_ifrac_raw), &
-        ' | n_exact_zero=', n_exact_zero, ' de n_total=', n_total
-      call ESMF_LogWrite(trim(diag_msg_raw), ESMF_LOGMSG_INFO)
-    end if
-  end subroutine log_ifrac_raw
 
   !============================================================================
   !> @brief Interpola um campo do SIS2 pela rota 'ocn2atm_ice', se ele existir.
@@ -279,54 +172,5 @@ contains
       call record_fill(cont, n_invalid_pts, n_fixed_pts)
     end if
   end subroutine extrapolate_ice_field
-
-  !============================================================================
-  !> @brief Alerta de gelo em latitude implausível (FIX-DIAG-ICEGEO-01).
-  !!
-  !! Calcula a latitude e a longitude de cada célula da grade ATM 360x180
-  !! pelas fórmulas da malha atm_med (cpl_grids), sem depender de qual PET cuida de
-  !! qual parte do domínio. Conta as células com ifrac > 0,05 em
-  !! |lat| < 55 graus, onde não existe gelo marinho em nenhuma época do
-  !! ano, e registra a primeira encontrada neste PET.
-  !============================================================================
-  subroutine check_ice_geography(p_ifrac_out)
-    real(ESMF_KIND_R8), pointer, intent(in) :: p_ifrac_out(:,:)
-    real(ESMF_KIND_R8), parameter :: LAT_MAX_ICE = 55.0_ESMF_KIND_R8
-    integer :: ii_geo
-    integer :: jj_geo
-    integer :: n_bad_geo
-    real(ESMF_KIND_R8) :: lat_bad
-    real(ESMF_KIND_R8) :: lon_bad
-    real(ESMF_KIND_R8) :: val_bad
-    character(len=250) :: diag_msg_geo
-    real(ESMF_KIND_R8) :: lat_here
-    real(ESMF_KIND_R8) :: lon_here
-
-    n_bad_geo = 0; lat_bad = -999.0_ESMF_KIND_R8
-    lon_bad = -999.0_ESMF_KIND_R8; val_bad = -999.0_ESMF_KIND_R8
-    do jj_geo = lbound(p_ifrac_out,2), ubound(p_ifrac_out,2)
-      do ii_geo = lbound(p_ifrac_out,1), ubound(p_ifrac_out,1)
-        if (p_ifrac_out(ii_geo,jj_geo) > 0.05_ESMF_KIND_R8) then
-            lon_here = center_lon_east0(ii_geo, ATM_NX)
-            lat_here = center_lat_east0(jj_geo, ATM_NY)
-            if (abs(lat_here) < LAT_MAX_ICE) then
-              n_bad_geo = n_bad_geo + 1
-              if (lat_bad < -900.0_ESMF_KIND_R8) then
-                lat_bad = lat_here; lon_bad = lon_here
-                val_bad = p_ifrac_out(ii_geo,jj_geo)
-              end if
-            end if
-        end if
-      end do
-    end do
-    if (n_bad_geo > 0) then
-      write(diag_msg_geo,'(A,I0,A,ES10.3,A,ES10.3,A,ES10.3)') &
-        'FIX-DIAG-ICEGEO-01: ALERTA -- ', n_bad_geo, &
-        ' celula(s) com ifrac>0,05 em |lat|<55 (implausivel). ' // &
-        'Primeira ocorrencia: lat=', lat_bad, ' lon=', lon_bad, &
-        ' ifrac=', val_bad
-      call ESMF_LogWrite(trim(diag_msg_geo), ESMF_LOGMSG_WARNING)
-    end if
-  end subroutine check_ice_geography
 
 end module med_ice_mod

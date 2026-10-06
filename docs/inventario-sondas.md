@@ -4,12 +4,14 @@ Sondas são trechos que registram, no meio do cálculo, valores de investigaçõ
 
 | Rótulo | Onde | O que registra | Destino |
 | --- | --- | --- | --- |
-| `FIX-DIAG-BITSUM-01` | `diag_bitsum`, `med_diag`, `MED_cap`, `med_ice` | soma de bits de `Si_ifrac` em 4 etapas do caminho gelo para atmosfera; lida por `tools/coupler/mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
-| `FIX-DIAG-ICESRC-01` e `-02` | `med_ice` | `Si_ifrac` antes e depois da interpolação, com 15 a 17 algarismos; 01 lida por `mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
-| `FIX-DIAG-ICEMASK-01` e `-02` | `med_exchange`, `med_ice` | máscara do oceano vista pelo PET; fração de gelo antes da extrapolação; lidas por `mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
-| `FIX-DIAG-ICESTAB-01` | `med_bulk_ncar` | células que saturam o fator de estabilidade sobre o gelo | fica (depuração, desde a R-FASE13-09) |
-| `FIX-DIAG-ICEGEO-01` | `med_ice` | alerta de gelo em latitude implausível | fica (aviso, sempre gravado desde a R-FASE13-09) |
-| `FIX-DIAG-CONSERVE02-01: ALERTA` | `med_init` | dois alertas de dobra tripolar degenerada na inicialização | fica (aviso) |
+| `FIX-DIAG-BITSUM-01` | `diag_bitsum`, `med_diag`, `MED_cap`, `med_ice` | soma de bits de `Si_ifrac` em 4 etapas do caminho gelo para atmosfera; lida por `tools/coupler/mede-taxa-repro.sh` | fica: `DIAG ice_fraction bitsum etapa1` a `etapa4` (depuração; R-FASE13-10) |
+| `FIX-DIAG-ICESRC-01` e `-02` | `med_ice` | `Si_ifrac` antes e depois da interpolação, com 15 a 17 algarismos; 01 lida por `mede-taxa-repro.sh` | fica: `DIAG ice_fraction source` e `destination` (depuração; R-FASE13-10) |
+| `FIX-DIAG-ICEMASK-01` e `-02` | `med_exchange`, `med_ice` | máscara do oceano vista pelo PET; fração de gelo antes da extrapolação; lidas por `mede-taxa-repro.sh` | fica: `DIAG ocean_mask` e `DIAG ice_fraction raw` (depuração; R-FASE13-10) |
+| `FIX-DIAG-ICESTAB-01` | `med_bulk_ncar` | células que saturam o fator de estabilidade sobre o gelo | fica: `DIAG ice_stability` (depuração; R-FASE13-10) |
+| `FIX-DIAG-ICEGEO-01` | `med_ice` | alerta de gelo em latitude implausível | fica: aviso "gelo em latitude implausível" (R-FASE13-10) |
+| `FIX-DIAG-CONSERVE02-01: ALERTA` | `med_init` | dois alertas de dobra tripolar degenerada na inicialização | fica: avisos "grade OCN: ..." (R-FASE13-10) |
+| `[MED BUG-CALC-08 + BUG-MPAS-01 DIAG]` (saída padrão) | `med_diag` | resumo da forçante atmosférica no primeiro passo; fora do inventário original | fica: `DIAG atm_forcing summary`, no log do ESMF (depuração; R-FASE13-10) |
+| `MED B-OCNGRID-02 DIAG` | `med_ocean` | `So_t` como chega do oceano, no primeiro passo; fora do inventário original | fica: `DIAG sst raw` (depuração; R-FASE13-10) |
 | `FIX-DIAG-CONSERVE01-01` | `med_init` | cantos da grade do oceano | retirada (R-FASE13-08) |
 | `FIX-DIAG-CONSERVE02-01` (linha informativa) | `med_init` | linha mais ao norte da grade | retirada (R-FASE13-08) |
 | `FIX-DIAG-ICEFLUX-01` | `med_bulk_ncar` | faixa de `T_gelo`, `Fioi_sen` e `Foxx_sen` | retirada (R-FASE13-08) |
@@ -23,6 +25,8 @@ Sondas são trechos que registram, no meio do cálculo, valores de investigaçõ
 | `FIX-DIAG-ALBEDO-01` | `sis_cap_fields` | faixa dos albedos do gelo | retirada (R-FASE13-08) |
 | `FIX-DIAG-TSKIN-01` | `sis_cap_fields` | faixa de `Si_t_sis2` (investigação da oscilação, encerrada) | retirada (R-FASE13-08) |
 | `FIX-DIAG-ALBFEEDBACK-01` | `mpas_atm_model` | albedo de uma célula antes e depois do MPAS | retirada (R-FASE13-08) |
+
+Desde a R-FASE13-10, os diagnósticos que ficam estão em `src/mediator/med_diag.F90` (exceto os alertas da grade, em `med_init`), com nomes que dizem o que medem (`DIAG <grandeza> <ponto>`), e todas as mensagens do mediador passam pelo `coupler_log_mod`. A troca de cada texto antigo pelo novo está em `tests/log-traduzido.sed`. Os rótulos `MED B-OCNGRID-01` e `MED B-CONSERVE-01` passados a `cpl_grids` e `mom6_supergrid` ficam para a etapa dos módulos compartilhados.
 
 Desde a R-FASE13-09, as sondas de depuração só rodam com `log_level = 'debug'` no `&nuopc_driver` (antes, com `write_fixdiag`, que valia `.true.` por padrão); com o padrão `'info'`, nem são calculadas. Os avisos são gravados em qualquer nível.
 

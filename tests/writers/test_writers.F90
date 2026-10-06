@@ -40,6 +40,18 @@ program test_writers
   call ESMF_VMGetGlobal(vm, rc=rc)
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, mpiCommunicator=comm, rc=rc)
 
+  ! log_level='debug': a mensagem da máscara do diagnóstico do mediador é de
+  ! depuração desde a R-FASE13-10
+  if (localPet == 0) then
+    open(newunit=k, file='debug.nml', status='replace', action='write')
+    write(k,'(A)') '&nuopc_driver'
+    write(k,'(A)') "  log_level = 'debug'"
+    write(k,'(A)') '/'
+    close(k)
+  end if
+  call ESMF_VMBarrier(vm, rc=rc)
+  call config_read(rc, 'debug.nml')
+
   ! ── mediador ─────────────────────────────────────────────────────────
   is%diag%write_import = .true.
   is%diag%import_dir   = 'out_med'

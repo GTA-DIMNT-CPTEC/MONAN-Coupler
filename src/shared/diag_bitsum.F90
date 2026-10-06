@@ -5,7 +5,8 @@
 ! Checksum EXATO de campos reais, POR PET, para diagnostico de
 ! reprodutibilidade bit a bit.
 !
-! POR QUE. Os diagnosticos FIX-DIAG-ICESRC-01/-02 imprimem 17 algarismos,
+! POR QUE. Os diagnosticos "DIAG ice_fraction source" e "destination"
+! (med_diag) imprimem 17 algarismos,
 ! precisao suficiente, mas so' o PET 0 e' recolhido. Uma bateria de testes
 ! achou diferencas de exatamente 1 ulp no Si_ifrac recebido pelo MPAS
 ! (1573 pontos, r1 x r4, 01h) fora da fatia do PET 0.
@@ -27,13 +28,16 @@
 !  - Nao detecta dois pontos que TROCAM de valor entre si. Entre execucoes
 !    com a mesma decomposicao isso nao ocorre na pratica.
 !
-! SAIDA. Uma linha por chamada, no log de cada PET que chega ao ponto:
-! <rotulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
-! com " ERRO=<k>" no fim se algum pedaco local nao pode ser lido.
+! SAIDA. Uma linha de depuracao (log_debug, so com log_level='debug') por
+! chamada, no log de cada PET que chega ao ponto:
+! <comp>: DIAG <rotulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
+! com " ERRO=<k>" no fim se algum pedaco local nao pode ser lido. O chamador
+! da a marca do componente (COMP_* de coupler_log_mod) e o rotulo.
 module diag_bitsum_mod
 
   use, intrinsic :: iso_fortran_env, only: int64, real64
   use ESMF
+  use coupler_log_mod, only: log_debug
 
   implicit none
   private
@@ -46,7 +50,6 @@ module diag_bitsum_mod
     module procedure bitsum_log_field
   end interface diag_bitsum_log
 
-  character(len=*), parameter :: PREFIX = 'FIX-DIAG-BITSUM-01'
 
 contains
 
@@ -80,7 +83,8 @@ contains
 
   ! --------------------------------------------------------------------------
   !> Grava a linha no log deste PET.
-  subroutine write_sum(label, n, s_hi, s_lo, n_err)
+  subroutine write_sum(comp, label, n, s_hi, s_lo, n_err)
+    character(len=*), intent(in) :: comp
     character(len=*), intent(in) :: label
     integer(int64),   intent(in) :: n, s_hi, s_lo
     integer,          intent(in) :: n_err
@@ -88,43 +92,46 @@ contains
     character(len=512) :: msg
 
     if (n_err == 0) then
-      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0)') &
-            PREFIX, trim(label), n, s_hi, s_lo
+      write(msg, '("DIAG ",a," n=",i0," hi=",i0," lo=",i0)') &
+            trim(label), n, s_hi, s_lo
     else
-      write(msg, '(a,": ",a," n=",i0," hi=",i0," lo=",i0," ERRO=",i0)') &
-            PREFIX, trim(label), n, s_hi, s_lo, n_err
+      write(msg, '("DIAG ",a," n=",i0," hi=",i0," lo=",i0," ERRO=",i0)') &
+            trim(label), n, s_hi, s_lo, n_err
     end if
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_debug(comp, trim(msg))
   end subroutine write_sum
 
   ! --------------------------------------------------------------------------
-  subroutine bitsum_log_1d(label, x, rc)
+  subroutine bitsum_log_1d(comp, label, x, rc)
+    character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label
     real(real64),     intent(in)  :: x(:)
     integer,          intent(out) :: rc
     integer(int64) :: n, s_hi, s_lo
     n = 0 ; s_hi = 0 ; s_lo = 0
     call accumulate(x, n, s_hi, s_lo)
-    call write_sum(label, n, s_hi, s_lo, 0)
+    call write_sum(comp, label, n, s_hi, s_lo, 0)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_1d
 
   ! --------------------------------------------------------------------------
-  subroutine bitsum_log_2d(label, x, rc)
+  subroutine bitsum_log_2d(comp, label, x, rc)
+    character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label
     real(real64),     intent(in)  :: x(:,:)
     integer,          intent(out) :: rc
     integer(int64) :: n, s_hi, s_lo
     n = 0 ; s_hi = 0 ; s_lo = 0
     call accumulate_2d(x, n, s_hi, s_lo)
-    call write_sum(label, n, s_hi, s_lo, 0)
+    call write_sum(comp, label, n, s_hi, s_lo, 0)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_2d
 
   ! --------------------------------------------------------------------------
   !> ESMF_Field real(8) de posto 1 ou 2, com qualquer numero de pedacos
   !! locais (localDeCount pode ser 0, 1 ou mais). Soma a regiao exclusiva.
-  subroutine bitsum_log_field(label, field, rc)
+  subroutine bitsum_log_field(comp, label, field, rc)
+    character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label
     type(ESMF_Field), intent(in)  :: field
     integer,          intent(out) :: rc
@@ -166,7 +173,7 @@ contains
       end if
     end do
 
-    call write_sum(label, n, s_hi, s_lo, n_err)
+    call write_sum(comp, label, n, s_hi, s_lo, n_err)
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_field
 

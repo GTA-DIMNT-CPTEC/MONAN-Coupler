@@ -11,10 +11,22 @@
 !! | info (padrão)| grava       | grava    | não       |
 !! | debug        | grava       | grava    | grava     |
 !!
+!! Regra para escolher o nível: aviso para falha contornada ou valor
+!! suspeito; informação para o que acontece uma vez por rodada (ou uma vez
+!! por passo, quando marca o andamento); depuração para o detalhe de cada
+!! passo e para os diagnósticos "DIAG".
+!!
 !! Avisos saem com severidade WARNING no log do ESMF; informação e
 !! depuração, com INFO. A mensagem é gravada como "<comp>: <texto>", em que
 !! <comp> é uma das marcas COMP_* abaixo, para que se saiba de que
 !! componente ela veio.
+!!
+!! O relatório de acoplamento (linhas "CPL-REL: ...", que o
+!! valida_rodada.bash extrai e compara entre rodadas) sai por log_report,
+!! gravado em qualquer nível e sem a marca de componente.
+!!
+!! Diagnósticos de depuração começam por "DIAG <grandeza> <ponto>" (por
+!! exemplo, "DIAG ice_fraction source"), para que se filtrem com grep.
 !!
 !! Diagnósticos caros (somas de bits, varreduras de campo) devem ser
 !! protegidos por log_debug_enabled(), para que não sejam nem calculados
@@ -43,7 +55,10 @@ module coupler_log_mod
   integer, parameter :: LEVEL_INFO    = 2
   integer, parameter :: LEVEL_DEBUG   = 3
 
-  public :: log_warning, log_info, log_debug, log_debug_enabled
+  !> Início das linhas do relatório de acoplamento
+  character(len=*), parameter, public :: REPORT_PREFIX = 'CPL-REL: '
+
+  public :: log_warning, log_info, log_debug, log_debug_enabled, log_report
 
 contains
 
@@ -88,6 +103,14 @@ contains
     if (log_debug_enabled()) &
       call ESMF_LogWrite(comp//': '//msg, ESMF_LOGMSG_INFO)
   end subroutine log_debug
+
+  !> Linha do relatório de acoplamento: "CPL-REL: <msg>", gravada em
+  !! qualquer nível, com severidade INFO.
+  !! @param[in] msg  texto da linha, sem o prefixo
+  subroutine log_report(msg)
+    character(len=*), intent(in) :: msg
+    call ESMF_LogWrite(REPORT_PREFIX//msg, ESMF_LOGMSG_INFO)
+  end subroutine log_report
 
   !> Verdadeiro se log_level='debug'; protege diagnósticos caros.
   logical function log_debug_enabled()

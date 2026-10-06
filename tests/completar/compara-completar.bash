@@ -104,8 +104,12 @@ done
 
 difere=0
 # Linhas de log retiradas de propósito (tests/log-retirado.txt) ficam fora
-# da comparação com REV, que ainda as grava
+# da comparação com REV, que ainda as grava; as mensagens de REV passam
+# antes pelas traduções de texto (tests/log-traduzido.sed). Compara-se a
+# mensagem sem data, hora e severidade ("PETn texto").
 retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
+traduzido() { sed -Ef "${RAIZ}/tests/log-traduzido.sed" "$1"; }
+mensagem() { sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//'; }
 padrao='MED|CPL-REL|regrid|ERROR|WARNING'
 for caso in ${CASOS}; do
   np=$(np_do_caso "${caso}")
@@ -131,8 +135,8 @@ for caso in ${CASOS}; do
     # Demais mensagens: as mesmas linhas, com as mesmas repetições, em
     # qualquer ordem (a R-FASE11-18 antecipou a criação de rotas dentro do
     # passo, e com ela algumas mensagens informativas)
-    if ! diff -q <(grep -E "${padrao}" "${pet}" | retirado | cut -d' ' -f3- | sort) \
-                 <(grep -E "${padrao}" "${novo}" | retirado | cut -d' ' -f3- | sort) > /dev/null; then
+    if ! diff -q <(traduzido "${pet}" | grep -E "${padrao}" | retirado | mensagem | sort) \
+                 <(grep -E "${padrao}" "${novo}" | retirado | mensagem | sort) > /dev/null; then
       echo "  log DIFERE     caso ${caso}: ${nome}"; difere=1
     fi
   done

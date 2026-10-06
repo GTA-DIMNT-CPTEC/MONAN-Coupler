@@ -20,7 +20,8 @@ module med_ocean_mod
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
                                 cfg_docn_epoch_day, cfg_use_sis2_dynamic
   use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_SST, SST_BULK_FALLBACK
-  use med_diag_mod, only: record_fill
+  use med_diag_mod, only: record_fill, log_sst_raw
+  use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
   use med_cap_methods_mod, only: ZeroInternalField, route_fill
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: index_trunc
@@ -50,40 +51,13 @@ contains
     type(ESMF_Field), intent(inout) :: field
     logical, intent(inout) :: raw_sst_diag_done
     integer, intent(inout) :: rc
-    character(len=300) :: dbgmsg2
-    integer :: i1r
-    integer :: i2r
-    integer :: j1r
-    integer :: mid_r
-    integer :: rc_diag
     real(ESMF_KIND_R8), pointer :: sst(:,:)
-    real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
     integer :: n_invalid, n_left
     if (is%regrid%has('ocn2atm')) then
       call ESMF_StateGet(importState, itemName="So_t", field=field, rc=rc)
 
-      ! Diagnostico dos valores BRUTOS de So_t (antes de
-      ! qualquer regrid/mascara do MED), para isolar se a falta de estrutura
-      ! leste-oeste vem da EXPORTACAO do MOM6 ou do regrid do mediador.
-        if (.not. raw_sst_diag_done) then
-          call ESMF_FieldGet(field, localDe=0, farrayPtr=sst_raw, rc=rc_diag)
-          if (rc_diag == ESMF_SUCCESS .and. associated(sst_raw)) then
-            i1r = lbound(sst_raw,1); i2r = ubound(sst_raw,1)
-            j1r = lbound(sst_raw,2)
-            mid_r = (i1r + i2r) / 2
-            write(dbgmsg2,'(A,I0,A,I0,A,I0)') &
-              'MED B-OCNGRID-02 DIAG: So_t BRUTO (OCN, DE local) i=[', i1r, &
-              ',', i2r, '] j1=', j1r
-            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
-            write(dbgmsg2,'(A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
-              '  sst_raw(i1,j1)=', sst_raw(i1r,j1r), &
-              ' sst_raw(mid,j1)=', sst_raw(mid_r,j1r), &
-              ' sst_raw(i2,j1)=', sst_raw(i2r,j1r), &
-              ' min_row=', minval(sst_raw(:,j1r))
-            call ESMF_LogWrite(trim(dbgmsg2), ESMF_LOGMSG_INFO)
-            raw_sst_diag_done = .true.
-          end if
-        end if
+      ! So_t como chega do oceano, antes da interpolação (med_diag)
+      if (log_debug_enabled()) call log_sst_raw(field, raw_sst_diag_done)
 
 
       ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
@@ -139,9 +113,9 @@ contains
 
     call record_fill(cont, n_invalid, n_left)
     if (n_invalid > 0) then
-      write(msg,'(A,I0,A,I0,A)') 'MED: SST extrapolada em ', n_invalid, &
+      write(msg,'(A,I0,A,I0,A)') 'SST extrapolada em ', n_invalid, &
         ' celulas (', n_left, ' com valor fixo)'
-      call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+      call log_debug(COMP_MED, trim(msg))
     end if
   end subroutine record_sst_fill
 
@@ -201,9 +175,7 @@ contains
           end if
         end if
         rc = ESMF_SUCCESS
-        call ESMF_LogWrite( &
-          'MED(B.1.1): Si_ifrac decaimento aplicado (SI_IFRAC_DECAY_MED=0.9592)', &
-          ESMF_LOGMSG_INFO)
+        call log_debug(COMP_MED, 'Si_ifrac: decaimento SI_IFRAC_DECAY aplicado')
     end if
   end subroutine update_ice_fraction_from_docn
 
@@ -271,15 +243,14 @@ contains
                 where (abs(sst - T_FREEZE_SEAWATER) < TOL_LAND) fptr = 0.0_ESMF_KIND_R8
                 if (n_ifrac_land > 0) then
                     write(logmsg,'(A,I0,A)') &
-                      'MED Sprint A.5.2: Si_ifrac zerado em ', &
-                      n_ifrac_land, ' celulas terra (mascara T_FILL_LAND)'
-                    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+                      'Si_ifrac zerado em ', &
+                      n_ifrac_land, ' celulas de terra (SST no marcador de terra)'
+                    call log_debug(COMP_MED, trim(logmsg))
                 end if
               end if
           end if
-          call ESMF_LogWrite( &
-            'MED: Si_ifrac regridado do SIS2 + mascara terra (A.5.2)', &
-            ESMF_LOGMSG_INFO)
+          call log_debug(COMP_MED, 'Si_ifrac interpolado pela rota ocn2atm, com a ' // &
+            'mascara de terra')
         end if
       end if
     end if
@@ -301,9 +272,7 @@ contains
                 sst_eff_if < 271.34_ESMF_KIND_R8)
             end do
           end do
-        call ESMF_LogWrite( &
-          'MED: Si_ifrac calculado via limiar SST (fallback — Sprint A.5.2)', &
-          ESMF_LOGMSG_INFO)
+        call log_debug(COMP_MED, 'Si_ifrac calculado pelo limiar de SST')
       end if
     end if
   end subroutine legacy_ice_fraction
@@ -424,9 +393,9 @@ contains
     deallocate(f0)
 
     write(logmsg,'(A,A,A,F5.3)') &
-      'MED(Alt1): f_ifrac_atm preenchido de ', trim(cfg_docn_ice_file), &
+      'f_ifrac_atm preenchido de ', trim(cfg_docn_ice_file), &
       '  alpha=', alpha
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_MED, trim(logmsg))
     rc = ESMF_SUCCESS
 
   end subroutine fill_ifrac_from_oisst
