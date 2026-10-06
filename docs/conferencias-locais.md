@@ -34,6 +34,7 @@ Leva cerca de onze minutos e termina com um resumo (OK, FALHOU ou PULADO por con
 | `mapa` | `tools/dev/mapa-acoplamento.py -c` | `docs/acoplamento.md` está desatualizado |
 | `curtocircuito` | `tools/dev/confere-curto-circuito.py` | uma instrução de `src/` usa, na mesma expressão, um nome que ela testa com `associated`, `allocated` ou `present` (o Fortran não garante o curto-circuito do `.and.`; separar em `if` aninhados) |
 | `exportacao` | `tools/dev/confere-exportacao.py` | um campo que sai do mediador por conector no mapa não tem `RegridOrCopy(..., exportState, "<nome>", ...)` em `src/mediator/`, ou um nome preenchido assim não sai do mediador no mapa |
+| `dependencias` | `tools/dev/dependencias.py gera -c` | `src/dependencies.mk`, incluído pelo `Makefile` e pelo `tests/regrid/Makefile`, não corresponde aos `use` dos fontes; gerar de novo com `tools/dev/dependencias.py gera` |
 | `cplcheck` | `tests/cplcheck/confere-cplcheck.bash` | a conferência do mapa num driver NUOPC de teste não dá o esperado |
 | `supergrid` | `tests/supergrid/compara-supergrid.bash REV` | a leitura do supergrid do MOM6 muda |
 | `docn` | `tests/docn/compara-docn.bash REV` | o oceano de dados exporta campos, carimbos ou mensagens diferentes, ou, com o arquivo de SST ausente, a falha não chega a todos os PETs |

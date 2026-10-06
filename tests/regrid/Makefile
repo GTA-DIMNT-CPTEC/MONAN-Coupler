@@ -28,14 +28,10 @@ test_scheme: $(REGRID) test_scheme.o
 %.o: %.F90
 	$(FC) $(FLAGS) -c $<
 
-# dependências entre módulos
-coupler_config.o: coupler_utils.o
-regrid_esmf.o regrid_weights.o regrid_weights_base.o: regrid_base.o
-regrid_mpassit.o: regrid_esmf.o coupler_constants.o
-regrid_idw.o: regrid_weights_base.o coupler_constants.o
-regrid_schemes.o: regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_idw.o
-regrid_registry.o: regrid_schemes.o
-regrid_manager.o: regrid_registry.o coupler_config.o
+# dependências entre módulos: as do acoplador vêm de src/dependencies.mk
+# (gerado por tools/dev/dependencias.py); as dos programas de teste, abaixo
+OBJDIR := .
+include $(SRC)/dependencies.mk
 identity_scheme.o: regrid_weights_base.o
 test_regrid.o: regrid_manager.o identity_scheme.o regrid_idw.o
 test_scheme.o: regrid_manager.o
