@@ -22,7 +22,6 @@ module sis_cap_fields_mod
   use NUOPC_Model, only : NUOPC_ModelGet
   use coupler_constants_mod, only : TICE_FALLBACK => T_FREEZE_SEAWATER, T0_KELVIN, &
                                     T_ICE_MIN, ALBEDO_ICE_FALLBACK => ALB_ICE_DEFAULT
-  use coupler_config_mod, only : cfg_write_fixdiag
   use ice_model_mod, only : ice_data_type, ocean_ice_boundary_type, &
                              atmos_ice_boundary_type
   use coupler_utils_mod, only : ChkErr
@@ -215,7 +214,6 @@ contains
     real(ESMF_KIND_R8), pointer :: ptr_ifrac(:,:) => null()
     integer :: ii, jj, lb1, lb2, ub1, ub2
     integer :: i_off, j_off, k_lo, k_hi
-          character(len=200) :: diag_msg6
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -272,23 +270,6 @@ contains
       end do
     end do
 
-    ! Diagnostico: compara o campo publico de fachada Ice%part_size (zerado
-    ! nesta configuracao, ver acima) com sCS%IST%part_size, a fonte real
-    ! usada acima. Condicionado a cfg_write_fixdiag para nao poluir os logs
-    ! de rodadas longas.
-    if (cfg_write_fixdiag) then
-      if (associated(is%ice%part_size)) then
-          write(diag_msg6,'(A,ES12.4,A,ES12.4)') &
-            'FIX-DIAG-FASTSYNC-01: Ice%part_size(:,:,1) [fachada publica] ' // &
-            'min=', minval(is%ice%part_size(:,:,1)), ' max=', &
-            maxval(is%ice%part_size(:,:,1))
-          call ESMF_LogWrite(trim(diag_msg6), ESMF_LOGMSG_INFO)
-      else
-        call ESMF_LogWrite('FIX-DIAG-FASTSYNC-01: Ice%part_size ainda nao ' // &
-          'associado neste ponto', ESMF_LOGMSG_INFO)
-      end if
-    end if
-
   end subroutine export_si_ifrac
 
   !! exporta o albedo real do gelo, por banda,
@@ -327,7 +308,6 @@ contains
     ! termo de gelo no blend por ifrac feito no mediador torna esse valor
     ! quase irrelevante), ou onde Ice%albedo_* ainda nao estiver associado:
     ! ALBEDO_ICE_FALLBACK (ALB_ICE_DEFAULT de coupler_constants).
-        character(len=200) :: diag_msg7
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -395,17 +375,6 @@ contains
       end do
     end do
 
-    ! diagnostico de validacao, mesmo espirito do
-    ! Espera-se min proximo do fallback/agua (baixo)
-    ! e max na faixa de neve fria (~0,8-0,9) em regioes com gelo espesso.
-    if (cfg_write_fixdiag) then
-        write(diag_msg7,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-          'FIX-DIAG-ALBEDO-01: Si_avsdr min=', minval(ptr_avsdr), &
-          ' max=', maxval(ptr_avsdr), &
-          ' | Si_anidr min=', minval(ptr_anidr), ' max=', maxval(ptr_anidr)
-        call ESMF_LogWrite(trim(diag_msg7), ESMF_LOGMSG_INFO)
-    end if
-
   end subroutine export_si_albedo
 
   !! exporta a temperatura de pele real do
@@ -431,7 +400,6 @@ contains
     ! usado so' onde a fracao de gelo e desprezivel ou o campo nao esta
     ! associado — o peso do termo de gelo no blend a jusante torna esse
     ! valor quase irrelevante nesses casos.
-        character(len=150) :: diag_msg8
 
     rc = ESMF_SUCCESS
     call NUOPC_ModelGet(gcomp, exportState=exportState, rc=rc)
@@ -466,12 +434,6 @@ contains
         ptr_tice(ii,jj) = max(T_ICE_MIN, min(T0_KELVIN, ptr_tice(ii,jj)))
       end do
     end do
-
-    if (cfg_write_fixdiag) then
-        write(diag_msg8,'(A,ES10.3,A,ES10.3)') &
-          'FIX-DIAG-TSKIN-01: Si_t_sis2 min=', minval(ptr_tice), ' max=', maxval(ptr_tice)
-        call ESMF_LogWrite(trim(diag_msg8), ESMF_LOGMSG_INFO)
-    end if
 
   end subroutine export_si_tskin
 

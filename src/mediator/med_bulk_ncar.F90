@@ -539,8 +539,6 @@ contains
 
       call ESMF_LogWrite('MED(Fase3-ICE): Fioi_taux/tauy/sen/evap/lwnet ' // &
         'calculados com T_gelo real (nao mais SST)', ESMF_LOGMSG_INFO)
-
-      if (cfg_write_fixdiag) call log_ice_flux_check(fluxes, tice)
     else
       call ESMF_LogWrite('MED(Fase3-ICE): f_tice_atm nao associado — ' // &
         'Fioi_* permanecem no fallback inicial', ESMF_LOGMSG_WARNING)
@@ -754,33 +752,6 @@ contains
         -300.0_ESMF_KIND_R8)
     end do; end do
   end subroutine ice_longwave
-
-  !============================================================================
-  !> @brief Diagnóstico FIX-DIAG-ICEFLUX-01: T_gelo, Fioi_sen e Foxx_sen.
-  !!
-  !! Compara, no DE local, a temperatura do gelo e o calor sensível sobre o
-  !! gelo com o calor sensível da água aberta, calculado com a SST.
-  !============================================================================
-  subroutine log_ice_flux_check(fluxes, tice)
-    type(med_flux_t), intent(in) :: fluxes
-    real(ESMF_KIND_R8), pointer, intent(in) :: tice(:,:)
-    real(ESMF_KIND_R8), pointer :: p_sen_ice(:,:)
-    real(ESMF_KIND_R8), pointer :: p_sen_ocn(:,:)
-    real(ESMF_KIND_R8), pointer :: p_lwnet_ice(:,:)
-    character(len=250) :: diag_msg9
-
-    p_sen_ice   => fluxes%sen_ice
-    p_sen_ocn   => fluxes%sen
-    p_lwnet_ice => fluxes%lwnet_ice
-    if (associated(p_sen_ice) .and. associated(p_sen_ocn) .and. &
-        associated(p_lwnet_ice)) then
-      write(diag_msg9,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-        'FIX-DIAG-ICEFLUX-01: T_gelo min=', minval(tice), ' max=', maxval(tice), &
-        ' | Fioi_sen min=', minval(p_sen_ice), ' max=', maxval(p_sen_ice), &
-        ' | Foxx_sen(SST) min=', minval(p_sen_ocn), ' max=', maxval(p_sen_ocn)
-      call ESMF_LogWrite(trim(diag_msg9), ESMF_LOGMSG_INFO)
-    end if
-  end subroutine log_ice_flux_check
 
   !> @brief Onda curta líquida por banda (água aberta e gelo) e albedo de
   !! banda larga para a atmosfera, com o gelo real do SIS2.

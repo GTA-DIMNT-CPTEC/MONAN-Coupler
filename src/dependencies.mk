@@ -21,7 +21,7 @@ $(OBJDIR)/med_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_type
 $(OBJDIR)/med_cap_types.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_diag.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_types.o
 $(OBJDIR)/med_exchange.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_export.o $(OBJDIR)/med_ocean.o
-$(OBJDIR)/med_export.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
+$(OBJDIR)/med_export.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
 $(OBJDIR)/med_flux.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
 $(OBJDIR)/med_ice.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_init.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o
@@ -47,6 +47,6 @@ $(OBJDIR)/regrid_registry.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_schemes.o
 $(OBJDIR)/regrid_schemes.o: $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_esmf.o $(OBJDIR)/regrid_idw.o $(OBJDIR)/regrid_mpassit.o $(OBJDIR)/regrid_weights.o
 $(OBJDIR)/regrid_weights.o: $(OBJDIR)/regrid_base.o
 $(OBJDIR)/regrid_weights_base.o: $(OBJDIR)/regrid_base.o
-$(OBJDIR)/sis_cap_fields.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o
+$(OBJDIR)/sis_cap_fields.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom6_supergrid.o $(OBJDIR)/sis_cap_fields.o $(OBJDIR)/time_utils.o
 $(OBJDIR)/time_utils.o: $(OBJDIR)/mom_cap_methods.o

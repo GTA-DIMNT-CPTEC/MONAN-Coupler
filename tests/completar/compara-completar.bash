@@ -100,6 +100,9 @@ for versao in antiga nova; do
 done
 
 difere=0
+# Linhas de log retiradas de propósito (tests/log-retirado.txt) ficam fora
+# da comparação com REV, que ainda as grava
+retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
 padrao='MED|CPL-REL|regrid|ERROR|WARNING'
 for caso in ${CASOS}; do
   np=$(np_do_caso "${caso}")
@@ -125,8 +128,8 @@ for caso in ${CASOS}; do
     # Demais mensagens: as mesmas linhas, com as mesmas repetições, em
     # qualquer ordem (a R-FASE11-18 antecipou a criação de rotas dentro do
     # passo, e com ela algumas mensagens informativas)
-    if ! diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3- | sort) \
-                 <(grep -E "${padrao}" "${novo}" | cut -d' ' -f3- | sort) > /dev/null; then
+    if ! diff -q <(grep -E "${padrao}" "${pet}" | retirado | cut -d' ' -f3- | sort) \
+                 <(grep -E "${padrao}" "${novo}" | retirado | cut -d' ' -f3- | sort) > /dev/null; then
       echo "  log DIFERE     caso ${caso}: ${nome}"; difere=1
     fi
   done

@@ -201,8 +201,8 @@ contains
         rc = ESMF_SUCCESS; cycle
       end if
 
-      call gather_field_global(fptr2d, fieldNameList(n), nx_global, ny_global, &
-                               is%par%comm, is%run%first_import_write, grid_local, grid_global)
+      call gather_field_global(fptr2d, nx_global, ny_global, is%par%comm, &
+                               grid_local, grid_global)
 
       ! guardar NaN/Inf antes de escrever como NF90_FLOAT
       where (.not. ieee_is_finite(grid_global))
@@ -222,7 +222,6 @@ contains
       end if
       rc = ESMF_SUCCESS
     end do  ! campos
-    is%run%first_import_write = .false.
 
     deallocate(grid_local, grid_global, fieldNameList)
     deallocate(mask_global)
@@ -519,32 +518,21 @@ contains
   !! e o MPI_Allreduce(MAX) combina os subdomínios, descartando o valor de
   !! preenchimento (−9,99e20).
   !!
-  !! Na primeira gravação, para o campo Si_ifrac, cada PET registra a fatia
-  !! global que acredita possuir. Se dois PETs vizinhos reportarem faixas que
-  !! se sobrepõem, o MAX pode escolher o valor de um PET que não é o dono
-  !! da célula; o registro permite confirmar ou descartar essa hipótese.
-  !!
   !! @param[in]  fptr2d       dados locais do campo
-  !! @param[in]  name         nome do campo
   !! @param[in]  nx_global    número de longitudes
   !! @param[in]  ny_global    número de latitudes
   !! @param[in]  comm         comunicador MPI do mediador
-  !! @param[in]  first_write  .true. na primeira gravação (registra a fatia do PET)
   !! @param[out] grid_local   buffer de trabalho (fatia local + preenchimento)
   !! @param[out] grid_global  campo global combinado
   !============================================================================
-  subroutine gather_field_global(fptr2d, name, nx_global, ny_global, comm, first_write, &
-                                 grid_local, grid_global)
+  subroutine gather_field_global(fptr2d, nx_global, ny_global, comm, grid_local, grid_global)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr2d(:,:)
-    character(len=*),   intent(in)  :: name
     integer,            intent(in)  :: nx_global, ny_global
     integer,            intent(in)  :: comm
-    logical,            intent(in)  :: first_write
     real(ESMF_KIND_R8), intent(out) :: grid_local(nx_global, ny_global)
     real(ESMF_KIND_R8), intent(out) :: grid_global(nx_global, ny_global)
 
     integer :: i1a, i2a, j1a, j2a, mpi_ierr
-    character(len=200) :: diag_msg_nc
 
     grid_local = FILL_VALUE_R8
 
@@ -553,13 +541,6 @@ contains
     j1a = max(1, lbound(fptr2d,2));  j2a = min(ny_global, ubound(fptr2d,2))
     if (i2a >= i1a .and. j2a >= j1a) &
       grid_local(i1a:i2a, j1a:j2a) = fptr2d(i1a:i2a, j1a:j2a)
-
-    if (first_write .and. trim(name) == "Si_ifrac") then
-      write(diag_msg_nc,'(A,I0,A,I0,A,I0,A,I0,A,I0)') &
-        'FIX-DIAG-NCWRITE-01: PET declara fatia global i=[', i1a, ',', &
-        i2a, '] j=[', j1a, ',', j2a, ']'
-      call ESMF_LogWrite(trim(diag_msg_nc), ESMF_LOGMSG_INFO)
-    end if
 
     ! MPI_Allreduce(MAX): combina subdomínios; descarta fill_val (−9.99e20)
     call MPI_Allreduce(grid_local, grid_global, nx_global*ny_global, &

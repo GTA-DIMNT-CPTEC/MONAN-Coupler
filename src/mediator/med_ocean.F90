@@ -14,7 +14,7 @@ module med_ocean_mod
   use netcdf
   use coupler_constants_mod, only: ATM_NX, ATM_NY, SI_IFRAC_DECAY, T_FREEZE_SEAWATER
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny, cfg_use_docn_ice, &
-                                cfg_write_fixdiag, cfg_docn_ice_init_only, &
+                                cfg_docn_ice_init_only, &
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
@@ -51,14 +51,10 @@ contains
     logical, intent(inout) :: raw_sst_diag_done
     integer, intent(inout) :: rc
     character(len=300) :: dbgmsg2
-    character(len=220) :: diag_msgB2
     integer :: i1r
     integer :: i2r
     integer :: j1r
     integer :: mid_r
-    real(ESMF_KIND_R8), pointer :: p_idr(:,:)
-    real(ESMF_KIND_R8), pointer :: p_if(:,:)
-    real(ESMF_KIND_R8), pointer :: p_vdr(:,:)
     integer :: rc_diag
     real(ESMF_KIND_R8), pointer :: sst(:,:)
     real(ESMF_KIND_R8), pointer :: sst_raw(:,:)
@@ -120,24 +116,6 @@ contains
       ! regiao de deformacao da malha tripolar (alta latitude).
       if (cfg_use_sis2_dynamic) then
         call update_ice_fields_on_atm_grid(is, importState)
-
-        ! Diagnostico: is%ice%ifrac deve refletir o Ice%part_size real do
-        ! SIS2 interpolado para a grade ATM. Os 4 albedos devem ficar entre o
-        ! valor padrao (0,65) e o de neve fria (~0,85-0,9) sob gelo espesso.
-        if (cfg_write_fixdiag) then
-            call ESMF_FieldGet(is%ice%ifrac,   farrayPtr=p_if,  rc=rc)
-            call ESMF_FieldGet(is%ice%alb_vdr, farrayPtr=p_vdr, rc=rc)
-            call ESMF_FieldGet(is%ice%alb_idr, farrayPtr=p_idr, rc=rc)
-            rc = ESMF_SUCCESS
-            if (associated(p_if) .and. associated(p_vdr) .and. associated(p_idr)) then
-              write(diag_msgB2,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-                'FIX-DIAG-SPRINTB2-01: f_ifrac_atm min=', minval(p_if), &
-                ' max=', maxval(p_if), &
-                ' | f_alb_vdr_ice min=', minval(p_vdr), ' max=', maxval(p_vdr), &
-                ' | f_alb_idr_ice min=', minval(p_idr), ' max=', maxval(p_idr)
-              call ESMF_LogWrite(trim(diag_msgB2), ESMF_LOGMSG_INFO)
-            end if
-        end if
       end if
     else
       ! Routehandles nao criados: usa SST padrao (ja preenchido em InitializeRealize)

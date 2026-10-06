@@ -368,7 +368,7 @@ contains
         'varias iteracoes do laco de dependencia de dados; prosseguindo.', &
         ESMF_LOGMSG_WARNING)
       call ESMF_LogWrite('  A SST em t=0 pode estar nula. Inspecione '// &
-        '"So_t BRUTO" e "[MED-DIAG] f_sst_atm" no passo 1 antes de '// &
+        '"So_t BRUTO" no passo 1 antes de '// &
         'confiar nos fluxos.', ESMF_LOGMSG_WARNING)
       call NUOPC_CompAttributeSet(gcomp, name="InitializeDataProgress", &
         value="true", rc=rc)

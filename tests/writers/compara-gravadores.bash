@@ -88,11 +88,14 @@ for f in $(cd "${SAIDA}/antiga/run" && find out_med diag_import out_docn out_mpa
 done
 [[ ${n} -gt 0 ]] || { echo "ERRO: nenhum arquivo gravado; ver ${SAIDA}/antiga/run/run.log" >&2; exit 2; }
 # Mensagens dos gravadores no log do ESMF, sem data e hora
-padrao='FIX-DIAG-NCWRITE|AVISO|B-DIAGMASK|escrito|ERRO NetCDF|WriteDOCNDiag'
+# Linhas de log retiradas de propósito (tests/log-retirado.txt) ficam fora
+# da comparação com REV, que ainda as grava
+retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
+padrao='AVISO|B-DIAGMASK|escrito|ERRO NetCDF|WriteDOCNDiag'
 for pet in "${SAIDA}"/antiga/run/PET*.ESMF_LogFile; do
   nome=$(basename "${pet}")
-  if diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3-) \
-             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | cut -d' ' -f3-) > /dev/null; then
+  if diff -q <(grep -E "${padrao}" "${pet}" | retirado | cut -d' ' -f3-) \
+             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | retirado | cut -d' ' -f3-) > /dev/null; then
     echo "  log igual      ${nome}"
   else
     echo "  log DIFERE     ${nome}"; difere=1

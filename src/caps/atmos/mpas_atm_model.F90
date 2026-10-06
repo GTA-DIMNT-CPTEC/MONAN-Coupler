@@ -55,8 +55,7 @@ module mpas_atm_model_mod
   use mpas_log,           only : mpas_log_write, mpas_log_info
 
   use coupler_config_mod,  only : cfg_use_datm,&
-                                    cfg_use_docn, &
-                                    cfg_write_fixdiag
+                                    cfg_use_docn
 
   ! Etapas da inicialização e fluxos instantâneos
   use mpas_atm_setup_mod,  only : setup_mpas_domain, setup_mpas_streams,  &
@@ -226,10 +225,8 @@ contains
     ! sfc_albedo real (Sf_albedo do
     ! mediador) -> physica do MONAN-A, substituindo a climatologia mensal
     ! (config_sfc_albedo=.false. necessario no namelist p/ nao ser
-    ! sobrescrito pelo NOAH LSM). Ver diagnostico logo apos a injecao.
+    ! sobrescrito pelo NOAH LSM).
     real(MPAS_RKIND), dimension(:), pointer :: albedo_field => null()
-    integer :: diag_alb_cell
-    real(MPAS_RKIND) :: diag_alb_before
     integer :: n, ierr
     ! limite do laco de injecao. nCellsSolve vive em
     ! atm_public (mpas_atm_types.F90), nao em atm_state.
@@ -277,8 +274,6 @@ contains
     call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
     call mpas_pool_get_config(atm_state%domain%configs, 'config_do_restart', config_do_restart)
-    diag_alb_cell = -1
-    diag_alb_before = -1.0_MPAS_RKIND
     if (associated(config_do_restart)) then
       is_cold_start = .not. config_do_restart
     else
@@ -316,7 +311,7 @@ contains
             call inject_ocean_cells(nSolve_inj,                              &
               atm_state%first_coupling_call .and. is_cold_start, atm_bnd,    &
               xland_field, sst_field, skintemp_field, ice_field, zorl_field, &
-              albedo_field, diag_alb_cell, diag_alb_before)
+              albedo_field)
             ! Propaga aos halos os campos injetados (ver exchange_surface_halos).
             if (.not. (atm_state%first_coupling_call .and. is_cold_start)) then
               call exchange_surface_halos(sfcInputPool, diag_physicsPool)
@@ -359,11 +354,6 @@ contains
 
     call mpas_log_write('mpas_atm_run: core_run concluido')
 
-    ! Diagnostico: reabre sfc_albedo (diag_physics) DEPOIS de core_run e
-    ! compara com o valor injetado ANTES (diag_alb_before), na mesma celula
-    ! de oceano (diag_alb_cell). Condicionado a cfg_write_fixdiag.
-    call log_albedo_feedback(atm_state, diag_alb_cell, diag_alb_before)
-
     ! ------------------------------------------------------------------
     ! Pós-processamento dos campos acumulados e stress superficial.
     !
@@ -389,14 +379,11 @@ contains
   !!
   !! Percorre só as nSolve primeiras células (as próprias); os halos são
   !! trocados depois por exchange_surface_halos. Com skip_first (primeira
-  !! chamada de um cold start) nada é copiado. Guarda em diag_alb_cell e
-  !! diag_alb_before a primeira célula cujo albedo foi injetado, para o
-  !! diagnóstico de log_albedo_feedback.
+  !! chamada de um cold start) nada é copiado.
   ! ============================================================================
   subroutine inject_ocean_cells(nSolve_inj, skip_first, atm_bnd,          &
                                 xland_field, sst_field, skintemp_field,  &
-                                ice_field, zorl_field, albedo_field,     &
-                                diag_alb_cell, diag_alb_before)
+                                ice_field, zorl_field, albedo_field)
     integer,                                intent(in)    :: nSolve_inj
     logical,                                intent(in)    :: skip_first
     type(atm_ocean_boundary_type),          intent(in)    :: atm_bnd
@@ -406,8 +393,6 @@ contains
     real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: ice_field
     real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: zorl_field
     real(MPAS_RKIND), dimension(:), pointer, intent(in)   :: albedo_field
-    integer,                                intent(inout) :: diag_alb_cell
-    real(MPAS_RKIND),                       intent(inout) :: diag_alb_before
     integer :: iCell
 
             DO iCell =1, nSolve_inj
@@ -427,53 +412,12 @@ contains
                      ! xland>1.5 (oceano) e atm_state%first_coupling_call/cold-start
                      ! ja usada para sst/ice/zorl acima.
                      if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
-                       if (diag_alb_cell < 0) then
-                         ! guarda a 1a celula de
-                         ! oceano injetada nesta chamada, para comparar
-                         ! ANTES/DEPOIS de core_run logo abaixo — teste
-                         ! empirico de se o NOAH LSM preserva ou sobrescreve
-                         ! sfc_albedo em pontos de agua.
-                         diag_alb_cell   = iCell
-                         diag_alb_before = atm_bnd%alb(iCell)
-                       end if
                        albedo_field(iCell) = atm_bnd%alb(iCell)
                      endif
                   end if
                endif
             end do
   end subroutine inject_ocean_cells
-
-  ! ============================================================================
-  !> @brief Diagnóstico FIX-DIAG-ALBFEEDBACK-01: compara o sfc_albedo depois
-  !! de core_run com o valor injetado antes, na célula guardada por
-  !! inject_ocean_cells. Só atua com cfg_write_fixdiag.
-  ! ============================================================================
-  subroutine log_albedo_feedback(atm_state, diag_alb_cell, diag_alb_before)
-    type(mpas_atm_state_type), intent(in) :: atm_state
-    integer,                   intent(in) :: diag_alb_cell
-    real(MPAS_RKIND),          intent(in) :: diag_alb_before
-    real(MPAS_RKIND), dimension(:), pointer :: albedo_field_after => null()
-    type(mpas_pool_type), pointer :: diag_physicsPool_after
-    character(len=250) :: diag_msg_alb
-
-    if (cfg_write_fixdiag .and. diag_alb_cell > 0) then
-        call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', &
-          diag_physicsPool_after)
-        if (associated(diag_physicsPool_after)) then
-          call mpas_pool_get_array(diag_physicsPool_after, 'sfc_albedo', &
-            albedo_field_after)
-          if (associated(albedo_field_after)) then
-            write(diag_msg_alb, '(A,I0,A,F10.6,A,F10.6,A,L1)') &
-              'FIX-DIAG-ALBFEEDBACK-01: celula=', diag_alb_cell, &
-              ' albedo_injetado=', diag_alb_before, &
-              ' albedo_pos_core_run=', albedo_field_after(diag_alb_cell), &
-              ' preservado=', &
-              (abs(albedo_field_after(diag_alb_cell) - diag_alb_before) < 1.0e-6_MPAS_RKIND)
-            call mpas_log_write(trim(diag_msg_alb))
-          end if
-        end if
-    end if
-  end subroutine log_albedo_feedback
 
   ! ============================================================================
   !> @brief Troca de halo dos campos de contorno injetados pelo acoplador.

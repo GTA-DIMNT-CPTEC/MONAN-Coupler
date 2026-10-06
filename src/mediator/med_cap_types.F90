@@ -249,8 +249,6 @@ module med_cap_types_mod
     logical :: first_forcing_summary = .true.
     !> Si_ifrac já preenchido do OISST (fill_ifrac_from_oisst, modo init_only)
     logical :: ifrac_init_done = .false.
-    !> primeira gravação de mom6_import_*.nc (registro da fatia de cada PET)
-    logical :: first_import_write = .true.
     !> pontos completados por vizinhança, por campo (índices COMPL_*)
     type(med_fill_count_t) :: fill_counts(N_FILL)
   end type med_run_flags_t

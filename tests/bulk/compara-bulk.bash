@@ -80,11 +80,14 @@ for f in $(cd "${SAIDA}/antiga/run" && ls saida_*.bin 2>/dev/null); do
 done
 [[ ${n} -eq ${NP} ]] || { echo "ERRO: esperados ${NP} arquivos, gravados ${n}; ver ${SAIDA}/antiga/run/run.log" >&2; exit 2; }
 # Mensagens da física bulk no log do ESMF, sem data e hora
+# Linhas de log retiradas de propósito (tests/log-retirado.txt) ficam fora
+# da comparação com REV, que ainda as grava
+retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
 padrao='FIX-DIAG|MED|AVISO'
 for pet in "${SAIDA}"/antiga/run/PET*.teste_bulk; do
   nome=$(basename "${pet}")
-  if diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3-) \
-             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | cut -d' ' -f3-) > /dev/null; then
+  if diff -q <(grep -E "${padrao}" "${pet}" | retirado | cut -d' ' -f3-) \
+             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | retirado | cut -d' ' -f3-) > /dev/null; then
     echo "  log igual      ${nome}"
   else
     echo "  log DIFERE     ${nome}"; difere=1

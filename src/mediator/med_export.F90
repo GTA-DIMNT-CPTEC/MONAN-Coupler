@@ -12,7 +12,6 @@
 
 module med_export_mod
   use ESMF
-  use coupler_config_mod, only: cfg_write_fixdiag
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP
   use med_diag_mod, only: record_fill
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, route_fill
@@ -30,8 +29,6 @@ contains
     type(ESMF_State), intent(inout) :: importState
     type(ESMF_State), intent(inout) :: exportState
     integer, intent(inout) :: rc
-    integer :: rc_sst
-    real(ESMF_KIND_R8), pointer :: sst_diag(:,:)
     if (.not. is%ocn%omask_done) then
       call regrid_land_mask(is, importState)
     end if
@@ -97,27 +94,11 @@ contains
     ! (ponto ATM@atm_cap do mapa de acoplamento, para atm_bnd%sst).
     call export_surface_temperature(is)
 
-    ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector MED→MPAS
-    ! Diagnóstico: imprimir min/max de is%ocn%sst para confirmar que tem dados reais.
-      call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst_diag, rc=rc_sst)
-      if (rc_sst == ESMF_SUCCESS .and. associated(sst_diag)) then
-        write(*,'(A,F10.3,A,F10.3,A,I0)') &
-          '[MED-DIAG] f_sst_atm antes RegridOrCopy: min=', minval(sst_diag), &
-          '  max=', maxval(sst_diag), '  size=', size(sst_diag)
-        flush(6)
-      else
-        write(*,'(A,I0)') '[MED-DIAG] f_sst_atm: FieldGet falhou rc=', rc_sst
-        flush(6)
-      end if
+    ! So_t: SST dinâmica MOM6 → exportState para escrita NetCDF e conector
+    ! MED→MPAS. Uma falha não interrompe a rodada; o RegridOrCopy já a
+    ! registra no log.
     call RegridOrCopy(is%ocn%sst,    exportState, "So_t",           is, rc)
-    if (rc /= ESMF_SUCCESS) then
-      write(*,'(A,I0)') '[MED-DIAG] RegridOrCopy So_t FALHOU rc=', rc
-      flush(6)
-      rc = ESMF_SUCCESS  ! não fatal — para debug
-    else
-      write(*,'(A)') '[MED-DIAG] RegridOrCopy So_t OK'
-      flush(6)
-    end if
+    rc = ESMF_SUCCESS
 
     ! Sx_tsfc — composto (SST+Si_t_sis2 por
     ! Si_ifrac), exclusivo para o MPAS-A (atm_bnd%sst, ponto ATM@atm_cap do
@@ -177,7 +158,6 @@ contains
     integer :: rc_tsfc
     real(ESMF_KIND_R8) :: ifrac_c
     integer :: ii_c, jj_c
-    character(len=220) :: diag_msg_tsfc
 
     call ESMF_FieldGet(is%ocn%sst,   farrayPtr=p_sst_src,   rc=rc_tsfc)
     call ESMF_FieldGet(is%ice%tice,  farrayPtr=p_tice_comp, rc=rc_tsfc)
@@ -207,13 +187,6 @@ contains
           end if
         end do
       end do
-      if (cfg_write_fixdiag) then
-          write(diag_msg_tsfc,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-            'FIX-DIAG-TSFCCOMP-01: Sx_tsfc(composto) min=', minval(p_tsfc_out), &
-            ' max=', maxval(p_tsfc_out), ' | So_t(pura, INTOCADA) min=', &
-            minval(p_sst_src), ' max=', maxval(p_sst_src)
-          call ESMF_LogWrite(trim(diag_msg_tsfc), ESMF_LOGMSG_INFO)
-      end if
     else
       ! Sem dado para compor — Sx_tsfc degrada para SST pura.
       if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
@@ -230,8 +203,6 @@ contains
     integer, intent(inout) :: rc
     type(ESMF_Field) :: f_ifrac_exp
     integer :: rc_ifrac2
-    real(ESMF_KIND_R8), pointer :: p_ifrac_exp(:,:)
-    character(len=200) :: diag_msg_ifrac2
     integer :: n_invalid_pts, n_fixed_pts
 
     call ESMF_StateGet(exportState, itemName="Si_ifrac", field=f_ifrac_exp, rc=rc_ifrac2)
@@ -252,13 +223,6 @@ contains
       end if
       if (n_invalid_pts >= 0) &
         call record_fill(is%run%fill_counts(COMPL_IFRAC_EXP), n_invalid_pts, n_fixed_pts)
-      call ESMF_FieldGet(f_ifrac_exp, farrayPtr=p_ifrac_exp, rc=rc_ifrac2)
-      if (cfg_write_fixdiag .and. associated(p_ifrac_exp)) then
-          write(diag_msg_ifrac2,'(A,ES10.3,A,ES10.3)') &
-            'FIX-DIAG-ICEREGRID04-01: Si_ifrac(exportState, pos ATM->OCN+' // &
-            'extrapolacao) min=', minval(p_ifrac_exp), ' max=', maxval(p_ifrac_exp)
-          call ESMF_LogWrite(trim(diag_msg_ifrac2), ESMF_LOGMSG_INFO)
-      end if
     else
       ! Fallback: exportState sem Si_ifrac realizado (nao deveria
       ! acontecer) -- mantem o comportamento antigo em vez de travar.

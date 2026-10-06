@@ -106,7 +106,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
     if (associated(coordX) .and. associated(coordY)) then
-      call check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
+      call check_corner_coordinates(coordX, coordY)
     end if
 
     ! Item de MÁSCARA na grade OCN (terra = SST fill ≈200 K do MOM6).
@@ -126,15 +126,9 @@ contains
     rc = ESMF_SUCCESS
   end subroutine create_ocn_grid
 
-  subroutine check_corner_coordinates(ocn_grid, localDeCount_ocn, coordX, coordY)
-    type(ESMF_Grid), intent(inout) :: ocn_grid
-    integer, intent(inout) :: localDeCount_ocn
+  subroutine check_corner_coordinates(coordX, coordY)
     real(ESMF_KIND_R8), pointer :: coordX(:,:)
     real(ESMF_KIND_R8), pointer :: coordY(:,:)
-    character(len=250) :: diag_msg_corner
-    real(ESMF_KIND_R8), pointer :: coordX_c(:,:), coordY_c(:,:)
-    real(ESMF_KIND_R8) :: dlon_sample, dlat_sample
-    integer :: rc_diag
     integer :: iN_c
     integer :: i_c
     integer :: jN_c
@@ -143,26 +137,8 @@ contains
     real(ESMF_KIND_R8) :: dlon_max_found
     real(ESMF_KIND_R8) :: dist_corner_min
     real(ESMF_KIND_R8) :: dist_here
-    character(len=280) :: diag_msg_fold
     real(ESMF_KIND_R8) :: dlon_raw
     integer :: i_next
-    dlon_sample = -999.0_ESMF_KIND_R8; dlat_sample = -999.0_ESMF_KIND_R8
-    call ESMF_GridGetCoord(ocn_grid, coordDim=1, localDE=localDeCount_ocn-1, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX_c, rc=rc_diag)
-    call ESMF_GridGetCoord(ocn_grid, coordDim=2, localDE=localDeCount_ocn-1, &
-      staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordY_c, rc=rc_diag)
-    if (rc_diag == ESMF_SUCCESS .and. associated(coordX_c) .and. associated(coordY_c)) then
-      dlon_sample = coordX(lbound(coordX,1),lbound(coordX,2)) - &
-                    coordX_c(lbound(coordX_c,1),lbound(coordX_c,2))
-      dlat_sample = coordY(lbound(coordY,1),lbound(coordY,2)) - &
-                    coordY_c(lbound(coordY_c,1),lbound(coordY_c,2))
-    end if
-    write(diag_msg_corner,'(A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
-      'FIX-DIAG-CONSERVE01-01: canto lon min=', minval(coordX), ' max=', maxval(coordX), &
-      ' | canto lat min=', minval(coordY), ' max=', maxval(coordY), &
-      ' | canto-centro (amostra) dlon=', dlon_sample, ' dlat=', dlat_sample
-    call ESMF_LogWrite(trim(diag_msg_corner), ESMF_LOGMSG_INFO)
-
     ! Checagem especifica da(s)
     ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
     ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
@@ -200,12 +176,6 @@ contains
             dist_corner_min = min(dist_corner_min, dist_here)
         end do
         dlon_avg = dlon_avg / real(iN_c - lbound(coordX,1) + 1, ESMF_KIND_R8)
-        write(diag_msg_fold,'(A,ES10.3,A,ES10.3,A,ES10.3)') &
-          'FIX-DIAG-CONSERVE02-01: linha mais ao norte deste DE -- ' // &
-          'dlon medio entre vizinhos=', dlon_avg, ' dlon MAXIMO=', &
-          dlon_max_found, ' | menor distancia canto-canto encontrada=', &
-          dist_corner_min
-        call ESMF_LogWrite(trim(diag_msg_fold), ESMF_LOGMSG_INFO)
         if (dist_corner_min < 1.0e-3_ESMF_KIND_R8) &
           call ESMF_LogWrite('FIX-DIAG-CONSERVE02-01: ALERTA -- ' // &
             'celula quase degenerada encontrada perto do polo ' // &

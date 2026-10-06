@@ -703,38 +703,12 @@ contains
     call ESMF_LogWrite('ICE(SIS2): ModelAdvance concluido', ESMF_LOGMSG_INFO)
   end subroutine ModelAdvance
 
-  !> Termodinâmica lenta e dinâmica do SIS2, com soma de verificação da
-  !! fração por categoria antes e depois de cada etapa (diagnóstico).
+  !> Termodinâmica lenta e dinâmica do SIS2.
   subroutine advance_ice_slow(is)
     type(ice_internal_state_type), pointer, intent(in) :: is
-    character(len=200) :: msg_slow
-    integer(kind=8)    :: cks_ini, cks_thermo, cks_dyn
-    logical            :: has_ps
 
-    has_ps = associated(is%ice%part_size)
-
-    if (has_ps) cks_ini = chksum_part_size(is%ice%part_size)
     call update_ice_slow_thermo(is%ice)
-    if (has_ps) cks_thermo = chksum_part_size(is%ice%part_size)
     call update_ice_dynamics_trans(is%ice)
-    if (has_ps) cks_dyn = chksum_part_size(is%ice%part_size)
-
-    if (has_ps) then
-      write(msg_slow,'(A,I0,A,I0,A,I0)') &
-        'FIX-DIAG-SLOWSPLIT-01: part_size chksum  entrada=', cks_ini, &
-        '  pos_slow_thermo=', cks_thermo, '  pos_dynamics_trans=', cks_dyn
-      call ESMF_LogWrite(trim(msg_slow), ESMF_LOGMSG_INFO)
-      if (cks_ini == cks_thermo .and. cks_thermo == cks_dyn) then
-        call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: AVISO - os tres ' // &
-          'checksums sao IGUAIS. A fachada is%ice%part_size nao reflete o ' // &
-          'estado interno do SIS2 (ver B-ICE-TSKIN-SRC-01): este ' // &
-          'diagnostico esta CEGO e nao permite concluir nada.', &
-          ESMF_LOGMSG_WARNING)
-      end if
-    else
-      call ESMF_LogWrite('FIX-DIAG-SLOWSPLIT-01: is%ice%part_size nao ' // &
-        'associado; diagnostico nao realizado', ESMF_LOGMSG_WARNING)
-    end if
   end subroutine advance_ice_slow
 
   ! ============================================================================
@@ -779,33 +753,5 @@ contains
     call ESMF_LogWrite('ICE(SIS2): ModelFinalize concluido', ESMF_LOGMSG_INFO)
 
   end subroutine ModelFinalize
-
-  !> @brief Checksum inteiro de part_size, no mesmo espirito do chksum do SIS2.
-  !!
-  !! Inteiro, e nao mean/min/max, porque valor de ponto
-  !! flutuante impresso com poucos digitos ja escondeu divergencia duas vezes
-  !! nesta investigacao: com quatro digitos ela aparecia na 12a troca, com
-  !! quinze, na 3a. Um checksum inteiro nao tem esse problema.
-  !!
-  !! A transformacao para inteiro usa um fator grande e o padrao de bits do
-  !! valor, de modo que diferenca de ultimo bit altere o resultado. A soma
-  !! acumula em inteiro de 8 bytes para nao saturar.
-  !!
-  !! Escopo: arranjo do DE local, nao global. Comparar sempre o MESMO PET
-  !! entre execucoes.
-  function chksum_part_size(ps) result(cks)
-    real(ESMF_KIND_R8), pointer, intent(in) :: ps(:,:,:)
-    integer(kind=8) :: cks
-    integer :: i1, i2, i3
-    cks = 0_8
-    if (.not. associated(ps)) return
-    do i3 = lbound(ps,3), ubound(ps,3)
-      do i2 = lbound(ps,2), ubound(ps,2)
-        do i1 = lbound(ps,1), ubound(ps,1)
-          cks = cks + int(transfer(ps(i1,i2,i3), 1_8), 8)
-        end do
-      end do
-    end do
-  end function chksum_part_size
 
 end module sis_cap_MONAN_mod
