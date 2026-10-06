@@ -16,6 +16,12 @@
 !! por passo, quando marca o andamento); depuração para o detalhe de cada
 !! passo e para os diagnósticos "DIAG".
 !!
+!! Erros que param a rodada saem por log_error, em qualquer nível: no log do
+!! ESMF, com severidade ERROR, e também na saída padrão (esmApp_run.log),
+!! para que o motivo da parada apareça mesmo com log_kind='multi_on_error'.
+!! Quando a condição vale em todos os PETs, só um PET deve chamá-la, para
+!! que a saída padrão não repita a mesma linha.
+!!
 !! Avisos saem com severidade WARNING no log do ESMF; informação e
 !! depuração, com INFO. A mensagem é gravada como "<comp>: <texto>", em que
 !! <comp> é uma das marcas COMP_* abaixo, para que se saiba de que
@@ -37,7 +43,8 @@
 !!   if (log_debug_enabled()) call diag_caro(campo)
 module coupler_log_mod
 
-  use ESMF,               only: ESMF_LogWrite, ESMF_LOGMSG_INFO, ESMF_LOGMSG_WARNING
+  use ESMF,               only: ESMF_LogWrite, ESMF_LOGMSG_INFO, ESMF_LOGMSG_WARNING, &
+                                ESMF_LOGMSG_ERROR
   use coupler_config_mod, only: cfg_log_level
 
   implicit none
@@ -47,6 +54,8 @@ module coupler_log_mod
   character(len=*), parameter, public :: COMP_ATM = 'ATM'
   character(len=*), parameter, public :: COMP_OCN = 'OCN'
   character(len=*), parameter, public :: COMP_ICE = 'ICE'
+  character(len=*), parameter, public :: COMP_DATM = 'DATM'
+  character(len=*), parameter, public :: COMP_DOCN = 'DOCN'
   character(len=*), parameter, public :: COMP_MED = 'MED'
   character(len=*), parameter, public :: COMP_DRV = 'ESM'
 
@@ -58,7 +67,7 @@ module coupler_log_mod
   !> Início das linhas do relatório de acoplamento
   character(len=*), parameter, public :: REPORT_PREFIX = 'CPL-REL: '
 
-  public :: log_warning, log_info, log_debug, log_debug_enabled, log_report
+  public :: log_error, log_warning, log_info, log_debug, log_debug_enabled, log_report
 
 contains
 
@@ -74,6 +83,18 @@ contains
       requested_level = LEVEL_INFO
     end select
   end function requested_level
+
+  !> Erro que para a rodada: gravado em qualquer nível, no log do ESMF com
+  !! severidade ERROR e na saída padrão como "ERRO <comp>: <texto>".
+  !! @param[in] comp  marca do componente (COMP_*)
+  !! @param[in] msg   texto da mensagem
+  subroutine log_error(comp, msg)
+    character(len=*), intent(in) :: comp
+    character(len=*), intent(in) :: msg
+    call ESMF_LogWrite(comp//': '//msg, ESMF_LOGMSG_ERROR)
+    write(*,'(A)') 'ERRO '//comp//': '//msg
+    flush(6)
+  end subroutine log_error
 
   !> Aviso: gravado em qualquer nível, com severidade WARNING.
   !! @param[in] comp  marca do componente (COMP_*)

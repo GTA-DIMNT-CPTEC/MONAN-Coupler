@@ -21,6 +21,7 @@ module mpas_import_diag_mod
   use mpas_atm_types_mod,  only : atm_ocean_boundary_type, MPAS_RKIND
   use coupler_config_mod, only : cfg_import_diag_dir, cfg_grid_res_deg
   use cpl_grids_mod,      only : index_trunc, lon_m180to180_loop
+  use coupler_log_mod,    only : COMP_ATM, log_info, log_debug
 
   implicit none
   private
@@ -140,7 +141,7 @@ contains
     real(MPAS_RKIND), optional,    intent(in)  :: latCell(:)
     integer,                       intent(out) :: rc
 
-    character(len=*), parameter :: subname = '(write_mpas_import_diag)'
+    character(len=*), parameter :: subname = 'write_mpas_import_diag'
     integer :: i, nRecv
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
@@ -312,7 +313,7 @@ contains
       call write_import_diag_fields(ncid, varids, recvBuf, lon_global, lat_global, nGlobal, &
                                     nlon, nlat, dlon, dlat)
       ios = nf90_close(ncid)
-      call ESMF_LogWrite(subname//': escrito '//trim(fname), ESMF_LOGMSG_INFO)
+      call log_info(COMP_ATM, subname//': escrito '//trim(fname))
     end if
 
     deallocate(lat_axis, lon_axis)
@@ -575,10 +576,10 @@ contains
     nbins   = size(mask_2d)
     n_ocn_b = count(mask_2d >= OMASK_MIN)
     write(logmsg_mask,'(A,F5.1,A,I0,A,I0,A)') &
-      'B-DIAGMASK-01: monan2_import mascarado — oceano ', &
+      'mascara do diagnostico do monan2_import: oceano ', &
       100.0*real(n_ocn_b)/real(nbins), '% (', n_ocn_b, ' de ', &
       nbins, ' bins)'
-    call ESMF_LogWrite(trim(logmsg_mask), ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ATM, trim(logmsg_mask))
   end subroutine log_mask_coverage
 
   !> @brief Binning Voronoi → grade lat/lon para diagnóstico de importação.

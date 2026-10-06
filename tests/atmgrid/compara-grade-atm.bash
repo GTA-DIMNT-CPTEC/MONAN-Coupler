@@ -12,8 +12,12 @@
 # state_set_field_1d e map_cells_to_regular_grid (soma e contagem por caixa,
 # soma reprodutível entre PETs, média, preenchimento de caixas vazias e cópia
 # para a grade local), e grava os campos reunidos no PET 0. Os arquivos
-# gravados, as mensagens de diagnóstico do log do ESMF e a linha MPAS-DIAG
-# da saída padrão têm de ser idênticos, bit a bit, nas duas versões.
+# gravados, as mensagens de diagnóstico do log do ESMF e a linha de
+# cobertura das células ("DIAG cell_binning coverage" no log do ESMF; até a
+# R-FASE13-10, "[MPAS-DIAG]" na saída padrão) têm de ser idênticos, bit a
+# bit, nas duas versões. As mensagens da versão anterior passam antes pelas
+# traduções de texto de tests/log-traduzido.sed, e a severidade não entra
+# na comparação.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/atmgrid/compara-grade-atm.bash REV [SAIDA]
@@ -83,18 +87,27 @@ for f in $(cd "${SAIDA}/antiga/run" && ls saida_*.bin 2>/dev/null); do
   fi
 done
 [[ ${n} -eq 6 ]] || { echo "ERRO: esperados 6 arquivos, gravados ${n}; ver ${SAIDA}/antiga/run/run.log" >&2; exit 2; }
-if diff -q <(grep 'MPAS-DIAG' "${SAIDA}/antiga/run/run.log") \
-           <(grep 'MPAS-DIAG' "${SAIDA}/nova/run/run.log") > /dev/null; then
-  echo "  saída igual    MPAS-DIAG ($(grep -c 'MPAS-DIAG' "${SAIDA}/antiga/run/run.log") linhas)"
+traduzido() { sed -Ef "${RAIZ}/tests/log-traduzido.sed" "$1"; }
+mensagem() { sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//'; }
+# Cobertura das células: na saída padrão ([MPAS-DIAG], versões até a
+# R-FASE13-10) ou no log do ESMF, sem o PET
+cobertura() {
+  { grep -h 'MPAS-DIAG' "$1/run.log" \
+      | sed -E 's/^\[MPAS-DIAG\] ([A-Za-z0-9_]+): n_local=/ATM: DIAG cell_binning coverage: campo=\1 n_local=/'
+    cat "$1"/PET*.teste_grade_atm | grep -h 'DIAG cell_binning coverage' | mensagem | sed -E 's/^PET[0-9]+ //'
+  }
+}
+if diff -q <(cobertura "${SAIDA}/antiga/run") <(cobertura "${SAIDA}/nova/run") > /dev/null; then
+  echo "  saída igual    cobertura das células ($(cobertura "${SAIDA}/antiga/run" | wc -l) linhas)"
 else
-  echo "  saída DIFERE   MPAS-DIAG"; difere=1
+  echo "  saída DIFERE   cobertura das células"; difere=1
 fi
-# Mensagens de diagnóstico e de erro no log do ESMF, sem data e hora
-padrao='BUG-SPARSE|ERROR|WARNING|state_set_field_1d|mpas_export'
+# Mensagens de diagnóstico e de erro no log do ESMF, sem data, hora e severidade
+padrao='DIAG cell_binning fill|ERROR|WARNING|state_set_field_1d|mpas_export'
 for pet in "${SAIDA}"/antiga/run/PET*.teste_grade_atm; do
   nome=$(basename "${pet}")
-  if diff -q <(grep -E "${padrao}" "${pet}" | cut -d' ' -f3-) \
-             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | cut -d' ' -f3-) > /dev/null; then
+  if diff -q <(traduzido "${pet}" | grep -E "${padrao}" | mensagem) \
+             <(grep -E "${padrao}" "${SAIDA}/nova/run/${nome}" | mensagem) > /dev/null; then
     echo "  log igual      ${nome} ($(grep -cE "${padrao}" "${pet}") linhas)"
   else
     echo "  log DIFERE     ${nome}"; difere=1

@@ -53,6 +53,7 @@ module mpas_atm_model_mod
 
   ! mpas_log_write confirmado (probe mpas_log.F linha 480)
   use mpas_log,           only : mpas_log_write, mpas_log_info
+  use coupler_log_mod,    only : COMP_ATM, log_error, log_warning, log_info
 
   use coupler_config_mod,  only : cfg_use_datm,&
                                     cfg_use_docn
@@ -190,7 +191,7 @@ contains
     integer,                    intent(out)   :: rc
     rc = 0
     if (.not. atm_state%initialized) then
-      write(*,'(A)') 'ERRO mpas_atm_init_sfc: modelo nao inicializado'
+      call log_error(COMP_ATM, 'mpas_atm_init_sfc: modelo nao inicializado')
       rc = 1; return
     end if
     ! core_init já preencheu o subpool diag com dados do init.nc via SMIOL.
@@ -252,16 +253,16 @@ contains
     ! default aceitavel, entao registra em nivel de erro em vez de seguir calado.
     nSolve_inj = atm_public%nCellsSolve
     if (nSolve_inj <= 0 .or. nSolve_inj > n) then
-      write(msg,'(A,I0,A,I0,A)') 'mpas_atm_run: B-INJECT-HALO-01 ERRO - ' // &
+      write(msg,'(A,I0,A,I0,A)') 'mpas_atm_run: ' // &
         'nCellsSolve=', nSolve_inj, ' invalido (nCells=', n, &
         '); injetando ate nCells, halos ficarao inconsistentes'
-      write(*,'(A)') trim(msg)
+      call log_warning(COMP_ATM, trim(msg))
       call mpas_log_write(trim(msg))
       nSolve_inj = n
     end if
 
     if (.not. atm_state%initialized .or. .not. associated(atm_state%domain)) then
-      write(*,'(A)') 'ERRO mpas_atm_run: modelo nao inicializado'
+      call log_error(COMP_ATM, 'mpas_atm_run: modelo nao inicializado')
       rc = 1; return
     end if
 
@@ -320,7 +321,7 @@ contains
       end if
       atm_state%first_coupling_call = .false.
     else
-      write(*,'(A)') 'AVISO mpas_atm_run: subpool sfc_input nao encontrado em structs'
+      call log_warning(COMP_ATM, 'mpas_atm_run: subpool sfc_input nao encontrado em structs')
     end if
 
     call mpas_log_write('mpas_atm_run: sfc_input injetado')
@@ -346,8 +347,8 @@ contains
     ! ------------------------------------------------------------------
     ierr = atm_state%domain%core%core_run(atm_state%domain)
     if (ierr /= 0) then
-      write(msg,'(A,I0)') 'ERRO mpas_atm_run: core_run retornou ierr=', ierr
-      write(*,'(A)') trim(msg)
+      write(msg,'(A,I0)') 'mpas_atm_run: core_run retornou ierr=', ierr
+      call log_error(COMP_ATM, trim(msg))
       call mpas_log_write(trim(msg))
       rc = ierr; return
     end if
@@ -560,7 +561,7 @@ contains
       nullify(atm_state%pool_snownc,  atm_state%pool_q2,       atm_state%pool_ust)
       atm_state%domain => null()
 
-      write(*,'(A)') 'mpas_atm_final: ponteiros nulificados (ESMF preservado)'
+      call log_info(COMP_ATM, 'mpas_atm_final: ponteiros nulificados (ESMF preservado)')
     end if
 
     ! 4. Desaloca apenas arrays de propriedade deste módulo

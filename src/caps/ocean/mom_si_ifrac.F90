@@ -18,6 +18,7 @@ module mom_si_ifrac_mod
 
   use ESMF
   use coupler_constants_mod, only : SI_IFRAC_DECAY, T_FREEZE => T_FREEZE_SEAWATER
+  use coupler_log_mod, only : COMP_OCN, log_warning, log_info, log_debug
   use MOM_cap_methods,       only : ChkErr
   ! Leitura de Si_ifrac do arquivo OISST (use_docn_ice)
   use docn_cap_netcdf_mod,   only : ReadOcnFieldInterp
@@ -130,7 +131,7 @@ contains
                             trim(cfg_docn_ice_varname),      &
                             currTime, nx, ny, ice_global, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('OCN(Alt1): ERRO ReadOcnFieldInterp', ESMF_LOGMSG_ERROR)
+      call log_warning(COMP_OCN, 'set_si_ifrac_from_file: ReadOcnFieldInterp falhou')
       deallocate(ice_global); return
     end if
 
@@ -209,11 +210,9 @@ contains
     ifrac_mem%valid = .true.
 
     write(logmsg,'(A,I0,A,I0,A,I0,A,I0,A)') &
-      'OCN(Alt1): si_ifrac_mem salvo — bounds=[', lb1, ':', ub1, ',', lb2, ':', ub2, ']'
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
-
-    write(logmsg,'(A,A)') 'OCN(Alt1): Si_ifrac lido de ', trim(cfg_docn_ice_file)
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+      'si_ifrac_mem salvo: bounds=[', lb1, ':', ub1, ',', lb2, ':', ub2, ']'
+    call log_info(COMP_OCN, trim(logmsg))
+    call log_info(COMP_OCN, 'Si_ifrac lido de '//trim(cfg_docn_ice_file))
 
   end subroutine set_si_ifrac_from_file
 
@@ -301,9 +300,7 @@ contains
     ! ocean_grid é necessário para acessar mask2dT.
     ! Se não foi passado, retorna zeros — comportamento seguro.
     if (.not. associated(ocean_grid)) then
-      call ESMF_LogWrite( &
-        'OCN(MOM6): Si_ifrac sem ocean_grid — retornando zeros', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_OCN, 'Si_ifrac sem ocean_grid: zeros')
       return
     end if
 
@@ -372,8 +369,7 @@ contains
     !   'OCN(proxy): si_ifrac_mem_valid=T' → persistência ativa
     !   'OCN(proxy): si_ifrac_mem_valid=F' → sem campo anterior salvo
     if (ifrac_mem%valid) then
-      call ESMF_LogWrite('OCN(proxy): si_ifrac_mem_valid=T — aplicando persistencia', &
-                         ESMF_LOGMSG_INFO)
+      call log_debug(COMP_OCN, 'si_ifrac_mem_valid=T: aplicando persistencia')
       do jj = lb2, ub2
         do ii = lb1, ub1
           ptr_ifrac(ii, jj) = max(ptr_ifrac(ii, jj), &
@@ -383,8 +379,7 @@ contains
       ! Clamp pós-persistência
       where (ptr_ifrac > 1.0_ESMF_KIND_R8) ptr_ifrac = 1.0_ESMF_KIND_R8
     else
-      call ESMF_LogWrite('OCN(proxy): si_ifrac_mem_valid=F — sem persistencia (passo inicial?)', &
-                         ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_OCN, 'si_ifrac_mem_valid=F: sem persistencia (passo inicial?)')
     end if
 
     ! Salvar estado atual para o próximo passo de acoplamento
@@ -395,9 +390,7 @@ contains
     ifrac_mem%field = ptr_ifrac
     ifrac_mem%valid = .true.
 
-    call ESMF_LogWrite( &
-      'OCN(MOM6): Si_ifrac via sigmoide DT_TRANS=2K + frazil contínuo (v2.3)', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_OCN, 'Si_ifrac pela sigmoide DT_TRANS=2K + frazil continuo')
 
   end subroutine compute_si_ifrac_proxy
 

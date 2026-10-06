@@ -55,12 +55,13 @@ module DOCN_cap_mod
   use ESMF, only: ESMF_TYPEKIND_R8, ESMF_KIND_R8, ESMF_KIND_I8
   use ESMF, only: ESMF_INDEX_GLOBAL, ESMF_COORDSYS_SPH_DEG
   use ESMF, only: ESMF_SUCCESS, ESMF_FAILURE, ESMF_LOGERR_PASSTHRU
-  use ESMF, only: ESMF_LogFoundError, ESMF_LogWrite, ESMF_LOGMSG_INFO
+  use ESMF, only: ESMF_LogFoundError
   use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGet, ESMF_VMBroadcast
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
   use docn_cap_netcdf_mod, only: ReadOcnFieldInterp, WriteDOCNDiag
   use coupler_utils_mod,   only: ChkErr, int_to_str
+  use coupler_log_mod,     only: COMP_DOCN, log_info, log_warning
   use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &
                                  cap_fill_export_initial, cap_set_data_complete, &
                                  cap_stamp_export
@@ -177,7 +178,7 @@ contains
       specRoutine=ModelAdvance, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DOCN: SetServices concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DOCN, 'SetServices concluido')
 
   end subroutine SetServices
 
@@ -217,9 +218,9 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call ESMF_LogWrite('DOCN: InitializeAdvertise concluido (' &
+    call log_info(COMP_DOCN, 'InitializeAdvertise concluido (' &
       //int_to_str(size(exp))//' exp, ' &
-      //int_to_str(size(imp))//' imp)', ESMF_LOGMSG_INFO)
+      //int_to_str(size(imp))//' imp)')
 
   end subroutine InitializeAdvertise
 
@@ -355,9 +356,9 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DOCN: InitializeRealize concluido (grade ' &
+    call log_info(COMP_DOCN, 'InitializeRealize concluido (grade ' &
       //int_to_str(nx)//'x' &
-      //int_to_str(ny)//')', ESMF_LOGMSG_INFO)
+      //int_to_str(ny)//')')
 
   end subroutine InitializeRealize
 
@@ -405,7 +406,7 @@ contains
     call cap_set_data_complete(gcomp, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DOCN: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DOCN, 'InitializeDataComplete SATISFIED')
 
   end subroutine InitializeDataComplete
 
@@ -478,9 +479,9 @@ contains
       h=hour, m=minute, s=sec, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    write(msg,'(A,I4,5(A,I2.2))') 'DOCN: avancando para ', year, '-', &
+    write(msg,'(A,I4,5(A,I2.2))') 'avancando para ', year, '-', &
       month, '-', day, ' ', hour, ':', minute, ':', sec
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_DOCN, trim(msg))
 
     ! Obtém limites locais do subdomínio a partir do primeiro campo exportado
     call ESMF_StateGet(exportState, itemName="So_t", field=field, rc=rc)
@@ -517,8 +518,7 @@ contains
     if (cfg_write_import_diag) then
       call WriteDOCNDiag(gcomp, currTime, cfg_docn_nx, cfg_docn_ny, rc)
       if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('DOCN: AVISO: WriteDOCNDiag falhou — continuando', &
-          ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_DOCN, 'WriteDOCNDiag falhou; continuando')
         rc = ESMF_SUCCESS
       end if
     end if
@@ -531,8 +531,7 @@ contains
     call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DOCN: ModelAdvance concluido (OISST netcdf)', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_DOCN, 'ModelAdvance concluido (OISST netcdf)')
 
   end subroutine ModelAdvance
 
@@ -595,8 +594,7 @@ contains
         trim(cfg_docn_cur_u_varname), &
         currTime, cfg_docn_nx, cfg_docn_ny, is%uocn, rc)
       if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('DOCN: AVISO: falha uo — corrente zonal = 0', &
-          ESMF_LOGMSG_INFO)
+        call log_warning(COMP_DOCN, 'falha uo: corrente zonal = 0')
         is%uocn = 0.0_ESMF_KIND_R8; rc = ESMF_SUCCESS
       else
         ! Fill value OSCAR = -999.0 — limiar |v|>10 m/s captura fills oceânicos
@@ -607,8 +605,7 @@ contains
         trim(cfg_docn_cur_v_varname), &
         currTime, cfg_docn_nx, cfg_docn_ny, is%vocn, rc)
       if (rc /= ESMF_SUCCESS) then
-        call ESMF_LogWrite('DOCN: AVISO: falha vo — corrente meridional = 0', &
-          ESMF_LOGMSG_INFO)
+        call log_warning(COMP_DOCN, 'falha vo: corrente meridional = 0')
         is%vocn = 0.0_ESMF_KIND_R8; rc = ESMF_SUCCESS
       else
         where (abs(is%vocn) >= 10.0_ESMF_KIND_R8) is%vocn = 0.0_ESMF_KIND_R8

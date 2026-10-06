@@ -37,6 +37,7 @@ module mpas_atm_setup_mod
   use atm_core_interface, only : atm_setup_core, atm_setup_domain
   use coupler_config_mod, only : cfg_sst_default, cfg_ice_fraction_default, &
                                  cfg_zorl_default
+  use coupler_log_mod, only : COMP_ATM, log_error, log_warning, log_info
 
   implicit none
   private
@@ -136,15 +137,15 @@ contains
     !    não inicializado → SIGSEGV.
     !
     !    Por isso nao ha mpas_log_write logo apos atm_setup_domain (uma
-    !    chamada ali causou SIGSEGV em todos os 128 ranks). Mensagens de
-    !    progresso anteriores a este ponto devem usar write(*,…).
+    !    chamada ali causou SIGSEGV em todos os 128 ranks). Mensagens
+    !    anteriores a este ponto vão para o log do ESMF (coupler_log_mod).
     !
     !    Sequência de mpas_subdriver.F:
     !      ierr = domain_ptr%core%setup_log(domain_ptr%logInfo, domain_ptr)
     ! ------------------------------------------------------------------
     ierr = atm_state%domain%core%setup_log(atm_state%domain%logInfo, atm_state%domain)
     if (ierr /= 0) then
-      write(*,'(A)') 'ERRO mpas_atm_init: setup_log falhou'
+      call log_error(COMP_ATM, 'mpas_atm_init: setup_log falhou')
       rc = ierr; return
     end if
 
@@ -344,7 +345,7 @@ contains
     call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'mesh', meshPool)
 
     if (.not. associated(meshPool)) then
-      write(*,'(A)') 'ERRO mpas_atm_init: subpool mesh nao encontrado em blocklist%structs'
+      call log_error(COMP_ATM, 'mpas_atm_init: subpool mesh nao encontrado em blocklist%structs')
       rc = 1; return
     end if
 
@@ -353,7 +354,7 @@ contains
     call mpas_pool_get_dimension(meshPool, 'nVertLevels', nVertLev_ptr)
 
     if (.not. associated(nCells_ptr)) then
-      write(*,'(A)') 'ERRO mpas_atm_init: nCells nao encontrado no subpool mesh'
+      call log_error(COMP_ATM, 'mpas_atm_init: nCells nao encontrado no subpool mesh')
       rc = 1; return
     end if
 
@@ -368,7 +369,7 @@ contains
       nSolve = nCellsSolve_ptr
     else
       nSolve = n
-      write(*,'(A)') 'AVISO mpas_atm_init: nCellsSolve ausente no pool mesh — usando nCells'
+      call log_warning(COMP_ATM, 'mpas_atm_init: nCellsSolve ausente no pool mesh; usando nCells')
     end if
 
     ! nVertLev_ptr pode ser null se 'nVertLevels' não existir no pool
@@ -378,7 +379,7 @@ contains
       atm_state%nVertLevels  = nVertLev_ptr
       atm_public%nVertLevels = nVertLev_ptr
     else
-      write(*,'(A)') 'AVISO mpas_atm_init: nVertLevels ausente no pool mesh — usando default 55'
+      call log_warning(COMP_ATM, 'mpas_atm_init: nVertLevels ausente no pool mesh; usando 55')
       atm_state%nVertLevels  = 55   ! default da física MONAN-A 2.0
       atm_public%nVertLevels = 55
     end if
@@ -396,7 +397,7 @@ contains
     call mpas_pool_get_array(meshPool, 'areaCell', atm_public%areaCell)
 
     if (.not. associated(atm_public%latCell)) then
-      write(*,'(A)') 'ERRO mpas_atm_init: latCell nao encontrado no subpool mesh'
+      call log_error(COMP_ATM, 'mpas_atm_init: latCell nao encontrado no subpool mesh')
       rc = 1; return
     end if
   end subroutine bind_mesh_fields
@@ -450,7 +451,7 @@ contains
       call mpas_pool_get_array(diagPool, 'lh',      atm_public%lhflx)
       call mpas_pool_get_array(diagPool, 'hfx',     atm_public%shflx)
     else
-      write(*,'(A)') 'AVISO mpas_atm_init: subpool diag nao encontrado em structs'
+      call log_warning(COMP_ATM, 'mpas_atm_init: subpool diag nao encontrado em structs')
     end if
 
     ! Passa 2: subpool 'diag_physics' — fallback para campos de CLP/superfície
@@ -491,7 +492,7 @@ contains
     call warn_if_null(atm_state%pool_rainnc,       'rainnc')
     call warn_if_null(atm_public%lhflx,    'lh')
     if (.not. associated(atm_state%pool_ust)) &
-      write(*,'(A)') 'AVISO mpas_atm_init: ust nulo — taux/tauy serao zero'
+      call log_warning(COMP_ATM, 'mpas_atm_init: ust nulo; taux/tauy serao zero')
   end subroutine bind_diag_fields
 
   !> Prepara o calculo de u10/v10 por perfil logaritmico quando os campos
@@ -522,8 +523,8 @@ contains
     ! (mar aberto, Charnock neutral). Erro tipico: <15% vs. u10 do MYNN.
     ! ─────────────────────────────────────────────────────────────────────────────
     if (.not. associated(atm_public%u10) .or. .not. associated(atm_public%v10)) then
-      write(*,'(A)') 'BUG-WIND-01: u10/v10 ausentes do pool (bl_mynn_in/bl_ysu_in inativos).'
-      write(*,'(A)') '  Ativando fallback por perfil logaritmico de uReconstructZonal/Meridional.'
+      call log_warning(COMP_ATM, 'u10/v10 ausentes do pool (bl_mynn_in/bl_ysu_in inativos): '// &
+        'u10/v10 pelo perfil logaritmico de uReconstructZonal/Meridional')
 
       ! Buscar uReconstructZonal e uReconstructMeridional (3D: nVertLevels x nCells)
       call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag', diagPool2)
@@ -540,12 +541,11 @@ contains
         atm_state%v10_buf = 0.0_MPAS_RKIND
         atm_public%u10 => atm_state%u10_buf
         atm_public%v10 => atm_state%v10_buf
-        write(*,'(A)') '  BUG-WIND-01: buffers g_u10_buf/g_v10_buf alocados — OK.'
+        call log_info(COMP_ATM, 'buffers u10_buf/v10_buf alocados')
       else
-        write(*,'(A)') '  BUG-WIND-01: uReconstructZonal nao encontrado no pool diag.'
-        write(*,'(A)') '  SOLUCAO ALTERNATIVA: ativar bl_mynn_in no namelist.atmosphere:'
-        write(*,'(A)') '    config_bl_pbl_physics  = 5'
-        write(*,'(A)') '    config_sf_sfclay_physics = 5'
+        call log_warning(COMP_ATM, 'uReconstructZonal nao encontrado no pool diag; '// &
+          'ative bl_mynn_in no namelist.atmosphere (config_bl_pbl_physics = 5, '// &
+          'config_sf_sfclay_physics = 5)')
       end if
     end if
   end subroutine setup_wind_fallback
@@ -819,10 +819,10 @@ contains
     character(len=*),          intent(in) :: name
     character(len=256) :: msg
     if (.not. associated(ptr)) then
-      write(msg,'(A,A,A)') 'AVISO: ponteiro nulo "', trim(name), &
-           '" — verificar Registry.xml e namelist'
-      call mpas_log_write(trim(msg))
-      write(*,'(A)') trim(msg)
+      write(msg,'(A,A,A)') 'ponteiro nulo "', trim(name), &
+           '": verificar Registry.xml e namelist'
+      call mpas_log_write('AVISO: '//trim(msg))
+      call log_warning(COMP_ATM, trim(msg))
     end if
   end subroutine warn_if_null
 

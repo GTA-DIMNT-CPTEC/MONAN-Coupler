@@ -40,6 +40,7 @@ module mpas_adapter_mod
                                   atm_ocean_boundary_type, &
                                   MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
+  use coupler_log_mod, only : COMP_ATM, log_info, log_warning, log_debug
   use cpl_grids_mod, only : cpl_latlon_grid, ORIGIN_WEST180, index_trunc, lon_m180to180_floor
   ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
   ! para rugosidade e SST invalidas (ver fill_invalid_sst).
@@ -99,7 +100,7 @@ contains
     real(MPAS_RKIND), optional,    intent(in)    :: lonCell(:)  !< lon celulas [rad, 0..2pi]
     real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat celulas [rad, -pi/2..pi/2]
 
-    character(len=*), parameter :: subname = '(mpas_import)'
+    character(len=*), parameter :: subname = 'mpas_import'
           real(MPAS_RKIND), parameter :: ICE_POLAR = 0.5_MPAS_RKIND
           real(MPAS_RKIND), parameter :: RAD2DEG_2 = 180.0_MPAS_RKIND / 3.14159265358979_MPAS_RKIND
           real(MPAS_RKIND), allocatable :: ice_fallback(:)
@@ -269,9 +270,8 @@ contains
       where (atm_bnd%omask /= atm_bnd%omask)  atm_bnd%omask = 1.0_MPAS_RKIND
     end if
 
-    call ESMF_LogWrite(subname//': importacao Fase 2 concluida ' // &
-      '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl + Sf_albedo + Sx_omask)', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ATM, subname//': importacao concluida ' // &
+      '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl + Sf_albedo + Sx_omask)')
 
     ! ── Diagnóstico de importação MED→MPAS ──────────────────────────────
     ! Escrito quando write_import_diag=.true. em &nuopc_docn do nuopc.input
@@ -358,7 +358,7 @@ contains
 
     integer :: n
     type(ESMF_VM) :: vm
-    character(len=*), parameter :: subname = '(mpas_export)'
+    character(len=*), parameter :: subname = 'mpas_export'
 
     rc = ESMF_SUCCESS
     call ESMF_VMGetCurrent(vm, rc=rc); if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS
@@ -396,7 +396,7 @@ contains
     if (rc /= ESMF_SUCCESS) return
     call export_mpas_member(diag, exportState, 'Faxa_tauy_mpas', atm_public%tauy_sfc, n, vm, atm_public, rc)
     if (rc /= ESMF_SUCCESS) return
-    call ESMF_LogWrite(subname//': exportacao concluida', ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ATM, subname//': exportacao concluida')
 
   end subroutine mpas_export
 
@@ -445,7 +445,7 @@ contains
 
     integer  :: petCount
     type(ESMF_VM) :: vm
-    character(len=*), parameter :: subname = '(mpas_create_grid)'
+    character(len=*), parameter :: subname = 'mpas_create_grid'
 
     rc = ESMF_SUCCESS
 
@@ -458,7 +458,7 @@ contains
                           grid, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    call ESMF_LogWrite(subname//': ESMF_Grid 360x180 criada (sem MOAB)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, subname//': ESMF_Grid 360x180 criada')
 
   end subroutine mpas_create_grid
 
@@ -475,7 +475,7 @@ contains
     character(len=64), allocatable :: fldnames(:)
     integer :: itemCount, i, localrc
     character(len=160) :: msg
-    character(len=*), parameter :: subname = '(state_diagnose)'
+    character(len=*), parameter :: subname = 'state_diagnose'
         real(ESMF_KIND_R8), pointer :: fp1d(:)
         real(ESMF_KIND_R8), pointer :: fp2d(:,:)
         real(ESMF_KIND_R8), allocatable :: vals(:)
@@ -485,7 +485,7 @@ contains
 
     call ESMF_StateGet(state, itemCount=itemCount, rc=localrc)
     if (localrc /= ESMF_SUCCESS .or. itemCount == 0) then
-      call ESMF_LogWrite(subname//': '//trim(state_tag)//' vazio', ESMF_LOGMSG_INFO)
+      call log_info(COMP_ATM, subname//': '//trim(state_tag)//' vazio')
       return
     end if
 
@@ -496,7 +496,7 @@ contains
     end if
 
     write(msg,'(A,A)') subname//': ', trim(state_tag)
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, trim(msg))
 
     do i = 1, itemCount
       call ESMF_StateGet(state, itemName=trim(fldnames(i)), field=field, rc=localrc)
@@ -522,7 +522,7 @@ contains
           '  min=', minval(vals), &
           '  max=', maxval(vals), &
           '  mean=', sum(vals) / real(size(vals), ESMF_KIND_R8)
-        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+        call log_info(COMP_ATM, trim(msg))
       if (allocated(vals)) deallocate(vals)
     end do
 
@@ -554,7 +554,7 @@ contains
     type(ESMF_Field)             :: field
     real(ESMF_KIND_R8), pointer  :: fptr1d(:)
     integer :: n_esmf, fld_rank
-    character(len=*), parameter  :: subname = '(state_get_field_1d)'
+    character(len=*), parameter  :: subname = 'state_get_field_1d'
     logical :: found
         real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
         real(ESMF_KIND_R8), parameter :: DLAT = 1.0_ESMF_KIND_R8
@@ -713,7 +713,7 @@ contains
 
     call ESMF_StateGet(state, itemName=fldname, field=field, rc=rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' nao encontrado', ESMF_LOGMSG_INFO)
+      call log_info(COMP_ATM, subname//': '//trim(fldname)//' nao encontrado')
       return
     end if
 
@@ -722,7 +722,7 @@ contains
 
     call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': '//trim(fldname)//' dimCount query falhou', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ATM, subname//': '//trim(fldname)//' dimCount query falhou')
       return
     end if
 
@@ -749,7 +749,7 @@ contains
     real(ESMF_KIND_R8), pointer  :: fptr1d(:)
     real(ESMF_KIND_R8), pointer  :: fptr2d(:,:)
     integer :: n_esmf, fld_rank, i, j, idx
-    character(len=*), parameter  :: subname = '(state_set_field_1d)'
+    character(len=*), parameter  :: subname = 'state_set_field_1d'
     logical :: found
 
     rc = ESMF_SUCCESS

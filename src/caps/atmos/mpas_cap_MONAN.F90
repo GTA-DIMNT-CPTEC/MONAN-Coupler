@@ -58,6 +58,7 @@ module mpas_cap_MONAN_mod
                                     cfg_zorl_default
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
+  use coupler_log_mod,     only : COMP_ATM, log_error, log_info
   use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
   use cpl_fields_mod,      only : CPL_NAME_LEN
   use cpl_map_mod,         only : cpl_arrivals, cpl_exports, cpl_current_config
@@ -156,8 +157,7 @@ contains
          specLabel=model_label_CheckImport, &
          specRoutine=CheckImportAlwaysOK, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_LogWrite('mpas_cap: SetServices concluido (v7.0 NUOPC_CompDerive)', &
-         ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'SetServices concluido')
   end subroutine SetServices
 
   subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
@@ -168,7 +168,6 @@ contains
     type(ESMF_Time)    :: startTimeLoc
     character(len=32)  :: value
     integer            :: yr, mo, dy, hr, mn, sc
-    character(len=*), parameter :: subname = '(mpas_cap:InitializeP0)'
     rc = ESMF_SUCCESS
     call cap_initialize_p0(gcomp, importState, exportState, clock, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -178,8 +177,8 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     write(value, '(I4.4,"-",I2.2,"-",I2.2,"T",I2.2,":",I2.2,":",I2.2)') &
           yr, mo, dy, hr, mn, sc
-    call ESMF_LogWrite(subname//': start_time = '//trim(value), ESMF_LOGMSG_INFO)
-    call ESMF_LogWrite(subname//': InitializeP0 concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'start_time = '//trim(value))
+    call log_info(COMP_ATM, 'InitializeP0 concluido')
   end subroutine InitializeP0
 
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
@@ -189,7 +188,6 @@ contains
     integer,             intent(out) :: rc
     integer :: i
     character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
-    character(len=*), parameter :: subname = '(mpas_cap:InitializeAdvertise)'
     rc = ESMF_SUCCESS
     call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', imp)
     call cpl_exports(POINT_ATM, cpl_current_config(), '', exp)
@@ -201,9 +199,9 @@ contains
       call NUOPC_Advertise(exportState, StandardName=trim(exp(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end do
-    call ESMF_LogWrite(subname//': anunciados '// &
+    call log_info(COMP_ATM, 'InitializeAdvertise: anunciados '// &
          int_to_str(size(imp))//' imp + '// &
-         int_to_str(size(exp))//' exp', ESMF_LOGMSG_INFO)
+         int_to_str(size(exp))//' exp')
   end subroutine InitializeAdvertise
 
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
@@ -280,7 +278,7 @@ contains
     if (allocated(lon_local_nc)) deallocate(lon_local_nc)
     if (allocated(lat_local_nc)) deallocate(lat_local_nc)
 
-    call ESMF_LogWrite(subname//': InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
   subroutine InitializeDataComplete(gcomp, rc)
@@ -319,7 +317,7 @@ contains
     call NUOPC_CompAttributeSet(gcomp, &
          name='InitializeDataComplete', value='true', rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_LogWrite(subname//': DataInitialize SATISFIED', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'DataInitialize SATISFIED')
   end subroutine InitializeDataComplete
 
   subroutine ModelAdvance(gcomp, rc)
@@ -390,7 +388,7 @@ contains
                                 yr, mo, dy, hr, mn, sc, vm, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    call ESMF_LogWrite(subname//': ModelAdvance concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'ModelAdvance concluido')
   end subroutine ModelAdvance
 
   !> Recupera o estado interno do cap, criado em InitializeRealize.
@@ -432,7 +430,7 @@ contains
     st%atm_public => null()
     st%atm_state  => null()
     st%atm_bnd    => null()
-    call ESMF_LogWrite(subname//': ModelFinalize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'ModelFinalize concluido')
   end subroutine ModelFinalize
 
   !> @brief Aborta se algum campo importado nao estiver conectado.
@@ -495,8 +493,6 @@ contains
         n_missing = n_missing + 1
         if (len_trim(missing) > 0) missing = trim(missing)//', '
         missing = trim(missing)//trim(names(i))
-        call ESMF_LogWrite(subname//': campo de importacao NAO conectado: '// &
-                           trim(names(i)), ESMF_LOGMSG_ERROR)
       end if
     end do
 
@@ -504,35 +500,23 @@ contains
       write(msg,'(A,I0,A,I0,A)') subname//': ABORTANDO — ', n_missing, &
         ' de ', size(names), ' campos de importacao nao estao conectados: '
       msg = trim(msg)//trim(missing)
-      ! Tambem para a saida padrao: o log de PET nao e' lido quando o
-      ! sintoma aparece so' no esmApp_run.log, e foi exatamente esse o
-      ! ponto cego que custou dois jobs e um segfault opaco.
-      if (localPet == 0) then
-        write(*,'(A)') ''
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ' ERRO FATAL: campos de importacao nao conectados'
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ' '//trim(missing)
-        write(*,'(A)') ''
-        write(*,'(A)') ' O componente OCN configurado nao oferece todos os campos que'
-        write(*,'(A)') ' o cap do MPAS anuncia (ATM@atm_cap no mapa de acoplamento).'
-        write(*,'(A)') ' Prosseguir levaria a SIGSEGV no primeiro passo, ao ler um'
-        write(*,'(A)') ' campo nunca realizado.'
-        write(*,'(A)') ''
-        write(*,'(A)') ' Verifique a combinacao ATM x OCN em &nuopc_mode:'
-        write(*,'(A)') '   use_datm=F use_docn=F use_med=T -> MPAS + MOM6  (producao)'
-        write(*,'(A)') '   use_datm=F use_docn=T use_med=F -> MPAS + DOCN  (Fase 1)'
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ''
-      end if
+      ! log_error grava também na saída padrão (esmApp_run.log), onde o
+      ! motivo da parada precisa aparecer; a condição vale em todos os PETs,
+      ! por isso só o PET 0 a registra.
+      if (localPet == 0) call log_error(COMP_ATM, 'verify_import_connected: '// &
+        int_to_str(n_missing)//' de '//int_to_str(size(names))// &
+        ' campos de importacao nao conectados: '//trim(missing)// &
+        '. O componente OCN configurado nao oferece todos os campos que o cap '// &
+        'do MPAS anuncia (ATM@atm_cap no mapa de acoplamento); prosseguir levaria '// &
+        'a SIGSEGV no primeiro passo. Verifique a combinacao de componentes '// &
+        '(&nuopc_mode e &nuopc_petlayout, tabela COUPLER_MODES).')
       call ESMF_LogSetError(ESMF_FAILURE, msg=trim(msg), &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
 
-    write(msg,'(A,I0,A)') subname//': todos os ', size(names), &
-      ' campos de importacao estao conectados'
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'verify_import_connected: todos os '// &
+      int_to_str(size(names))//' campos de importacao estao conectados')
 
   end subroutine verify_import_connected
 

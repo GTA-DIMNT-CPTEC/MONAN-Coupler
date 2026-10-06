@@ -18,7 +18,7 @@ module docn_cap_netcdf_mod
   use ESMF, only: ESMF_TimeInterval, ESMF_TimeIntervalSet, ESMF_TimeIntervalGet
   use ESMF, only: ESMF_KIND_R8, ESMF_KIND_I8
   use ESMF, only: ESMF_SUCCESS, ESMF_FAILURE, ESMF_LOGERR_PASSTHRU
-  use ESMF, only: ESMF_LogFoundError, ESMF_LogWrite, ESMF_LOGMSG_INFO, ESMF_LOGMSG_WARNING, ESMF_LOGMSG_ERROR
+  use ESMF, only: ESMF_LogFoundError
   use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGetCurrent, ESMF_VMGet, ESMF_VMBroadcast, ESMF_GridCompGet
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
@@ -27,6 +27,7 @@ module docn_cap_netcdf_mod
   use mpi
   use coupler_constants_mod, only: T0_KELVIN
   use coupler_utils_mod, only: ChkErr, int_to_str, real_to_str
+  use coupler_log_mod, only: COMP_DOCN, log_error, log_warning, log_info, log_debug
 
   use coupler_config_mod, only: cfg_docn_mode,           &
                                   cfg_docn_sst_file,       &
@@ -83,15 +84,15 @@ contains
     rc    = ESMF_SUCCESS
     nc_rc = nf90_open(filename, NF90_NOWRITE, ncid)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField DOCN: falha ao abrir " &
-        //trim(filename)//": "//trim(nf90_strerror(nc_rc)), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DOCN, "ReadGlobalField: falha ao abrir " &
+        //trim(filename)//": "//trim(nf90_strerror(nc_rc)))
       rc = ESMF_FAILURE; return
     end if
 
     nc_rc = nf90_inq_varid(ncid, varname, varid)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField DOCN: variavel nao encontrada: " &
-        //trim(varname), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DOCN, "ReadGlobalField: variavel nao encontrada: " &
+        //trim(varname))
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 
@@ -102,14 +103,13 @@ contains
       if (nc_rc_dim == NF90_NOERR .and. ndims_var >= 2) then
         nc_rc_dim = nf90_inquire_dimension(ncid, dimids(1), name=dim1_name, len=dim1_size)
         if (nc_rc_dim == NF90_NOERR .and. dim1_size /= nx) then
-          call ESMF_LogWrite( &
-            "ReadGlobalField DOCN: ERRO B-59 — ordem de eixos incompativel! "// &
+          call log_error(COMP_DOCN, &
+            "ReadGlobalField: ordem de eixos incompativel. "// &
             "Arquivo "//trim(filename)//" tem dim1='"//trim(dim1_name)// &
             "' com tamanho "//int_to_str(dim1_size)// &
             " mas DOCN espera nx="//int_to_str(nx)//". "// &
             "Execute prepare_cur_file.sh para transpor: "// &
-            "ncpdq -a time,latitude,longitude arquivo.nc arquivo_corrigido.nc", &
-            ESMF_LOGMSG_ERROR)
+            "ncpdq -a time,latitude,longitude arquivo.nc arquivo_corrigido.nc")
           rc = ESMF_FAILURE
           nc_rc = nf90_close(ncid)
           return
@@ -120,8 +120,8 @@ contains
     count_arr = [nx, ny, 1]
     nc_rc     = nf90_get_var(ncid, varid, array, start=start, count=count_arr)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField DOCN: falha ao ler " &
-        //trim(varname)//": "//trim(nf90_strerror(nc_rc)), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DOCN, "ReadGlobalField: falha ao ler " &
+        //trim(varname)//": "//trim(nf90_strerror(nc_rc)))
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 
@@ -207,8 +207,8 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     if (sec_since_epoch < 0_ESMF_KIND_I8) then
-      call ESMF_LogWrite('DOCN ReadOcnFieldInterp: data corrente anterior ao ' // &
-        'epoch do arquivo oceanico (docn_epoch_*)', ESMF_LOGMSG_ERROR)
+      if (localPet == 0) call log_error(COMP_DOCN, 'ReadOcnFieldInterp: data ' // &
+        'corrente anterior ao epoch do arquivo oceanico (docn_epoch_*)')
       rc = ESMF_FAILURE
       return
     end if
@@ -257,8 +257,8 @@ contains
     call ESMF_VMBroadcast(vm, bcstData=read_status, count=1, rootPet=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     if (read_status(1) /= 0) then
-      call ESMF_LogWrite('DOCN ReadOcnFieldInterp: o PET 0 nao conseguiu ler ' // &
-        trim(varname) // ' de ' // trim(filename), ESMF_LOGMSG_ERROR)
+      call log_warning(COMP_DOCN, 'ReadOcnFieldInterp: o PET 0 nao conseguiu ler ' // &
+        trim(varname) // ' de ' // trim(filename))
       rc = ESMF_FAILURE
       return
     end if
@@ -280,9 +280,9 @@ contains
 
     ! formato corrigido — 5 strings antes do primeiro I5
     write(msg,'(A,A,A,A,A,I5,A,I5,A,F6.4)') &
-      'DOCN: interp ', trim(varname), ' [', trim(filename), &
+      'interp ', trim(varname), ' [', trim(filename), &
       '] tidx0=', tidx0, ' tidx1=', tidx1, ' alpha=', alpha
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_debug(COMP_DOCN, trim(msg))
 
   end subroutine ReadOcnFieldInterp
 
@@ -438,9 +438,8 @@ contains
     opened = .false.
     ncstat = nf90_open(trim(cfg_docn_sst_file), NF90_NOWRITE, ncid_r)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite('WriteDOCNDiag: falha ao abrir '// &
-        trim(cfg_docn_sst_file)//': '//trim(nf90_strerror(ncstat)), &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_DOCN, 'WriteDOCNDiag: falha ao abrir '// &
+        trim(cfg_docn_sst_file)//': '//trim(nf90_strerror(ncstat)))
       return
     end if
     opened = .true.
@@ -641,9 +640,9 @@ contains
     ncstat = nf90_put_var(ncid_w, varid_u,   uout)
     ncstat = nf90_put_var(ncid_w, varid_v,   vout)
     ncstat = nf90_close(ncid_w)
-    call ESMF_LogWrite('WriteDOCNDiag: '//trim(fname)//' (tidx0='// &
+    call log_info(COMP_DOCN, 'WriteDOCNDiag: '//trim(fname)//' (tidx0='// &
       int_to_str(tidx0)//' alpha='// &
-      real_to_str(alpha)//') [B-58v2]', ESMF_LOGMSG_INFO)
+      real_to_str(alpha)//')')
   end subroutine write_docn_diag_file
 
 end module docn_cap_netcdf_mod

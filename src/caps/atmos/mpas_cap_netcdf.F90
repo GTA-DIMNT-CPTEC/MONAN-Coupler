@@ -48,6 +48,7 @@ module mpas_cap_netcdf_mod
   use mpi_allreduce_wrappers_mod, only : allreduce_r8, allreduce_i4
   use netcdf
   use coupler_utils_mod,  only : ChkErr, int_to_str
+  use coupler_log_mod,    only : COMP_ATM, log_error, log_warning, log_info
   use nc_writer_mod,      only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use cpl_grids_mod,      only : index_round, lon_m180to180_loop
 
@@ -110,6 +111,7 @@ contains
     real,             intent(in) :: res_deg
     character(len=*), intent(in) :: out_dir
     integer,          intent(in) :: localPet  ! guarda de rank
+    character(len=200) :: msg
 
     diag%grid_res   = res_deg
     diag%dlon       = real(res_deg, ESMF_KIND_R8)
@@ -118,12 +120,13 @@ contains
     diag%nlat       = nint(180.0 / res_deg) + 1
     diag%output_dir = trim(out_dir)
 
-    ! sem guarda, N PETs × N chamadas = N² mensagens em stdout.
-    ! Só PET 0 imprime; demais passam silenciosamente.
-    if (localPet == 0) &
-      write(*,'(A,F5.2,A,I0,A,I0,A,A)') &
-        '[NetCDF] grade configurada: ', res_deg, '° -> NLON=', diag%nlon, &
+    ! Só o PET 0 registra a configuração, que é a mesma em todos.
+    if (localPet == 0) then
+      write(msg,'(A,F5.2,A,I0,A,I0,A,A)') &
+        'netcdf_config_set: grade ', res_deg, ' graus, NLON=', diag%nlon, &
         ' NLAT=', diag%nlat, ' output_dir=', trim(diag%output_dir)
+      call log_info(COMP_ATM, trim(msg))
+    end if
   end subroutine netcdf_config_set
 
   ! ============================================================================
@@ -150,7 +153,7 @@ contains
 
     integer :: localPet, petCount, mpiComm, mpi_ierr, i, nGlobal
     integer, allocatable :: allCounts(:), displs(:)
-    character(len=*), parameter :: subname = '(netcdf_init_coords)'
+    character(len=*), parameter :: subname = 'netcdf_init_coords'
 
     rc = ESMF_SUCCESS
     if (diag%coords_ready) return   ! idempotente
@@ -190,13 +193,13 @@ contains
                      diag%lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
-      write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lon_local falhou'
+      call log_warning(COMP_ATM, subname//': MPI_Gatherv de lon_local falhou')
 
     call MPI_Gatherv(lat_local, nLocal, MPI_DOUBLE_PRECISION, &
                      diag%lat_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
-      write(*,'(A)') '[NetCDF] AVISO: MPI_Gatherv de lat_local falhou'
+      call log_warning(COMP_ATM, subname//': MPI_Gatherv de lat_local falhou')
 
     ! Salvar a decomposicao MPI para reuso em export_write_netcdf.
     ! Garante que recvBuf(i) corresponde a lon_global/lat_global(i).
@@ -223,12 +226,9 @@ contains
     deallocate(allCounts, displs)
     diag%coords_ready = .true.
 
-    if (localPet == 0) then
-      write(*,'(A,I0,A)') &
-        '[NetCDF] Coordenadas prontas: ', nGlobal, ' células (grade 1° pronta)'
-      call ESMF_LogWrite(subname//': '//(int_to_str(nGlobal))// &
-                         ' células — interpolação lat/lon ativa', ESMF_LOGMSG_INFO)
-    end if
+    if (localPet == 0) &
+      call log_info(COMP_ATM, subname//': '//int_to_str(nGlobal)// &
+                    ' celulas; interpolacao lat/lon ativa')
 
   end subroutine netcdf_init_coords
 
@@ -294,7 +294,7 @@ contains
 
     character(len=64) :: fname
     character(len=19) :: valid_time_iso
-    character(len=*), parameter :: subname = '(export_write_netcdf)'
+    character(len=*), parameter :: subname = 'export_write_netcdf'
 
     rc = ESMF_SUCCESS
 
@@ -304,8 +304,8 @@ contains
 
     ! Coordenadas requeridas — preenchidas por netcdf_init_coords em InitializeRealize
     if (.not. diag%coords_ready) then
-      if (localPet == 0) write(*,'(A)') &
-        '[NetCDF] ERRO: netcdf_init_coords nao foi chamado em InitializeRealize.'
+      if (localPet == 0) call log_error(COMP_ATM, subname// &
+        ': netcdf_init_coords nao foi chamado em InitializeRealize')
       rc = ESMF_FAILURE
       return
     end if
@@ -353,11 +353,9 @@ contains
     if (localPet == 0) then
       ncstat = nf90_close(ncid)
       if (ncstat == NF90_NOERR) then
-        write(*,'(A,4A)') '[NetCDF] Escrito (', trim(valid_time_iso), ') → ', trim(fname), ''
-        call ESMF_LogWrite(subname//': '//trim(fname)//' escrito', &
-                           ESMF_LOGMSG_INFO)
+        call log_info(COMP_ATM, subname//': '//trim(fname)//' escrito')
       else
-        write(*,'(A)') '[NetCDF] AVISO nf90_close: '//trim(nf90_strerror(ncstat))
+        call log_warning(COMP_ATM, subname//': nf90_close: '//trim(nf90_strerror(ncstat)))
       end if
     end if
 
@@ -473,7 +471,7 @@ contains
 
       ncstat = nf90_enddef(ncid)
       if (ncstat /= NF90_NOERR) then
-        write(*,'(A)') '[NetCDF] ERRO nf90_enddef: '//trim(nf90_strerror(ncstat))
+        call log_error(COMP_ATM, subname//': nf90_enddef: '//trim(nf90_strerror(ncstat)))
         call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': nf90_enddef falhou', &
              line=__LINE__, file=u_FILE_u, rcToReturn=rc)
         ncstat = nf90_close(ncid); return
@@ -560,8 +558,8 @@ contains
         if (ncstat == NF90_NOERR) then
           ncstat = nf90_put_var(ncid, varid, grid_2d)
           if (ncstat /= NF90_NOERR) &
-            write(*,'(3A)') '[NetCDF] AVISO nf90_put_var: ', &
-              trim(fldnames(i)), ' '//trim(nf90_strerror(ncstat))
+            call log_warning(COMP_ATM, 'write_export_fields: nf90_put_var '// &
+              trim(fldnames(i))//': '//trim(nf90_strerror(ncstat)))
         end if
       end if
     end do ! campos

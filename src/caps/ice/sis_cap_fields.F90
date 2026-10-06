@@ -25,6 +25,7 @@ module sis_cap_fields_mod
   use ice_model_mod, only : ice_data_type, ocean_ice_boundary_type, &
                              atmos_ice_boundary_type
   use coupler_utils_mod, only : ChkErr
+  use coupler_log_mod, only : COMP_ICE, log_warning
 
   implicit none
   private
@@ -127,9 +128,8 @@ contains
     if (rc == ESMF_SUCCESS) then
       call broadcast_to_cat(ptr2d, is%aib%coszen)
     else
-      call ESMF_LogWrite('ICE(SIS2): Faxa_coszen nao encontrado no ' // &
-        'importState — is%aib%coszen permanece 0 (mediador antigo?)', &
-        ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'Faxa_coszen nao encontrado no importState: ' // &
+        'is%aib%coszen permanece 0')
       rc = ESMF_SUCCESS
     end if
 
@@ -156,8 +156,8 @@ contains
     type(ESMF_Field) :: fld
     call ESMF_StateGet(state, itemName=trim(name), field=fld, rc=rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('ICE(SIS2): campo "' // trim(name) // &
-        '" nao encontrado no importState', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'campo "' // trim(name) // &
+        '" nao encontrado no importState')
       return
     end if
     call ESMF_FieldGet(fld, farrayPtr=ptr2d, rc=rc)
@@ -225,8 +225,8 @@ contains
     if (rc /= ESMF_SUCCESS .or. .not. associated(ptr_ifrac)) return
 
     if (.not. associated(is%ice%sCS)) then
-      call ESMF_LogWrite('ICE(SIS2): Ice%sCS nao associado (slow ice PE ' // &
-        'ausente?) — Si_ifrac=0', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'Ice%sCS nao associado (slow ice PE ' // &
+        'ausente?): Si_ifrac=0')
       ptr_ifrac = 0.0_ESMF_KIND_R8
       return
     end if
@@ -336,8 +336,8 @@ contains
                associated(is%ice%albedo_vis_dif) .and. &
                associated(is%ice%albedo_nir_dir) .and. &
                associated(is%ice%albedo_nir_dif))) then
-      call ESMF_LogWrite('ICE(SIS2): Ice%part_size/albedo_* nao ' // &
-        'associados — Si_a*_sis2 = fallback constante', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'Ice%part_size/albedo_* nao associados: ' // &
+        'Si_a*_sis2 constantes')
       ptr_avsdr = ALBEDO_ICE_FALLBACK; ptr_avsdf = ALBEDO_ICE_FALLBACK
       ptr_anidr = ALBEDO_ICE_FALLBACK; ptr_anidf = ALBEDO_ICE_FALLBACK
       return
@@ -411,8 +411,8 @@ contains
     if (rc /= ESMF_SUCCESS .or. .not. associated(ptr_tice)) return
 
     if (.not. (associated(is%ice%part_size) .and. associated(is%ice%t_surf))) then
-      call ESMF_LogWrite('ICE(SIS2): Ice%part_size/t_surf nao associados ' // &
-        '— Si_t_sis2 = fallback (ponto de congelamento)', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'Ice%part_size/t_surf nao associados: ' // &
+        'Si_t_sis2 no ponto de congelamento')
       ptr_tice = TICE_FALLBACK
       return
     end if

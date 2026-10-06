@@ -72,6 +72,7 @@ module MOM_cap_MONAN_mod
                                mod2med_areacor, med2mod_areacor,          &
                                state_diagnose, ChkErr
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_stamp_export
+  use coupler_log_mod, only : COMP_OCN, log_error, log_warning, log_info, log_debug
   use cpl_fields_mod, only : CPL_NAME_LEN
   use cpl_map_mod,    only : cpl_arrivals, cpl_exports, cpl_current_config
   use cpl_grids_mod,  only : cpl_block_grid
@@ -201,7 +202,7 @@ contains
       specRoutine=ModelFinalize, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('OCN(MOM6): SetServices concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'SetServices concluido')
 
   end subroutine SetServices
 
@@ -239,7 +240,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call ESMF_LogWrite('OCN(MOM6): InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'InitializeAdvertise concluido')
 
   end subroutine InitializeAdvertise
 
@@ -288,7 +289,7 @@ contains
 
     ! ── 4. Inicializar MOM6 (lê MOM_input, grid, restart) ────────────────
     call ocean_model_init(is%ocean_public, is%ocean_state, fms_start, fms_init)
-    call ESMF_LogWrite('OCN(MOM6): ocean_model_init concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'ocean_model_init concluido')
 
     call get_ocean_domain(is, ocean_grid, isc, iec, jsc, jec, ni, nj)
 
@@ -299,9 +300,9 @@ contains
       call alloc_ice_ocean_boundary(is%ice_ocn_bnd, isc, iec, jsc, jec)
     end if
 
-    write(logmsg,'(A,4I6)') 'OCN(MOM6): domínio local isc,iec,jsc,jec=', &
+    write(logmsg,'(A,4I6)') 'dominio local isc,iec,jsc,jec=', &
       isc, iec, jsc, jec
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, trim(logmsg))
 
     ! ── 6–8. Criar ESMF_Grid e realizar campos do OCN ────────────────────
     ! Grade 2D com deBlockList igual à decomposição do MOM6 (mesma solução
@@ -322,7 +323,7 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha SetInternalState', &
       line=__LINE__, file=__FILE__)) return
 
-    call ESMF_LogWrite('OCN(MOM6): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'InitializeRealize concluido')
 
   end subroutine InitializeRealize
 
@@ -404,9 +405,7 @@ contains
       ! PET land-only: isc=iec=jsc=jec=0, ni/nj=dimensão global (via allreduce)
       isc = 1; iec = 0; jsc = 1; jec = 0  ! range vazio → loops sem iteração
       ni  = 0; nj  = 0                     ! preenchido abaixo via MPI_Allreduce
-      call ESMF_LogWrite( &
-        'OCN(MOM6): PET land-only — mesh com 0 elementos', &
-        ESMF_LOGMSG_INFO)
+      call log_info(COMP_OCN, 'PET so com terra: mesh com 0 elementos')
     end if
 
     ! Propagar ni,nj globais para todos os PETs via mpp_max (FMS)
@@ -520,9 +519,7 @@ contains
     ! ── 1. Verificar que temos exatamente 1 tile por PET ─────────────────
     ntiles = mpp_get_ntile_count(is%ocean_public%domain)
     if (ntiles /= 1) then
-      call ESMF_LogWrite( &
-        'OCN: ERRO — ntiles /= 1 não suportado em ESMF_Grid', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_OCN, 'ntiles /= 1 nao suportado em ESMF_Grid')
       rc = ESMF_FAILURE
       return
     end if
@@ -539,9 +536,9 @@ contains
     call mpp_get_pelist(is%ocean_public%domain, pe)
 
     write(logmsg,'(A,I4,A,4I6)') &
-      'OCN(MOM6): npes_ocn=', npes_ocn, '  global ni,nj,isc,jsc=', &
+      'npes_ocn=', npes_ocn, '  global ni,nj,isc,jsc=', &
       ni, nj, isc, jsc
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, trim(logmsg))
 
     ! ── 3. Limites de cada bloco e PET de cada bloco ──────────────────────
     ! limites(:, n) = (is, ie, js, je) globais do bloco do PET MOM6 n;
@@ -624,7 +621,7 @@ contains
     call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
     call cap_realize_fields(exportState, ocn_grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call ESMF_LogWrite('OCN(MOM6): Grid+Fields realizados', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'Grid+Fields realizados')
   end subroutine realize_ocean_fields
 
   ! ============================================================================
@@ -684,8 +681,8 @@ contains
     ! mpas_export.
     if (is%ocean_public%is_ocean_pe) then
       call ocean_model_init_sfc(is%ocean_state, is%ocean_public)
-      call ESMF_LogWrite('OCN(MOM6): ocean_model_init_sfc — t_surf de t=0 '// &
-        'extraido do estado interno', ESMF_LOGMSG_INFO)
+      call log_info(COMP_OCN, 'ocean_model_init_sfc: t_surf de t=0 '// &
+        'extraido do estado interno')
     end if
 
     ! Exporta SST real (t=0) do ocean_public → exportState
@@ -723,8 +720,7 @@ contains
       value="true", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('OCN(MOM6): IDC — SST + Si_ifrac exportados (t=0)', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'IDC: SST + Si_ifrac exportados (t=0)')
 
   end subroutine InitializeDataComplete
 
@@ -755,7 +751,6 @@ contains
     type(ocean_grid_type), pointer :: ocean_grid => null()
     integer :: yr, mo, dy, hr, mn, sc            ! conversão ESMF→FMS
     character(len=64)  :: timestr                ! log de tempo
-    character(len=256) :: logmsg
 
     rc = ESMF_SUCCESS
 
@@ -783,8 +778,7 @@ contains
 
     ! Log de tempo via ESMF_TimeGet(timestring=)
     call ESMF_TimeGet(currTime, timestring=timestr, rc=rc)
-    write(logmsg,'(A,A)') 'OCN(MOM6): ModelAdvance currTime=', trim(timestr)
-    call ESMF_LogWrite(trim(logmsg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'ModelAdvance currTime='//trim(timestr))
 
     ! ── Obter grade MOM6 para mom_import e mom_export ─────────────────────
     ! PETs nao oceanicas nao executam o advance
@@ -807,8 +801,7 @@ contains
     call update_ocean_model(is%ice_ocn_bnd, is%ocean_state, &
                             is%ocean_public, fms_curr, fms_dt, &
                             cesm_coupled=.false.)
-    call ESMF_LogWrite('OCN(MOM6): update_ocean_model concluido', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_OCN, 'update_ocean_model concluido')
 
     ! ── Passo 3: Exportar estado oceânico real → exportState ──────────────
     ! mom_export lê ocean_public%t_surf (SST), u_surf, v_surf (correntes),
@@ -848,7 +841,7 @@ contains
     call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('OCN(MOM6): ModelAdvance concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'ModelAdvance concluido')
 
   end subroutine ModelAdvance
 
@@ -888,7 +881,7 @@ contains
     ! Encerra MOM6 (restart final, fechamento de arquivos netcdf, etc.)
     call ocean_model_end(is%ocean_public, is%ocean_state, fms_stop, &
                          write_restart=.true.)
-    call ESMF_LogWrite('OCN(MOM6): ocean_model_end concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'ocean_model_end concluido')
 
     ! Libera memória alocada em InitializeRealize
     if (associated(is%ice_ocn_bnd)) deallocate(is%ice_ocn_bnd)
@@ -899,7 +892,7 @@ contains
     ! Finaliza infraestrutura FMS
     call MOM_infra_end()
 
-    call ESMF_LogWrite('OCN(MOM6): ModelFinalize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_OCN, 'ModelFinalize concluido')
 
   end subroutine ModelFinalize
 
@@ -921,7 +914,6 @@ contains
     type(ESMF_TimeInterval) :: dt
     type(ESMF_Field)        :: field
     integer :: n, localrc
-    character(len=256) :: msg
     character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
@@ -948,9 +940,8 @@ contains
 
       ! Verifica janela de tolerância ±dt
       if (fldTime < currTime - dt .or. fldTime > currTime + dt) then
-        write(msg,'(3A)') 'OCN(MOM6): CheckImport WARNING — timestamp fora ', &
-          'da janela ±dt para campo ', trim(names(n))
-        call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_WARNING)
+        call log_warning(COMP_OCN, 'CheckImport: carimbo de tempo fora da janela '// &
+          '+-dt para o campo '//trim(names(n)))
       end if
     end do
 

@@ -33,12 +33,13 @@ module DATM_cap_mod
   use ESMF, only: ESMF_TYPEKIND_R8, ESMF_KIND_R8, ESMF_KIND_I8
   use ESMF, only: ESMF_INDEX_GLOBAL, ESMF_COORDSYS_SPH_DEG
   use ESMF, only: ESMF_SUCCESS, ESMF_FAILURE, ESMF_LOGERR_PASSTHRU
-  use ESMF, only: ESMF_LogFoundError, ESMF_LogWrite, ESMF_LOGMSG_INFO
+  use ESMF, only: ESMF_LogFoundError
   use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGet, ESMF_VMBroadcast
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
   use netcdf
 
+  use coupler_log_mod, only: COMP_DATM, log_error, log_info, log_warning, log_debug
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
@@ -154,8 +155,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call ESMF_LogWrite('DATM: InitializeAdvertise concluido (campos brutos JRA55)', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_DATM, 'InitializeAdvertise concluido (campos brutos JRA55)')
   end subroutine InitializeAdvertise
 
   !============================================================================
@@ -235,7 +235,7 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DATM: InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DATM, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
   !============================================================================
@@ -262,7 +262,7 @@ contains
     call cap_set_data_complete(gcomp, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DATM: InitializeDataComplete SATISFIED', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DATM, 'InitializeDataComplete SATISFIED')
   end subroutine InitializeDataComplete
 
   !============================================================================
@@ -307,9 +307,9 @@ contains
       h=hour, m=minute, s=sec, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    write(msg,'(A,I4,5(A,I2.2))') 'DATM: avancando para ', year, '-', &
+    write(msg,'(A,I4,5(A,I2.2))') 'avancando para ', year, '-', &
       month, '-', day, ' ', hour, ':', minute, ':', sec
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_DATM, trim(msg))
 
     ! Obtem limites locais a partir do primeiro campo
     call ESMF_StateGet(exportState, itemName="Sa_u10m", field=field, rc=rc)
@@ -369,7 +369,7 @@ contains
     call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('DATM: ModelAdvance concluido (campos brutos)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DATM, 'ModelAdvance concluido (campos brutos)')
   end subroutine ModelAdvance
 
   !============================================================================
@@ -450,8 +450,7 @@ contains
 
     ! Garantir sec_since_epoch >= 0 (currTime nao pode ser anterior ao epoch)
     if (sec_since_epoch < 0_ESMF_KIND_I8) then
-      call ESMF_LogWrite('DATM ReadJRAFieldInterp: currTime anterior ao epochTime!', &
-        ESMF_LOGMSG_INFO)
+      call log_warning(COMP_DATM, 'ReadJRAFieldInterp: currTime anterior ao epochTime')
       rc = ESMF_FAILURE
       !PK return
     end if
@@ -496,9 +495,9 @@ contains
     deallocate(buf_global)
 
     write(msg,'(A,A,A,I5,A,I5,A,F6.4)') &
-      'DATM: interp ', trim(varname), &
+      'interp ', trim(varname), &
       ' tidx0=', tidx0, ' tidx1=', tidx1, ' alpha=', alpha
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_debug(COMP_DATM, trim(msg))
   end subroutine ReadJRAFieldInterp
 
   !============================================================================
@@ -517,15 +516,15 @@ contains
     rc     = ESMF_SUCCESS
     nc_rc  = nf90_open(filename, NF90_NOWRITE, ncid)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField: falha ao abrir "//trim(filename)// &
-        ": "//trim(nf90_strerror(nc_rc)), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DATM, "ReadGlobalField: falha ao abrir "//trim(filename)// &
+        ": "//trim(nf90_strerror(nc_rc)))
       rc = ESMF_FAILURE; return
     end if
 
     nc_rc = nf90_inq_varid(ncid, varname, varid)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField: variavel nao encontrada: "// &
-        trim(varname), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DATM, "ReadGlobalField: variavel nao encontrada: "// &
+        trim(varname))
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 
@@ -533,8 +532,8 @@ contains
     start = [1, 1, tidx]; count = [nx, ny, 1]
     nc_rc = nf90_get_var(ncid, varid, array, start=start, count=count)
     if (nc_rc /= NF90_NOERR) then
-      call ESMF_LogWrite("ReadGlobalField: falha ao ler "//trim(varname)// &
-        ": "//trim(nf90_strerror(nc_rc)), ESMF_LOGMSG_INFO)
+      call log_error(COMP_DATM, "ReadGlobalField: falha ao ler "//trim(varname)// &
+        ": "//trim(nf90_strerror(nc_rc)))
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 

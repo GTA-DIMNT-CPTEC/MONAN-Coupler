@@ -64,6 +64,7 @@ module sis_cap_MONAN_mod
   use MOM_domains,     only : MOM_infra_init, AGRID
 
   use coupler_utils_mod, only : ChkErr
+  use coupler_log_mod, only : COMP_ICE, log_info, log_warning, log_debug
   use cap_common_mod, only : cap_initialize_p0
 
   ! Estado interno do componente e troca de campos com o mediador
@@ -193,7 +194,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
 
-    call ESMF_LogWrite('ICE(SIS2): InitializeAdvertise concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'InitializeAdvertise concluido')
 
   end subroutine InitializeAdvertise
 
@@ -238,7 +239,7 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('ICE(SIS2): InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'InitializeRealize concluido')
 
   end subroutine InitializeRealize
 
@@ -322,7 +323,7 @@ contains
     call share_ice_domains(is%ice)
     is%ice%pe = is%ice%fast_ice_pe .or. is%ice%slow_ice_pe
 
-    call ESMF_LogWrite('ICE(SIS2): ice_model_init concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'ice_model_init concluido')
   end subroutine init_sis2
 
   ! ============================================================================
@@ -377,9 +378,9 @@ contains
     end if
 
     if (localPet == 0) then
-      write(msg_decomp,'(a,i0,a,i0,a)') 'ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ' // &
+      write(msg_decomp,'(a,i0,a,i0,a)') 'grade ESMF ' // &
         'segue a decomposicao do SIS2: ', size(blocks%cntx), ' x ', size(blocks%cnty), ' blocos'
-      call ESMF_LogWrite(trim(msg_decomp), ESMF_LOGMSG_INFO)
+      call log_info(COMP_ICE, trim(msg_decomp))
     end if
 
     call cpl_tripolar_grid('ice_sis2', cfg_mom6_mesh_ocn, nx_ice, ny_ice, petCount, .false., &
@@ -403,8 +404,7 @@ contains
       return
     end if
 
-    call ESMF_LogWrite('ICE(SIS2): grade ESMF criada ' // &
-      '(mesma grade tripolar do OCN)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'grade ESMF criada (mesma grade tripolar do OCN)')
   end subroutine create_ice_grid
 
   ! ============================================================================
@@ -419,9 +419,8 @@ contains
       ncat = size(is%ice%part_size, 3)
     else
       ncat = 1
-      call ESMF_LogWrite('ICE(SIS2): AVISO — Ice%part_size nao ' // &
-        'associado apos ice_model_init; usando ncat=1 como fallback ' // &
-        '(provavelmente ERRADO, precisa investigar)', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_ICE, 'Ice%part_size nao associado apos ice_model_init; ' // &
+        'usando ncat=1 (provavelmente errado)')
     end if
   end function ice_category_count
 
@@ -512,8 +511,7 @@ contains
     is%aib%drdt = 0.0_ESMF_KIND_R8; is%aib%coszen = 0.0_ESMF_KIND_R8
     is%aib%p = 101325.0_ESMF_KIND_R8  ! 1 atm, default de seguranca
 
-    call ESMF_LogWrite('ICE(SIS2): campos ESMF realizados, ' // &
-      'oib/aib alocados', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'campos ESMF realizados, oib/aib alocados')
   end subroutine alloc_ice_boundaries
 
   ! ============================================================================
@@ -536,12 +534,12 @@ contains
     ! "vazio" com que fCS%IST e alocado por padrao. Mesmo espirito do guard
     ! de first_coupling_call ja usado noutros caps para o passo inicial.
     call exchange_slow_to_fast_ice(is%ice)
-    call ESMF_LogWrite('ICE(SIS2): exchange_slow_to_fast_ice inicial ' // &
-      'concluido (InitializeDataComplete)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'exchange_slow_to_fast_ice inicial concluido ' // &
+      '(InitializeDataComplete)')
 
     call set_ice_surface_fields(is%ice)
-    call ESMF_LogWrite('ICE(SIS2): set_ice_surface_fields inicial ' // &
-      'concluido (InitializeDataComplete)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'set_ice_surface_fields inicial concluido ' // &
+      '(InitializeDataComplete)')
 
     call export_si_ifrac(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ' // &
@@ -559,8 +557,7 @@ contains
       value="true", rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('ICE(SIS2): InitializeDataComplete concluido', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'InitializeDataComplete concluido')
   end subroutine InitializeDataComplete
 
   ! ============================================================================
@@ -647,8 +644,7 @@ contains
     ! impressao, que ja enganou esta investigacao duas vezes.
     call advance_ice_slow(is)
 
-    call ESMF_LogWrite('ICE(SIS2): update_ice_slow_thermo + ' // &
-      'update_ice_dynamics_trans concluido', ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ICE, 'update_ice_slow_thermo + update_ice_dynamics_trans concluido')
 
     ! ── Passo 2b: sincronizar fCS%IST <- sCS%IST ──
     ! Sem esta chamada, Ice%fCS%IST (a copia "rapida" do estado do gelo,
@@ -668,8 +664,8 @@ contains
     ! estado sincronizado. Mesma defasagem de um passo do driver nativo do
     ! SIS2 (coupler_main.F90) -- nao e uma inconsistencia nova.
     call exchange_slow_to_fast_ice(is%ice)
-    call ESMF_LogWrite('ICE(SIS2): exchange_slow_to_fast_ice concluido ' // &
-      '(fCS%IST sincronizado com sCS%IST)', ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ICE, 'exchange_slow_to_fast_ice concluido ' // &
+      '(fCS%IST sincronizado com sCS%IST)')
 
     ! ── Passo 2c: popular Ice%part_size/Ice%albedo* ──
     ! exchange_slow_to_fast_ice (acima) so ATUALIZA fCS%IST; quem de fato
@@ -681,9 +677,8 @@ contains
     ! so como campo permanentemente zerado. Sem esta chamada, o estado fica
     ! sincronizado mas ninguem o "publica".
     call set_ice_surface_fields(is%ice)
-    call ESMF_LogWrite('ICE(SIS2): set_ice_surface_fields concluido ' // &
-      '(Ice%part_size/albedo* publicados a partir de fCS%IST)', &
-      ESMF_LOGMSG_INFO)
+    call log_debug(COMP_ICE, 'set_ice_surface_fields concluido ' // &
+      '(Ice%part_size/albedo* publicados a partir de fCS%IST)')
 
     ! ── Passo 3: exportar Si_ifrac real ───────────────────────────────────
     call export_si_ifrac(is, gcomp, rc)
@@ -700,7 +695,7 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_tskin', &
       line=__LINE__, file=__FILE__)) return
 
-    call ESMF_LogWrite('ICE(SIS2): ModelAdvance concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'ModelAdvance concluido')
   end subroutine ModelAdvance
 
   !> Termodinâmica lenta e dinâmica do SIS2.
@@ -728,8 +723,8 @@ contains
     call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     if (wrap%ptr%check_import_logged) return
-    call ESMF_LogWrite('ICE(SIS2): CheckImportTolerant ativo, validacao de ' // &
-      'carimbo de tempo desativada', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'CheckImportTolerant ativo, validacao de ' // &
+      'carimbo de tempo desativada')
     wrap%ptr%check_import_logged = .true.
   end subroutine CheckImportTolerant
 
@@ -750,7 +745,7 @@ contains
     call ice_model_end(is%ice)
     deallocate(wrap%ptr)
 
-    call ESMF_LogWrite('ICE(SIS2): ModelFinalize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ICE, 'ModelFinalize concluido')
 
   end subroutine ModelFinalize
 

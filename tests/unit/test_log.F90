@@ -9,6 +9,7 @@
 !!                write_fixdiag é aceita e não muda o nível
 !!   gravação     com cada nível, quais de log_warning, log_info e
 !!                log_debug chegam ao log do ESMF, e com que severidade;
+!!                log_error e log_report gravam mesmo com 'warning';
 !!                log_debug_enabled só é verdadeiro com 'debug'
 !!
 !! O log do ESMF é um arquivo só (ESMF_LOGKIND_SINGLE), lido de volta no
@@ -21,8 +22,8 @@ program test_log
   use ESMF,               only : ESMF_Initialize, ESMF_Finalize, ESMF_LogFlush, &
                                  ESMF_LOGKIND_SINGLE, ESMF_SUCCESS
   use coupler_config_mod, only : config_read, cfg_log_level
-  use coupler_log_mod,    only : log_warning, log_info, log_debug, log_debug_enabled, &
-                                 COMP_MED
+  use coupler_log_mod,    only : log_error, log_warning, log_info, log_debug, &
+                                 log_debug_enabled, log_report, COMP_MED
   implicit none
 
   character(len=*), parameter :: NML = 'test_log.nml'
@@ -66,8 +67,10 @@ program test_log
     count_lines('WARNING', 'MED: aviso com debug') == 1 .and. &
     count_lines('INFO', 'MED: informacao com debug') == 1 .and. &
     count_lines('INFO', 'MED: depuracao com debug') == 1)
-  call outcome('warning: grava so o aviso', &
+  call outcome('warning: grava erro, aviso e relatorio, sem informacao', &
+    count_lines('ERROR', 'MED: erro com warning') == 1 .and. &
     count_lines('WARNING', 'MED: aviso com warning') == 1 .and. &
+    count_lines('INFO', 'CPL-REL: relatorio com warning') == 1 .and. &
     count_lines('', 'MED: informacao com warning') == 0 .and. &
     count_lines('', 'MED: depuracao com warning') == 0)
   call outcome('info: grava aviso e informacao, sem depuracao', &
@@ -100,8 +103,13 @@ contains
     call config_read(rc, NML)
   end subroutine read_level
 
-  !> Uma mensagem de cada nível, com o nível pedido no texto.
+  !> Uma mensagem de cada nível, com o nível pedido no texto (o erro e a
+  !! linha do relatório, só com 'warning', o nível mais restrito).
   subroutine write_all()
+    if (trim(cfg_log_level) == 'warning') then
+      call log_error(COMP_MED, 'erro com warning')
+      call log_report('relatorio com warning')
+    end if
     call log_warning(COMP_MED, 'aviso com '//trim(cfg_log_level))
     call log_info(COMP_MED, 'informacao com '//trim(cfg_log_level))
     call log_debug(COMP_MED, 'depuracao com '//trim(cfg_log_level))

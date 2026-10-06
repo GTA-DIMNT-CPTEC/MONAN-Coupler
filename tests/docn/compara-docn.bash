@@ -101,6 +101,11 @@ for versao in antiga nova; do
       run="${dir}/run_${c}_${modo}"
       rm -rf "${run}"; mkdir -p "${run}/diag_import"
       cp "${SAIDA}/nuopc_${c}.input" "${run}/nuopc.input"
+      # Versão com a chave log_level (desde a R-FASE13-09): nível de
+      # depuração, para que as mensagens de interpolação do DOCN entrem no log
+      if grep -qi 'cfg_log_level' "${src}/src/shared/coupler_config.F90" 2>/dev/null; then
+        printf '&nuopc_driver\n  log_level = '"'"'debug'"'"'\n/\n' >> "${run}/nuopc.input"
+      fi
       echo "--- versão ${versao}: ${c} ${modo}"
       arg=""; [[ ${modo} == inicio ]] && arg="inicio"
       # shellcheck disable=SC2086
@@ -128,8 +133,11 @@ for c in com_correntes sem_correntes; do
     fi
     for pet in "${a}"/PET*.teste; do
       nome=$(basename "${pet}")
-      if diff -q <(grep -E 'DOCN|ERROR|WARNING' "${pet}" | cut -d' ' -f3-) \
-                 <(grep -E 'DOCN|ERROR|WARNING' "${n}/${nome}" | cut -d' ' -f3-) > /dev/null; then
+      # mensagens sem data, hora e severidade; as da versão anterior passam
+      # antes pelas traduções de texto (tests/log-traduzido.sed)
+      if diff -q <(sed -Ef "${RAIZ}/tests/log-traduzido.sed" "${pet}" | grep -E 'DOCN|ERROR|WARNING' \
+                     | sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//') \
+                 <(grep -E 'DOCN|ERROR|WARNING' "${n}/${nome}" | sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//') > /dev/null; then
         echo "  log igual      ${nome} ($(grep -cE 'DOCN|ERROR|WARNING' "${pet}") linhas)"
       else
         echo "  log DIFERE     ${nome}"; difere=1

@@ -20,6 +20,7 @@ program test_mpas_export
   use mpas_atm_types_mod,    only : mpas_atm_public_type, MPAS_RKIND
   use mpas_adapter_mod,      only : mpas_export, mpas_create_grid
   use mpas_cap_netcdf_mod,   only : mpas_diag_export_t
+  use coupler_config_mod,    only : config_read
   implicit none
 
   integer, parameter :: NFIELDS = 3
@@ -39,6 +40,18 @@ program test_mpas_export
   call ESMF_Initialize(defaultLogFileName='teste_grade_atm', &
     logkindflag=ESMF_LOGKIND_MULTI, vm=vm, rc=rc)
   call ESMF_VMGet(vm, localPet=localPet, petCount=petCount, rc=rc)
+
+  ! log_level='debug': os diagnósticos de map_cells_to_regular_grid ("DIAG
+  ! cell_binning") são de depuração desde a R-FASE13-11
+  if (localPet == 0) then
+    open(newunit=u, file='debug.nml', status='replace', action='write')
+    write(u,'(A)') '&nuopc_driver'
+    write(u,'(A)') "  log_level = 'debug'"
+    write(u,'(A)') '/'
+    close(u)
+  end if
+  call ESMF_VMBarrier(vm, rc=rc)
+  call config_read(rc, 'debug.nml')
 
   call mpas_create_grid(grid, rc)
   if (rc /= ESMF_SUCCESS) call ESMF_Finalize(endflag=ESMF_END_ABORT)

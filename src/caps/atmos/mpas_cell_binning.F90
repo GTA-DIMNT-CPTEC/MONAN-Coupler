@@ -19,6 +19,7 @@ module mpas_cell_binning_mod
   use mpi
   use mpas_atm_types_mod, only : MPAS_RKIND
   use coupler_utils_mod, only : ChkErr
+  use coupler_log_mod, only : COMP_ATM, log_error, log_debug, log_debug_enabled
   use cpl_grids_mod, only : index_trunc, lon_0to360_floor, center_lon_west180
   implicit none
   private
@@ -39,7 +40,7 @@ contains
   !! copy_to_local_grid (porção local de fptr2d, na convenção [-180,180)).
   subroutine map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
     integer, parameter :: N_FILL_ITER = 12
-    character(len=*), parameter :: subname = '(state_set_field_1d)'
+    character(len=*), parameter :: subname = 'state_set_field_1d'
     integer, intent(in) :: n
     character(len=*), intent(in) :: fldname
     integer, intent(inout) :: rc
@@ -82,8 +83,10 @@ contains
     ! Preenchimento espacial das caixas sem célula Voronoi
     call fill_empty_bins(N_FILL_ITER, buf_global, count_global, &
                          n_holes_pre, n_holes_post)
-    call log_fill_marker(fldname, N_FILL_ITER, n_holes_pre, n_holes_post, rc)
-    call log_dup_diag(vm_local, fldname, n, count_global, rc)
+    if (log_debug_enabled()) then
+      call log_fill_marker(fldname, N_FILL_ITER, n_holes_pre, n_holes_post, rc)
+      call log_dup_diag(vm_local, fldname, n, count_global, rc)
+    end if
 
     ! 5. Copiar do buffer global para a porção LOCAL da fptr2d.
     call copy_to_local_grid(buf_global, fptr2d)
@@ -142,14 +145,13 @@ contains
 
     call ESMF_VMGetCurrent(vm_local, rc=rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': falha ESMF_VMGetCurrent no gather '// &
-        'Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+      call log_error(COMP_ATM, subname//': falha ESMF_VMGetCurrent no gather Voronoi')
       return
     end if
     call ESMF_VMGet(vm_local, mpiCommunicator=mpi_comm_use, rc=rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite(subname//': falha ESMF_VMGet mpiCommunicator no '// &
-        'gather Voronoi (state_set_field_1d)', ESMF_LOGMSG_ERROR)
+      call log_error(COMP_ATM, subname//': falha ESMF_VMGet mpiCommunicator no '// &
+        'gather Voronoi')
       return
     end if
   end subroutine mpas_mpi_comm
@@ -298,9 +300,9 @@ contains
     n_holes_post = count(count_global < 0.5_ESMF_KIND_R8)
   end subroutine fill_empty_bins
 
-  !> Marca de verificação do build no log (PET 0, campo Sa_u10m_mpas), com
-  !! o número de caixas vazias antes e depois do preenchimento. O texto
-  !! '##### BUG-SPARSE-02 v7.6 ATIVO #####' é constante e fica como está.
+  !> Caixas vazias da grade regular antes e depois do preenchimento
+  !! (PET 0, campo Sa_u10m_mpas), linha "DIAG cell_binning fill" de
+  !! depuração.
   subroutine log_fill_marker(fldname, n_iter, n_holes_pre, n_holes_post, rc)
     character(len=*), intent(in) :: fldname
     integer, intent(in) :: n_iter
@@ -317,17 +319,18 @@ contains
       rc = ESMF_SUCCESS
       if (my_pet == 0 .and. trim(fldname) == 'Sa_u10m_mpas') then
           write(vmsg, '(A,A,A,I0,A,I0,A,I0,A)') &
-            '##### BUG-SPARSE-02 v7.6 ATIVO ##### campo=', &
+            'DIAG cell_binning fill: campo=', &
             trim(fldname), ' buracos_pre_fill=', n_holes_pre, &
             ' buracos_pos_fill=', n_holes_post, &
             ' (N_FILL_ITER=', n_iter, ')'
-          call ESMF_LogWrite(trim(vmsg), ESMF_LOGMSG_INFO)
+          call log_debug(COMP_ATM, trim(vmsg))
       end if
     end if
     rc = ESMF_SUCCESS
   end subroutine log_fill_marker
 
-  !> Diagnóstico de cobertura e duplicação (PET 0, campo Sa_pslv_mpas).
+  !> Cobertura e duplicação das células na grade regular (PET 0, campo
+  !! Sa_pslv_mpas), linha "DIAG cell_binning coverage" de depuração.
   !! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 (Fortran é estrito).
   subroutine log_dup_diag(vm_local, fldname, n, count_global, rc)
     type(ESMF_VM), intent(in) :: vm_local
@@ -339,6 +342,7 @@ contains
     integer :: my_pet
     integer :: n_cov
     integer :: n_max_dup
+    character(len=200) :: msg
 
     call ESMF_VMGet(vm_local, localPet=my_pet, rc=rc)
     if (my_pet == 0 .and. trim(fldname) == 'Sa_pslv_mpas') then
@@ -346,12 +350,12 @@ contains
       n_max_dup = int(maxval(count_global))
       avg_dup_val = sum(count_global) / &
         max(1.0_ESMF_KIND_R8, real(count(count_global > 0.5_ESMF_KIND_R8), ESMF_KIND_R8))
-      write(*,'(3A,I0,A,I0,A,I0,A,F8.4)') &
-        '[MPAS-DIAG] ', trim(fldname), ': n_local=', n, &
+      write(msg,'(3A,I0,A,I0,A,I0,A,F8.4)') &
+        'DIAG cell_binning coverage: campo=', trim(fldname), ' n_local=', n, &
         '  cells_cov=',  n_cov, &
         '  max_dup=',    n_max_dup, &
         '  avg_dup=',    avg_dup_val
-      flush(6)
+      call log_debug(COMP_ATM, trim(msg))
     end if
   end subroutine log_dup_diag
 

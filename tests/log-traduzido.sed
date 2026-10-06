@@ -88,3 +88,68 @@ s/MED Sprint A\.5\.2: Si_ifrac zerado em ([0-9]+) celulas terra \(mascara T_FILL
 s/MED: Si_ifrac regridado do SIS2 \+ mascara terra \(A\.5\.2\)/MED: Si_ifrac interpolado pela rota ocn2atm, com a mascara de terra/
 s/MED: Si_ifrac calculado via limiar SST \(fallback — Sprint A\.5\.2\)/MED: Si_ifrac calculado pelo limiar de SST/
 s/MED\(Alt1\): f_ifrac_atm preenchido de /MED: f_ifrac_atm preenchido de /
+
+# ---- R-FASE13-11: caps dos modelos ----
+
+# DATM_cap
+s/DATM ReadJRAFieldInterp: currTime anterior ao epochTime!/DATM: ReadJRAFieldInterp: currTime anterior ao epochTime/
+s/(PET[0-9]+ +)ReadGlobalField: /\1DATM: ReadGlobalField: /
+
+# rotinas dos caps do MPAS: nome sem parênteses, com a marca ATM
+s/(PET[0-9]+ +)\((mpas_import|mpas_export|mpas_create_grid|state_diagnose|state_get_field_1d|state_set_field_1d|write_mpas_import_diag|netcdf_init_coords|export_write_netcdf)\): /\1ATM: \2: /
+
+# mpas_adapter
+s/ATM: mpas_import: importacao Fase 2 concluida /ATM: mpas_import: importacao concluida /
+s/ATM: mpas_create_grid: ESMF_Grid 360x180 criada \(sem MOAB\)/ATM: mpas_create_grid: ESMF_Grid 360x180 criada/
+s/(PET[0-9]+) +([A-Za-z]+_[A-Za-z0-9_]+  min=)/\1 ATM:   \2/
+
+# mpas_cap_MONAN
+s/mpas_cap: SetServices concluido \(v7\.0 NUOPC_CompDerive\)/ATM: SetServices concluido/
+s/\(mpas_cap:InitializeAdvertise\): anunciados/ATM: InitializeAdvertise: anunciados/
+s/\(mpas_cap:verify_import_connected\): todos/ATM: verify_import_connected: todos/
+s/(PET[0-9]+ +)\(mpas_cap:[A-Za-z0-9_]+\): /\1ATM: /
+
+# mpas_cap_netcdf
+s/ATM: netcdf_init_coords: ([0-9]+) células — interpolação lat\/lon ativa/ATM: netcdf_init_coords: \1 celulas; interpolacao lat\/lon ativa/
+
+# mpas_cell_binning
+s/(PET[0-9]+ +)##### BUG-SPARSE-02 v7\.6 ATIVO ##### campo=/\1ATM: DIAG cell_binning fill: campo=/
+s/ATM: state_set_field_1d: falha (ESMF_VMGetCurrent|ESMF_VMGet mpiCommunicator) no gather Voronoi \(state_set_field_1d\)/ATM: state_set_field_1d: falha \1 no gather Voronoi/
+s/ATM: state_set_field_1d: falha ESMF_VMGet mpiCommunicator no gather Voronoi \(state_set_field_1d\)/ATM: state_set_field_1d: falha ESMF_VMGet mpiCommunicator no gather Voronoi/
+
+# mpas_import_diag
+s/(PET[0-9]+ +)B-DIAGMASK-01: monan2_import mascarado — oceano /\1ATM: mascara do diagnostico do monan2_import: oceano /
+
+# sis_cap_MONAN e sis_cap_fields
+s/ICE\(SIS2\): B-ICE-DECOMP-01 - grade ESMF /ICE: grade ESMF /
+s/ICE\(SIS2\): AVISO — Ice%part_size nao associado apos ice_model_init; usando ncat=1 como fallback \(provavelmente ERRADO, precisa investigar\)/ICE: Ice%part_size nao associado apos ice_model_init; usando ncat=1 (provavelmente errado)/
+s/ICE\(SIS2\): Faxa_coszen nao encontrado no importState — is%aib%coszen permanece 0 \(mediador antigo\?\)/ICE: Faxa_coszen nao encontrado no importState: is%aib%coszen permanece 0/
+s/ICE\(SIS2\): Ice%sCS nao associado \(slow ice PE ausente\?\) — Si_ifrac=0/ICE: Ice%sCS nao associado (slow ice PE ausente?): Si_ifrac=0/
+s/ICE\(SIS2\): Ice%part_size\/albedo_\* nao associados — Si_a\*_sis2 = fallback constante/ICE: Ice%part_size\/albedo_* nao associados: Si_a*_sis2 constantes/
+s/ICE\(SIS2\): Ice%part_size\/t_surf nao associados — Si_t_sis2 = fallback \(ponto de congelamento\)/ICE: Ice%part_size\/t_surf nao associados: Si_t_sis2 no ponto de congelamento/
+s/ICE\(SIS2\): /ICE: /
+
+# DOCN_cap e docn_cap_netcdf
+s/DOCN: AVISO: WriteDOCNDiag falhou — continuando/DOCN: WriteDOCNDiag falhou; continuando/
+s/DOCN: AVISO: falha uo — corrente zonal = 0/DOCN: falha uo: corrente zonal = 0/
+s/DOCN: AVISO: falha vo — corrente meridional = 0/DOCN: falha vo: corrente meridional = 0/
+s/ReadGlobalField DOCN: ERRO B-59 — ordem de eixos incompativel! /DOCN: ReadGlobalField: ordem de eixos incompativel. /
+s/ReadGlobalField DOCN: /DOCN: ReadGlobalField: /
+s/DOCN ReadOcnFieldInterp: /DOCN: ReadOcnFieldInterp: /
+s/(PET[0-9]+ +)WriteDOCNDiag: (.*) \[B-58v2\]$/\1DOCN: WriteDOCNDiag: \2/
+s/(PET[0-9]+ +)WriteDOCNDiag: /\1DOCN: WriteDOCNDiag: /
+
+# mom_cap_MONAN e mom_si_ifrac
+s/OCN\(MOM6\): domínio local /OCN: dominio local /
+s/OCN\(MOM6\): PET land-only — mesh com 0 elementos/OCN: PET so com terra: mesh com 0 elementos/
+s/OCN: ERRO — ntiles \/= 1 não suportado em ESMF_Grid/OCN: ntiles \/= 1 nao suportado em ESMF_Grid/
+s/OCN\(MOM6\): ocean_model_init_sfc — t_surf/OCN: ocean_model_init_sfc: t_surf/
+s/OCN\(MOM6\): IDC — SST/OCN: IDC: SST/
+s/OCN\(MOM6\): CheckImport WARNING — timestamp fora da janela ±dt para campo /OCN: CheckImport: carimbo de tempo fora da janela +-dt para o campo /
+s/OCN\(Alt1\): ERRO ReadOcnFieldInterp/OCN: set_si_ifrac_from_file: ReadOcnFieldInterp falhou/
+s/OCN\(Alt1\): si_ifrac_mem salvo — bounds=/OCN: si_ifrac_mem salvo: bounds=/
+s/OCN\(MOM6\): Si_ifrac sem ocean_grid — retornando zeros/OCN: Si_ifrac sem ocean_grid: zeros/
+s/OCN\(proxy\): si_ifrac_mem_valid=T — aplicando persistencia/OCN: si_ifrac_mem_valid=T: aplicando persistencia/
+s/OCN\(proxy\): si_ifrac_mem_valid=F — sem persistencia/OCN: si_ifrac_mem_valid=F: sem persistencia/
+s/OCN\(MOM6\): Si_ifrac via sigmoide DT_TRANS=2K \+ frazil contínuo \(v2\.3\)/OCN: Si_ifrac pela sigmoide DT_TRANS=2K + frazil continuo/
+s/OCN\((MOM6|Alt1)\): /OCN: /
