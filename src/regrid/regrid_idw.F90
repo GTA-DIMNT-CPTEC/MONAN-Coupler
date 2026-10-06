@@ -10,11 +10,12 @@
 !!      liberação);
 !!   3. leia as opções com regrid_option_real e regrid_option_int, e recuse
 !!      as desconhecidas com regrid_options_check;
-!!   4. acrescente uma linha na lista de regrid_schemes.F90, e o arquivo no
-!!      Makefile (SRCS e dependências);
+!!   4. acrescente uma linha na lista de regrid_schemes.F90 (o Makefile
+!!      compila todo .F90 de src/regrid; atualize as dependências com
+!!      tools/dev/dependencias.py gera);
 !!   5. confira com tests/regrid/compara-esquema.bash <nome> '<opções>'.
 !! Depois, o esquema pode ser escolhido numa rota pela tabela ROUTES (coluna
-!! esquema) ou só pelo nuopc.input (&nuopc_regrid: regrid_scheme e
+!! scheme) ou só pelo nuopc.input (&nuopc_regrid: regrid_scheme e
 !! regrid_options).
 !!
 !! O método. Cada ponto de destino recebe a média dos vizinhos de origem
@@ -59,12 +60,15 @@ module regrid_idw_mod
 
 contains
 
-  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  !> @brief Construtor usado pela lista de esquemas (regrid_schemes.F90).
   subroutine new_idw(r)
     class(regridder_t), allocatable, intent(out) :: r
     allocate(idw_regridder_t :: r)
   end subroutine new_idw
 
+  !> @brief compute_weights do esquema 'idw': para cada destino, os vizinhos de
+  !! origem válidos mais próximos, com peso 1/d^p normalizado (ver o
+  !! cabeçalho do arquivo).
   subroutine idw_compute_weights(this, src_points, dst_points, factors, orig, dest, rc)
     class(idw_regridder_t),          intent(inout) :: this
     type(regrid_points_t),           intent(in)    :: src_points, dst_points
@@ -133,7 +137,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine idw_compute_weights
 
-  !> Coordenadas cartesianas na esfera de raio 1.
+  !> @brief Coordenadas cartesianas na esfera de raio 1.
   subroutine to_sphere(lon, lat, x, y, z)
     real(ESMF_KIND_R8),              intent(in)  :: lon(:), lat(:)
     real(ESMF_KIND_R8), allocatable, intent(out) :: x(:), y(:), z(:)
@@ -142,7 +146,7 @@ contains
     z = sin(lat*DEG2RAD)
   end subroutine to_sphere
 
-  !> Insere (d, k) na lista dos melhores, ordenada pela distância; com
+  !> @brief Insere (d, k) na lista dos melhores, ordenada pela distância; com
   !! distância igual, o que já estava (de menor índice) fica na frente.
   subroutine insert_sorted(d, k, best_dist, best_k)
     real(ESMF_KIND_R8), intent(in)    :: d

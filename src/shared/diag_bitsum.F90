@@ -2,37 +2,35 @@
 !! @brief Soma de verificação exata, por PET, de campos reais (diagnóstico de
 !! reprodutibilidade bit a bit).
 !!
-! Checksum EXATO de campos reais, POR PET, para diagnostico de
-! reprodutibilidade bit a bit.
-!
-! POR QUE. Os diagnosticos "DIAG ice_fraction source" e "destination"
-! (med_diag) imprimem 17 algarismos,
-! precisao suficiente, mas so' o PET 0 e' recolhido. Uma bateria de testes
-! achou diferencas de exatamente 1 ulp no Si_ifrac recebido pelo MPAS
-! (1573 pontos, r1 x r4, 01h) fora da fatia do PET 0.
-!
-! COMO. Cada valor e' lido como inteiro de 64 bits (transfer), separado em
-! duas metades de 32 bits, e as metades sao somadas em inteiro. Soma de
-! inteiros e' exata e nao depende da ordem: o resultado so' muda se algum
-! bit de algum ponto mudar.
-!
-! POR QUE NAO HA REDUCAO ENTRE PETs. No MediatorAdvance, os PETs sem pedaco
-! da grade atmosferica retornam cedo (bloco localDeCount_med == 0). Uma
-! chamada coletiva depois desse ponto travaria o job. Aqui cada PET grava a
-! sua parte no proprio log (logs/PETnn.esmApp.log), e o mede-taxa-repro.sh
-! junta as linhas de todos os PETs. Bonus: a diferenca aparece localizada
-! por PET, isto e', por regiao do dominio.
-!
-! LIMITES.
-!  - Seguro ate' 2**31 pontos por pedaco (cada metade < 2**32).
-!  - Nao detecta dois pontos que TROCAM de valor entre si. Entre execucoes
-!    com a mesma decomposicao isso nao ocorre na pratica.
-!
-! SAIDA. Uma linha de depuracao (log_debug, so com log_level='debug') por
-! chamada, no log de cada PET que chega ao ponto:
-! <comp>: DIAG <rotulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
-! com " ERRO=<k>" no fim se algum pedaco local nao pode ser lido. O chamador
-! da a marca do componente (COMP_* de coupler_log_mod) e o rotulo.
+!! Por quê: os diagnósticos "DIAG ice_fraction source" e "destination"
+!! (med_diag) escrevem 17 algarismos, precisão suficiente, mas só do PET 0.
+!! Uma diferença de 1 ulp fora da fatia do PET 0 (como as que já apareceram
+!! no Si_ifrac recebido pelo MPAS) não aparece neles; esta soma, gravada em
+!! cada PET, a mostra.
+!!
+!! Como: cada valor é lido como inteiro de 64 bits (transfer), separado em
+!! duas metades de 32 bits, e as metades são somadas em inteiro. Soma de
+!! inteiros é exata e não depende da ordem: o resultado só muda se algum
+!! bit de algum ponto mudar.
+!!
+!! Não há redução entre PETs: no MediatorAdvance, os PETs sem pedaço da
+!! grade atmosférica retornam cedo (bloco localDeCount_med == 0), e uma
+!! chamada coletiva depois desse ponto travaria o job. Cada PET grava a sua
+!! parte no próprio log (logs/PETnn.esmApp.log), e o mede-taxa-repro.sh
+!! junta as linhas de todos os PETs; a diferença aparece, assim, localizada
+!! por PET, isto é, por região do domínio.
+!!
+!! Limites:
+!!  - seguro até 2**31 pontos por pedaço (cada metade < 2**32);
+!!  - não detecta dois pontos que TROCAM de valor entre si (entre execuções
+!!    com a mesma decomposição, isso não ocorre na prática).
+!!
+!! Saída: uma linha de depuração (log_debug, só com log_level='debug') por
+!! chamada, no log de cada PET que chega ao ponto:
+!!   <comp>: DIAG <rótulo> n=<pontos> hi=<soma alta> lo=<soma baixa>
+!! com " ERRO=<k>" no fim se algum pedaço local não pode ser lido. O chamador
+!! dá a marca do componente (COMP_* de coupler_log_mod) e o rótulo.
+
 module diag_bitsum_mod
 
   use, intrinsic :: iso_fortran_env, only: int64, real64
@@ -53,8 +51,7 @@ module diag_bitsum_mod
 
 contains
 
-  ! --------------------------------------------------------------------------
-  !> Acumula contagem e as duas somas de 32 bits de um trecho contiguo.
+  !> @brief Acumula contagem e as duas somas de 32 bits de um trecho contíguo.
   pure subroutine accumulate(x, n, s_hi, s_lo)
     real(real64),   intent(in)    :: x(:)
     integer(int64), intent(inout) :: n, s_hi, s_lo
@@ -71,7 +68,7 @@ contains
     n = n + size(x, kind=int64)
   end subroutine accumulate
 
-  ! --------------------------------------------------------------------------
+  !> @brief Acumula contagem e somas de um arranjo 2D, coluna a coluna.
   pure subroutine accumulate_2d(x, n, s_hi, s_lo)
     real(real64),   intent(in)    :: x(:,:)
     integer(int64), intent(inout) :: n, s_hi, s_lo
@@ -81,8 +78,7 @@ contains
     end do
   end subroutine accumulate_2d
 
-  ! --------------------------------------------------------------------------
-  !> Grava a linha no log deste PET.
+  !> @brief Grava a linha no log deste PET.
   subroutine write_sum(comp, label, n, s_hi, s_lo, n_err)
     character(len=*), intent(in) :: comp
     character(len=*), intent(in) :: label
@@ -101,7 +97,7 @@ contains
     call log_debug(comp, trim(msg))
   end subroutine write_sum
 
-  ! --------------------------------------------------------------------------
+  !> @brief Grava a soma de um vetor real(8).
   subroutine bitsum_log_1d(comp, label, x, rc)
     character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label
@@ -114,7 +110,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_1d
 
-  ! --------------------------------------------------------------------------
+  !> @brief Grava a soma de um arranjo 2D real(8).
   subroutine bitsum_log_2d(comp, label, x, rc)
     character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label
@@ -127,9 +123,8 @@ contains
     rc = ESMF_SUCCESS
   end subroutine bitsum_log_2d
 
-  ! --------------------------------------------------------------------------
-  !> ESMF_Field real(8) de posto 1 ou 2, com qualquer numero de pedacos
-  !! locais (localDeCount pode ser 0, 1 ou mais). Soma a regiao exclusiva.
+  !> @brief ESMF_Field real(8) de posto 1 ou 2, com qualquer número de pedaços
+  !! locais (localDeCount pode ser 0, 1 ou mais). Soma a região exclusiva.
   subroutine bitsum_log_field(comp, label, field, rc)
     character(len=*), intent(in)  :: comp
     character(len=*), intent(in)  :: label

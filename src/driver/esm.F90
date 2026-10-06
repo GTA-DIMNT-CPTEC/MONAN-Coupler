@@ -64,7 +64,7 @@ module ESM_MONAN
 
 contains
 
-  !> Registra o driver NUOPC e as três especializações usadas.
+  !> @brief Registra o driver NUOPC e as três especializações usadas.
   subroutine SetServices(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
@@ -82,7 +82,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine SetServices
 
-  !> Registra componentes e conectores.
+  !> @brief Registra componentes e conectores.
   subroutine SetModelServices(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
@@ -97,14 +97,14 @@ contains
     use_ice = cfg_use_sis2_dynamic
 
     ! Nomes de campo do acoplador (_mpas, Foxx_* etc.): os de FIELDS, no
-    ! dicionário do NUOPC, sem acréscimo automático (desde a R-FASE11-25)
+    ! dicionário do NUOPC, sem acréscimo automático
     call cpl_nuopc_dictionary(rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call ESMF_GridCompGet(driver, petCount=petCount, clock=driverClock, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! ---- Divisão de PETs entre componentes --------------------------------
+    ! Divisão de PETs entre componentes
     allPets = [(i - 1, i = 1, petCount)]
     if (trim(cfg_pet_layout) == 'split') then
       call split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
@@ -118,7 +118,7 @@ contains
     end if
     call log_layout(petCount, nAtm, nOcn, nIce, use_ice)
 
-    ! ---- Componentes --------------------------------------------------------
+    ! Componentes
     call add_model(driver, MPAS_LABEL, MPAS_SetServices, atmPets, driverClock, mpasComp, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -147,7 +147,7 @@ contains
       call log_info(COMP_DRV, 'componente ICE (SIS2) registrado')
     end if
 
-    ! ---- Conectores ---------------------------------------------------------
+    ! Conectores
     ! Escolhidos pelo mapa de acoplamento (EXCHANGES, coluna when), na ordem
     ! de CONNECTOR_SRC/CONNECTOR_DST.
     call add_connectors(driver, driverClock, rc)
@@ -156,7 +156,7 @@ contains
     call log_info(COMP_DRV, 'componentes e conectores registrados')
   end subroutine SetModelServices
 
-  !> Calcula o tamanho dos blocos ATM | OCN | ICE no layout split.
+  !> @brief Calcula o tamanho dos blocos ATM | OCN | ICE no layout split.
   !! Contagem zero em nuopc.input significa "automático": o que sobra é
   !! dividido em partes aproximadamente iguais.
   subroutine split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
@@ -197,7 +197,7 @@ contains
     end if
   end subroutine split_pets
 
-  !> Registra no log a divisão de PETs. O formato destas linhas é lido pelas
+  !> @brief Registra no log a divisão de PETs. O formato destas linhas é lido pelas
   !! ferramentas de tools/coupler e tools/dev: não alterar sem ajustá-las.
   subroutine log_layout(petCount, nAtm, nOcn, nIce, use_ice)
     integer, intent(in) :: petCount, nAtm, nOcn, nIce
@@ -237,11 +237,12 @@ contains
     end if
   end subroutine log_layout
 
-  !> Registra um componente de modelo e lhe entrega uma CÓPIA do relógio do
-  !! driver. Motivos: (1) com três ou mais componentes em PETs disjuntos o
-  !! NUOPC não atribuía relógio a alguns deles ("Clock object is not present");
-  !! (2) ESMF_Clock é referência, e o relógio compartilhado era avançado uma
-  !! vez por componente a cada passo. Use esta rotina para qualquer componente novo.
+  !> @brief Registra um componente de modelo e lhe entrega uma CÓPIA do relógio do
+  !! driver. Motivos: (1) com três ou mais componentes em PETs disjuntos, o
+  !! NUOPC deixa de atribuir relógio a alguns deles ("Clock object is not
+  !! present"); (2) ESMF_Clock é referência, e um relógio compartilhado seria
+  !! avançado uma vez por componente a cada passo. Use esta rotina para
+  !! qualquer componente novo.
   subroutine add_model(driver, label, setServices, petList, driverClock, comp, rc)
     type(ESMF_GridComp), intent(inout) :: driver
     character(len=*),    intent(in)    :: label
@@ -270,7 +271,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine add_model
 
-  !> Registra os conectores que o mapa de acoplamento tem na configuração
+  !> @brief Registra os conectores que o mapa de acoplamento tem na configuração
   !! atual, na ordem de CONNECTOR_SRC/CONNECTOR_DST (cpl_driver_connectors,
   !! em cpl_map). Um conector do mapa que não está na lista é erro.
   !!
@@ -311,7 +312,7 @@ contains
 
   end subroutine add_connectors
 
-  !> Registra um conector NUOPC padrão com cópia própria do relógio do driver
+  !> @brief Registra um conector NUOPC padrão com cópia própria do relógio do driver
   !! (mesmos motivos de add_model).
   subroutine add_connector(driver, srcLabel, dstLabel, driverClock, rc)
     type(ESMF_GridComp), intent(inout) :: driver
@@ -331,7 +332,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine add_connector
 
-  !> Torna reprodutíveis, bit a bit, as somas feitas dentro dos conectores.
+  !> @brief Torna reprodutíveis, bit a bit, as somas feitas dentro dos conectores.
   !!
   !! Cada conector faz um produto matriz esparsa: o valor de destino é a soma
   !! de contribuições vindas de vários PETs. Por padrão o ESMF soma na ordem
@@ -344,12 +345,12 @@ contains
   !!
   !! Em seguida, escreve em cada entrada o método de interpolação do mapa de
   !! acoplamento (remapmethod, coluna method de EXCHANGES; cpl_write_methods).
-  !! Hoje é bilinear em todas, o padrão que o conector usava sem a opção.
+  !! Hoje é bilinear em todas.
   !!
   !! Depois, com as listas prontas, registra no log o relatório dos conectores
   !! e a conferência do mapa de acoplamento (cpl_check_coupling), que não
-  !! muda as listas; desde a R-FASE11-25, uma diferença na conferência
-  !! interrompe a inicialização aqui.
+  !! muda as listas; uma diferença na conferência interrompe a inicialização
+  !! aqui.
   subroutine ModifyCplLists(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
@@ -414,6 +415,7 @@ contains
 
   contains
 
+    !> Acrescenta option à entrada, se key ainda não está nela, e conta a mudança.
     subroutine append_option(entry, key, option, counter)
       character(len=*), intent(inout) :: entry
       character(len=*), intent(in)    :: key, option
@@ -430,7 +432,7 @@ contains
 
   end subroutine ModifyCplLists
 
-  !> Define a sequência de execução de cada passo de acoplamento.
+  !> @brief Define a sequência de execução de cada passo de acoplamento.
   !!
   !! Sete variantes, escolhidas pela configuração:
   !!   modo        oceano     gelo   seq_repro   variante
@@ -531,7 +533,7 @@ contains
     call log_info(COMP_DRV, 'RunSequence '//title//' (dt='//int_to_str(int(dt_s))//' s)')
   end subroutine SetRunSequence
 
-  !> Verdadeiro no PET 0 da VM atual: erros que valem em todos os PETs são
+  !> @brief Verdadeiro no PET 0 da VM atual: erros que valem em todos os PETs são
   !! registrados por log_error só uma vez (a saída padrão não repete a linha).
   logical function on_root()
     type(ESMF_VM) :: vm

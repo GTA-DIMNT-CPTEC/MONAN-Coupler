@@ -7,8 +7,7 @@
 !! componentes: registra no dicionário do NUOPC os nomes de FIELDS
 !! (cpl_fields), com a unidade de cada um, e desliga o acréscimo automático;
 !! um nome fora de FIELDS para a rodada no anúncio, com a mensagem do NUOPC
-!! "<nome> is not a StandardName in the NUOPC_FieldDictionary!" (desde a
-!! R-FASE11-25).
+!! "<nome> is not a StandardName in the NUOPC_FieldDictionary!".
 !!
 !! As outras duas rotinas com o driver são chamadas pelo ModifyCplLists do
 !! esm.F90, quando os componentes já anunciaram os campos e os conectores já
@@ -16,8 +15,8 @@
 !!
 !!   cpl_write_methods      escreve em cada entrada da CplList a opção
 !!                          remapmethod com o método da troca no mapa
-!!                          (coluna method de EXCHANGES); desde a R-FASE11-22;
-!!   cpl_check_coupling     só escreve no log do PET 0, com o prefixo
+!!                          (coluna method de EXCHANGES);
+!!   cpl_check_coupling     escreve no log do PET 0, com o prefixo
 !!                          CPL-REL:, duas coisas:
 !!     relatório dos conectores  para cada conector do driver, os campos da
 !!                               CplList e as opções de cada um;
@@ -33,14 +32,13 @@
 !! Cada diferença vira uma linha "CPL-REL: DIFERENCA: ..."; campos exportados
 !! que nenhum componente consome viram "CPL-REL: AVISO: ...", porque são
 !! normais (o MOM6 exporta So_s, por exemplo), e também as lacunas conhecidas
-!! da tabela GAPS do mapa ("AVISO: lacuna conhecida: ..."). Desde a
-!! R-FASE11-25, havendo diferença, cpl_check_coupling devolve erro em
-!! todos os PETs, depois de escrever o relatório inteiro, e a inicialização
-!! para. Um erro do ESMF durante a consulta só é registrado.
+!! da tabela GAPS do mapa ("AVISO: lacuna conhecida: ..."). Havendo
+!! diferença, cpl_check_coupling devolve erro em todos os PETs, depois de
+!! escrever o relatório inteiro, e a inicialização para. Um erro do ESMF
+!! durante a consulta só é registrado.
 !!
 !! As rotinas cpl_check_connector_fields, cpl_check_methods e cpl_check_state
-!! não usam o ESMF e
-!! são testadas em tests/unit/test_cpl_check.F90; a rotina do driver é
+!! não usam o ESMF e são testadas em tests/unit/test_cpl_check.F90; a rotina do driver é
 !! exercitada por tests/cplcheck/.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
@@ -75,9 +73,9 @@ module cpl_check_mod
 
 contains
 
-  !> Dicionário do NUOPC com os campos de FIELDS, e sem acréscimo automático.
+  !> @brief Dicionário do NUOPC com os campos de FIELDS, e sem acréscimo automático.
   !!
-  !! Cada nome entra com a unidade da coluna unidade de FIELDS ('1' se
+  !! Cada nome entra com a unidade da coluna units de FIELDS ('1' se
   !! vazia); um nome que o dicionário já tenha não é registrado de novo. O
   !! NUOPC grava a unidade no atributo Units de cada campo anunciado.
   !!
@@ -106,7 +104,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine cpl_nuopc_dictionary
 
-  !> Escreve em cada entrada da CplList dos conectores a opção remapmethod
+  !> @brief Escreve em cada entrada da CplList dos conectores a opção remapmethod
   !! com o método da troca no mapa (cpl_connector_method).
   !!
   !! Entradas que já tragam remapmethod não são alteradas, nem as de campos
@@ -115,8 +113,8 @@ contains
   !! procurados pelos pares de rótulos, como na conferência.
   !!
   !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
-  !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
-  !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
+  !! @param[in]    labels       rótulos dos componentes no driver ('MPAS', ...)
+  !! @param[in]    components   componente do mapa de cada rótulo ('ATM', ...)
   !! @param[out]   n_method     entradas que receberam a opção
   !! @param[out]   n_full       entradas sem espaço para a opção (o chamador
   !!                            trata como erro)
@@ -173,7 +171,7 @@ contains
     end do
   end subroutine cpl_write_methods
 
-  !> Relatório dos conectores e conferência do mapa, no log do PET 0; erro
+  !> @brief Relatório dos conectores e conferência do mapa, no log do PET 0; erro
   !! em todos os PETs se a conferência acha diferença.
   !!
   !! O PET 0 faz a conferência e escreve o relatório; o número de diferenças
@@ -181,8 +179,8 @@ contains
   !! ESMF_FAILURE juntos, com uma mensagem de erro no log de cada um.
   !!
   !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
-  !! @param[in]    rotulos      rótulos dos componentes no driver ('MPAS', ...)
-  !! @param[in]    componentes  componente do mapa de cada rótulo ('ATM', ...)
+  !! @param[in]    labels       rótulos dos componentes no driver ('MPAS', ...)
+  !! @param[in]    components   componente do mapa de cada rótulo ('ATM', ...)
   !! @param[out]   rc           ESMF_FAILURE se houve diferença
   subroutine cpl_check_coupling(driver, labels, components, rc)
     type(ESMF_GridComp), intent(inout) :: driver
@@ -217,7 +215,7 @@ contains
     end if
   end subroutine cpl_check_coupling
 
-  !> A conferência e o relatório, no PET 0 (ver cpl_check_coupling).
+  !> @brief A conferência e o relatório, no PET 0 (ver cpl_check_coupling).
   subroutine check_on_pet0(driver, labels, components, ndif)
     type(ESMF_GridComp), intent(inout) :: driver
     character(len=*),    intent(in)    :: labels(:)
@@ -251,7 +249,7 @@ contains
                  int_to_str(nwarn)//' aviso(s)')
   end subroutine check_on_pet0
 
-  !> Relatório da CplList do conector origem -> destino e conferência dela
+  !> @brief Relatório da CplList do conector origem -> destino e conferência dela
   !! contra o mapa. Conector ausente só é diferença se o mapa prevê trocas.
   subroutine check_connector(driver, cfg, label_src, label_dst, comp_src, comp_dst, msgs, ndif)
     type(ESMF_GridComp),                     intent(inout) :: driver
@@ -314,7 +312,7 @@ contains
     call cpl_check_methods(comp_src, comp_dst, names, methods, msgs, ndif)
   end subroutine check_connector
 
-  !> Conferência do importState e do exportState de um componente.
+  !> @brief Conferência do importState e do exportState de um componente.
   subroutine check_component(driver, cfg, label, comp, msgs, ndif, nwarn)
     type(ESMF_GridComp),                     intent(inout) :: driver
     type(cpl_config_t),                      intent(in)    :: cfg
@@ -351,7 +349,7 @@ contains
     call cpl_check_state(cfg, comp, .false., exp_names, msgs, ndif, nwarn)
   end subroutine check_component
 
-  !> Nomes padrão (StandardName) dos campos anunciados num State.
+  !> @brief Nomes padrão (StandardName) dos campos anunciados num State.
   subroutine state_names(state, names, rc)
     type(ESMF_State),                        intent(in)  :: state
     character(len=ESMF_MAXSTR), allocatable, intent(out) :: names(:)
@@ -370,7 +368,7 @@ contains
     end if
   end subroutine state_names
 
-  !> Confere a lista de campos de um conector com as trocas do mapa.
+  !> @brief Confere a lista de campos de um conector com as trocas do mapa.
   !!
   !! Diferença: campo na lista sem troca ativa por conector de comp_src para
   !! comp_dst; troca ativa do mapa cujo campo não está na lista.
@@ -378,7 +376,7 @@ contains
   !! @param[in]    cfg        configuração (chaves de &nuopc_mode)
   !! @param[in]    comp_src   componente de origem no mapa ('ATM', 'OCN', ...)
   !! @param[in]    comp_dst   componente de destino no mapa
-  !! @param[in]    nomes      campos da CplList, sem as opções
+  !! @param[in]    names      campos da CplList, sem as opções
   !! @param[inout] msgs       mensagens acumuladas
   !! @param[inout] ndif       número de diferenças acumulado
   subroutine cpl_check_connector_fields(cfg, comp_src, comp_dst, names, msgs, ndif)
@@ -405,7 +403,7 @@ contains
     end do
   end subroutine cpl_check_connector_fields
 
-  !> Confere o método de cada campo da lista de um conector com o do mapa.
+  !> @brief Confere o método de cada campo da lista de um conector com o do mapa.
   !!
   !! Diferença: campo com troca por conector no mapa cuja entrada não traz
   !! remapmethod (o conector usaria o seu padrão) ou traz outro método.
@@ -413,8 +411,8 @@ contains
   !!
   !! @param[in]    comp_src   componente de origem no mapa
   !! @param[in]    comp_dst   componente de destino no mapa
-  !! @param[in]    nomes      campos da CplList, sem as opções
-  !! @param[in]    metodos    remapmethod de cada entrada ('' se não tem)
+  !! @param[in]    names      campos da CplList, sem as opções
+  !! @param[in]    methods    remapmethod de cada entrada ('' se não tem)
   !! @param[inout] msgs       mensagens acumuladas
   !! @param[inout] ndif       número de diferenças acumulado
   subroutine cpl_check_methods(comp_src, comp_dst, names, methods, msgs, ndif)
@@ -441,7 +439,7 @@ contains
     end do
   end subroutine cpl_check_methods
 
-  !> Valor da opção remapmethod de uma entrada da CplList ('' se não tem).
+  !> @brief Valor da opção remapmethod de uma entrada da CplList ('' se não tem).
   pure function cpl_method_of_entry(entry) result(method)
     character(len=*), intent(in) :: entry
     character(len=CPL_METHOD_LEN) :: method
@@ -459,7 +457,7 @@ contains
     end if
   end function cpl_method_of_entry
 
-  !> Confere os campos anunciados num State de um componente com o mapa.
+  !> @brief Confere os campos anunciados num State de um componente com o mapa.
   !!
   !! Importação: cada campo anunciado tem de estar em FIELDS e ter uma única
   !! troca ativa por conector chegando ao componente; cada troca ativa que
@@ -471,11 +469,11 @@ contains
   !!
   !! @param[in]    cfg         configuração (chaves de &nuopc_mode)
   !! @param[in]    comp        componente no mapa
-  !! @param[in]    importacao  .true. para o importState, .false. para o exportState
-  !! @param[in]    nomes       StandardName dos campos anunciados
+  !! @param[in]    is_import   .true. para o importState, .false. para o exportState
+  !! @param[in]    names       StandardName dos campos anunciados
   !! @param[inout] msgs        mensagens acumuladas
   !! @param[inout] ndif        número de diferenças acumulado
-  !! @param[inout] naviso      número de avisos acumulado
+  !! @param[inout] nwarn       número de avisos acumulado
   subroutine cpl_check_state(cfg, comp, is_import, names, msgs, ndif, nwarn)
     type(cpl_config_t),                      intent(in)    :: cfg
     character(len=*),                        intent(in)    :: comp
@@ -524,7 +522,7 @@ contains
     end if
   end subroutine cpl_check_state
 
-  !> Trocas ativas por conector do campo, de comp_src para comp_dst ('' vale
+  !> @brief Trocas ativas por conector do campo, de comp_src para comp_dst ('' vale
   !! qualquer componente).
   integer function count_exchanges(cfg, field, comp_src, comp_dst) result(n)
     type(cpl_config_t), intent(in) :: cfg
@@ -538,7 +536,7 @@ contains
     end do
   end function count_exchanges
 
-  !> Trocas ativas por conector de comp_src para comp_dst ('' vale qualquer).
+  !> @brief Trocas ativas por conector de comp_src para comp_dst ('' vale qualquer).
   integer function expected_count(cfg, comp_src, comp_dst) result(n)
     type(cpl_config_t), intent(in) :: cfg
     character(len=*),   intent(in) :: comp_src, comp_dst
@@ -550,7 +548,7 @@ contains
     end do
   end function expected_count
 
-  !> A troca t é por conector, vale em cfg e liga comp_src a comp_dst
+  !> @brief A troca t é por conector, vale em cfg e liga comp_src a comp_dst
   !! ('' vale qualquer componente).
   logical function exchange_via_connector(t, cfg, comp_src, comp_dst) result(ok)
     integer,            intent(in) :: t
@@ -563,7 +561,7 @@ contains
     if (ok .and. len_trim(comp_dst) > 0) ok = cpl_point_component(EXCHANGES(t)%dst) == comp_dst
   end function exchange_via_connector
 
-  !> Acrescenta uma mensagem à lista e soma um ao contador.
+  !> @brief Acrescenta uma mensagem à lista e soma um ao contador.
   subroutine append_msg(msgs, counter, msg)
     character(len=CPL_MSG_LEN), allocatable, intent(inout) :: msgs(:)
     integer,                                 intent(inout) :: counter
@@ -573,7 +571,7 @@ contains
     counter = counter + 1
   end subroutine append_msg
 
-  !> As condições do mapa que valem na configuração, para o log.
+  !> @brief As condições do mapa que valem na configuração, para o log.
   function describe_config(cfg) result(txt)
     type(cpl_config_t), intent(in) :: cfg
     character(len=:), allocatable :: txt
@@ -583,6 +581,7 @@ contains
     if (cfg%sis2) txt = txt//', sis2'
   end function describe_config
 
+  !> @brief Grava uma linha do relatório no log (log_report, prefixo CPL-REL:).
   subroutine write_line(msg)
     character(len=*), intent(in) :: msg
     call log_report(trim(msg))

@@ -36,7 +36,7 @@ module regrid_schemes_mod
 
 contains
 
-  !> Entrega cada esquema da lista a registra, na ordem da lista; para no
+  !> @brief Entrega cada esquema da lista a register, na ordem da lista; para no
   !! primeiro que falhar (rc dele).
   subroutine regrid_coupler_schemes(register, rc)
     procedure(register_iface) :: register

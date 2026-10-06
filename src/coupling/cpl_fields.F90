@@ -20,10 +20,11 @@
 !! As descrições são texto sem acentos, como as mensagens do log, para que
 !! o comprimento em bytes seja o comprimento em caracteres.
 !!
-!! Este módulo só descreve: nenhum componente o usa para anunciar ou
-!! realizar campos (isso começa na R-FASE11-05). O conteúdo é conferido por
-!! tests/unit/test_cpl_map.F90 e publicado em docs/acoplamento.md por
-!! tools/dev/mapa-acoplamento.py.
+!! Este módulo não decide o que é anunciado (isso sai do mapa):
+!! cpl_nuopc_dictionary (cpl_check) registra estes nomes, com a unidade, no
+!! dicionário do NUOPC, e um nome fora de FIELDS para a rodada no anúncio.
+!! O conteúdo é conferido por tests/unit/test_cpl_map.F90 e publicado em
+!! docs/acoplamento.md por tools/dev/mapa-acoplamento.py.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -122,7 +123,7 @@ module cpl_fields_mod
 
 contains
 
-  !> Posição do campo nome em FIELDS, ou 0 se ele não estiver no dicionário.
+  !> @brief Posição do campo name em FIELDS, ou 0 se ele não estiver no dicionário.
   pure integer function cpl_field_index(name) result(k)
     character(len=*), intent(in) :: name
     integer :: i

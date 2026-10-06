@@ -1,11 +1,11 @@
 !> @file mpi_allreduce_i4.F90
-!! @brief Wrapper MPI_Allreduce para INTEGER(4) — arquivo de compilação isolado.
+!! @brief Wrapper MPI_Allreduce para INTEGER(4) , em arquivo de compilação próprio.
 !!
 !! Isolado em arquivo próprio para que o compilador não cruze os tipos
 !! de sendbuf/recvbuf com a variante REAL(8) (mpi_allreduce_r8.F90).
 !! Ver mpi_allreduce_wrappers.F90 para a motivação completa.
 !!
-!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module mpi_allreduce_i4_mod
 
@@ -18,7 +18,7 @@ module mpi_allreduce_i4_mod
 
 contains
 
-  !> Redução global MPI_SUM para arrays INTEGER(4).
+  !> @brief Redução global MPI_SUM para arrays INTEGER(4).
   !! @param[in]  sendbuf  Array de envio (INTEGER(4), qualquer rank linearizado)
   !! @param[out] recvbuf  Array de recepção (INTEGER(4))
   !! @param[in]  count    Número de elementos

@@ -219,7 +219,7 @@ contains
   !!
   !! @param[out] ocn_field  So_t no importState (grade OCN)
   !! @param[out] startTime  início da simulação, no relógio do mediador
-  !! @param[out] pronta     .true. se So_t chegou com valor físico; .false.
+  !! @param[out] ready      .true. se So_t chegou com valor físico; .false.
   !!                        se ainda não chegou ou se houve erro (rc)
   subroutine wait_first_sst(gcomp, is, importState, clock, ocn_field, startTime, &
                                   ready, rc)
@@ -700,7 +700,7 @@ contains
   !! array nulo, que a física trata como indisponível.
   !!
   !! @param[in]  is     estado interno do mediador
-  !! @param[out] fluxo  arrays da física
+  !! @param[out] fluxes arrays da física
   subroutine associate_fluxes(is, fluxes)
     type(MED_InternalState), intent(in)  :: is
     type(med_flux_t),        intent(out) :: fluxes

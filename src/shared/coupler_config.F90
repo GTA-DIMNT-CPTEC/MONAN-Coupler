@@ -118,9 +118,7 @@ module coupler_config_mod
   character(len=32),  public, protected :: cfg_regrid_class(MAX_REGRID_OVERRIDES)   = ''
   character(len=128), public, protected :: cfg_regrid_options(MAX_REGRID_OVERRIDES) = ''
 
-  !--------------------------------------------------------------------------
   ! Configurações de componentes
-  !--------------------------------------------------------------------------
   ! As quatro chaves que escolhem os componentes (use_datm, use_docn e
   ! use_med_to_mpas, de &nuopc_mode, e use_sis2_dynamic, de
   ! &nuopc_petlayout) formam 16 combinações. Esta tabela diz o que acontece
@@ -179,7 +177,7 @@ module coupler_config_mod
 
 contains
 
-  !> Posição em COUPLER_MODES da combinação das quatro chaves. A tabela tem
+  !> @brief Posição em COUPLER_MODES da combinação das quatro chaves. A tabela tem
   !! as 16 combinações (conferido por tests/unit/test_cpl_map.F90), então o
   !! resultado nunca é 0.
   pure integer function coupler_mode_index(datm, docn, med_to_mpas, sis2) result(k)
@@ -197,7 +195,7 @@ contains
     end do
   end function coupler_mode_index
 
-  !> Lê o arquivo de configuração e preenche as variáveis cfg_*.
+  !> @brief Lê o arquivo de configuração e preenche as variáveis cfg_*.
   !!
   !! @param[out] rc         0 sucesso, 1 arquivo ausente, 2 erro fatal
   !! @param[in]  file_path  caminho opcional; senão usa a variável de
@@ -413,6 +411,7 @@ contains
 
   contains
 
+    !> Lê os grupos do namelist em ordem; para no primeiro com erro de sintaxe.
     subroutine read_groups(unit)
       integer, intent(in) :: unit
       integer :: ios
@@ -516,6 +515,7 @@ contains
       seq_repro = .false.
     end subroutine neutralize_seq_repro
 
+    !> Escreve a mensagem de erro fatal na saída padrão (só o processo 0).
     subroutine fatal(msg)
       character(len=*), intent(in) :: msg
       if (is_root) write(*,'(A)') TAG//'ERRO: '//msg
@@ -523,7 +523,7 @@ contains
 
   end subroutine config_read
 
-  !> Posto MPI do processo, lido das variáveis que os lançadores definem
+  !> @brief Posto MPI do processo, lido das variáveis que os lançadores definem
   !! (PALS, PMI/Hydra, PMIx, Open MPI). A leitura da configuração acontece
   !! antes do MPI; com isto só o processo 0 escreve as mensagens. Devolve 0
   !! se nenhuma variável existir (execução sem lançador).
@@ -543,7 +543,7 @@ contains
     end do
   end function launcher_rank
 
-  !> Converte 'AAAA-MM-DD' em ano, mês e dia. rc = 0 sucesso, 1 formato inválido.
+  !> @brief Converte 'AAAA-MM-DD' em ano, mês e dia. rc = 0 sucesso, 1 formato inválido.
   subroutine config_parse_date(date_str, yy, mm, dd, rc)
     character(len=*), intent(in)  :: date_str
     integer,          intent(out) :: yy, mm, dd, rc

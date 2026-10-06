@@ -90,7 +90,7 @@ contains
   !!   (fluxo%ifrac é lida, não escrita: sem o SIS2, a fase
   !!   ice_fraction_without_sis2, de med_exchange, a recalcula logo depois)
   !!
-  !! @param[in]   fluxo       Arrays da física (med_flux_t); os valores
+  !! @param[in]   fluxes      Arrays da física (med_flux_t); os valores
   !!                          apontados são lidos e escritos
   !! @param[in]   uas, vas    Vento zonal/meridional [m/s]
   !! @param[in]   tas         Temperatura do ar [K]
@@ -291,7 +291,7 @@ contains
   !! balanco de onda longa, escritos em fluxo. A SST é a da grade ATM
   !! interna; fora de (271, 308) K, ou sem SST, usa SST_BULK_FALLBACK.
   !!
-  !! @param[in]    fluxo   arrays da física (escreve taux, tauy, sen, evap, lwnet)
+  !! @param[in]    fluxes  arrays da física (escreve taux, tauy, sen, evap, lwnet)
   !! @param[in]    sst     SST na grade ATM (pode estar desassociado)
   !! @param[in]    uas..shum  campos atmosféricos na grade ATM
   !! @param[in]    i1,i2,j1,j2  limites locais da DE

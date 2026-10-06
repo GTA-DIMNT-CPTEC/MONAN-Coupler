@@ -2,6 +2,7 @@
 !! @brief Conversão de tempo do ESMF para o FMS (usado pelos caps do MOM6 e do SIS2).
 !!
 !! Compilado com as opções do MOM6 (real de 8 bytes), pois depende do FMS.
+!!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 module time_utils_mod
 
@@ -23,6 +24,7 @@ module time_utils_mod
 
 contains
 
+  !> @brief Instante ESMF no time_type do FMS (set_date, ao segundo).
   function esmf2fms_date(time) result(fms_time)
     type(ESMF_Time), intent(in) :: time
     type(time_type)             :: fms_time
@@ -33,6 +35,7 @@ contains
     fms_time = set_date(yy, mm, dd, h, m, s)
   end function esmf2fms_date
 
+  !> @brief Intervalo ESMF no time_type do FMS (set_time, em segundos inteiros).
   function esmf2fms_interval(timestep) result(fms_time)
     type(ESMF_TimeInterval), intent(in) :: timestep
     type(time_type)                     :: fms_time

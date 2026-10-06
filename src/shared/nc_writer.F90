@@ -2,7 +2,7 @@
 !! @brief Rotinas comuns dos gravadores NetCDF do acoplador.
 !!
 !! Os gravadores de diagnóstico (exportação da atmosfera, importação da
-!! atmosfera, importação do oceano no mediador e oceano de dados) repetiam a
+!! atmosfera, importação do oceano no mediador e oceano de dados) seguem a
 !! mesma sequência: criar o arquivo, gravar o cabeçalho CF, definir os eixos
 !! de latitude e longitude e definir cada campo 2D com seus atributos. Este
 !! módulo concentra essa sequência; cada gravador cuida só dos seus campos.
@@ -25,7 +25,7 @@ module nc_writer_mod
 
 contains
 
-  !> .true. se status indica sucesso; senão registra a falha no log
+  !> @brief .true. se status indica sucesso; senão registra a falha no log
   !! ('contexto: mensagem do NetCDF') e devolve .false.
   logical function nc_ok(status, context)
     integer,          intent(in) :: status
@@ -34,7 +34,7 @@ contains
     if (.not. nc_ok) call log_warning(trim(context), trim(nf90_strerror(status)))
   end function nc_ok
 
-  !> Cria (ou sobrescreve) o arquivo fname e abre em modo de definição.
+  !> @brief Cria (ou sobrescreve) o arquivo fname e abre em modo de definição.
   logical function nc_create(fname, ncid, context)
     character(len=*), intent(in)  :: fname, context
     integer,          intent(out) :: ncid
@@ -42,7 +42,7 @@ contains
                       trim(context)//': nf90_create '//trim(fname))
   end function nc_create
 
-  !> Cabeçalho global CF: Conventions, title, institution e source.
+  !> @brief Cabeçalho global CF: Conventions, title, institution e source.
   subroutine nc_global_header(ncid, title, institution, source)
     integer,          intent(in) :: ncid
     character(len=*), intent(in) :: title, institution, source
@@ -53,7 +53,7 @@ contains
     s = nf90_put_att(ncid, NF90_GLOBAL, 'source',      source)
   end subroutine nc_global_header
 
-  !> Dimensões e variáveis de coordenada 'lat' e 'lon' (NF90_DOUBLE), com
+  !> @brief Dimensões e variáveis de coordenada 'lat' e 'lon' (NF90_DOUBLE), com
   !! long_name, units, standard_name e axis. Define 'lat' antes de 'lon'.
   logical function nc_def_latlon(ncid, nlon, nlat, dimid_lon, dimid_lat, &
                                  varid_lon, varid_lat, context)
@@ -82,7 +82,7 @@ contains
     nc_def_latlon = .true.
   end function nc_def_latlon
 
-  !> Campo 2D (lon, lat) com os atributos presentes, nesta ordem: long_name,
+  !> @brief Campo 2D (lon, lat) com os atributos presentes, nesta ordem: long_name,
   !! units, standard_name, _FillValue e, com missing=.true., missing_value
   !! igual ao _FillValue. O tipo segue o valor de preenchimento: fill_r8 dá
   !! NF90_DOUBLE, fill_r4 dá NF90_FLOAT (sem nenhum dos dois: NF90_DOUBLE).

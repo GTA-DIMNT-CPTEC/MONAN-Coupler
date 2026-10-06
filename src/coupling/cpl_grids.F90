@@ -27,7 +27,7 @@
 !! PET; com blocos (cpl_blocks_t, montados por cpl_blocks_from_bounds), cada
 !! bloco vai ao PET que o tem no modelo.
 !!
-!! A grade do cap do MOM6 é diferente, e continua como era: criada sobre um
+!! A grade do cap do MOM6 é diferente: criada sobre um
 !! DistGrid com a lista de blocos do MOM6 (deBlockList, que aceita
 !! qualquer conjunto de blocos retangulares), sem periodicidade declarada e
 !! com os índices locais de cada DE (o padrão do ESMF). Não pode ser feita
@@ -37,13 +37,14 @@
 !!
 !! As fórmulas de centro e de canto ficam em funções, uma por regra: as
 !! malhas regulares calculam o centro com expressões diferentes, e cada
-!! função reproduz a sua expressão sem mudança, para que nenhum bit mude.
+!! função mantém a ordem das operações da sua malha, para que nenhum bit
+!! mude.
 !!
 !! Também ficam aqui as fórmulas que levam uma coordenada à coluna ou à linha
 !! de uma grade regular (índice), usadas pelo cap atmosférico, pelos
 !! gravadores de diagnóstico do MONAN-A, pelo mediador e pelo cap do MOM6, e
 !! as que trazem a longitude para uma faixa de 360 graus. Cada regra é uma
-!! função, com o nome da regra, e reproduz a expressão de onde saiu:
+!! função, com o nome da regra:
 !!
 !!   index_trunc        int(x/d) + 1        binning e cópia do cap, leitura
 !!                                          da importação no cap, OISST e
@@ -54,20 +55,18 @@
 !!   lon_0to360_loop    soma ou subtrai 360 até [0, 360)  OISST no cap do MOM6
 !!   lon_m180to180_loop soma ou subtrai 360 até [-180, 180)  diagnósticos
 !!
-!! O diagnóstico da importação usava floor(x/d) + 1. Para x >= 0, floor e
-!! int dão o mesmo valor; para x < 0, os dois dão 0 ou menos, e o índice,
-!! limitado a [1, n], vira 1 nos dois casos. Com o limite, as duas
-!! expressões dão sempre o mesmo índice, e ficou uma função só
-!! (tests/unit/test_cpl_grids.F90 confere isso). nint arredonda para o mais
-!! próximo e não é trocável pelas outras. Na longitude, as regras também não
-!! são trocáveis: para um valor negativo muito pequeno, -1e-17
-!! por exemplo, somar 360 dá exatamente 360, e o laço ainda subtrai 360 e
-!! chega a 0, enquanto uma soma só para em 360 (a cópia do cap, que soma uma
-!! vez só, continua com a sua expressão).
+!! Para x >= 0, floor(x/d) + 1 e int(x/d) + 1 dão o mesmo valor; para
+!! x < 0, os dois dão 0 ou menos, e o índice, limitado a [1, n], vira 1 nos
+!! dois casos. Com o limite, as duas expressões dão sempre o mesmo índice,
+!! e basta index_trunc (tests/unit/test_cpl_grids.F90 confere isso). nint
+!! arredonda para o mais próximo e não é trocável pelas outras. Na
+!! longitude, as regras também não são trocáveis: para um valor negativo
+!! muito pequeno, -1e-17 por exemplo, somar 360 dá exatamente 360, e o laço
+!! ainda subtrai 360 e chega a 0, enquanto uma soma só para em 360 (a cópia
+!! do cap, que soma uma vez só, tem a sua própria expressão).
 !!
-!! Na grade do cap, o tamanho da célula era a constante 1 grau; aqui ele é
-!! 360/nx e 180/ny, que com a grade 360 x 180 dão exatamente 1, e a
-!! multiplicação por 1 é exata: as coordenadas são as mesmas, bit a bit.
+!! Na grade do cap, o tamanho da célula é 360/nx e 180/ny, que com a grade
+!! 360 x 180 dão exatamente 1 grau, e a multiplicação por 1 é exata.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -112,7 +111,7 @@ module cpl_grids_mod
 
 contains
 
-  !> Decomposição regular (colunas x linhas) de uma grade nx x ny em petCount
+  !> @brief Decomposição regular (colunas x linhas) de uma grade nx x ny em petCount
   !! DEs, um por PET: linhas = o maior divisor de petCount que não passe de
   !! sqrt(petCount) nem de ny, com colunas <= nx/2 (cada DE com pelo menos 2
   !! colunas); colunas = petCount / linhas. Garante colunas x linhas =
@@ -142,7 +141,7 @@ contains
     regDecomp(2) = nrows              ! linhas (lat)
   end function cpl_regdecomp
 
-  !> Cria uma malha regular nx x ny, periódica em longitude, com um DE por
+  !> @brief Cria uma malha regular nx x ny, periódica em longitude, com um DE por
   !! PET (cpl_regdecomp), índices globais e coordenadas dos centros; com
   !! cantos = .true., também as dos cantos (só nas origens ORIGIN_EAST0 e
   !! ORIGIN_EAST0_CORNER).
@@ -159,12 +158,12 @@ contains
   !! e exige localDE= quando o PET tem mais de um DE, por isso o laço sobre
   !! os DEs locais.
   !!
-  !! @param[in]  nome        nome da malha em GRIDS, para as mensagens
+  !! @param[in]  name        nome da malha em GRIDS, para as mensagens
   !! @param[in]  nx, ny      pontos em longitude e em latitude
   !! @param[in]  lon_origin  ORIGIN_EAST0, ORIGIN_EAST0_CORNER ou ORIGIN_WEST180
-  !! @param[in]  cantos      cria também as coordenadas dos cantos
+  !! @param[in]  corners     cria também as coordenadas dos cantos
   !! @param[in]  petCount    PETs do componente
-  !! @param[out] grade       a grade criada
+  !! @param[out] grid        a grade criada
   !! @param[out] rc          ESMF_SUCCESS, ou o código da falha
   subroutine cpl_latlon_grid(name, nx, ny, lon_origin, corners, petCount, grid, rc)
     character(len=*), intent(in)  :: name
@@ -250,7 +249,7 @@ contains
   end subroutine cpl_latlon_grid
 
 
-  !> Cria a grade tripolar do MOM6 com as coordenadas lidas do supergrid
+  !> @brief Cria a grade tripolar do MOM6 com as coordenadas lidas do supergrid
   !! (ocean_hgrid.nc): os centros das células T (mom6_supergrid_tcoords) e,
   !! com cantos = .true., os vértices (mom6_supergrid_corners), na porção de
   !! cada DE local. Periódica em longitude, índices globais, sem polo
@@ -265,14 +264,14 @@ contains
   !! A decomposição é a de blocos, quando dada (cada bloco no PET que o tem
   !! no modelo; nx e ny não são usados), ou cpl_regdecomp.
   !!
-  !! @param[in]  nome          nome da malha em GRIDS, para as mensagens
-  !! @param[in]  arquivo       supergrid do MOM6
+  !! @param[in]  name          nome da malha em GRIDS, para as mensagens
+  !! @param[in]  file_name     supergrid do MOM6
   !! @param[in]  nx, ny        tamanho da grade T (sem blocos)
   !! @param[in]  petCount      PETs do componente (sem blocos)
-  !! @param[in]  cantos        cria também as coordenadas dos cantos
-  !! @param[out] grade         a grade criada
+  !! @param[in]  corners       cria também as coordenadas dos cantos
+  !! @param[out] grid          a grade criada
   !! @param[out] rc            ESMF_SUCCESS, ou o código da falha
-  !! @param[in]  blocos        decomposição do modelo (opcional)
+  !! @param[in]  blocks        decomposição do modelo (opcional)
   !! @param[in]  comp          marca do componente nas mensagens da leitura
   !!                           do supergrid (padrão: OCN)
   subroutine cpl_tripolar_grid(name, file_name, nx, ny, petCount, corners, grid, rc, &
@@ -319,7 +318,7 @@ contains
     end do
   end subroutine cpl_tripolar_grid
 
-  !> Cria a grade do cap do MOM6 nos blocos do modelo: um DE por bloco,
+  !> @brief Cria a grade do cap do MOM6 nos blocos do modelo: um DE por bloco,
   !! no PET dado, sobre um DistGrid [1..ni] x [1..nj] com a lista de blocos
   !! (deBlockList, que aceita qualquer conjunto de blocos retangulares, até
   !! um PET sem oceano), sem margem de halo (gridEdgeLWidth e gridEdgeUWidth
@@ -327,11 +326,11 @@ contains
   !! acrescenta o stagger dos centros, sem preencher: as coordenadas são as
   !! do modelo, e quem chama as copia.
   !!
-  !! @param[in]  nome      nome da malha em GRIDS, para as mensagens
+  !! @param[in]  name      nome da malha em GRIDS, para as mensagens
   !! @param[in]  ni, nj    tamanho global da grade
-  !! @param[in]  limites   (is, ie, js, je) globais de cada bloco
+  !! @param[in]  bounds    (is, ie, js, je) globais de cada bloco
   !! @param[in]  petMap    PET de cada bloco (base 0)
-  !! @param[out] grade     a grade criada
+  !! @param[out] grid      a grade criada
   !! @param[out] rc        ESMF_SUCCESS, ou o código da falha
   subroutine cpl_block_grid(name, ni, nj, bounds, petMap, grid, rc)
     character(len=*), intent(in)  :: name
@@ -376,11 +375,9 @@ contains
         ': falha GridAddCoord', line=__LINE__, file=u_FILE_u)) return
   end subroutine cpl_block_grid
 
-  ! --------------------------------------------------------------------------
   ! Partes comuns aos construtores
-  ! --------------------------------------------------------------------------
 
-  !> Cria a grade periódica em longitude, com índices globais e coordenadas
+  !> @brief Cria a grade periódica em longitude, com índices globais e coordenadas
   !! esféricas em graus: nos blocos dados ou, sem eles, na decomposição
   !! cpl_regdecomp de nx x ny em petCount PETs.
   subroutine create_grid(grid, nx, ny, petCount, rc, blocks)
@@ -402,7 +399,7 @@ contains
     end if
   end subroutine create_grid
 
-  !> Acrescenta as coordenadas no stagger dado (chamada coletiva, todos os
+  !> @brief Acrescenta as coordenadas no stagger dado (chamada coletiva, todos os
   !! PETs) e devolve o número de DEs locais.
   subroutine prepare_coordinates(grid, stagger, localDeCount, rc)
     type(ESMF_Grid),       intent(inout) :: grid
@@ -416,7 +413,7 @@ contains
     call ESMF_GridGet(grid, localDeCount=localDeCount, rc=rc)
   end subroutine prepare_coordinates
 
-  !> Vetores das duas coordenadas do DE local lde, no stagger dado.
+  !> @brief Vetores das duas coordenadas do DE local lde, no stagger dado.
   !! ESMF_GridGetCoord é local e exige localDE= quando o PET tem mais de um
   !! DE.
   subroutine de_coordinates(grid, stagger, lde, coordX, coordY, rc)
@@ -433,12 +430,12 @@ contains
       staggerloc=stagger, farrayPtr=coordY, rc=rc)
   end subroutine de_coordinates
 
-  !> A partir dos blocos de todos os PETs (início e fim globais em i e em j,
+  !> @brief A partir dos blocos de todos os PETs (início e fim globais em i e em j,
   !! na ordem dos PETs), monta a decomposição retangular que o ESMF precisa:
   !! tamanho de cada coluna (cntx), de cada linha (cnty) e o PET dono de cada
   !! bloco (pmap). Confere que os blocos formam uma grade produto (layout
   !! nbx x nby), cobrem 1..nx e 1..ny sem buraco nem sobreposição, e que cada
-  !! bloco pertence a exatamente um PET. limites(1:4, p) = (/ is, ie, js, je /)
+  !! bloco pertence a exatamente um PET. bounds(1:4, p) = (/ is, ie, js, je /)
   !! do PET p-1. Com ok = .false., msg diz o que não confere.
   subroutine cpl_blocks_from_bounds(bounds, npet, nx, ny, blocks, msg, ok)
     integer,            intent(in)  :: bounds(:,:)
@@ -521,6 +518,7 @@ contains
 
   contains
 
+    !> Ordena a em ordem crescente (inserção), levando b junto.
     pure subroutine sort_pairs(a, b)
       integer, intent(inout) :: a(:), b(:)
       integer :: i, j, ta, tb
@@ -536,60 +534,56 @@ contains
 
   end subroutine cpl_blocks_from_bounds
 
-  ! --------------------------------------------------------------------------
-  ! Fórmulas de centro e de canto. Cada uma é a expressão que a malha usava,
-  ! sem mudança na ordem das operações.
-  ! --------------------------------------------------------------------------
+  ! Fórmulas de centro e de canto, cada uma com a ordem das operações da
+  ! sua malha.
 
-  !> Longitude do centro da coluna i, a partir de 0 grau (atm_med).
+  !> @brief Longitude do centro da coluna i, a partir de 0 grau (atm_med).
   elemental function center_lon_east0(i, nx) result(lon)
     integer, intent(in) :: i, nx
     real(r8) :: lon
     lon = (i-1) * (360.0_r8/nx) + (360.0_r8/nx) * 0.5_r8
   end function center_lon_east0
 
-  !> Latitude do centro da linha j, a partir de -90 graus (atm_med).
+  !> @brief Latitude do centro da linha j, a partir de -90 graus (atm_med).
   elemental function center_lat_east0(j, ny) result(lat)
     integer, intent(in) :: j, ny
     real(r8) :: lat
     lat = -90.0_r8 + (j-1)*(180.0_r8/ny) + (180.0_r8/ny)/2.0_r8
   end function center_lat_east0
 
-  !> Longitude do canto oeste da coluna i, a partir de 0 grau (atm_med).
+  !> @brief Longitude do canto oeste da coluna i, a partir de 0 grau (atm_med).
   elemental function corner_lon_east0(i, nx) result(lon)
     integer, intent(in) :: i, nx
     real(r8) :: lon
     lon = (i-1) * (360.0_r8/nx)
   end function corner_lon_east0
 
-  !> Latitude do canto sul da linha j, a partir de -90 graus (atm_med).
+  !> @brief Latitude do canto sul da linha j, a partir de -90 graus (atm_med).
   elemental function corner_lat_east0(j, ny) result(lat)
     integer, intent(in) :: j, ny
     real(r8) :: lat
     lat = -90.0_r8 + (j-1)*(180.0_r8/ny)
   end function corner_lat_east0
 
-  !> Longitude do centro da coluna i, a partir de -180 graus (atm_cap).
+  !> @brief Longitude do centro da coluna i, a partir de -180 graus (atm_cap).
   elemental function center_lon_west180(i, nx) result(lon)
     integer, intent(in) :: i, nx
     real(r8) :: lon
     lon = -180.0_r8 + (real(i,r8) - 0.5_r8)*(360.0_r8/nx)
   end function center_lon_west180
 
-  !> Latitude do centro da linha j, a partir de -90 graus (atm_cap).
+  !> @brief Latitude do centro da linha j, a partir de -90 graus (atm_cap).
   elemental function center_lat_west180(j, ny) result(lat)
     integer, intent(in) :: j, ny
     real(r8) :: lat
     lat = -90.0_r8 + (real(j,r8) - 0.5_r8)*(180.0_r8/ny)
   end function center_lat_west180
 
-  ! --------------------------------------------------------------------------
   ! Fórmulas de índice: a caixa de largura d que contém x, contada a partir
   ! de x = 0 (quem chama soma a origem: lat + 90, por exemplo), limitada a
-  ! [1, n]. Cada uma é a expressão que as rotinas usavam, sem mudança.
-  ! --------------------------------------------------------------------------
+  ! [1, n].
 
-  !> Índice por truncamento: int(x/d) + 1, limitado a [1, n]. Igual, para
+  !> @brief Índice por truncamento: int(x/d) + 1, limitado a [1, n]. Igual, para
   !! todo x, a floor(x/d) + 1 limitado a [1, n] (ver o cabeçalho).
   elemental function index_trunc(x, d, n) result(k)
     real(r8), intent(in) :: x, d
@@ -599,7 +593,7 @@ contains
     k = max(1, min(k, n))
   end function index_trunc
 
-  !> Índice pelo inteiro mais próximo: nint(x/d) + 1, limitado a [1, n].
+  !> @brief Índice pelo inteiro mais próximo: nint(x/d) + 1, limitado a [1, n].
   elemental function index_round(x, d, n) result(k)
     real(r8), intent(in) :: x, d
     integer,  intent(in) :: n
@@ -608,25 +602,23 @@ contains
     k = min(max(k, 1), n)
   end function index_round
 
-  ! --------------------------------------------------------------------------
   ! Longitude numa faixa de 360 graus
-  ! --------------------------------------------------------------------------
 
-  !> Longitude em [0, 360) pelo piso.
+  !> @brief Longitude em [0, 360) pelo piso.
   elemental function lon_0to360_floor(lon) result(l)
     real(r8), intent(in) :: lon
     real(r8) :: l
     l = lon - floor(lon / 360.0_r8) * 360.0_r8
   end function lon_0to360_floor
 
-  !> Longitude em [-180, 180) pelo piso.
+  !> @brief Longitude em [-180, 180) pelo piso.
   elemental function lon_m180to180_floor(lon) result(l)
     real(r8), intent(in) :: lon
     real(r8) :: l
     l = lon - floor((lon + 180.0_r8) / 360.0_r8) * 360.0_r8
   end function lon_m180to180_floor
 
-  !> Longitude em [0, 360), somando ou subtraindo 360 quantas vezes for
+  !> @brief Longitude em [0, 360), somando ou subtraindo 360 quantas vezes for
   !! preciso (primeiro as somas).
   elemental function lon_0to360_loop(lon) result(l)
     real(r8), intent(in) :: lon
@@ -636,7 +628,7 @@ contains
     do while (l >= 360.0_r8); l = l - 360.0_r8; end do
   end function lon_0to360_loop
 
-  !> Longitude em [-180, 180), subtraindo ou somando 360 quantas vezes for
+  !> @brief Longitude em [-180, 180), subtraindo ou somando 360 quantas vezes for
   !! preciso (primeiro as subtrações).
   elemental function lon_m180to180_loop(lon) result(l)
     real(r8), intent(in) :: lon

@@ -16,13 +16,13 @@
 !!   Solução: separar as duas subrotinas em MÓDULOS DISTINTOS,
 !!   cada um em seu próprio arquivo de compilação (.F90). O compilador
 !!   analisa cada arquivo em escopo fechado, sem visibilidade cruzada.
-!!   A semântica MPI é idêntica à chamada direta original.
+!!   A semântica MPI é a mesma da chamada direta.
 !!
-!!   Este arquivo contém apenas o módulo de encaminhamento público que
-!!   re-exporta allreduce_r8 e allreduce_i4 para compatibilidade com o
-!!   código existente (sem alterar nenhum 'use mpi_allreduce_wrappers_mod').
+!!   Este arquivo contém apenas o módulo público que reexporta
+!!   allreduce_r8 e allreduce_i4, para que quem usa as duas importe um
+!!   módulo só.
 !!
-!! Uso (inalterado):
+!! Uso:
 !!   use mpi_allreduce_wrappers_mod, only : allreduce_r8, allreduce_i4
 !!   call allreduce_r8(sendbuf, recvbuf, n, comm, ierr)
 !!   call allreduce_i4(sendbuf, recvbuf, n, comm, ierr)
@@ -31,7 +31,7 @@
 !!   mpi_allreduce_r8_mod  →  mpi_allreduce_r8.F90
 !!   mpi_allreduce_i4_mod  →  mpi_allreduce_i4.F90
 !!
-!! INPE / CGCT / DIMNT — GT Acoplamento de Modelos
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module mpi_allreduce_wrappers_mod
 

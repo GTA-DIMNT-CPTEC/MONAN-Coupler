@@ -6,7 +6,7 @@
 !! origem e de destino (coordenadas em graus, máscara e índice global) e
 !! devolve a lista de pesos, um por par (ponto de origem, ponto de destino):
 !!
-!!   valor(destino(k)) = soma em k de fator(k) * valor(origem(k))
+!!   valor(dest(k)) = soma em k de factors(k) * valor(orig(k))
 !!
 !! A base cuida do resto, como os outros esquemas do acoplador:
 !!   setup    monta os pontos a partir dos campos, chama compute_weights e
@@ -18,7 +18,7 @@
 !!   release  libera o route handle.
 !!
 !! Pontos. A origem chega inteira a cada PET, ordenada pelo índice global
-!! (origem%lon(n) é o ponto de índice n), porque um ponto de destino pode
+!! (src_points%lon(n) é o ponto de índice n), porque um ponto de destino pode
 !! precisar de pontos de origem de outros PETs. O destino chega só com os
 !! pontos locais, cada um com o seu índice global. Os índices são os
 !! sequenciais do ESMF (os da DistGrid), os mesmos dos arquivos de pesos
@@ -30,7 +30,7 @@
 !! mensagem no log. A máscara de origem (spec%mask_src) é a da grade
 !! (ESMF_GRIDITEM_MASK, 0 = ignorar), a mesma do esquema esmf.
 !!
-!! Os pesos calculados ficam guardados (fator, src_index, dst_index), para
+!! Os pesos calculados ficam guardados (factors, src_index, dst_index), para
 !! diagnóstico e para quem quiser gravá-los.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
@@ -72,9 +72,9 @@ module regrid_weights_base_mod
     !> Calcula os pesos dos pontos de destino locais.
     !!
     !! @param[inout] this     o esquema (this%spec%options tem as opções)
-    !! @param[in]    origem   todos os pontos de origem; origem%indice(n) = n
-    !! @param[in]    destino  os pontos de destino locais
-    !! @param[out]   fator    pesos
+    !! @param[in]    src_points  todos os pontos de origem; src_points%global_index(n) = n
+    !! @param[in]    dst_points  os pontos de destino locais
+    !! @param[out]   factors     pesos
     !! @param[out]   orig     índice global de origem de cada peso
     !! @param[out]   dest     índice global de destino de cada peso
     !! @param[out]   rc       ESMF_SUCCESS ou ESMF_FAILURE (com mensagem)
@@ -90,6 +90,8 @@ module regrid_weights_base_mod
 
 contains
 
+  !> @brief setup da base de pesos: monta os pontos de origem (todos) e de destino
+  !! (locais), chama compute_weights e cria o route handle com os pesos.
   subroutine wb_setup(this, src, dst, rc)
     class(weights_regridder_t), intent(inout) :: this
     type(ESMF_Field),           intent(inout) :: src, dst
@@ -132,6 +134,8 @@ contains
       trim(this%spec%scheme))
   end subroutine wb_setup
 
+  !> @brief execute da base de pesos: ESMF_FieldSMM na ordem do índice de
+  !! origem.
   subroutine wb_execute(this, src, dst, zero_total, rc)
     class(weights_regridder_t), intent(inout) :: this
     type(ESMF_Field),           intent(inout) :: src, dst
@@ -147,6 +151,7 @@ contains
     end if
   end subroutine wb_execute
 
+  !> @brief release da base de pesos: libera o route handle, se criado.
   subroutine wb_release(this, rc)
     class(weights_regridder_t), intent(inout) :: this
     integer,                    intent(out)   :: rc
@@ -159,7 +164,7 @@ contains
     if (allocated(this%dst_index)) deallocate(this%dst_index)
   end subroutine wb_release
 
-  !> Pontos locais de um campo em ESMF_Grid: coordenadas do centro, máscara
+  !> @brief Pontos locais de um campo em ESMF_Grid: coordenadas do centro, máscara
   !! (se pedida) e índice global de cada ponto, na ordem do array local.
   subroutine get_local_points(field, use_mask, p, rc)
     type(ESMF_Field),      intent(in)  :: field
@@ -231,7 +236,7 @@ contains
     end if
   end subroutine get_local_points
 
-  !> Reúne em todos os PETs os pontos de origem, ordenados pelo índice
+  !> @brief Reúne em todos os PETs os pontos de origem, ordenados pelo índice
   !! global: o ponto de índice n vai para a posição n. Posições sem ponto
   !! (não deveria haver numa grade de um tile) ficam inválidas.
   subroutine gather_source(local_points, src_points, rc)

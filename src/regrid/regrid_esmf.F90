@@ -33,12 +33,14 @@ module regrid_esmf_mod
 
 contains
 
-  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  !> @brief Construtor usado pela lista de esquemas (regrid_schemes.F90).
   subroutine new_esmf(r)
     class(regridder_t), allocatable, intent(out) :: r
     allocate(esmf_regridder_t :: r)
   end subroutine new_esmf
 
+  !> @brief setup do esquema 'esmf': tenta os métodos de spec%methods em ordem e
+  !! fica com o primeiro cujo ESMF_FieldRegridStore funciona.
   subroutine esmf_setup(this, src, dst, rc)
     class(esmf_regridder_t), intent(inout) :: this
     type(ESMF_Field),        intent(inout) :: src, dst
@@ -63,7 +65,7 @@ contains
     call log_error(COMP_REGRID, 'rota '//trim(this%label)//' sem metodo utilizavel')
   end subroutine esmf_setup
 
-  !> Calcula o route handle para um método (usado também pelas extensões).
+  !> @brief Calcula o route handle para um método (usado também pelas extensões).
   subroutine esmf_store(this, src, dst, method, rc)
     class(esmf_regridder_t), intent(inout) :: this
     type(ESMF_Field),        intent(inout) :: src, dst
@@ -89,6 +91,8 @@ contains
     end if
   end subroutine esmf_store
 
+  !> @brief execute do esquema 'esmf': ESMF_FieldRegrid na ordem do índice de
+  !! origem (termorder = srcseq).
   subroutine esmf_execute(this, src, dst, zero_total, rc)
     class(esmf_regridder_t), intent(inout) :: this
     type(ESMF_Field),        intent(inout) :: src, dst
@@ -104,6 +108,7 @@ contains
     end if
   end subroutine esmf_execute
 
+  !> @brief release do esquema 'esmf': libera o route handle, se criado.
   subroutine esmf_release(this, rc)
     class(esmf_regridder_t), intent(inout) :: this
     integer,                 intent(out)   :: rc
@@ -113,7 +118,7 @@ contains
     this%ready = .false.
   end subroutine esmf_release
 
-  !> Converte o nome do método no identificador do ESMF.
+  !> @brief Converte o nome do método no identificador do ESMF.
   subroutine regrid_method_flag(method, flag, rc)
     character(len=*),             intent(in)  :: method
     type(ESMF_RegridMethod_Flag), intent(out) :: flag

@@ -352,7 +352,7 @@ contains
   !! campo que foi completado alguma vez. Coletiva: todos os PETs do
   !! mediador chamam.
   !!
-  !! @param[in]  completa  contagens deste PET (índices COMPL_*)
+  !! @param[in]  fill_counts contagens deste PET (índices COMPL_*)
   !! @param[out] rc        ESMF_SUCCESS, ou o código da redução que falhou
   subroutine report_fills(fill_counts, rc)
     type(med_fill_count_t), intent(in) :: fill_counts(N_FILL)

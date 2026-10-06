@@ -35,11 +35,11 @@ program esmApp
   integer :: rc, userRc, petCount, step, nSteps, ios
   integer :: localPet = 0
 
-  ! ---- 1. Configuração -------------------------------------------------------
+  ! 1. Configuração
   call config_read(rc)
   if (rc == 2) error stop 'ERRO fatal na leitura de nuopc.input'
 
-  ! ---- 2. ESMF ---------------------------------------------------------------
+  ! 2. ESMF
   ! O ESMF cria PET*.esmApp.log no diretório corrente; por isso entramos em
   ! cfg_log_dir durante a inicialização. chdir é extensão do gfortran.
   call execute_command_line('mkdir -p '//trim(cfg_log_dir))
@@ -54,7 +54,7 @@ program esmApp
   if (ios == 0) call chdir('..')
   if (rc /= ESMF_SUCCESS) error stop 'ERRO: ESMF_Initialize falhou'
 
-  ! ---- 3. Relógio global -----------------------------------------------------
+  ! 3. Relógio global
   call set_time(cfg_start_date, startTime)
   call set_time(cfg_stop_date,  stopTime)
   call ESMF_TimeIntervalSet(timeStep, s=cfg_dt_coupling, rc=rc)
@@ -70,7 +70,7 @@ program esmApp
   call check(rc, __LINE__)
   call print_banner()
 
-  ! ---- 4. Driver ---------------------------------------------------------------
+  ! 4. Driver
   esmComp = ESMF_GridCompCreate(name='ESM', clock=clock, rc=rc)
   call check(rc, __LINE__)
   call ESMF_GridCompSetServices(esmComp, ESM_SetServices, userRc=userRc, rc=rc)
@@ -81,8 +81,8 @@ program esmApp
   call check(rc, __LINE__, userRc)
   call say('[OK] Inicializacao concluida')
 
-  ! Cada ESMF_GridCompRun executa exatamente um passo da RunSequence. Uma
-  ! única chamada até stop_date foi testada e encerrava a rodada cedo.
+  ! Cada ESMF_GridCompRun executa exatamente um passo da RunSequence; uma
+  ! única chamada até stop_date encerra a rodada antes da hora.
   call say('--- Loop de execucao: '//int_to_str(nSteps)//' passo(s) de acoplamento de '// &
            int_to_str(cfg_dt_coupling)//' s')
   do step = 1, nSteps
@@ -91,7 +91,7 @@ program esmApp
   end do
   call say('[OK] Todos os passos de acoplamento concluidos')
 
-  ! ---- 5. Encerramento -------------------------------------------------------
+  ! 5. Encerramento
   ! ESMF_GridCompFinalize não é chamado: a limpeza do ESMF é incompatível com
   ! o MOAB e o SMIOL nesta versão. ESMF_END_KEEPMPI deixa o MPI_Finalize para
   ! o encerramento do processo, evitando SIGSEGV secundários de MPI_Abort.
@@ -100,7 +100,7 @@ program esmApp
 
 contains
 
-  !> Aborta a execução se rc (ou o userRc do componente) indicar erro.
+  !> @brief Aborta a execução se rc (ou o userRc do componente) indicar erro.
   subroutine check(rc, line, userRc)
     integer, intent(in)           :: rc, line
     integer, intent(in), optional :: userRc
@@ -111,12 +111,13 @@ contains
     end if
   end subroutine check
 
+  !> @brief Encerra todos os processos (ESMF_Finalize com ESMF_END_ABORT).
   subroutine abort_run()
     call ESMF_Finalize(endflag=ESMF_END_ABORT)
     error stop
   end subroutine abort_run
 
-  !> Converte 'AAAA-MM-DD' em ESMF_Time às 00:00:00.
+  !> @brief Converte 'AAAA-MM-DD' em ESMF_Time às 00:00:00.
   subroutine set_time(date_str, t)
     character(len=*), intent(in)  :: date_str
     type(ESMF_Time),  intent(out) :: t
@@ -131,12 +132,13 @@ contains
     call check(prc, __LINE__)
   end subroutine set_time
 
-  !> Escreve na saída padrão apenas no PET 0.
+  !> @brief Escreve na saída padrão apenas no PET 0.
   subroutine say(msg)
     character(len=*), intent(in) :: msg
     if (localPet == 0) write(*,'(A)') msg
   end subroutine say
 
+  !> @brief Escreve na saída padrão (PET 0) o cabeçalho da rodada com a configuração lida.
   subroutine print_banner()
     type(ESMF_VM) :: vm
     integer :: vrc

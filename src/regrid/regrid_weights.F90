@@ -32,12 +32,14 @@ module regrid_weights_mod
 
 contains
 
-  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  !> @brief Construtor usado pela lista de esquemas (regrid_schemes.F90).
   subroutine new_weights(r)
     class(regridder_t), allocatable, intent(out) :: r
     allocate(weights_file_regridder_t :: r)
   end subroutine new_weights
 
+  !> @brief setup do esquema 'weights_file': lê os pesos de spec%weights_file e
+  !! cria o route handle (ESMF_FieldSMMStore); arquivo ausente é erro.
   subroutine weights_setup(this, src, dst, rc)
     class(weights_file_regridder_t), intent(inout) :: this
     type(ESMF_Field),                intent(inout) :: src, dst
@@ -65,6 +67,8 @@ contains
       trim(this%spec%weights_file))
   end subroutine weights_setup
 
+  !> @brief execute do esquema 'weights_file': produto matriz esparsa
+  !! (ESMF_FieldSMM) na ordem do índice de origem.
   subroutine weights_execute(this, src, dst, zero_total, rc)
     class(weights_file_regridder_t), intent(inout) :: this
     type(ESMF_Field),                intent(inout) :: src, dst
@@ -80,6 +84,7 @@ contains
     end if
   end subroutine weights_execute
 
+  !> @brief release do esquema 'weights_file': libera o route handle, se criado.
   subroutine weights_release(this, rc)
     class(weights_file_regridder_t), intent(inout) :: this
     integer,                         intent(out)   :: rc

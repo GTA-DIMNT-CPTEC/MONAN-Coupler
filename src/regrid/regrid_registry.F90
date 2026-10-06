@@ -36,7 +36,7 @@ module regrid_registry_mod
 
 contains
 
-  !> Registra (ou substitui) um esquema.
+  !> @brief Registra (ou substitui) um esquema.
   subroutine regrid_register(name, ctor, rc)
     character(len=*), intent(in)  :: name
     procedure(regridder_ctor)     :: ctor
@@ -59,13 +59,14 @@ contains
     table(k)%ctor => ctor
   end subroutine regrid_register
 
+  !> @brief Verdadeiro se há esquema registrado com o nome name.
   logical function regrid_is_registered(name)
     character(len=*), intent(in) :: name
     call register_builtins()
     regrid_is_registered = (find(name) > 0)
   end function regrid_is_registered
 
-  !> Cria uma instância do esquema pedido.
+  !> @brief Cria uma instância do esquema pedido.
   subroutine regrid_create(scheme, r, rc)
     character(len=*),                intent(in)  :: scheme
     class(regridder_t), allocatable, intent(out) :: r
@@ -84,6 +85,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine regrid_create
 
+  !> @brief Posição do esquema name no catálogo (0 se não está).
   integer function find(name)
     character(len=*), intent(in) :: name
     integer :: k
@@ -96,7 +98,7 @@ contains
     end do
   end function find
 
-  !> Esquemas do acoplador (lista de regrid_schemes.F90), uma vez.
+  !> @brief Esquemas do acoplador (lista de regrid_schemes.F90), uma vez.
   subroutine register_builtins()
     logical, save :: done = .false.
     integer :: rc

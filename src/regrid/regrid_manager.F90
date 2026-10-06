@@ -65,7 +65,7 @@ module regrid_manager_mod
 
 contains
 
-  !> Monta um regrid_spec_t a partir de uma lista de métodos separados por
+  !> @brief Monta um regrid_spec_t a partir de uma lista de métodos separados por
   !! vírgula ('conserve,bilinear').
   function regrid_spec(methods, scheme, mask_src, zero_total, nan_value, options) result(spec)
     character(len=*),   intent(in)           :: methods
@@ -85,7 +85,7 @@ contains
     end if
   end function regrid_spec
 
-  !> Cria a rota e calcula a interpolação (pesos ou route handle).
+  !> @brief Cria a rota e calcula a interpolação (pesos ou route handle).
   !! Se nenhum método funcionar e 'fallback' for dado, a rota passa a usar a
   !! rota 'fallback' (que precisa já existir).
   subroutine add(this, name, spec, src, dst, rc, fallback)
@@ -134,7 +134,7 @@ contains
     call report_route(this, k, final_spec)
   end subroutine add
 
-  !> Linha do relatório de acoplamento para a rota k, no log do PET 0.
+  !> @brief Linha do relatório de acoplamento para a rota k, no log do PET 0.
   subroutine report_route(this, k, spec)
     class(regrid_manager_t), intent(in) :: this
     integer,                 intent(in) :: k
@@ -168,7 +168,7 @@ contains
     call log_report(line)
   end subroutine report_route
 
-  !> Interpola pela rota, nesta ordem (a das etapas de ROUTES, em cpl_map):
+  !> @brief Interpola pela rota, nesta ordem (a das etapas de ROUTES, em cpl_map):
   !! interpolação, preenchimento por vizinhança (spec%fill, etapa completar)
   !! e troca de NaN (spec%nan_replace). As três usam a configuração da rota
   !! pedida, mesmo quando ela usa a interpolação da reserva.
@@ -220,7 +220,7 @@ contains
       call replace_nan(dst, this%routes(k_requested)%spec%nan_value, rc)
   end subroutine apply
 
-  !> Preenchimento por vizinhança do destino, em cada DE local (sem troca de
+  !> @brief Preenchimento por vizinhança do destino, em cada DE local (sem troca de
   !! halo), com as contagens somadas nos DEs; -1 nas duas se não há DE local.
   subroutine complete(dst, opt, n_invalid, n_left, rc)
     type(ESMF_Field),    intent(inout) :: dst
@@ -245,7 +245,7 @@ contains
     end do
   end subroutine complete
 
-  !> Troca os NaN do destino, em cada DE local, por valor.
+  !> @brief Troca os NaN do destino, em cada DE local, por val.
   subroutine replace_nan(dst, val, rc)
     type(ESMF_Field),   intent(inout) :: dst
     real(ESMF_KIND_R8), intent(in)    :: val
@@ -262,13 +262,14 @@ contains
     end do
   end subroutine replace_nan
 
+  !> @brief Verdadeiro se a rota name já foi criada.
   logical function has(this, name)
     class(regrid_manager_t), intent(in) :: this
     character(len=*),        intent(in) :: name
     has = (find(this, name) > 0)
   end function has
 
-  !> Método efetivamente usado pela rota ('' se a rota não existe).
+  !> @brief Método efetivamente usado pela rota ('' se a rota não existe).
   function method(this, name) result(m)
     class(regrid_manager_t), intent(in) :: this
     character(len=*),        intent(in) :: name
@@ -279,6 +280,7 @@ contains
     if (k > 0) m = this%routes(k)%r%method_used
   end function method
 
+  !> @brief Libera todas as rotas; rc fica com a última falha de release, se houver.
   subroutine destroy(this, rc)
     class(regrid_manager_t), intent(inout) :: this
     integer,                 intent(out)   :: rc
@@ -298,6 +300,7 @@ contains
     this%n = 0
   end subroutine destroy
 
+  !> @brief Índice da rota name (0 se não existe), sem seguir o apelido.
   integer function find(this, name)
     class(regrid_manager_t), intent(in) :: this
     character(len=*),        intent(in) :: name
@@ -311,7 +314,7 @@ contains
     end do
   end function find
 
-  !> Índice da rota que de fato interpola (segue o apelido, se houver).
+  !> @brief Índice da rota que de fato interpola (segue o apelido, se houver).
   integer function resolve(this, name)
     class(regrid_manager_t), intent(in) :: this
     character(len=*),        intent(in) :: name
@@ -321,7 +324,7 @@ contains
     end if
   end function resolve
 
-  !> Substitui a configuração padrão da rota pelo que estiver em &nuopc_regrid.
+  !> @brief Substitui a configuração padrão da rota pelo que estiver em &nuopc_regrid.
   subroutine apply_config(name, spec)
     character(len=*),    intent(in)    :: name
     type(regrid_spec_t), intent(inout) :: spec
@@ -339,6 +342,7 @@ contains
     end do
   end subroutine apply_config
 
+  !> @brief Separa a lista 'm1,m2,...' em até MAX_METHODS nomes, sem espaços à esquerda.
   subroutine split_methods(list, methods)
     character(len=*),        intent(in)  :: list
     character(len=NAME_LEN), intent(out) :: methods(MAX_METHODS)

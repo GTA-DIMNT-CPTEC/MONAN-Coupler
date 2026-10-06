@@ -1,7 +1,7 @@
 !> @file cap_common.F90
 !! @brief Procedimentos comuns aos caps NUOPC do acoplador.
 !!
-!! Reúne o que os caps repetiam, cada um com a sua cópia:
+!! Reúne o que é comum aos caps:
 !!
 !!  - cap_initialize_p0: fase 0 da inicialização, que restringe as fases do
 !!    componente ao protocolo IPDv03. O mediador e os caps do MOM6, do SIS2,
@@ -18,8 +18,6 @@
 !! A obtenção do estado interno continua em cada cap: o tipo do invólucro é
 !! próprio de cada componente, e ESMF_GridCompGetInternalState exige o tipo
 !! concreto.
-!!
-!! Reunido dos caps sem mudar cálculos (R-FASE9-01 e R-FASE9-04).
 
 module cap_common_mod
 

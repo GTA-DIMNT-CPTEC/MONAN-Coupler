@@ -74,7 +74,7 @@ module coupler_log_mod
 
 contains
 
-  !> Nível pedido em cfg_log_level (já validado e em minúsculas pela
+  !> @brief Nível pedido em cfg_log_level (já validado e em minúsculas pela
   !! leitura do nuopc.input); um valor desconhecido conta como info.
   integer function requested_level()
     select case (trim(cfg_log_level))
@@ -87,7 +87,7 @@ contains
     end select
   end function requested_level
 
-  !> Erro que para a rodada: gravado em qualquer nível, no log do ESMF com
+  !> @brief Erro que para a rodada: gravado em qualquer nível, no log do ESMF com
   !! severidade ERROR e na saída padrão como "ERRO <comp>: <texto>".
   !! @param[in] comp  marca do componente (COMP_*)
   !! @param[in] msg   texto da mensagem
@@ -99,7 +99,7 @@ contains
     flush(6)
   end subroutine log_error
 
-  !> Aviso: gravado em qualquer nível, com severidade WARNING.
+  !> @brief Aviso: gravado em qualquer nível, com severidade WARNING.
   !! @param[in] comp  marca do componente (COMP_*)
   !! @param[in] msg   texto da mensagem
   subroutine log_warning(comp, msg)
@@ -108,7 +108,7 @@ contains
     call ESMF_LogWrite(comp//': '//msg, ESMF_LOGMSG_WARNING)
   end subroutine log_warning
 
-  !> Informação: gravada nos níveis info e debug.
+  !> @brief Informação: gravada nos níveis info e debug.
   !! @param[in] comp  marca do componente (COMP_*)
   !! @param[in] msg   texto da mensagem
   subroutine log_info(comp, msg)
@@ -118,7 +118,7 @@ contains
       call ESMF_LogWrite(comp//': '//msg, ESMF_LOGMSG_INFO)
   end subroutine log_info
 
-  !> Depuração: gravada só no nível debug.
+  !> @brief Depuração: gravada só no nível debug.
   !! @param[in] comp  marca do componente (COMP_*)
   !! @param[in] msg   texto da mensagem
   subroutine log_debug(comp, msg)
@@ -128,7 +128,7 @@ contains
       call ESMF_LogWrite(comp//': '//msg, ESMF_LOGMSG_INFO)
   end subroutine log_debug
 
-  !> Linha do relatório de acoplamento: "CPL-REL: <msg>", gravada em
+  !> @brief Linha do relatório de acoplamento: "CPL-REL: <msg>", gravada em
   !! qualquer nível, com severidade INFO.
   !! @param[in] msg  texto da linha, sem o prefixo
   subroutine log_report(msg)
@@ -136,7 +136,7 @@ contains
     call ESMF_LogWrite(REPORT_PREFIX//msg, ESMF_LOGMSG_INFO)
   end subroutine log_report
 
-  !> Verdadeiro se log_level='debug'; protege diagnósticos caros.
+  !> @brief Verdadeiro se log_level='debug'; protege diagnósticos caros.
   logical function log_debug_enabled()
     log_debug_enabled = requested_level() >= LEVEL_DEBUG
   end function log_debug_enabled

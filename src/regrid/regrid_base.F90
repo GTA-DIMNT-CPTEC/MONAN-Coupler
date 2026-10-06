@@ -18,7 +18,7 @@
 !! weights_regridder_t (regrid_weights_base.F90), como o modelo
 !! regrid_idw.F90.
 !!
-!! Opções em texto (spec%options, desde a R-FASE11-23): pares chave=valor
+!! Opções em texto (spec%options): pares chave=valor
 !! separados por vírgula, por exemplo 'expoente=2,vizinhos=4'. Cada esquema
 !! lê as suas com regrid_option_real e regrid_option_int e recusa chaves que
 !! não conhece com regrid_options_check. Os esquemas esmf, weights_file e
@@ -106,6 +106,8 @@ module regrid_base_mod
   end type regridder_t
 
   abstract interface
+    !> Prepara a interpolação de src para dst (pesos, route handle) e marca
+    !! this%ready e this%method_used; rc = ESMF_SUCCESS se o esquema serve.
     subroutine setup_i(this, src, dst, rc)
       import :: regridder_t, ESMF_Field
       class(regridder_t), intent(inout) :: this
@@ -113,6 +115,8 @@ module regrid_base_mod
       integer,            intent(out)   :: rc
     end subroutine setup_i
 
+    !> Interpola os valores de src para dst; zero_total zera todo o destino
+    !! antes (zeroregion total), senão só os pontos alcançados.
     subroutine execute_i(this, src, dst, zero_total, rc)
       import :: regridder_t, ESMF_Field
       class(regridder_t), intent(inout) :: this
@@ -121,6 +125,7 @@ module regrid_base_mod
       integer,            intent(out)   :: rc
     end subroutine execute_i
 
+    !> Libera os recursos de setup; this%ready volta a .false.
     subroutine release_i(this, rc)
       import :: regridder_t
       class(regridder_t), intent(inout) :: this
@@ -136,7 +141,7 @@ module regrid_base_mod
 
 contains
 
-  !> Interpola src -> dst. zero_total, se presente, substitui
+  !> @brief Interpola src -> dst. zero_total, se presente, substitui
   !! spec%zero_total nesta chamada. O preenchimento por vizinhança
   !! (spec%fill) é feito por regrid_manager%apply, com as opções da rota
   !! pedida, mesmo quando ela usa a interpolação da reserva.
@@ -159,7 +164,7 @@ contains
     end if
   end subroutine apply
 
-  !> Preenchimento por vizinhança de um campo 2D local (sem troca de halo:
+  !> @brief Preenchimento por vizinhança de um campo 2D local (sem troca de halo:
   !! cada PET enxerga apenas os seus pontos).
   !! n_left (opcional) devolve quantos pontos receberam o valor fixo vfill;
   !! n_invalid (opcional), quantos estavam fora da faixa válida antes do
@@ -222,7 +227,7 @@ contains
     where (.not. valid) arr = opt%vfill
   end subroutine neighbor_fill
 
-  !> Valor real da opção chave em options, ou padrao se ela não aparece.
+  !> @brief Valor real da opção key em options, ou default_val se ela não aparece.
   !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um número.
   subroutine regrid_option_real(options, key, default_val, val, rc)
     character(len=*),   intent(in)  :: options, key
@@ -246,7 +251,7 @@ contains
     end if
   end subroutine regrid_option_real
 
-  !> Valor inteiro da opção chave em options, ou padrao se ela não aparece.
+  !> @brief Valor inteiro da opção key em options, ou default_val se ela não aparece.
   !! rc = ESMF_FAILURE (com mensagem no log) se o valor não é um inteiro.
   subroutine regrid_option_int(options, key, default_val, val, rc)
     character(len=*), intent(in)  :: options, key
@@ -274,7 +279,7 @@ contains
     end if
   end subroutine regrid_option_int
 
-  !> Confere que toda chave de options está em conhecidas e tem valor.
+  !> @brief Confere que toda chave de options está em known e tem valor.
   !! rc = ESMF_FAILURE (com mensagem no log) na primeira que não está.
   subroutine regrid_options_check(options, known, rc)
     character(len=*), intent(in)  :: options
@@ -310,7 +315,7 @@ contains
     end do
   end subroutine regrid_options_check
 
-  !> Texto do valor da chave em options ('chave=valor', separados por
+  !> @brief Texto do valor da chave key em options ('chave=valor', separados por
   !! vírgula; espaços em volta são ignorados). Vale a primeira ocorrência.
   subroutine option_text(options, key, text, found)
     character(len=*), intent(in)  :: options, key

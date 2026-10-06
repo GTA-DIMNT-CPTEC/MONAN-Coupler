@@ -1,13 +1,14 @@
 !> @file cpl_map.F90
 !! @brief Mapa de acoplamento: tabelas EXCHANGES e ROUTES e as consultas sobre elas.
 !!
-!! O mapa descreve, num lugar só, o acoplamento que o código faz hoje (tag
-!! fase11-01-validada): que campo vai de qual malha para qual, por qual meio
-!! e em que configuração. Ele não comanda nada: nenhum componente o usa
-!! ainda. As etapas seguintes da fase 11 passam a conferi-lo na execução
-!! (R-FASE11-03) e a gerar dele as listas de campos (R-FASE11-05 em diante).
-!! Arquitetura em docs/arquitetura-acoplamento.md; versão legível em
-!! docs/acoplamento.md, gerada por tools/dev/mapa-acoplamento.py.
+!! O mapa descreve, num lugar só, o acoplamento: que campo vai de qual
+!! malha para qual, por qual meio e em que configuração. Dele saem as
+!! listas de campos que o mediador e os caps anunciam (cpl_arrivals,
+!! cpl_exports), o método de cada campo dos conectores (cpl_write_methods,
+!! em cpl_check) e as rotas do mediador; na inicialização, cpl_check confere
+!! o que o NUOPC montou contra ele. Arquitetura em
+!! docs/arquitetura-acoplamento.md; versão legível em docs/acoplamento.md,
+!! gerada por tools/dev/mapa-acoplamento.py.
 !!
 !! Pontos. Origem e destino de uma troca são escritos 'COMPONENTE@malha':
 !!   ATM@mpas      células do MONAN-A (malha Voronoi, não é objeto ESMF)
@@ -19,11 +20,10 @@
 !!   MED@atm_med   grade regular de 1 grau do mediador, malha da física bulk
 !!   MED@ocn_med   grade tripolar do mediador
 !!
-!! Meios:
+!! Meios (coluna via):
 !!   'conector'  conector NUOPC entre dois componentes; a interpolação é a
 !!               da coluna method, que o driver escreve na CplList como
-!!               remapmethod (desde a R-FASE11-22; antes, o conector usava
-!!               o seu padrão, bilinear, sem a opção escrita);
+!!               remapmethod;
 !!   'cap'       código próprio do cap, dentro do mesmo componente;
 !!   nome de rota, de ROUTES: interpolação do mediador por regrid_manager_t.
 !!
@@ -34,8 +34,7 @@
 !! leva o campo exportado, que chegou de MED@atm_med pela rota 'atm2ocn'.
 !!
 !! Método (coluna method): só nas trocas por conector, um dos valores de
-!! CONNECTOR_METHODS; vazio nas demais. Hoje todas usam 'bilinear', o padrão
-!! do conector NUOPC, que era o que valia antes de a opção ser escrita.
+!! CONNECTOR_METHODS; vazio nas demais. Hoje todas usam 'bilinear'.
 !!
 !! Condições (coluna when): lista separada por vírgulas; a troca vale se
 !! todas as condições da lista valem. Lista vazia: vale sempre.
@@ -66,10 +65,10 @@
 !! GAPS: campos que um componente anuncia na importação e que, numa
 !! configuração, não têm origem no mapa. São conhecidas e não são erro: a
 !! conferência do mapa (cpl_check) as registra como aviso, e não como
-!! diferença, que interrompe a rodada desde a R-FASE11-25. O cap
-!! atmosférico, porém, interrompe a rodada por conta própria quando um campo
-!! que ele importa não está conectado (verify_import_connected), o que
-!! acontece nas lacunas do MONAN-A.
+!! diferença, que interrompe a rodada. O cap atmosférico, porém, interrompe
+!! a rodada por conta própria quando um campo que ele importa não está
+!! conectado (verify_import_connected), o que acontece nas lacunas do
+!! MONAN-A.
 !!
 !! EXPORTS: o que cada modelo exporta (anuncia no exportState) em cada
 !! ponto, consumido ou não, na ordem do anúncio do cap. Toda troca por
@@ -78,20 +77,21 @@
 !! A exportação do mediador não está nesta tabela: ela é o que chega a
 !! MED@ocn_med pelas rotas atm2ocn e atm2ocn_ice (ver cpl_arrivals).
 !!
-!! ROUTES: uma linha por interpolação do mediador. Toda rota tem as mesmas
-!! quatro etapas, na mesma ordem; a coluna com o valor padrão desliga a
-!! etapa (ou, no caso de no_value, deixa o comportamento padrão do ESMF):
-!!   1. preparar    mascara (campo que dá a máscara da origem, gravada na
-!!                  grade antes da criação) e no_value, o que acontece com
-!!                  os pontos de destino que a rota não alcança:
-!!                  'zerar' (zeroregion total do ESMF), 'manter' (ficam
-!!                  como estavam) ou 'sentinela' (recebem -999 antes da
+!! ROUTES: uma linha por interpolação do mediador, de src para dst (malhas).
+!! Toda rota tem as mesmas quatro etapas, na mesma ordem; a coluna com o
+!! valor padrão desliga a etapa (ou, no caso de no_value, deixa o
+!! comportamento padrão do ESMF):
+!!   1. preparar    mask (campo que dá a máscara da origem, gravada na grade
+!!                  antes da criação) e no_value, o que acontece com os
+!!                  pontos de destino que a rota não alcança: 'zerar'
+!!                  (zeroregion total do ESMF), 'manter' (ficam como
+!!                  estavam) ou 'sentinela' (recebem -999 antes da
 !!                  interpolação e ficam com ele, fora de qualquer faixa
 !!                  válida, como em med_ice e med_export)
-!!   2. interpolar  metodos (em ordem de preferência), reserva (rota usada se
-!!                  nenhum método servir) e esquema (padrão 'esmf', trocável
-!!                  no grupo &nuopc_regrid do nuopc.input)
-!!   3. completar   completar: preenchimento por vizinhança (regrid_fill_t)
+!!   2. interpolar  methods (em ordem de preferência), fallback (rota usada
+!!                  se nenhum método servir) e scheme (padrão 'esmf',
+!!                  trocável no grupo &nuopc_regrid do nuopc.input)
+!!   3. completar   fill: preenchimento por vizinhança (regrid_fill_t)
 !!   4. limitar     nan_to, o valor que substitui NaN no destino; CPL_UNSET
 !!                  desliga
 !! E a coluna create, que não é etapa: o momento em que a rota é criada.
@@ -175,14 +175,14 @@ module cpl_map_mod
     character(len=CPL_METHOD_LEN) :: method = ''  !< só nas trocas por conector
   end type cpl_exchange_t
 
-  !> Um campo que um modelo exporta num ponto, na configuração quando.
+  !> Um campo que um modelo exporta num ponto, nas configurações de when.
   type :: cpl_export_t
     character(len=CPL_NAME_LEN)   :: field  = ''
     character(len=CPL_POINT_LEN)  :: point  = ''
     character(len=CPL_WHEN_LEN) :: when = ''
   end type cpl_export_t
 
-  !> Um campo importado num ponto que fica sem origem na configuração quando.
+  !> Um campo importado num ponto que fica sem origem nas configurações de when.
   type :: cpl_gap_t
     character(len=CPL_NAME_LEN)   :: field  = ''
     character(len=CPL_POINT_LEN)  :: point  = ''
@@ -213,11 +213,9 @@ module cpl_map_mod
     logical :: sis2        = .true.
   end type cpl_config_t
 
-  !--------------------------------------------------------------------------
   ! EXCHANGES
-  !--------------------------------------------------------------------------
   type(cpl_exchange_t), parameter :: EXCHANGES(*) = [                                                                            &
-    !           campo             de              para            meio                quando                    metodo
+    !           field             src             dst             via                 when                      method
     ! 1. MONAN-A: das células para a grade do cap (mpas_cell_binning) e ao mediador
     cpl_exchange_t('Sa_u10m_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
     cpl_exchange_t('Sa_v10m_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
@@ -389,11 +387,9 @@ module cpl_map_mod
     cpl_exchange_t('Sf_albedo',      'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
     cpl_exchange_t('Sx_omask',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   '') ]
 
-  !--------------------------------------------------------------------------
   ! EXPORTS
-  !--------------------------------------------------------------------------
   type(cpl_export_t), parameter :: EXPORTS(*) = [                               &
-    !             campo             ponto           quando
+    !             field             point           when
     ! MONAN-A (mpas_cap_MONAN)
     cpl_export_t('Sa_pslv_mpas',   'ATM@atm_cap',  'mpas'),                     &
     cpl_export_t('Sa_tbot_mpas',   'ATM@atm_cap',  'mpas'),                     &
@@ -442,11 +438,9 @@ module cpl_map_mod
     cpl_export_t('Si_anidf_sis2',  'ICE@ice_sis2', 'sis2'),                     &
     cpl_export_t('Si_t_sis2',      'ICE@ice_sis2', 'sis2') ]
 
-  !--------------------------------------------------------------------------
   ! GAPS
-  !--------------------------------------------------------------------------
   type(cpl_gap_t), parameter :: GAPS(*) = [                                                            &
-    !            campo        ponto          quando                  motivo
+    !            field        point          when                    reason
     ! O mediador anuncia So_omask também com o DOCN, que não o exporta
     cpl_gap_t('So_omask',  'MED@ocn_med', 'docn',                 'o DOCN nao exporta So_omask'),       &
     ! Contorno direto do DOCN (use_med_to_mpas=.false.; com o MOM6 é
@@ -456,10 +450,8 @@ module cpl_map_mod
     cpl_gap_t('Sf_albedo', 'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sf_albedo'),    &
     cpl_gap_t('Sx_omask',  'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_omask') ]
 
-  !--------------------------------------------------------------------------
   ! ROUTES
-  !--------------------------------------------------------------------------
-  ! Criação e uso hoje (Apêndice A de docs/historico/arquitetura-acoplamento-fase11.md):
+  ! Onde cada rota é criada e usada:
   !   atm2ocn           idc_create_routes (med_init), ou antes em RegridOrCopy
   !                     (med_cap_methods), se a exportação vier primeiro;
   !                     RegridOrCopy troca NaN por zero depois da interpolação
@@ -509,7 +501,7 @@ module cpl_map_mod
 
 contains
 
-  !> Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
+  !> @brief Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
   !! nuopc.input (coupler_config).
   function cpl_current_config() result(cfg)
     type(cpl_config_t) :: cfg
@@ -520,7 +512,7 @@ contains
     cfg%sis2        = cfg_use_sis2_dynamic
   end function cpl_current_config
 
-  !> Combinação de chaves aceita por config_read: não recusada na tabela
+  !> @brief Combinação de chaves aceita por config_read: não recusada na tabela
   !! COUPLER_MODES (coupler_config), suportada ou não validada.
   pure logical function cpl_config_is_valid(cfg) result(ok)
     type(cpl_config_t), intent(in) :: cfg
@@ -530,18 +522,18 @@ contains
     ok = COUPLER_MODES(k)%status /= 'recusada'
   end function cpl_config_is_valid
 
-  !> Campos que chegam a um ponto, na ordem de EXCHANGES e sem repetição.
+  !> @brief Campos que chegam a um ponto, na ordem de EXCHANGES e sem repetição.
   !!
   !! A troca conta se vale em alguma configuração válida que concorda com
-  !! cfg nas chaves listadas em chaves ('datm', 'docn', 'med_to_mpas',
+  !! cfg nas chaves listadas em keys ('datm', 'docn', 'med_to_mpas',
   !! 'sis2', separadas por vírgula; '' deixa todas livres).
   !!
-  !! @param[in]  ponto         'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
+  !! @param[in]  point         'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
   !! @param[in]  by_connector  .true.: chegadas por conector (importação);
   !!                           .false.: por rota ou cap (dentro do componente)
   !! @param[in]  cfg           configuração atual
-  !! @param[in]  chaves        chaves de cfg que o componente consulta
-  !! @param[out] nomes         campos, na ordem de EXCHANGES
+  !! @param[in]  keys          chaves de cfg que o componente consulta
+  !! @param[out] names         campos, na ordem de EXCHANGES
   subroutine cpl_arrivals(point, by_connector, cfg, keys, names)
     character(len=*),                         intent(in)  :: point
     logical,                                  intent(in)  :: by_connector
@@ -561,13 +553,13 @@ contains
     end do
   end subroutine cpl_arrivals
 
-  !> Campos que um modelo exporta num ponto, na ordem de EXPORTS e sem
+  !> @brief Campos que um modelo exporta num ponto, na ordem de EXPORTS e sem
   !! repetição, com a mesma regra de chaves de cpl_arrivals.
   !!
-  !! @param[in]  ponto   'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
+  !! @param[in]  point   'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
   !! @param[in]  cfg     configuração atual
-  !! @param[in]  chaves  chaves de cfg que o componente consulta
-  !! @param[out] nomes   campos, na ordem de EXPORTS
+  !! @param[in]  keys    chaves de cfg que o componente consulta
+  !! @param[out] names   campos, na ordem de EXPORTS
   subroutine cpl_exports(point, cfg, keys, names)
     character(len=*),                         intent(in)  :: point
     type(cpl_config_t),                       intent(in)  :: cfg
@@ -585,7 +577,7 @@ contains
     end do
   end subroutine cpl_exports
 
-  !> O ponto p é o ponto pedido ('COMPONENTE@malha' exato, ou só o componente).
+  !> @brief O ponto p é o ponto pedido ('COMPONENTE@malha' exato, ou só o componente).
   pure logical function point_matches(p, requested) result(ok)
     character(len=*), intent(in) :: p, requested
     if (index(requested, '@') > 0) then
@@ -595,7 +587,7 @@ contains
     end if
   end function point_matches
 
-  !> A lista de condições quando vale em alguma configuração válida que
+  !> @brief A lista de condições when vale em alguma configuração válida que
   !! concorda com cfg nas chaves listadas.
   logical function applies_in_some(when, cfg, keys) result(applies)
     character(len=*),   intent(in) :: when, keys
@@ -618,7 +610,7 @@ contains
     end do
   end function applies_in_some
 
-  !> c e cfg têm o mesmo valor em cada chave listada.
+  !> @brief c e cfg têm o mesmo valor em cada chave listada.
   pure logical function agrees(c, cfg, keys) result(ok)
     type(cpl_config_t), intent(in) :: c, cfg
     character(len=*),   intent(in) :: keys
@@ -638,8 +630,8 @@ contains
     end do
   end function agrees
 
-  !> O campo importado no ponto é uma lacuna conhecida na configuração cfg
-  !! (tabela GAPS). ponto é 'COMPONENTE@malha' ou só o componente.
+  !> @brief O campo importado no point é uma lacuna conhecida na configuração cfg
+  !! (tabela GAPS). point é 'COMPONENTE@malha' ou só o componente.
   pure logical function cpl_is_gap(cfg, field, point) result(is_gap)
     type(cpl_config_t), intent(in) :: cfg
     character(len=*),   intent(in) :: field, point
@@ -655,7 +647,7 @@ contains
     end do
   end function cpl_is_gap
 
-  !> Verdadeiro se a troca vale na configuração cfg (todas as condições da
+  !> @brief Verdadeiro se a troca vale na configuração cfg (todas as condições da
   !! coluna when valem; lista vazia vale sempre).
   pure logical function cpl_exchange_applies(xchg, cfg) result(applies)
     type(cpl_exchange_t), intent(in) :: xchg
@@ -673,9 +665,9 @@ contains
     end do
   end function cpl_exchange_applies
 
-  !> Há troca por conector, válida em cfg, do componente de para o
+  !> @brief Há troca por conector, válida em cfg, do componente de para o
   !! componente para ('ATM', 'OCN', 'ICE', 'MED')? É o que decide se o
-  !! driver registra o conector de para para (desde a R-FASE11-21).
+  !! driver registra o conector de para para.
   pure logical function cpl_connector_applies(src, dst, cfg) result(applies)
     character(len=*),   intent(in) :: src, dst
     type(cpl_config_t), intent(in) :: cfg
@@ -692,16 +684,16 @@ contains
     end do
   end function cpl_connector_applies
 
-  !> Método da troca por conector do campo, do componente de para o
+  !> @brief Método da troca por conector do campo, do componente de para o
   !! componente para (coluna method), ou vazio se o mapa não tem essa troca.
   !! Não depende da configuração: as trocas por conector do mesmo campo entre
   !! os mesmos dois componentes têm o mesmo método em todas as linhas de
   !! EXCHANGES (conferido por tests/unit/test_cpl_map.F90). É o método que o
   !! driver escreve na CplList (cpl_write_methods, em cpl_check).
   !!
-  !! @param[in] campo  nome do campo (StandardName)
-  !! @param[in] de     componente de origem ('ATM', 'OCN', 'ICE', 'MED')
-  !! @param[in] para   componente de destino
+  !! @param[in] field  nome do campo (StandardName)
+  !! @param[in] src    componente de origem ('ATM', 'OCN', 'ICE', 'MED')
+  !! @param[in] dst    componente de destino
   pure function cpl_connector_method(field, src, dst) result(method)
     character(len=*), intent(in) :: field, src, dst
     character(len=CPL_METHOD_LEN) :: method
@@ -718,7 +710,7 @@ contains
     end do
   end function cpl_connector_method
 
-  !> Conectores que o driver registra na configuração cfg: ordem(1:n) são os
+  !> @brief Conectores que o driver registra na configuração cfg: ordem(1:n) são os
   !! índices em CONNECTOR_SRC/CONNECTOR_DST, na ordem de registro. O
   !! componente atmosférico registrado é sempre o MONAN-A, também com
   !! use_datm (o DATM está no mapa, mas o driver não o registra); por isso o
@@ -726,7 +718,7 @@ contains
   !! por conector válida que não tem lugar na lista (0 se não há).
   !!
   !! @param[in]  cfg     configuração (cpl_current_config)
-  !! @param[out] ordem   índices dos conectores registrados
+  !! @param[out] order   índices dos conectores registrados
   !! @param[out] n       quantos
   !! @param[out] t_unlisted índice em EXCHANGES de um conector sem lugar, ou 0
   pure subroutine cpl_driver_connectors(cfg, order, n, t_unlisted)
@@ -748,7 +740,7 @@ contains
     end do
   end subroutine cpl_driver_connectors
 
-  !> Primeira troca por conector válida em cfg cujo par de componentes não
+  !> @brief Primeira troca por conector válida em cfg cujo par de componentes não
   !! está na lista (des(k), paras(k)); 0 se todas estão. Serve ao driver
   !! para recusar um conector do mapa que ele não sabe registrar.
   pure integer function cpl_unlisted_connector(srcs, dsts, cfg) result(t_unlisted)
@@ -773,7 +765,7 @@ contains
     end do
   end function cpl_unlisted_connector
 
-  !> Verdadeiro se todas as condições da lista estão em CONDITIONS.
+  !> @brief Verdadeiro se todas as condições da lista estão em CONDITIONS.
   pure logical function cpl_valid_conditions(when) result(ok)
     character(len=*), intent(in) :: when
     character(len=CPL_WHEN_LEN) :: rest, cond
@@ -789,7 +781,7 @@ contains
     end do
   end function cpl_valid_conditions
 
-  !> Posição da rota nome em ROUTES, ou 0.
+  !> @brief Posição da rota nome em ROUTES, ou 0.
   pure integer function cpl_route_index(name) result(k)
     character(len=*), intent(in) :: name
     integer :: i
@@ -803,7 +795,7 @@ contains
     end do
   end function cpl_route_index
 
-  !> Posição da malha nome em GRIDS, ou 0.
+  !> @brief Posição da malha nome em GRIDS, ou 0.
   pure integer function cpl_grid_index(name) result(k)
     character(len=*), intent(in) :: name
     integer :: i
@@ -817,7 +809,7 @@ contains
     end do
   end function cpl_grid_index
 
-  !> Componente de um ponto 'COMPONENTE@malha' ('' se não houver '@').
+  !> @brief Componente de um ponto 'COMPONENTE@malha' ('' se não houver '@').
   pure function cpl_point_component(point) result(comp)
     character(len=*), intent(in) :: point
     character(len=CPL_POINT_LEN) :: comp
@@ -828,7 +820,7 @@ contains
     if (p > 1) comp = point(1:p-1)
   end function cpl_point_component
 
-  !> Malha de um ponto 'COMPONENTE@malha' ('' se não houver '@').
+  !> @brief Malha de um ponto 'COMPONENTE@malha' ('' se não houver '@').
   pure function cpl_point_grid(point) result(grid_name)
     character(len=*), intent(in) :: point
     character(len=CPL_POINT_LEN) :: grid_name
@@ -839,7 +831,7 @@ contains
     if (p > 0) grid_name = point(p+1:)
   end function cpl_point_grid
 
-  !> Tira a primeira condição da lista resto (separada por vírgula) e a
+  !> @brief Tira a primeira condição da lista resto (separada por vírgula) e a
   !! devolve em cond; resto fica com as demais.
   pure subroutine next_condition(rest, cond)
     character(len=CPL_WHEN_LEN), intent(inout) :: rest
@@ -856,7 +848,7 @@ contains
     end if
   end subroutine next_condition
 
-  !> Uma condição da coluna when, na configuração cfg.
+  !> @brief Uma condição da coluna when, na configuração cfg.
   pure logical function condition_holds(cond, cfg) result(applies)
     character(len=*),   intent(in) :: cond
     type(cpl_config_t), intent(in) :: cfg

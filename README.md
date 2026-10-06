@@ -127,7 +127,7 @@ Modelo dos cabeçalhos (Doxygen). O módulo começa por `!> @file nome.F90`, `!!
   subroutine nome(...)
 ```
 
-As rotinas internas (`contains` dentro de outra rotina) e as funções curtas podem ter só a linha `!>`.
+As rotinas internas (`contains` dentro de outra rotina) e as funções curtas podem ter só a linha `!>`. O nome depois de `@param` é o do argumento, como está na declaração da rotina.
 
 O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
 

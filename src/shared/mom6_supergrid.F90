@@ -1,13 +1,23 @@
 !> @file mom6_supergrid.F90
 !! @brief Grade T do MOM6 lida do supergrid FRE-NCtools (ocean_hgrid.nc).
 !!
-!! Usado pelo mediador e pelo cap do SIS2, que vivem na mesma grade tripolar do
-!! MOM6. As duas cópias que existiam (MED_* em MED_cap.F90 e ICE_* em
-!! sis_cap_MONAN.F90) tinham a mesma lógica; só as mensagens de log diferiam,
-!! e passam a usar a marca do componente dada em 'comp' (coupler_log_mod).
+!! Usado pelo mediador e pelo cap do SIS2, que vivem na mesma grade tripolar
+!! do MOM6; as mensagens de log levam a marca do componente dada em 'comp'
+!! (coupler_log_mod).
+!!
+!! Por que ler o supergrid: com o MOM6, a grade do oceano no mediador tem de
+!! ser a grade T real do modelo (tripolar, não uniforme, com NIGLOBAL x
+!! NJGLOBAL do MOM_input), e não uma grade regular. Se os dois lados do
+!! conector OCN->MED forem geometricamente diferentes, o NUOPC interpola
+!! entre eles com as coordenadas erradas do mediador, e todos os campos
+!! OCN->MED (So_t, So_u, So_v, So_omask) ficam deslocados, sobretudo na
+!! costa. As rotinas daqui são chamadas em InitializeRealize, antes de
+!! qualquer ESMF_FieldRegridStore, para que todos os campos OCN<->MED
+!! herdem a geometria correta.
 !!
 !! Supergrid: dimensões nx, ny = 2 × grade T; centros T nos índices pares
 !! (2i, 2j); cantos nos índices ímpares (2i-1, 2j-1).
+
 module mom6_supergrid_mod
 
   use ESMF
@@ -20,39 +30,10 @@ module mom6_supergrid_mod
 
 contains
 
-
-
-  !============================================================================
-  !
-  ! CAUSA-RAIZ: a grade "ocn_grid" que o MEDIADOR usa internamente para o
-  ! regrid OCN<->ATM era construida com as dimensoes do DOCN/OISST
-  ! (cfg_docn_nx x cfg_docn_ny = 1440x720) e coordenadas lat/lon UNIFORMES,
-  ! mesmo quando o componente OCN real e' o MOM6+SIS2 dinamico (grade
-  ! tripolar, NAO uniforme). Em producao (cfg_use_docn=.false.) a grade T
-  ! real do MOM6 (NIGLOBAL x NJGLOBAL no MOM_input) e' MUITO menor e
-  ! geometricamente diferente (ex.: 180x155 medido em campo vs 1440x720
-  ! assumido pelo mediador). Como os dois lados (OCN real, MED fabricado)
-  ! sao objetos ESMF geometricamente distintos, o NUOPC monta um regrid
-  ! AUTOMATICO entre eles usando as coordenadas erradas do MED ? isso
-  ! contamina todos os campos OCN->MED (So_t, So_u, So_v, So_omask) com um
-  ! deslocamento geografico sistematico, mais visivel exatamente na costa
-  ! (onde pequenos erros de posicao cruzam a fronteira terra/mar).
-  !
-  ! Por isso, quando cfg_use_docn=.false. (MOM6 ativo), a grade T real e' lida
-  ! diretamente do supergrid FRE-NCtools (ocean_hgrid.nc, mesmo arquivo
-  ! apontado por mesh_ocn em nuopc.input): dimensoes = nx/ny do arquivo / 2;
-  ! coordenadas T = pontos pares do supergrid (indice 2*i, 2*j). Ambas as
-  ! subrotinas abaixo sao chamadas a partir de InitializeRealize, ANTES de
-  ! qualquer ESMF_FieldRegridStore, para que TODOS os campos OCN<->MED
-  ! herdem a geometria correta (nao so' o SST mascarado).
-  !============================================================================
-
-  !----------------------------------------------------------------------------
-  ! mom6_supergrid_dims — le as dimensoes do supergrid (variaveis 'nx'/'ny'
-  ! de ocean_hgrid.nc) e devolve a grade T real do MOM6 (NIGLOBAL x NJGLOBAL),
-  ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
-  ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
-  !----------------------------------------------------------------------------
+  !> @brief Dimensões da grade T do MOM6 (NIGLOBAL x NJGLOBAL), metade das do
+  !! supergrid (variáveis 'nx'/'ny' de ocean_hgrid.nc) em cada eixo, pela
+  !! convenção do FRE-NCtools/make_hgrid (o supergrid inclui vértices e
+  !! centros das células).
   subroutine mom6_supergrid_dims(filename, ni, nj, rc, comp)
     character(len=*), intent(in)  :: filename
     integer,           intent(out) :: ni, nj
@@ -103,14 +84,11 @@ contains
     nj = ny_super / 2
   end subroutine mom6_supergrid_dims
 
-  !----------------------------------------------------------------------------
-  ! mom6_supergrid_tcoords - preenche coordX/coordY (bounds em indice GLOBAL,
-  ! pois ocn_grid usa ESMF_INDEX_GLOBAL) com as coordenadas T REAIS lidas do
-  ! supergrid ocean_hgrid.nc via hyperslab com stride=2 (pula os pontos de
-  ! vertice/aresta do supergrid, mantendo so' os centros das celulas T).
-  ! Convencao FRE-NCtools: celula T global (i,j), i=1..NIGLOBAL, j=1..NJGLOBAL,
-  ! esta no indice de supergrid (2*i, 2*j), 1-based.
-  !----------------------------------------------------------------------------
+  !> @brief Preenche coordX/coordY (bounds em índice GLOBAL, pois a grade usa
+  !! ESMF_INDEX_GLOBAL) com as coordenadas T do supergrid, lidas com
+  !! stride=2 (só os centros das células T). Convenção FRE-NCtools: a célula
+  !! T global (i,j), i=1..NIGLOBAL, j=1..NJGLOBAL, está no índice de
+  !! supergrid (2*i, 2*j), base 1.
   subroutine mom6_supergrid_tcoords(filename, coordX, coordY, rc, comp)
     character(len=*),    intent(in)    :: filename
     real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
@@ -126,7 +104,7 @@ contains
     real(ESMF_KIND_R8) :: y_col_max
 
     pfx = COMP_OCN; if (present(comp)) pfx = comp
-    ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
+    ! Ponto T (i,j) [global, 1-based] = vértice de supergrid (2*i, 2*j).
     call read_supergrid_points(filename, 0, ' para ler coordenadas T reais do MOM6', &
       '"x" (lon)', '"y" (lat)', pfx, coordX, coordY, was_read, rc)
     if (.not. was_read) return
@@ -140,9 +118,9 @@ contains
     ! lido de fato. Fora do nível de depuração, nem é calculado.
     if (.not. log_debug_enabled()) return
     ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
-    ! (exceto perto do fold tripolar); coordY o oposto. Se coordX nao variar
-    ! com i, a longitude "colapsou" e o regrid produz bandas puramente
-    ! zonais (sem estrutura leste-oeste) ? exatamente o sintoma relatado.
+    ! (exceto perto da dobra tripolar); coordY o oposto. Se coordX não
+    ! variar com i, a longitude "colapsou", e o regrid produz bandas
+    ! puramente zonais (sem estrutura leste-oeste).
       if (ni_local >= 2 .and. nj_local >= 1) then
         x_row_min = minval(coordX(:, j1))
         x_row_max = maxval(coordX(:, j1))
@@ -164,24 +142,17 @@ contains
       call log_debug(trim(pfx), trim(dbgmsg))
   end subroutine mom6_supergrid_tcoords
 
-  !----------------------------------------------------------------------------
-  ! mom6_supergrid_corners — le os
-  ! VERTICES (cantos) das celulas T do MOM6, necessarios para regrid
-  ! conservativo (ESMF_REGRIDMETHOD_CONSERVE), que calcula peso por
-  ! sobreposicao de AREA entre celulas fonte e destino — exige os 4 cantos
-  ! de cada celula, nao so' o centro.
-  !
-  ! Mesma leitura de mom6_supergrid_tcoords (mesmo arquivo ocean_hgrid.nc,
-  ! mesmo stride=2), com UM offset de indice diferente: celula T (i,j) esta
-  ! no vertice de supergrid (2*i, 2*j); o canto inferior-esquerdo dessa
-  ! MESMA celula esta em (2*i-1, 2*j-1). Como o canto (i,j) e' compartilhado
-  ! pelas celulas T vizinhas, um array de cantos (ni+1)x(nj+1) cobre uma
-  ! grade (ni)x(nj) de celulas por completo — o proprio ESMF ja' aloca o
-  ! array de cantos com o tamanho certo (incluindo periodicidade) quando
-  ! ESMF_GridAddCoord(staggerloc=CORNER) e' chamado; esta rotina so' preenche
-  ! o que coordX/coordY (ja' alocados pelo ESMF) pedirem, usando lbound/ubound
-  ! deles — nao supoe o tamanho a priori.
-  !----------------------------------------------------------------------------
+  !> @brief Preenche coordX/coordY com os VÉRTICES (cantos) das células T do
+  !! MOM6, necessários ao regrid conservativo (ESMF_REGRIDMETHOD_CONSERVE),
+  !! que pesa pela sobreposição de ÁREA e exige os 4 cantos de cada célula.
+  !!
+  !! Mesma leitura de mom6_supergrid_tcoords (mesmo arquivo, stride=2), com
+  !! outro deslocamento: o canto inferior-esquerdo da célula T (i,j) está em
+  !! (2*i-1, 2*j-1). Como cada canto é compartilhado pelas células vizinhas,
+  !! um array de cantos (ni+1)x(nj+1) cobre a grade inteira; o ESMF já o
+  !! aloca no tamanho certo (incluindo a periodicidade) em
+  !! ESMF_GridAddCoord(staggerloc=CORNER), e esta rotina só preenche o que
+  !! coordX/coordY pedem, pelos seus lbound/ubound.
   subroutine mom6_supergrid_corners(filename, coordX, coordY, rc, comp)
     character(len=*),    intent(in)    :: filename
     real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
@@ -191,22 +162,21 @@ contains
     logical :: was_read
 
     pfx = COMP_OCN; if (present(comp)) pfx = comp
-    ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
-    ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
+    ! Canto (i,j) [global, 1-based, até NI+1/NJ+1] = vértice de supergrid
+    ! (2*i-1, 2*j-1). Único offset em relação ao centro (2*i, 2*j).
     call read_supergrid_points(filename, 1, ' para ler cantos (vertices) do MOM6', &
       '"x" (lon, canto)', '"y" (lat, canto)', pfx, coordX, coordY, was_read, rc)
 
   end subroutine mom6_supergrid_corners
 
-  !----------------------------------------------------------------------------
-  !> Le do supergrid os pontos (2*i-off, 2*j-off) da porcao local de
-  !! coordX/coordY (bounds em indice GLOBAL), com stride=2: off=0 da os centros
-  !! T e off=1 os cantos. A longitude e' normalizada para [0,360).
+  !> @brief Lê do supergrid os pontos (2*i-off, 2*j-off) da porção local de
+  !! coordX/coordY (bounds em índice GLOBAL), com stride=2: off=0 dá os centros
+  !! T e off=1 os cantos. A longitude é normalizada para [0,360).
   !!
-  !! lido fica .false. quando nao ha o que ler (ponteiros nao associados ou
-  !! porcao local vazia, com rc=ESMF_SUCCESS) ou quando o arquivo nao abre
-  !! ou nao tem as variaveis "x"/"y" (rc=ESMF_FAILURE). Falha na leitura de
-  !! "x" ou "y" poe rc=ESMF_FAILURE, mas lido fica .true.
+  !! was_read fica .false. quando não há o que ler (ponteiros não associados
+  !! ou porção local vazia, com rc=ESMF_SUCCESS) ou quando o arquivo não abre
+  !! ou não tem as variáveis "x"/"y" (rc=ESMF_FAILURE). Falha na leitura de
+  !! "x" ou "y" põe rc=ESMF_FAILURE, mas was_read fica .true.
   !!
   !! @param[in]  filename  supergrid ocean_hgrid.nc
   !! @param[in]  off       0 para centros T, 1 para cantos
@@ -214,9 +184,8 @@ contains
   !! @param[in]  txt_x     nome de "x" nas mensagens de falha de leitura
   !! @param[in]  txt_y     nome de "y" nas mensagens de falha de leitura
   !! @param[in]  pfx       marca do componente nas mensagens de log
-  !! @param[out] lido      se o arquivo foi aberto e lido
+  !! @param[out] was_read  se o arquivo foi aberto e lido
   !! @param[out] rc        ESMF_SUCCESS ou ESMF_FAILURE
-  !----------------------------------------------------------------------------
   subroutine read_supergrid_points(filename, off, txt_open, txt_x, txt_y, pfx, &
                                    coordX, coordY, was_read, rc)
     character(len=*),   intent(in)  :: filename
@@ -256,8 +225,8 @@ contains
     end if
     was_read = .true.
 
-    ! stride=2 le direto os pontos pedidos, sem carregar o supergrid inteiro
-    ! (2x resolucao) na memoria de cada PET.
+    ! stride=2 lê direto os pontos pedidos, sem carregar o supergrid inteiro
+    ! (2x resolução) na memória de cada PET.
     start2  = (/ 2*i1 - off, 2*j1 - off /)
     count2  = (/ ni_local, nj_local /)
     stride2 = (/ 2, 2 /)
@@ -270,9 +239,9 @@ contains
     end if
 
     ! normaliza longitude bruta do supergrid (ex.: -300..60,
-    ! convencao nativa do make_hgrid) para 0..360, mesma convencao da grade
+    ! convenção nativa do make_hgrid) para 0..360, mesma convenção da grade
     ! ATM (coordX = (i-1)*360/nx_atm). Sem isso, os dois lados do acoplamento
-    ! descrevem a mesma posicao fisica com numeros de longitude diferentes.
+    ! descrevem a mesma posição física com números de longitude diferentes.
     where (coordX < 0.0_ESMF_KIND_R8)
       coordX = coordX + 360.0_ESMF_KIND_R8
     end where

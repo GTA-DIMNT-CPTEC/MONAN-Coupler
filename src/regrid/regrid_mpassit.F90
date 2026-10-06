@@ -45,13 +45,13 @@ module regrid_mpassit_mod
 
 contains
 
-  !> Construtor usado pela lista de esquemas (regrid_schemes.F90).
+  !> @brief Construtor usado pela lista de esquemas (regrid_schemes.F90).
   subroutine new_mpassit(r)
     class(regridder_t), allocatable, intent(out) :: r
     allocate(mpassit_regridder_t :: r)
   end subroutine new_mpassit
 
-  !> Método do MPASSIT para cada classe de campo.
+  !> @brief Método do MPASSIT para cada classe de campo.
   pure function mpassit_method(field_class) result(method)
     character(len=*), intent(in) :: field_class
     character(len=16) :: method
@@ -63,6 +63,8 @@ contains
     end select
   end function mpassit_method
 
+  !> @brief setup do esquema 'mpassit': método pela classe do campo, route handle
+  !! do ESMF e lista dos pontos do destino não alcançados pela malha.
   subroutine mpassit_setup(this, src, dst, rc)
     class(mpassit_regridder_t), intent(inout) :: this
     type(ESMF_Field),           intent(inout) :: src, dst
@@ -93,6 +95,8 @@ contains
       trim(this%method_used))
   end subroutine mpassit_setup
 
+  !> @brief execute do esquema 'mpassit': interpolação do ESMF e, nos pontos não
+  !! alcançados, o valor de ausência (spec%fill%vfill).
   subroutine mpassit_execute(this, src, dst, zero_total, rc)
     class(mpassit_regridder_t), intent(inout) :: this
     type(ESMF_Field),           intent(inout) :: src, dst
@@ -113,7 +117,7 @@ contains
     end do
   end subroutine mpassit_execute
 
-  !> Converte índices sequenciais globais do destino (grade 2D) em posições
+  !> @brief Converte índices sequenciais globais do destino (grade 2D) em posições
   !! do array local deste PET. Índices de outros PETs são descartados.
   subroutine local_positions(dst, seq, pos_i, pos_j, rc)
     type(ESMF_Field),               intent(in)  :: dst
@@ -152,19 +156,21 @@ contains
     pos_j = tj(1:n)
   end subroutine local_positions
 
-  !> Monta o ESMF_Mesh das células de Voronoi locais do MPAS.
+  !> @brief Monta o ESMF_Mesh das células de Voronoi locais do MPAS.
   !!
   !! Cada PET informa as suas células e os vértices que elas usam, com
   !! identificadores globais. Um vértice compartilhado por células de PETs
   !! diferentes aparece nos dois PETs com o mesmo identificador; o ESMF
   !! decide o dono. Coordenadas em radianos, como no MPAS.
   !!
-  !! @param cellIDs         identificador global de cada célula local
-  !! @param nEdgesOnCell    número de vértices de cada célula
-  !! @param verticesOnCell  (maxEdges, nCells) identificador global dos vértices
-  !! @param lonCell,latCell centro de cada célula [rad]
-  !! @param vertexIDs       identificadores globais dos vértices disponíveis
-  !! @param lonVertex,latVertex coordenadas desses vértices [rad]
+  !! @param[in]  cellIDs             identificador global de cada célula local
+  !! @param[in]  nEdgesOnCell        número de vértices de cada célula
+  !! @param[in]  verticesOnCell      (maxEdges, nCells) identificador global dos vértices
+  !! @param[in]  lonCell, latCell    centro de cada célula [rad]
+  !! @param[in]  vertexIDs           identificadores globais dos vértices disponíveis
+  !! @param[in]  lonVertex, latVertex coordenadas desses vértices [rad]
+  !! @param[out] mesh                malha criada
+  !! @param[out] rc                  código de retorno
   subroutine mpas_mesh_create(cellIDs, nEdgesOnCell, verticesOnCell, lonCell, latCell, &
                               vertexIDs, lonVertex, latVertex, mesh, rc)
     integer,            intent(in)  :: cellIDs(:), nEdgesOnCell(:), verticesOnCell(:,:)
@@ -236,6 +242,7 @@ contains
       elementCoords=elemCoords, coordSys=ESMF_COORDSYS_SPH_DEG, rc=rc)
   end subroutine mpas_mesh_create
 
+  !> @brief Longitude em (-180, 180]: subtrai 360 de valores acima de 180.
   elemental function to_lon180(lon) result(x)
     real(ESMF_KIND_R8), intent(in) :: lon
     real(ESMF_KIND_R8) :: x
