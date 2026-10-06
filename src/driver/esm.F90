@@ -46,11 +46,11 @@ module ESM_MONAN
                                  cfg_use_sis2_dynamic, cfg_seq_repro,   &
                                  cfg_coupling_mode, cfg_pet_layout,     &
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
-                                 cfg_ice_pet_count
+                                 cfg_ice_pet_count, cpl_current_config
   use coupler_utils_mod,  only : ChkErr, int_to_str
   use coupler_log_mod,    only : COMP_DRV, log_error, log_info
   use cpl_check_mod,      only : cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
-  use cpl_map_mod,        only : cpl_current_config, cpl_driver_connectors, &
+  use cpl_map_mod,        only : cpl_driver_connectors, &
                                  CONNECTOR_SRC, CONNECTOR_DST, N_CONNECTORS, EXCHANGES
 
   implicit none
@@ -397,7 +397,7 @@ contains
     call log_info(COMP_DRV, 'metodo dos conectores pelo mapa: remapmethod em '// &
       int_to_str(n_method)//' entrada(s)')
 
-    call cpl_check_coupling(driver,                                                  &
+    call cpl_check_coupling(driver, cpl_current_config(),                            &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

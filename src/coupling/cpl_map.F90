@@ -47,6 +47,12 @@
 !! consideram só as combinações aceitas pela tabela COUPLER_MODES
 !! (coupler_config), a mesma que config_read consulta.
 !!
+!! Configuração (cpl_config_t, de coupler_config): toda consulta a recebe
+!! como argumento (cfg); o mapa não lê as chaves do nuopc.input. Quem chama
+!! passa a configuração da rodada (cpl_current_config, em coupler_config)
+!! ou outra qualquer, como fazem os testes e a conferência das cinco
+!! configurações.
+!!
 !! O DATM está descrito como o cap dele anuncia os campos, mas o driver
 !! (esm.F90) não o registra hoje: com use_datm=.true. o componente ATM
 !! continua sendo o MONAN-A. O destino do DATM é uma decisão pendente do GT.
@@ -106,8 +112,7 @@ module cpl_map_mod
 
   use ESMF,                  only : ESMF_KIND_R8
   use coupler_constants_mod, only : T_FREEZE_SEAWATER
-  use coupler_config_mod,    only : cfg_use_datm, cfg_use_docn, cfg_use_med_to_mpas, &
-                                    cfg_use_sis2_dynamic, COUPLER_MODES, coupler_mode_index
+  use coupler_config_mod,    only : cpl_config_t, COUPLER_MODES, coupler_mode_index
   use regrid_base_mod,       only : regrid_fill_t
   use cpl_fields_mod,        only : CPL_NAME_LEN
 
@@ -121,7 +126,7 @@ module cpl_map_mod
   public :: cpl_exchange_applies, cpl_valid_conditions
   public :: cpl_route_index, cpl_grid_index
   public :: cpl_point_component, cpl_point_grid
-  public :: cpl_current_config, cpl_config_is_valid, cpl_arrivals, cpl_route_fields
+  public :: cpl_config_is_valid, cpl_arrivals, cpl_route_fields
   public :: cpl_connector_applies, cpl_unlisted_connector, cpl_driver_connectors
   public :: N_CONNECTORS, CONNECTOR_SRC, CONNECTOR_DST
   public :: cpl_export_t, EXPORTS, cpl_exports
@@ -204,14 +209,6 @@ module cpl_map_mod
     real(r8)                     :: nan_to     = CPL_UNSET
     character(len=16)            :: create     = 'inicio'
   end type cpl_route_t
-
-  !> Chaves de nuopc.input que escolhem as trocas.
-  type :: cpl_config_t
-    logical :: datm        = .false.
-    logical :: docn        = .false.
-    logical :: med_to_mpas = .true.
-    logical :: sis2        = .true.
-  end type cpl_config_t
 
   ! EXCHANGES
   type(cpl_exchange_t), parameter :: EXCHANGES(*) = [                                                                            &
@@ -501,17 +498,6 @@ module cpl_map_mod
 
 contains
 
-  !> @brief Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
-  !! nuopc.input (coupler_config).
-  function cpl_current_config() result(cfg)
-    type(cpl_config_t) :: cfg
-
-    cfg%datm        = cfg_use_datm
-    cfg%docn        = cfg_use_docn
-    cfg%med_to_mpas = cfg_use_med_to_mpas
-    cfg%sis2        = cfg_use_sis2_dynamic
-  end function cpl_current_config
-
   !> @brief Combinação de chaves aceita por config_read: não recusada na tabela
   !! COUPLER_MODES (coupler_config), suportada ou não validada.
   pure logical function cpl_config_is_valid(cfg) result(ok)
@@ -745,7 +731,7 @@ contains
   !! mapa é consultado com a chave datm desligada. t_unlisted é a primeira troca
   !! por conector válida que não tem lugar na lista (0 se não há).
   !!
-  !! @param[in]  cfg     configuração (cpl_current_config)
+  !! @param[in]  cfg     configuração (por exemplo, cpl_current_config)
   !! @param[out] order   índices dos conectores registrados
   !! @param[out] n       quantos
   !! @param[out] t_unlisted índice em EXCHANGES de um conector sem lugar, ou 0

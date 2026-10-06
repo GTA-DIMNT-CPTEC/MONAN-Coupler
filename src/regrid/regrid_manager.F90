@@ -4,7 +4,8 @@
 !! Uma rota tem um nome ('ocn2atm_sst'), um esquema e os campos de origem e
 !! destino. O componente cria cada rota uma vez (add) e a usa a cada passo
 !! (apply). A configuração da rota pode ser trocada em nuopc.input, no grupo
-!! &nuopc_regrid, sem recompilar:
+!! &nuopc_regrid, sem recompilar; quem cria a rota passa essas substituições
+!! a add (argumento overrides, uma linha regrid_override_t por rota):
 !!
 !!   &nuopc_regrid
 !!     regrid_route(1)   = 'ocn2atm_sst'
@@ -29,13 +30,11 @@ module regrid_manager_mod
   use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill, &
                                   NAME_LEN, MAX_METHODS
   use regrid_registry_mod, only : regrid_create
-  use coupler_config_mod,  only : cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
-                                  cfg_regrid_weights, cfg_regrid_class, cfg_regrid_options
 
   implicit none
   private
 
-  public :: regrid_manager_t
+  public :: regrid_manager_t, regrid_override_t
   public :: regrid_spec
 
   integer, parameter :: MAX_ROUTES = 32
@@ -51,6 +50,17 @@ module regrid_manager_mod
     integer                         :: alias = 0
     type(regrid_spec_t)             :: spec
   end type route_t
+
+  !> Substituição da configuração de uma rota (uma linha do &nuopc_regrid).
+  !! Coluna vazia: fica o valor de ROUTES.
+  type :: regrid_override_t
+    character(len=32)  :: route       = ''   !< nome da rota
+    character(len=32)  :: scheme      = ''   !< esquema
+    character(len=64)  :: methods     = ''   !< métodos separados por vírgula
+    character(len=256) :: weights     = ''   !< arquivo de pesos
+    character(len=32)  :: field_class = ''   !< classe do campo
+    character(len=128) :: options     = ''   !< opções do esquema
+  end type regrid_override_t
 
   type :: regrid_manager_t
     type(route_t) :: routes(MAX_ROUTES)
@@ -87,14 +97,16 @@ contains
 
   !> @brief Cria a rota e calcula a interpolação (pesos ou route handle).
   !! Se nenhum método funcionar e 'fallback' for dado, a rota passa a usar a
-  !! rota 'fallback' (que precisa já existir).
-  subroutine add(this, name, spec, src, dst, rc, fallback)
+  !! rota 'fallback' (que precisa já existir). A linha de overrides com o
+  !! nome da rota, se houver, substitui as colunas preenchidas de spec.
+  subroutine add(this, name, spec, src, dst, rc, fallback, overrides)
     class(regrid_manager_t), intent(inout) :: this
     character(len=*),        intent(in)    :: name
     type(regrid_spec_t),     intent(in)    :: spec
     type(ESMF_Field),        intent(inout) :: src, dst
     integer,                 intent(out)   :: rc
     character(len=*),        intent(in), optional :: fallback
+    type(regrid_override_t), intent(in), optional :: overrides(:)
 
     type(regrid_spec_t) :: final_spec
     integer :: k
@@ -111,7 +123,7 @@ contains
     end if
 
     final_spec = spec
-    call apply_config(name, final_spec)
+    if (present(overrides)) call apply_overrides(name, overrides, final_spec)
 
     k = this%n + 1
     call regrid_create(final_spec%scheme, this%routes(k)%r, rc)
@@ -324,23 +336,25 @@ contains
     end if
   end function resolve
 
-  !> @brief Substitui a configuração padrão da rota pelo que estiver em &nuopc_regrid.
-  subroutine apply_config(name, spec)
-    character(len=*),    intent(in)    :: name
-    type(regrid_spec_t), intent(inout) :: spec
+  !> @brief Substitui a configuração padrão da rota pela primeira linha de
+  !! overrides com o nome dela (o &nuopc_regrid).
+  subroutine apply_overrides(name, overrides, spec)
+    character(len=*),        intent(in)    :: name
+    type(regrid_override_t), intent(in)    :: overrides(:)
+    type(regrid_spec_t),     intent(inout) :: spec
     integer :: k
 
-    do k = 1, size(cfg_regrid_route)
-      if (trim(cfg_regrid_route(k)) /= trim(name)) cycle
-      if (len_trim(cfg_regrid_scheme(k))  > 0) spec%scheme       = cfg_regrid_scheme(k)
-      if (len_trim(cfg_regrid_methods(k)) > 0) call split_methods(cfg_regrid_methods(k), spec%methods)
-      if (len_trim(cfg_regrid_weights(k)) > 0) spec%weights_file = cfg_regrid_weights(k)
-      if (len_trim(cfg_regrid_class(k))   > 0) spec%field_class  = cfg_regrid_class(k)
-      if (len_trim(cfg_regrid_options(k)) > 0) spec%options      = cfg_regrid_options(k)
+    do k = 1, size(overrides)
+      if (trim(overrides(k)%route) /= trim(name)) cycle
+      if (len_trim(overrides(k)%scheme)      > 0) spec%scheme       = overrides(k)%scheme
+      if (len_trim(overrides(k)%methods)     > 0) call split_methods(overrides(k)%methods, spec%methods)
+      if (len_trim(overrides(k)%weights)     > 0) spec%weights_file = overrides(k)%weights
+      if (len_trim(overrides(k)%field_class) > 0) spec%field_class  = overrides(k)%field_class
+      if (len_trim(overrides(k)%options)     > 0) spec%options      = overrides(k)%options
       call log_info(COMP_REGRID, 'rota '//trim(name)//' configurada por &nuopc_regrid')
       return
     end do
-  end subroutine apply_config
+  end subroutine apply_overrides
 
   !> @brief Separa a lista 'm1,m2,...' em até MAX_METHODS nomes, sem espaços à esquerda.
   subroutine split_methods(list, methods)

@@ -48,7 +48,7 @@ end type
 | `regrid_idw` | Esquema `idw` (inverso da distância), escrito sobre a base de pesos; é o modelo de esquema (desde a R-FASE11-23) |
 | `regrid_schemes` | Lista dos esquemas do acoplador: uma linha por esquema, com o nome e o construtor (desde a R-FASE11-23) |
 | `regrid_registry` | Catálogo de esquemas: nome e rotina que cria uma instância; lê a lista de `regrid_schemes` na primeira consulta |
-| `regrid_manager` | Rotas com nome, rota de reserva e troca por `nuopc.input` (`&nuopc_regrid`) |
+| `regrid_manager` | Rotas com nome, rota de reserva e substituição da configuração de uma rota (`regrid_override_t`, argumento `overrides` de `add`; o mediador passa o `&nuopc_regrid` do `nuopc.input`) |
 
 Uso num componente:
 
@@ -58,7 +58,7 @@ call is%regrid%add('ocn2atm_sst', regrid_spec('conserve,bilinear', mask_src=.tru
 call is%regrid%apply('ocn2atm_sst', sst_ocn, sst_atm, rc)          ! a cada passo
 ```
 
-Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manager` faz, nesta ordem: a interpolação, com o `zero_total` da rota (zerar o destino inteiro antes, ou só os pontos alcançados); o preenchimento por vizinhança dos pontos fora da faixa válida (`spec%fill`, um `regrid_fill_t`, em cada DE local); e a troca de NaN no destino (`nan_value` em `regrid_spec`). As três usam a configuração da rota pedida, mesmo quando ela usa a interpolação da reserva. Argumentos opcionais de `apply`: `zero_total` e `fill` substituem os da rota nesta chamada; `n_invalid` e `n_left` devolvem quantos pontos estavam fora da faixa antes do preenchimento e quantos ficaram com o valor fixo, somados nos DEs locais (-1 quando não houve preenchimento). Até a R-FASE11-13, o preenchimento era feito por `regridder_t%apply`, com as opções da rota que interpola, só no primeiro DE local e sem contagens; nenhuma rota o usava. No mediador, as rotas são criadas por `create_route` (`med_cap_methods`), com a configuração da tabela `ROUTES` do mapa de acoplamento (`src/coupling/cpl_map.F90`).
+Cada rota guarda a configuração com que foi criada. O `apply` do `regrid_manager` faz, nesta ordem: a interpolação, com o `zero_total` da rota (zerar o destino inteiro antes, ou só os pontos alcançados); o preenchimento por vizinhança dos pontos fora da faixa válida (`spec%fill`, um `regrid_fill_t`, em cada DE local); e a troca de NaN no destino (`nan_value` em `regrid_spec`). As três usam a configuração da rota pedida, mesmo quando ela usa a interpolação da reserva. Argumentos opcionais de `apply`: `zero_total` e `fill` substituem os da rota nesta chamada; `n_invalid` e `n_left` devolvem quantos pontos estavam fora da faixa antes do preenchimento e quantos ficaram com o valor fixo, somados nos DEs locais (-1 quando não houve preenchimento). Até a R-FASE11-13, o preenchimento era feito por `regridder_t%apply`, com as opções da rota que interpola, só no primeiro DE local e sem contagens; nenhuma rota o usava. No mediador, as rotas são criadas por `create_route` (`med_cap_methods`), com a configuração da tabela `ROUTES` do mapa de acoplamento (`src/coupling/cpl_map.F90`) e as substituições do `&nuopc_regrid`, que `create_route` lê de `coupler_config` e passa a `add` (argumento `overrides`); o framework não lê o `nuopc.input`, e pode ser usado e testado sem ele.
 
 ## Como acrescentar um esquema
 

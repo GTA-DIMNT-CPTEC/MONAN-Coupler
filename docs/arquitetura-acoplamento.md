@@ -48,7 +48,7 @@ cpl_exchange_t('So_t', 'OCN@ocn_mom6', 'MED@ocn_med', 'conector',    'mom6', 'bi
 cpl_exchange_t('So_t', 'MED@ocn_med',  'MED@atm_med', 'ocn2atm_sst', '',     ''),         &
 ```
 
-Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de importação e `cpl_exports(ponto, ...)` a de exportação, na ordem das tabelas e só com as linhas da configuração atual (`cpl_current_config`). O driver registra os conectores que têm troca válida (`cpl_driver_connectors`, entre os pares de `CONNECTOR_SRC`/`CONNECTOR_DST`) e escreve o método de cada campo na `CplList` (`cpl_write_methods`). `tools/dev/mapa-acoplamento.py` gera [`acoplamento.md`](acoplamento.md), a versão em tabelas por componente e por conector.
+Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de importação e `cpl_exports(ponto, ...)` a de exportação, na ordem das tabelas e só com as linhas da configuração pedida, que chega como argumento (`cfg`, um `cpl_config_t`); o mapa não lê o `nuopc.input`, e quem chama passa a configuração da rodada (`cpl_current_config`, de `coupler_config`). O driver registra os conectores que têm troca válida (`cpl_driver_connectors`, entre os pares de `CONNECTOR_SRC`/`CONNECTOR_DST`) e escreve o método de cada campo na `CplList` (`cpl_write_methods`). `tools/dev/mapa-acoplamento.py` gera [`acoplamento.md`](acoplamento.md), a versão em tabelas por componente e por conector.
 
 ## 4. Como incluir um campo
 
@@ -61,7 +61,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 
 1. **Malha**: linha em `GRIDS`; o cap a constrói pelo catálogo (`cpl_grids`). Malha de tipo novo: função nova em `cpl_grids`.
 2. **Campos e passagens**: `FIELDS`, `EXCHANGES`, `EXPORTS` (seção 4); rotas novas do mediador em `ROUTES`.
-3. **Chave e condições** (componente opcional): chave em `&nuopc_mode` e `coupler_config`; campo em `cpl_config_t` e em `cpl_current_config`; condições em `CONDITIONS` e `condition_holds`; combinação aceita, não validada ou recusada na tabela `COUPLER_MODES` (`coupler_config`), que `config_read`, `cpl_config_is_valid` e `mapa-acoplamento.py` consultam; configurações conferidas em `mapa-acoplamento.py` e no teste do mapa.
+3. **Chave e condições** (componente opcional): chave em `&nuopc_mode` e `coupler_config`; campo em `cpl_config_t` e em `cpl_current_config` (os dois em `coupler_config`); condições em `CONDITIONS` e `condition_holds`; combinação aceita, não validada ou recusada na tabela `COUPLER_MODES` (`coupler_config`), que `config_read`, `cpl_config_is_valid` e `mapa-acoplamento.py` consultam; configurações conferidas em `mapa-acoplamento.py` e no teste do mapa.
 4. **Cap**: como o do DOCN. Constante `POINT_<COMP>`, listas por `cpl_arrivals` e `cpl_exports`, rotinas de `cap_common` (`cap_realize_fields`, `cap_put_field`, `cap_stamp_export`); o que é do modelo fica num adaptador.
 5. **Driver** (`esm.F90`): `add_model` e a divisão de PETs; os pares de conectores em `CONNECTOR_SRC`/`CONNECTOR_DST` (um conector do mapa fora da lista para a inicialização); as linhas em `SetRunSequence`.
 6. **Compilação**: basta o arquivo estar num diretório de `SRC_SUBDIRS` e rodar `tools/dev/dependencias.py gera` (dependências em `src/dependencies.mk`); o `Makefile`, o `compila-local.bash` e os testes tiram dali a lista e a ordem. Com real de 8 bytes, incluir o fonte em `MOM6_SRCS`.

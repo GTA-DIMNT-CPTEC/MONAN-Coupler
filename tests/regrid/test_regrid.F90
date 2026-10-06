@@ -3,7 +3,9 @@
 !!
 !! Desde a R-FASE11-23, o item 9 testa a base de esquemas de pesos
 !! (weights_regridder_t), o modelo idw, as opções em texto e a ida e volta
-!! dos pesos de um esquema de pesos pelo esquema weights_file.
+!! dos pesos de um esquema de pesos pelo esquema weights_file. O item 2c
+!! testa a substituição da configuração de uma rota (o &nuopc_regrid),
+!! passada a add como argumento.
 program test_regrid
 
   use ESMF
@@ -12,7 +14,7 @@ program test_regrid
   use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill, &
                                   regrid_option_real, regrid_option_int, regrid_options_check
   use regrid_registry_mod, only : regrid_register, regrid_create
-  use regrid_manager_mod,  only : regrid_manager_t, regrid_spec
+  use regrid_manager_mod,  only : regrid_manager_t, regrid_spec, regrid_override_t
   use regrid_mpassit_mod,  only : mpas_mesh_create
   use identity_scheme_mod, only : new_identity, new_identity_weights
   use regrid_idw_mod,      only : idw_regridder_t
@@ -67,6 +69,16 @@ program test_regrid
   if (rc == 0) call mgr%apply('reserva', fsrc, fdst2, rc)
   call report('rota de reserva: identica a rota bilinear', &
               rc == 0 .and. max_diff(fdst, fdst2) == 0.0_ESMF_KIND_R8)
+
+  ! 2c. Substituição da configuração da rota (&nuopc_regrid), por argumento:
+  ! vale a linha com o nome da rota; o método pedido em spec não existe
+  call mgr%add('substituida', regrid_spec('metodo_inexistente'), fsrc, fdst2, rc,      &
+    overrides=[regrid_override_t(route='outra', methods='conserve'),                   &
+               regrid_override_t(route='substituida', methods='bilinear')])
+  if (rc == 0) call mgr%apply('substituida', fsrc, fdst2, rc)
+  call report('substituicao por argumento: usa bilinear', rc == 0 .and.               &
+              trim(mgr%method('substituida')) == 'bilinear' .and.                    &
+              max_diff(fdst, fdst2) == 0.0_ESMF_KIND_R8)
 
   ! 3. Esquema weights_file: pesos gravados em arquivo reproduzem o online
   call write_weights(fsrc, fdst2, WFILE)

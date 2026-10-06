@@ -50,6 +50,8 @@
 !!                 stamp_export_fields e, com use_med_to_mpas, RouteOcnToAtm
 !!   COM_LOG_LEVEL pede log_level='debug' no nuopc.input do teste; sem ela
 !!                 (até a R-FASE13-08), as sondas já saíam com write_fixdiag
+!!   COM_CONFIG_DO_MAPA  tira cpl_current_config de coupler_config; sem ela
+!!                 (até a R-FASE13-19), de cpl_map
 !! As sequências de antes estão copiadas sem mudança.
 program test_fill
   use ESMF
@@ -60,7 +62,12 @@ program test_fill
   use mom6_supergrid_mod,    only : mom6_supergrid_dims
   use med_cap_types_mod,     only : MED_InternalState, MED_KEYS
   use cpl_fields_mod,        only : CPL_NAME_LEN
+#ifdef COM_CONFIG_DO_MAPA
+  use cpl_map_mod,           only : cpl_arrivals
+  use coupler_config_mod,    only : cpl_current_config
+#else
   use cpl_map_mod,           only : cpl_arrivals, cpl_current_config
+#endif
   use med_init_mod,          only : create_atm_grid, create_ocn_grid, realize_component_fields, &
                                     create_internal_fields
 #ifdef COM_INICIO

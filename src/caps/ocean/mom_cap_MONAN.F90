@@ -73,7 +73,7 @@ module MOM_cap_MONAN_mod
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_stamp_export
   use coupler_log_mod, only : COMP_OCN, log_error, log_warning, log_info, log_debug
   use cpl_fields_mod, only : CPL_NAME_LEN
-  use cpl_map_mod,    only : cpl_arrivals, cpl_exports, cpl_current_config
+  use cpl_map_mod,    only : cpl_arrivals, cpl_exports
   use cpl_grids_mod,  only : cpl_block_grid
 
   ! esmf2fms_time vem de time_utils_mod (MOM_cap_time não a tem); os
@@ -83,7 +83,7 @@ module MOM_cap_MONAN_mod
   ! Escolha da fonte de Si_ifrac (use_docn_ice); a leitura do OISST e o
   ! cálculo a partir da SST e do frazil ficam em mom_si_ifrac.F90.
   use coupler_config_mod,     only : cfg_use_docn_ice,        &
-                                       cfg_docn_ice_init_only
+                                       cfg_docn_ice_init_only, cpl_current_config
   use mom_si_ifrac_mod,       only : si_ifrac_memory_t,       &
                                        set_si_ifrac_from_file,  &
                                        compute_si_ifrac_proxy

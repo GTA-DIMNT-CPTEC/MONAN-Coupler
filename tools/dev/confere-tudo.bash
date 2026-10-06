@@ -34,6 +34,8 @@
 #               src/mediator (tools/dev/confere-exportacao.py)
 #   dependencias  src/dependencies.mk em dia com os 'use' dos fontes
 #               (tools/dev/dependencias.py gera -c)
+#   camadas     os 'use' de src/ respeitam as camadas, os componentes e a
+#               configuração por argumento (tools/dev/confere-camadas.py)
 #   cplcheck    conferência do mapa num driver NUOPC com as listas de campos
 #               de hoje (tests/cplcheck/confere-cplcheck.bash)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
@@ -59,7 +61,7 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito exportacao dependencias cplcheck supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito exportacao dependencias camadas cplcheck supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
@@ -222,6 +224,7 @@ quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
 quer curtocircuito && executa curtocircuito python3 tools/dev/confere-curto-circuito.py
 quer exportacao && executa exportacao python3 tools/dev/confere-exportacao.py
 quer dependencias && executa dependencias python3 tools/dev/dependencias.py gera -c
+quer camadas && executa camadas python3 tools/dev/confere-camadas.py
 quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"

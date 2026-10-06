@@ -63,7 +63,7 @@ module DOCN_cap_mod
                                  cap_fill_export_initial, cap_set_data_complete, &
                                  cap_stamp_export
   use cpl_fields_mod,      only: CPL_NAME_LEN
-  use cpl_map_mod,         only: cpl_arrivals, cpl_exports, cpl_current_config
+  use cpl_map_mod,         only: cpl_arrivals, cpl_exports
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
@@ -94,7 +94,7 @@ module DOCN_cap_mod
                                   cfg_write_import_diag,    &
                                   cfg_import_diag_dir,      &
                                   cfg_docn_ice_pct,       &
-                                  cfg_grid_res_deg
+                                  cfg_grid_res_deg, cpl_current_config
 
   implicit none
   private

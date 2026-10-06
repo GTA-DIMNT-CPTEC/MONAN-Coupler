@@ -106,6 +106,7 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
 | `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
 | `tools/dev/confere-curto-circuito.py` | acusa guardas que contam com o curto-circuito do `.and.` (`associated`, `allocated` ou `present` e uso do mesmo nome na expressão) | `docs/conferencias-locais.md` |
+| `tools/dev/confere-camadas.py` | conferência `camadas`: os `use` de `src/` respeitam as camadas (tabela `CAMADAS`), os componentes não usam uns aos outros, e `src/regrid` e `src/coupling` recebem a configuração por argumento | `docs/conferencias-locais.md` |
 | `tools/dev/dependencias.py` | dependências entre os fontes tiradas dos `use`: gera `src/dependencies.mk` (`gera`, `gera -c` confere), lista os fontes em ordem de compilação (`ordem`) e os objetos de que um programa depende (`objetos`) | `docs/conferencias-locais.md` |
 | `tools/dev/confere-exportacao.py` | confere que todo campo exportado pelo mediador por conector tem preenchimento em `src/mediator/`, e o inverso | `docs/conferencias-locais.md` |
 | `tools/dev/renomeia-identificadores.py` | troca nomes de identificadores Fortran por uma tabela de `tools/dev/nomes/` (`aplica`) e confere que a troca não mudou mais nada (`confere REV`) | `docs/conferencias-locais.md` |

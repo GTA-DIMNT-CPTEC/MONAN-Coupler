@@ -180,6 +180,7 @@ module tdrv_mod
   use NUOPC_Connector, only: cplSS => SetServices
   use tcomp_mod,       only: compSS => SetServices
   use cpl_check_mod,   only: cpl_check_coupling, cpl_write_methods
+  use coupler_config_mod, only: cpl_current_config
   use MED_cap_MONAN_mod, only: medSS => SetServices
   implicit none
   private
@@ -242,7 +243,8 @@ contains
       rc = ESMF_FAILURE
       return
     end if
-    call cpl_check_coupling(driver, LABELS, [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
+    call cpl_check_coupling(driver, cpl_current_config(), LABELS, &
+      [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (real_mediator) then
       ! para antes da realização do mediador real (ver o cabeçalho); a
       ! barreira espera o PET 0 terminar o relatório, porque o primeiro PET a

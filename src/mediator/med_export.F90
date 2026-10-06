@@ -13,7 +13,8 @@ module med_export_mod
   use ESMF
   use med_cap_types_mod, only: MED_InternalState, COMPL_IFRAC_EXP, med_field_index
   use cpl_fields_mod, only: CPL_NAME_LEN
-  use cpl_map_mod, only: cpl_route_fields, cpl_current_config
+  use cpl_map_mod, only: cpl_route_fields
+  use coupler_config_mod, only: cpl_current_config
   use med_diag_mod, only: record_fill
   use med_cap_methods_mod, only: FillInternalField, RegridOrCopy, route_fill
   use coupler_constants_mod, only: T_ICE_MIN

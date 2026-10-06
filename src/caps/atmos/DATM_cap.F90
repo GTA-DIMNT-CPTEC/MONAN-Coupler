@@ -56,7 +56,8 @@ module DATM_cap_mod
                              cap_fill_export_initial, cap_set_data_complete, &
                              cap_stamp_export
   use cpl_fields_mod, only : CPL_NAME_LEN
-  use cpl_map_mod,    only : cpl_exports, cpl_current_config
+  use cpl_map_mod,    only : cpl_exports
+  use coupler_config_mod, only : cpl_current_config
 
   implicit none
   private

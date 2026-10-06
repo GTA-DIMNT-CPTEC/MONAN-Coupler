@@ -42,9 +42,9 @@ module sis_cap_MONAN_mod
 
   use mom6_supergrid_mod, only : mom6_supergrid_dims
   use cpl_grids_mod, only : cpl_blocks_t, cpl_blocks_from_bounds, cpl_tripolar_grid
-  use coupler_config_mod, only : cfg_mom6_mesh_ocn
+  use coupler_config_mod, only : cfg_mom6_mesh_ocn, cpl_current_config
   use cpl_fields_mod, only : CPL_NAME_LEN
-  use cpl_map_mod, only : cpl_arrivals, cpl_exports, cpl_current_config
+  use cpl_map_mod, only : cpl_arrivals, cpl_exports
 
   ! API do SIS2: models/ocean/MOM6-examples/src/SIS2/src/{ice_model,
   ! ice_type,ice_boundary_types}.F90 (interfaces mínimas para compilar fora

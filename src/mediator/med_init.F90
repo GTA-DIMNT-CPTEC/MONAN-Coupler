@@ -13,11 +13,11 @@ module med_init_mod
   use coupler_utils_mod, only: ChkErr
   use coupler_log_mod, only: COMP_MED, log_info, log_warning
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
-                                cfg_use_sis2_dynamic
+                                cfg_use_sis2_dynamic, cpl_current_config
   use NUOPC, only: NUOPC_Realize
   use med_cap_types_mod, only: MED_InternalState, MED_KEYS, MED_FIELDS, med_field_index
   use cpl_fields_mod, only: CPL_NAME_LEN
-  use cpl_map_mod, only: cpl_arrivals, cpl_current_config, cpl_config_t
+  use cpl_map_mod, only: cpl_arrivals, cpl_config_t
   use cpl_grids_mod, only: cpl_latlon_grid, cpl_tripolar_grid, ORIGIN_EAST0, &
                            ORIGIN_EAST0_CORNER
   use med_cap_methods_mod, only: CreateInternalField, FillInternalField

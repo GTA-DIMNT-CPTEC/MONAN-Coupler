@@ -55,7 +55,7 @@ module cpl_check_mod
                                  NUOPC_FieldDictionarySetAutoAdd
   use cpl_fields_mod,     only : cpl_field_index, FIELDS
   use cpl_map_mod,        only : EXCHANGES, cpl_config_t, cpl_exchange_applies, cpl_point_component, &
-                                 cpl_current_config, cpl_connector_method, CPL_METHOD_LEN, &
+                                 cpl_connector_method, CPL_METHOD_LEN, &
                                  cpl_is_gap
 
   implicit none
@@ -179,11 +179,13 @@ contains
   !! ESMF_FAILURE juntos, com uma mensagem de erro no log de cada um.
   !!
   !! @param[inout] driver       driver NUOPC, depois da montagem das CplList
+  !! @param[in]    cfg          configuração do mapa (a da rodada: cpl_current_config)
   !! @param[in]    labels       rótulos dos componentes no driver ('MPAS', ...)
   !! @param[in]    components   componente do mapa de cada rótulo ('ATM', ...)
   !! @param[out]   rc           ESMF_FAILURE se houve diferença
-  subroutine cpl_check_coupling(driver, labels, components, rc)
+  subroutine cpl_check_coupling(driver, cfg, labels, components, rc)
     type(ESMF_GridComp), intent(inout) :: driver
+    type(cpl_config_t),  intent(in)    :: cfg
     character(len=*),    intent(in)    :: labels(:)
     character(len=*),    intent(in)    :: components(:)
     integer,             intent(out)   :: rc
@@ -200,7 +202,7 @@ contains
 
     ndif = 0
     if (localPet == 0) then
-      call check_on_pet0(driver, labels, components, ndif(1))
+      call check_on_pet0(driver, cfg, labels, components, ndif(1))
       ! o relatório vai para o arquivo antes que um PET possa abortar a rodada
       if (ndif(1) > 0) call ESMF_LogFlush(rc=lrc)
     end if
@@ -216,17 +218,16 @@ contains
   end subroutine cpl_check_coupling
 
   !> @brief A conferência e o relatório, no PET 0 (ver cpl_check_coupling).
-  subroutine check_on_pet0(driver, labels, components, ndif)
+  subroutine check_on_pet0(driver, cfg, labels, components, ndif)
     type(ESMF_GridComp), intent(inout) :: driver
+    type(cpl_config_t),  intent(in)    :: cfg
     character(len=*),    intent(in)    :: labels(:)
     character(len=*),    intent(in)    :: components(:)
     integer,             intent(out)   :: ndif
 
-    type(cpl_config_t) :: cfg
     character(len=CPL_MSG_LEN), allocatable :: msgs(:)
     integer :: nwarn, i, j
 
-    cfg = cpl_current_config()
     call write_line('configuracao do mapa: '//describe_config(cfg))
     allocate(msgs(0))
     ndif = 0; nwarn = 0

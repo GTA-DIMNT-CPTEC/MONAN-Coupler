@@ -71,10 +71,10 @@ program test_cpl_map
   use cpl_map_mod,       only : GRIDS, EXCHANGES, ROUTES, cpl_config_t, cpl_exchange_applies, &
                                 cpl_valid_conditions, cpl_route_index, cpl_grid_index, &
                                 cpl_point_component, cpl_point_grid, cpl_exchange_t
-  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_current_config, cpl_route_fields
+  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_route_fields
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
   use cpl_map_mod,       only : GAPS, cpl_is_gap, cpl_config_is_valid
-  use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index
+  use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index, cpl_current_config
   use cpl_fields_mod,    only : CPL_NAME_LEN
   use med_cap_types_mod, only : MED_KEYS, MED_FIELDS
   implicit none

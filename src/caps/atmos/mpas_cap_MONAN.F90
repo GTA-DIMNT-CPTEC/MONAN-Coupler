@@ -53,13 +53,13 @@ module mpas_cap_MONAN_mod
                                     cfg_output_dir, cfg_grid_res_deg, &
                                     cfg_sst_default,                  &
                                     cfg_ice_fraction_default,         &
-                                    cfg_zorl_default
+                                    cfg_zorl_default, cpl_current_config
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
   use coupler_log_mod,     only : COMP_ATM, log_error, log_info
   use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
   use cpl_fields_mod,      only : CPL_NAME_LEN
-  use cpl_map_mod,         only : cpl_arrivals, cpl_exports, cpl_current_config
+  use cpl_map_mod,         only : cpl_arrivals, cpl_exports
 
   implicit none
   private

@@ -12,18 +12,20 @@
 !!   RegridOrCopy               interpola um campo da malha de fluxo para o exportState
 !!   route_spec                 configuração de uma rota na tabela ROUTES
 !!   route_fill                 preenchimento por vizinhança de uma rota de ROUTES
-!!   create_route               cria uma rota com a configuração de ROUTES
+!!   create_route               cria uma rota com a configuração de ROUTES e do &nuopc_regrid
 !!   set_ocn_grid_mask          copia So_omask para a máscara da grade OCN
 
 module med_cap_methods_mod
 
   use ESMF
-  use regrid_manager_mod, only : regrid_spec, regrid_manager_t
+  use regrid_manager_mod, only : regrid_spec, regrid_manager_t, regrid_override_t
   use regrid_base_mod,    only : regrid_spec_t, regrid_fill_t
   use cpl_map_mod,        only : ROUTES, cpl_route_index, CPL_UNSET
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
-  use coupler_config_mod, only: cfg_use_sis2_dynamic
+  use coupler_config_mod, only: cfg_use_sis2_dynamic, MAX_REGRID_OVERRIDES,             &
+                                cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
+                                cfg_regrid_weights, cfg_regrid_class, cfg_regrid_options
 
   use coupler_utils_mod, only : ChkErr
 
@@ -280,7 +282,8 @@ contains
   end function route_fill
 
   !> @brief Cria a rota nome em regrid com a configuração de ROUTES, e com a
-  !! rota de reserva da tabela, quando houver.
+  !! rota de reserva da tabela, quando houver. As substituições do
+  !! &nuopc_regrid (nuopc.input) vão para regrid%add como argumento.
   subroutine create_route(regrid, name, src, dst, rc)
     type(regrid_manager_t), intent(inout) :: regrid
     character(len=*),       intent(in)    :: name
@@ -297,11 +300,25 @@ contains
       return
     end if
     if (len_trim(fallback) > 0) then
-      call regrid%add(name, spec, src, dst, rc, fallback=trim(fallback))
+      call regrid%add(name, spec, src, dst, rc, fallback=trim(fallback), &
+        overrides=nuopc_regrid_overrides())
     else
-      call regrid%add(name, spec, src, dst, rc)
+      call regrid%add(name, spec, src, dst, rc, overrides=nuopc_regrid_overrides())
     end if
   end subroutine create_route
+
+  !> @brief Substituições das rotas lidas do &nuopc_regrid (coupler_config), uma
+  !! linha por posição do grupo, vazias as que não foram dadas.
+  function nuopc_regrid_overrides() result(overrides)
+    type(regrid_override_t) :: overrides(MAX_REGRID_OVERRIDES)
+
+    overrides%route       = cfg_regrid_route
+    overrides%scheme      = cfg_regrid_scheme
+    overrides%methods     = cfg_regrid_methods
+    overrides%weights     = cfg_regrid_weights
+    overrides%field_class = cfg_regrid_class
+    overrides%options     = cfg_regrid_options
+  end function nuopc_regrid_overrides
 
   !> @brief Copia So_omask (1 = oceano, 0 = terra) do importState para o item
   !! de máscara de ocn_grid, DE a DE, e conta os pontos de terra e de

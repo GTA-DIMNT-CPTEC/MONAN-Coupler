@@ -175,7 +175,30 @@ module coupler_config_mod
 
   public :: coupler_mode_index
 
+  !> Chaves de &nuopc_mode que escolhem as trocas do mapa de acoplamento
+  !! (cpl_map). O mapa recebe a configuração como argumento em todas as
+  !! consultas; cpl_current_config dá a lida do nuopc.input.
+  type, public :: cpl_config_t
+    logical :: datm        = .false.
+    logical :: docn        = .false.
+    logical :: med_to_mpas = .true.
+    logical :: sis2        = .true.
+  end type cpl_config_t
+
+  public :: cpl_current_config
+
 contains
+
+  !> @brief Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
+  !! nuopc.input.
+  function cpl_current_config() result(cfg)
+    type(cpl_config_t) :: cfg
+
+    cfg%datm        = cfg_use_datm
+    cfg%docn        = cfg_use_docn
+    cfg%med_to_mpas = cfg_use_med_to_mpas
+    cfg%sis2        = cfg_use_sis2_dynamic
+  end function cpl_current_config
 
   !> @brief Posição em COUPLER_MODES da combinação das quatro chaves. A tabela tem
   !! as 16 combinações (conferido por tests/unit/test_cpl_map.F90), então o

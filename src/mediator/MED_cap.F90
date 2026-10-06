@@ -33,7 +33,8 @@ module MED_cap_MONAN_mod
                                   cfg_use_sis2_dynamic,             & ! gelo dinâmico do SIS2
                                   cfg_coupling_mode,                &
                                   cfg_seq_repro,                    & ! seq_repro (reprodutibilidade)
-                                  cfg_stop_date, config_parse_date
+                                  cfg_stop_date, config_parse_date, &
+                                  cpl_current_config
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
   use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise
   use NUOPC_Mediator, only: med_routine_SS          => SetServices
@@ -46,7 +47,7 @@ module MED_cap_MONAN_mod
                                   MED_InternalStateWrapper,     &
                                   MED_KEYS
   use cpl_fields_mod,      only: CPL_NAME_LEN
-  use cpl_map_mod,         only: cpl_arrivals, cpl_current_config
+  use cpl_map_mod,         only: cpl_arrivals
   use med_cap_netcdf_mod,  only: med_read_import_config, med_write_import_fields
   use med_init_mod,        only: create_atm_grid, create_ocn_grid,           &
                                   realize_component_fields,                   &
