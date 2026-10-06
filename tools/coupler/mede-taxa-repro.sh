@@ -192,6 +192,14 @@ _cpl="$(grep -E '^\s*coupling_mode'  nuopc.input | head -1 | tr -s ' ')"
 info "configuracao:${_atm}"
 info "configuracao:${_dtc}"
 info "configuracao:${_cpl}"
+# Os diagnósticos do mediador (linhas FIX-DIAG) só saem
+# com log_level='debug' em &nuopc_driver; sem eles, o relatório fica sem as
+# linhas do mediador e sem o checksum do Si_ifrac.
+if grep -qiE "^\s*log_level\s*=\s*['\"]debug['\"]" nuopc.input; then
+  ok "log_level='debug': diagnosticos do mediador ligados"
+else
+  info "log_level diferente de 'debug': sem FIX-DIAG do mediador (meddiag_r*.txt e bitsum_r*.txt vazios)"
+fi
 info "execucoes: ${RUNS}   pares a comparar: $(( RUNS * (RUNS - 1) / 2 ))"
 
 espera_fila() {

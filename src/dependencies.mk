@@ -6,6 +6,7 @@
 # arquivo desatualizado.
 $(OBJDIR)/cap_common.o: $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/coupler_config.o: $(OBJDIR)/coupler_utils.o
+$(OBJDIR)/coupler_log.o: $(OBJDIR)/coupler_config.o
 $(OBJDIR)/cpl_check.o: $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o
 $(OBJDIR)/cpl_grids.o: $(OBJDIR)/coupler_utils.o $(OBJDIR)/mom6_supergrid.o
 $(OBJDIR)/cpl_map.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/regrid_base.o
@@ -14,16 +15,16 @@ $(OBJDIR)/DOCN_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR
 $(OBJDIR)/docn_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/esm.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_check.o $(OBJDIR)/cpl_map.o $(OBJDIR)/DOCN_cap.o $(OBJDIR)/MED_cap.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/sis_cap_MONAN.o
 $(OBJDIR)/esmApp.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/esm.o
-$(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_types.o
-$(OBJDIR)/MED_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_exchange.o $(OBJDIR)/med_flux.o $(OBJDIR)/med_init.o $(OBJDIR)/mom6_supergrid.o
+$(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/med_cap_types.o
+$(OBJDIR)/MED_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_exchange.o $(OBJDIR)/med_flux.o $(OBJDIR)/med_init.o $(OBJDIR)/mom6_supergrid.o
 $(OBJDIR)/med_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/med_cap_types.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_diag.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_types.o
-$(OBJDIR)/med_exchange.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_export.o $(OBJDIR)/med_ocean.o
+$(OBJDIR)/med_exchange.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_export.o $(OBJDIR)/med_ocean.o
 $(OBJDIR)/med_export.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
 $(OBJDIR)/med_flux.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
-$(OBJDIR)/med_ice.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
+$(OBJDIR)/med_ice.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_init.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o
 $(OBJDIR)/med_ocean.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_ice.o
 $(OBJDIR)/mom_cap_methods.o: $(OBJDIR)/mom_ocean_model_nuopc.o $(OBJDIR)/mom_surface_forcing_nuopc.o

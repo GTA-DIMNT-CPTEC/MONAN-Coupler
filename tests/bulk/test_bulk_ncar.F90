@@ -29,6 +29,9 @@
 !! O teste roda sem o SIS2. Até a R-FASE12-07 esse era o valor padrão de
 !! use_sis2_dynamic; desde a R-FASE13-01, que fez dos padrões a configuração
 !! de produção (com o SIS2), o programa lê um nuopc.input que o desliga.
+!! O mesmo arquivo pede log_level='debug', para que as sondas do mediador
+!! (FIX-DIAG) entrem no log, como entravam com write_fixdiag, que até a
+!! R-FASE13-08 vinha ligada por padrão.
 program test_bulk_ncar
   use ESMF
   use med_cap_types_mod, only: MED_InternalState
@@ -58,6 +61,9 @@ program test_bulk_ncar
   call ESMF_VMGet(vm, localPet=pet, petCount=npet, rc=rc)
   if (pet == 0) then
     open(newunit=u, file='sem_sis2.nml', status='replace', action='write')
+    write(u,'(A)') '&nuopc_driver'
+    write(u,'(A)') "  log_level = 'debug'"
+    write(u,'(A)') '/'
     write(u,'(A)') '&nuopc_petlayout'
     write(u,'(A)') '  use_sis2_dynamic = .false.'
     write(u,'(A)') '/'

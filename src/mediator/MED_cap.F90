@@ -26,8 +26,8 @@ module MED_cap_MONAN_mod
   use coupler_utils_mod, only: ChkErr
   use cap_common_mod, only: cap_initialize_p0
   use mom6_supergrid_mod, only : mom6_supergrid_dims
+  use coupler_log_mod, only: log_debug_enabled
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
-                                  cfg_write_fixdiag,                &
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  &
                                   cfg_use_datm, cfg_use_med_to_mpas, &
                                   cfg_use_sis2_dynamic,             & ! gelo dinamico do SIS2
@@ -565,7 +565,7 @@ contains
     call ESMF_LogWrite('MED: MediatorAdvance concluido', ESMF_LOGMSG_INFO)
 
     ! Si_ifrac como sai do mediador (etapa 4 de 4 do FIX-DIAG-BITSUM-01)
-    if (cfg_write_fixdiag) call log_ifrac_export_bitsum(exportState)
+    if (log_debug_enabled()) call log_ifrac_export_bitsum(exportState)
 
     call med_write_import_fields(exportState, stampTime, is, rc)
     if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal

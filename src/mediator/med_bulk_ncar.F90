@@ -20,8 +20,8 @@ module med_bulk_ncar_mod
   use coupler_constants_mod, only : GRAV, T_FREEZE_SEAWATER, ATM_NX, ATM_NY, &
                                     T_ICE_MIN, T_ICE_MAX
 
-  use coupler_config_mod, only: cfg_docn_ice_init_only,   &  ! 1
-                                cfg_write_fixdiag
+  use coupler_config_mod, only: cfg_docn_ice_init_only      ! 1
+  use coupler_log_mod, only: log_debug_enabled
   use med_cap_types_mod, only: med_flux_t,           &
                                 rho_air,              &
                                 Cd_neut,              &
@@ -622,7 +622,7 @@ contains
   !!
   !! Células com tas < 100 K (sem dado da atmosfera) ficam como estão.
   !! Conta, antes do limite, as células com |fluxo| > 490 W/m2 e, com
-  !! cfg_write_fixdiag, registra a primeira delas (FIX-DIAG-ICESTAB-01):
+  !! log_level='debug', registra a primeira delas (FIX-DIAG-ICESTAB-01):
   !! saturação frequente indica vento ou diferença de temperatura extremos.
   !! No ramo instável, stab_fac pode passar de 1 (reforço da troca).
   !============================================================================
@@ -675,7 +675,7 @@ contains
       fptr_ice(i,j) = max(-500.0_ESMF_KIND_R8, min(500.0_ESMF_KIND_R8, raw_sen))
     end do; end do
 
-    if (cfg_write_fixdiag .and. n_sat > 0) then
+    if (log_debug_enabled() .and. n_sat > 0) then
         write(diag_msg10,'(A,I0,A,I0,A,I0,A,ES10.3,A,ES10.3,A,ES10.3, &
           &A,ES10.3,A,ES10.3,A,ES10.3,A,ES10.3)') &
           'FIX-DIAG-ICESTAB-01: n_saturado=', n_sat, &

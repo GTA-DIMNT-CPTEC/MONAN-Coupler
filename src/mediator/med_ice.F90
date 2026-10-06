@@ -18,7 +18,7 @@ module med_ice_mod
   use diag_bitsum_mod, only: diag_bitsum_log
   use regrid_base_mod, only: regrid_fill_t, neighbor_fill
   use regrid_manager_mod, only: regrid_manager_t
-  use coupler_config_mod, only: cfg_write_fixdiag
+  use coupler_log_mod, only: log_debug_enabled
   use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_ICE_IFRAC, &
                                COMPL_ICE_AVSDR, COMPL_ICE_AVSDF, COMPL_ICE_ANIDR, &
                                COMPL_ICE_ANIDF, COMPL_ICE_T
@@ -64,16 +64,16 @@ contains
 
     call fill_ice_sentinels(is, rc_ice)
 
-    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) &
+    if (log_debug_enabled() .and. rc_ice == ESMF_SUCCESS) &
       call log_ice_source(f_ifrac_src)
 
     if (rc_ice == ESMF_SUCCESS) &
       call is%regrid%apply('ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_ice)
 
-    if (cfg_write_fixdiag .and. rc_ice == ESMF_SUCCESS) &
+    if (log_debug_enabled() .and. rc_ice == ESMF_SUCCESS) &
       call log_ice_destination(is)
 
-    if (cfg_write_fixdiag) call log_ifrac_raw(is)
+    if (log_debug_enabled()) call log_ifrac_raw(is)
 
     call regrid_ice_member(is%regrid, importState, "Si_avsdr_sis2", is%ice%alb_vdr)
     call regrid_ice_member(is%regrid, importState, "Si_avsdf_sis2", is%ice%alb_vdf)
@@ -92,12 +92,13 @@ contains
     end if
 
     ! Checksum exato de is%ice%ifrac depois da extrapolação.
-    if (cfg_write_fixdiag) then
+    if (log_debug_enabled()) then
         call diag_bitsum_log('etapa3 f_ifrac_atm pos-extrapolacao', &
                              is%ice%ifrac, rc_bs)
     end if
 
-    if (cfg_write_fixdiag .and. associated(p_ifrac_out)) &
+    ! Alerta de gelo em latitude implausível: gravado em qualquer log_level.
+    if (associated(p_ifrac_out)) &
       call check_ice_geography(p_ifrac_out)
 
     call extrapolate_ice_field(is%ice%alb_vdr, regrid_fill_t(enabled=.true., &

@@ -40,7 +40,8 @@ module med_exchange_mod
   use ESMF
   use NUOPC,               only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet, NUOPC_IsAtTime
   use coupler_utils_mod,   only: ChkErr
-  use coupler_config_mod,  only: cfg_use_sis2_dynamic, cfg_write_fixdiag
+  use coupler_config_mod,  only: cfg_use_sis2_dynamic
+  use coupler_log_mod,     only: log_debug_enabled
   use cpl_map_mod,         only: ROUTES
   use med_cap_types_mod,   only: MED_InternalState, med_flux_t
   use med_bulk_ncar_mod,   only: calc_bulk_ncar
@@ -635,7 +636,7 @@ contains
   !! ROUTES: 'conserve', que conserva a área e é o adequado para uma fração,
   !! 'bilinear' em seguida e a rota 'ocn2atm' como reserva.
   !!
-  !! Com cfg_write_fixdiag, registra quantos pontos de terra e de oceano
+  !! Com log_level='debug', registra quantos pontos de terra e de oceano
   !! este PET viu na máscara (FIX-DIAG-ICEMASK-01), para confirmar que
   !! So_omask foi encontrada e não está toda em terra ou toda em oceano.
   !============================================================================
@@ -653,7 +654,7 @@ contains
     ! foi de fato encontrada e tem uma mistura sensata dos dois valores (nao
     ! tudo-terra nem tudo-oceano por engano).
     call set_ocn_grid_mask(is%ocn_grid, importState, n_land_ice, n_sea_ice, found, copied)
-    if (cfg_write_fixdiag) then
+    if (log_debug_enabled()) then
         write(diag_msg_mask,'(A,L1,A,I0,A,I0)') &
           'FIX-DIAG-ICEMASK-01: So_omask encontrada=', &
           found, ' n_land=', n_land_ice, &

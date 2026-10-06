@@ -9,7 +9,7 @@
 # programa tests/completar/test_fill.F90 da árvore de trabalho (ele só
 # usa interfaces que existem desde a fase11-12-validada; as fases de
 # med_exchange que a versão tiver entram com -DCOM_ENTREGAR, -DCOM_IR_PARA
-# e -DCOM_INICIO) e o
+# e -DCOM_INICIO; com a chave log_level, -DCOM_LOG_LEVEL) e o
 # executa com 1, 4, 6 e 8 processos MPI e, com 4, no caso "mista4" (máscara
 # do oceano com terra desde o passo 1), com um supergrid sintético
 # (tests/supergrid/gera-supergrid.py). Para cada PET, os valores gravados
@@ -82,6 +82,9 @@ for versao in antiga nova; do
     grep -qi 'subroutine deliver' "${mx}" 2>/dev/null && defs+=" -DCOM_ENTREGAR"
     grep -qi 'subroutine go_to_flux_grid' "${mx}" 2>/dev/null && defs+=" -DCOM_IR_PARA"
     grep -qi 'subroutine prepare_start' "${mx}" 2>/dev/null && defs+=" -DCOM_INICIO"
+    # Chave log_level (desde a R-FASE13-09): o programa pede o nível de
+    # depuração, para ter as sondas FIX-DIAG que write_fixdiag ligava
+    grep -qi 'cfg_log_level' "${src}/src/shared/coupler_config.F90" 2>/dev/null && defs+=" -DCOM_LOG_LEVEL"
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -cpp ${defs} -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${RAIZ}/tests/completar/test_fill.F90" -o test_fill.o &&

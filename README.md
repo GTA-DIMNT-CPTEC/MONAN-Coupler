@@ -110,6 +110,7 @@ Convenções para código novo:
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente. No mediador, a rota é criada por `create_route` (`med_cap_methods`), com a configuração da sua linha em `ROUTES` (`src/coupling/cpl_map.F90`); rota nova ganha uma linha na tabela. Esquema novo: um arquivo em `src/regrid/`, a partir do modelo `regrid_idw.F90` (base de pesos), e uma linha em `regrid_schemes.F90`; opções do esquema em texto (`regrid_options` no `&nuopc_regrid`) |
 | Campos trocados | todo campo novo ganha uma linha em `FIELDS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `EXCHANGES` (`src/coupling/cpl_map.F90`); desde a R-FASE11-25, só os nomes de `FIELDS` estão no dicionário do NUOPC, e a conferência do mapa interrompe a rodada em caso de diferença (lacunas conhecidas ficam em `GAPS`); campo que um modelo exporta, a linha em `EXPORTS`, na ordem do anúncio; rota nova ou alterada, a linha em `ROUTES`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
 | Malhas | grade latitude e longitude criada por `cpl_latlon_grid` grade tripolar do supergrid do MOM6 por `cpl_tripolar_grid` e grade do cap do MOM6 nos blocos do modelo por `cpl_block_grid` (`src/coupling/cpl_grids.F90`), com a decomposição de `cpl_regdecomp` ou os blocos do modelo (`cpl_blocks_t`); fórmula de centro, canto ou índice nova vira função em `cpl_grids`, uma por regra de arredondamento |
+| Mensagens de log | pelo `coupler_log_mod` (`src/shared/coupler_log.F90`): `log_warning`, `log_info` ou `log_debug`, com a marca do componente (`COMP_ATM`, `COMP_OCN`, `COMP_ICE`, `COMP_MED`, `COMP_DRV`); diagnóstico caro protegido por `if (log_debug_enabled())`, para nem ser calculado fora do nível de depuração |
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
 | Constantes físicas e da grade | em `src/shared/coupler_constants.F90`; não redeclarar localmente |
 | Etapas de uma rotina longa | procedimento de módulo com argumentos explícitos e `intent` declarado, em vez de procedimento interno (`contains` dentro da rotina), que enxerga todas as variáveis da rotina hospedeira |
@@ -135,6 +136,16 @@ O código do acoplador é compilado sem fusão de multiplicação e soma (`-ffp-
 ## Saídas e pós-processamento
 
 Com o diagnóstico ativo, a rodada grava campos exportados em `diag_export/` e campos importados em `diag_import/` (`monan2_import_*.nc` no lado atmosférico e `mom6_import_*.nc` no lado oceânico), além dos logs do ESMF em `logs/`. Os scripts em `tools/` apoiam a análise: `tools/postproc/` para pós-processamento dos NetCDF, `tools/animation/` para animações, `tools/coupler/` para balanceamento de PETs, testes de modo e baterias de reprodutibilidade binária, `tools/atmos/` para as partições METIS e o teste do MPAS autônomo, `tools/ocean/` para a divisão de domínio do MOM6, e `tools/dev/` para linhas de base de comparação e o ambiente do `nccmp`. O catálogo completo, com a pergunta que cada ferramenta responde, está em [`docs/ferramentas.md`](docs/ferramentas.md).
+
+A chave `log_level` do `&nuopc_driver` escolhe quais mensagens do acoplador vão para os logs do ESMF:
+
+| `log_level` | O que é gravado |
+| --- | --- |
+| `'warning'` | só os avisos |
+| `'info'` (padrão) | avisos e mensagens de andamento |
+| `'debug'` | tudo, inclusive os diagnósticos do mediador (linhas `FIX-DIAG`, somas de bits do `Si_ifrac`) que o `mede-taxa-repro.sh` lê |
+
+A antiga chave `write_fixdiag` é obsoleta: é aceita, não tem efeito e gera um aviso na leitura.
 
 ## Reprodutibilidade binária
 

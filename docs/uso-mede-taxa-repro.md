@@ -57,7 +57,7 @@ O script confere que o `nccmp` está disponível antes de começar.
 | Instrumento | Como ligar | O que acrescenta ao relatório |
 | --- | --- | --- |
 | checksums internos do SIS2 | `DEBUG_CHKSUMS = True`, `DEBUG_SLOW_ICE = True`, `DEBUG_FAST_ICE = True` no `SIS_override` | as etapas do ciclo do gelo em que a divergência aparece (`gelo_r<k>.txt`) |
-| diagnósticos do mediador | `cfg_write_fixdiag` ligado (padrão nos binários de teste) | as linhas `FIX-DIAG` do PET 0 (`meddiag_r<k>.txt`) e o checksum exato do `Si_ifrac` por PET (`bitsum_r<k>.txt`, seção 6) |
+| diagnósticos do mediador | `log_level = 'debug'` em `&nuopc_driver` (o padrão, `'info'`, não grava esses diagnósticos; o script avisa no início) | as linhas `FIX-DIAG` do PET 0 (`meddiag_r<k>.txt`) e o checksum exato do `Si_ifrac` por PET (`bitsum_r<k>.txt`, seção 6) |
 | importações por instante | `IMPORT_GLOBS` (seção 3) | o que a atmosfera e o oceano receberam do mediador, troca a troca |
 
 Os checksums do SIS2 acrescentam alguns segundos por troca e muitas linhas ao `esmApp_run.log`. Em produção, devem ser desligados.

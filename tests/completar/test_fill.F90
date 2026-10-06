@@ -48,6 +48,8 @@
 !!                 MediatorAdvance até a R-FASE11-14 (tag
 !!                 fase11-14-validada): export_to_components,
 !!                 stamp_export_fields e, com use_med_to_mpas, RouteOcnToAtm
+!!   COM_LOG_LEVEL pede log_level='debug' no nuopc.input do teste; sem ela
+!!                 (até a R-FASE13-08), as sondas já saíam com write_fixdiag
 !! As sequências de antes estão copiadas sem mudança.
 program test_fill
   use ESMF
@@ -223,10 +225,18 @@ program test_fill
 contains
 
   !> Configuração com o MOM6 (supergrid sintético) e o SIS2, como na produção.
+  !! Com COM_LOG_LEVEL (versão com a chave log_level, desde a R-FASE13-09),
+  !! pede log_level='debug', que põe no log as sondas do mediador (FIX-DIAG),
+  !! como write_fixdiag, que até a R-FASE13-08 vinha ligada por padrão.
   subroutine write_nml(nc_file)
     character(len=*), intent(in) :: nc_file
     integer :: u
     open(newunit=u, file=nc_file, status='replace', action='write')
+#ifdef COM_LOG_LEVEL
+    write(u,'(A)') '&nuopc_driver'
+    write(u,'(A)') "  log_level = 'debug'"
+    write(u,'(A)') '/'
+#endif
     write(u,'(A)') '&nuopc_mode'
     write(u,'(A)') '  use_docn = .false.'
     write(u,'(A)') '/'

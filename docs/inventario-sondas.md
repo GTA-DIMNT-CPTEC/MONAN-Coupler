@@ -4,11 +4,11 @@ Sondas são trechos que registram, no meio do cálculo, valores de investigaçõ
 
 | Rótulo | Onde | O que registra | Destino |
 | --- | --- | --- | --- |
-| `FIX-DIAG-BITSUM-01` | `diag_bitsum`, `med_diag`, `MED_cap`, `med_ice` | soma de bits de `Si_ifrac` em 4 etapas do caminho gelo para atmosfera; lida por `tools/coupler/mede-taxa-repro.sh` | fica; vai para o nível de depuração do novo registro |
-| `FIX-DIAG-ICESRC-01` e `-02` | `med_ice` | `Si_ifrac` antes e depois da interpolação, com 15 a 17 algarismos; 01 lida por `mede-taxa-repro.sh` | fica (depuração) |
-| `FIX-DIAG-ICEMASK-01` e `-02` | `med_exchange`, `med_ice` | máscara do oceano vista pelo PET; fração de gelo antes da extrapolação; lidas por `mede-taxa-repro.sh` | fica (depuração) |
-| `FIX-DIAG-ICESTAB-01` | `med_bulk_ncar` | células que saturam o fator de estabilidade sobre o gelo | fica (depuração) |
-| `FIX-DIAG-ICEGEO-01` | `med_ice` | alerta de gelo em latitude implausível | fica (aviso) |
+| `FIX-DIAG-BITSUM-01` | `diag_bitsum`, `med_diag`, `MED_cap`, `med_ice` | soma de bits de `Si_ifrac` em 4 etapas do caminho gelo para atmosfera; lida por `tools/coupler/mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
+| `FIX-DIAG-ICESRC-01` e `-02` | `med_ice` | `Si_ifrac` antes e depois da interpolação, com 15 a 17 algarismos; 01 lida por `mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
+| `FIX-DIAG-ICEMASK-01` e `-02` | `med_exchange`, `med_ice` | máscara do oceano vista pelo PET; fração de gelo antes da extrapolação; lidas por `mede-taxa-repro.sh` | fica (depuração, desde a R-FASE13-09) |
+| `FIX-DIAG-ICESTAB-01` | `med_bulk_ncar` | células que saturam o fator de estabilidade sobre o gelo | fica (depuração, desde a R-FASE13-09) |
+| `FIX-DIAG-ICEGEO-01` | `med_ice` | alerta de gelo em latitude implausível | fica (aviso, sempre gravado desde a R-FASE13-09) |
 | `FIX-DIAG-CONSERVE02-01: ALERTA` | `med_init` | dois alertas de dobra tripolar degenerada na inicialização | fica (aviso) |
 | `FIX-DIAG-CONSERVE01-01` | `med_init` | cantos da grade do oceano | retirada (R-FASE13-08) |
 | `FIX-DIAG-CONSERVE02-01` (linha informativa) | `med_init` | linha mais ao norte da grade | retirada (R-FASE13-08) |
@@ -23,6 +23,8 @@ Sondas são trechos que registram, no meio do cálculo, valores de investigaçõ
 | `FIX-DIAG-ALBEDO-01` | `sis_cap_fields` | faixa dos albedos do gelo | retirada (R-FASE13-08) |
 | `FIX-DIAG-TSKIN-01` | `sis_cap_fields` | faixa de `Si_t_sis2` (investigação da oscilação, encerrada) | retirada (R-FASE13-08) |
 | `FIX-DIAG-ALBFEEDBACK-01` | `mpas_atm_model` | albedo de uma célula antes e depois do MPAS | retirada (R-FASE13-08) |
+
+Desde a R-FASE13-09, as sondas de depuração só rodam com `log_level = 'debug'` no `&nuopc_driver` (antes, com `write_fixdiag`, que valia `.true.` por padrão); com o padrão `'info'`, nem são calculadas. Os avisos são gravados em qualquer nível.
 
 As marcas `B-DIAGMASK-01` e `B-DIAG-IMPORT-INCOMPLETO-01` não são sondas: são atributos de versão gravados nos NetCDF de diagnóstico e lidos por `tools/postproc/`.
 

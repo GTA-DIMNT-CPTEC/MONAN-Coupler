@@ -44,6 +44,13 @@
 !                                    logs/PET*.esmApp.log completo. Reserve
 !                                    para produção já calibrada, quando não
 !                                    for mais preciso medir tempo por passo.
+!   log_level    Quais mensagens do acoplador vão para o log ESMF:
+!                'warning' -> só avisos;
+!                'info'    -> avisos e mensagens de andamento (padrão);
+!                'debug'   -> tudo, inclusive os diagnósticos do mediador
+!                             (linhas FIX-DIAG, somas de bits do Si_ifrac)
+!                             lidos por tools/coupler/mede-taxa-repro.sh.
+!                A chave antiga write_fixdiag é obsoleta e não tem efeito.
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'
@@ -52,6 +59,7 @@
   dt_atm      = 60
   log_dir     = 'logs'
   log_kind    = 'multi'  ! 'multi' (calibração) | 'multi_on_error' (produção)
+  log_level   = 'info'   ! 'warning' | 'info' (padrão) | 'debug' (diagnósticos)
 /
 
 !-----------------------------------------------------------------------

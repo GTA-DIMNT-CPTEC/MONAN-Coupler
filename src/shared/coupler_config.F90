@@ -7,7 +7,7 @@
 !! as variáveis cfg_* (somente leitura, atributo protected).
 !!
 !! Grupos do namelist e o que controlam:
-!!   &nuopc_driver     datas, passo de acoplamento, diretório e tipo de log
+!!   &nuopc_driver     datas, passo de acoplamento, diretório, tipo e nível de log
 !!   &nuopc_mode       quais componentes de dados (DATM/DOCN) substituem modelos
 !!   &nuopc_atm        malha e diretório de configuração do MONAN-A
 !!   &nuopc_netcdf     escrita dos NetCDF exportados pelo cap ATM
@@ -53,7 +53,7 @@ module coupler_config_mod
   integer,            public, protected :: cfg_dt_atm       = 60          ! [s]
   character(len=256), public, protected :: cfg_log_dir      = 'logs'
   character(len=16),  public, protected :: cfg_log_kind     = 'multi'     ! multi | multi_on_error
-  logical,            public, protected :: cfg_write_fixdiag = .true.
+  character(len=16),  public, protected :: cfg_log_level    = 'info'      ! warning | info | debug
 
   ! &nuopc_atm
   character(len=256), public, protected :: cfg_mesh_atm     = 'mpas_mesh.nc'
@@ -211,7 +211,8 @@ contains
     integer            :: dt_coupling, dt_atm
     character(len=256) :: log_dir
     character(len=16)  :: log_kind
-    logical            :: write_fixdiag
+    character(len=16)  :: log_level
+    logical            :: write_fixdiag              ! chave obsoleta, sem efeito
     character(len=256) :: mesh_atm, config_dir
     logical            :: write_diag, write_netcdf
     character(len=256) :: output_dir
@@ -240,7 +241,7 @@ contains
     character(len=128) :: regrid_options(MAX_REGRID_OVERRIDES)
 
     namelist /nuopc_driver/    start_date, stop_date, dt_coupling, dt_atm, &
-                               log_dir, log_kind, write_fixdiag
+                               log_dir, log_kind, log_level, write_fixdiag
     namelist /nuopc_atm/       mesh_atm, config_dir, write_diag
     namelist /nuopc_netcdf/    write_netcdf, output_dir, grid_res_deg
     namelist /nuopc_atm_bnd/   sst_default, ice_fraction_default, zorl_default
@@ -270,7 +271,8 @@ contains
     ! 1. Valores iniciais = valores atuais do módulo (padrões na 1a leitura)
     start_date = cfg_start_date;  stop_date = cfg_stop_date
     dt_coupling = cfg_dt_coupling; dt_atm = cfg_dt_atm
-    log_dir = cfg_log_dir;  log_kind = cfg_log_kind;  write_fixdiag = cfg_write_fixdiag
+    log_dir = cfg_log_dir;  log_kind = cfg_log_kind;  log_level = cfg_log_level
+    write_fixdiag = .false.
     mesh_atm = cfg_mesh_atm;  config_dir = cfg_config_dir;  write_diag = cfg_write_diag
     write_netcdf = cfg_write_netcdf;  output_dir = cfg_output_dir
     grid_res_deg = cfg_grid_res_deg
@@ -335,6 +337,7 @@ contains
 
     ! 4. Normalizar e completar valores
     call str_lower(log_kind)
+    call str_lower(log_level)
     call str_lower(coupling_mode)
     call str_lower(pet_layout)
     if (len_trim(pet_layout) == 0) then
@@ -346,6 +349,8 @@ contains
     end if
     if (is_root .and. (use_mommesh .or. restart_n /= 0)) write(*,'(A)') TAG//'AVISO: use_mommesh e ' // &
       'restart_n (&nuopc_ocn) sao obsoletas e nao tem efeito; remova-as do nuopc.input.'
+    if (is_root .and. write_fixdiag) write(*,'(A)') TAG//'AVISO: write_fixdiag (&nuopc_driver) ' // &
+      'e obsoleta e nao tem efeito; os diagnosticos saem com log_level=''debug''.'
 
     ! 5. Validar (erro fatal)
     mode = coupler_mode_index(use_datm, use_docn, use_med_to_mpas, use_sis2_dynamic)
@@ -376,7 +381,7 @@ contains
     ! 7. Publicar nas variáveis do módulo
     cfg_start_date = start_date;  cfg_stop_date = stop_date
     cfg_dt_coupling = dt_coupling;  cfg_dt_atm = dt_atm
-    cfg_log_dir = log_dir;  cfg_log_kind = log_kind;  cfg_write_fixdiag = write_fixdiag
+    cfg_log_dir = log_dir;  cfg_log_kind = log_kind;  cfg_log_level = log_level
     cfg_mesh_atm = mesh_atm;  cfg_config_dir = config_dir;  cfg_write_diag = write_diag
     cfg_write_netcdf = write_netcdf;  cfg_output_dir = output_dir
     cfg_grid_res_deg = grid_res_deg
@@ -457,6 +462,9 @@ contains
 
       if (trim(log_kind) /= 'multi' .and. trim(log_kind) /= 'multi_on_error') then
         call fatal('log_kind="'//trim(log_kind)//'" invalido; use multi|multi_on_error.')
+      else if (trim(log_level) /= 'warning' .and. trim(log_level) /= 'info' .and. &
+               trim(log_level) /= 'debug') then
+        call fatal('log_level="'//trim(log_level)//'" invalido; use warning|info|debug.')
       else if (dt_coupling <= 0) then
         call fatal('dt_coupling deve ser positivo.')
       else if (dt_atm <= 0) then
