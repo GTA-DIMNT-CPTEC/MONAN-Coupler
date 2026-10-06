@@ -5,8 +5,6 @@
 !! (use_docn_ice), levados da grade OCN para a grade ATM interna do mediador.
 !! Usa med_ice_mod para o gelo do SIS2.
 !!
-!! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
-!!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module med_ocean_mod
@@ -34,7 +32,7 @@ module med_ocean_mod
   public :: update_ice_fraction_from_docn
   public :: legacy_ice_fraction
 
-  ! ── Si_ifrac do OISST ──────────────────────────────────────────────────
+  ! Si_ifrac do OISST
   !
   ! is%run%ifrac_init_done : .true. após fill_ifrac_from_oisst ser chamado
   !   na primeira MediatorAdvance (estado interno, med_cap_types).
@@ -45,6 +43,14 @@ module med_ocean_mod
 
 contains
 
+  !> @brief SST na malha de fluxo: interpola So_t pela rota 'ocn2atm_sst'
+  !! (ou 'ocn2atm', enquanto a máscara não tem terra e mar), com a contagem
+  !! dos pontos completados.
+  !! @param[in]    is                 estado interno do mediador
+  !! @param[inout] importState        estado de importação
+  !! @param[inout] field              So_t no importState
+  !! @param[inout] raw_sst_diag_done  .true. depois do diagnóstico "DIAG sst raw"
+  !! @param[inout] rc                 código de retorno
   subroutine update_ocean_fields_on_atm_grid(is, importState, field, raw_sst_diag_done, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -60,7 +66,7 @@ contains
       if (log_debug_enabled()) call log_sst_raw(field, raw_sst_diag_done)
 
 
-      ! Regrid da SST com a mascara real do oceano (So_omask) e extrapolação
+      ! Regrid da SST com a máscara real do oceano (So_omask) e extrapolação
       ! por vizinhança para a costa (etapa completar da rota ocn2atm_sst).
       ! A rota ocn2atm_sst é criada pela fase go_to_flux_grid
       ! (med_exchange) no primeiro passo em que a máscara tem terra e mar;
@@ -84,15 +90,15 @@ contains
       call regrid_ocean_currents(is, importState, zero_on_error=.false.)
 
       ! Si_ifrac_sis2, albedos e T_gelo, pela rota MASCARADA 'ocn2atm_ice',
-      ! com extrapolacao por vizinhanca apos o regrid: o mesmo tratamento da
-      ! SST ('ocn2atm_sst'). A rota generica 'ocn2atm' (sem mascara nem
-      ! extrapolacao) daria artefatos justamente onde o gelo se concentra, na
-      ! regiao de deformacao da malha tripolar (alta latitude).
+      ! com extrapolação por vizinhança após o regrid: o mesmo tratamento da
+      ! SST ('ocn2atm_sst'). A rota genérica 'ocn2atm' (sem máscara nem
+      ! extrapolação) daria artefatos justamente onde o gelo se concentra, na
+      ! região de deformação da malha tripolar (alta latitude).
       if (cfg_use_sis2_dynamic) then
         call update_ice_fields_on_atm_grid(is, importState)
       end if
     else
-      ! Routehandles nao criados: usa SST padrao (ja preenchido em InitializeRealize)
+      ! Routehandles não criados: usa SST padrão (já preenchido em InitializeRealize)
       call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
     end if
   end subroutine update_ocean_fields_on_atm_grid
@@ -133,6 +139,9 @@ contains
 
   contains
 
+    !> Interpola um campo do importState pela rota 'ocn2atm'.
+    !! @param[in]    name  nome do campo
+    !! @param[inout] dst   destino na malha de fluxo
     subroutine regrid_one(name, dst)
       character(len=*), intent(in)    :: name
       type(ESMF_Field), intent(inout) :: dst
@@ -147,6 +156,13 @@ contains
 
   end subroutine regrid_ocean_currents
 
+  !> @brief Fração de gelo do OISST (use_docn_ice): lê o arquivo no início
+  !! (ou a cada passo, sem docn_ice_init_only) e, com docn_ice_init_only,
+  !! aplica o decaimento SI_IFRAC_DECAY nos passos seguintes.
+  !! @param[in]    is         estado interno do mediador
+  !! @param[inout] clock      relógio do mediador
+  !! @param[inout] ifrac_ptr  fração de gelo na malha de fluxo
+  !! @param[inout] rc         código de retorno
   subroutine update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_Clock), intent(inout) :: clock
@@ -162,7 +178,7 @@ contains
     else if (cfg_use_docn_ice .and. cfg_docn_ice_init_only .and. &
              is%run%ifrac_init_done) then
       ! init_only: decaimento exponencial do campo OISST retido em
-      ! is%ice%ifrac (zero_med_fluxes nao o zera neste modo).
+      ! is%ice%ifrac (zero_med_fluxes não o zera neste modo).
       ! Multiplica cada célula por SI_IFRAC_DECAY_MED (≈ 0.9592/hora).
       ! Resulta em τ ≈ 24h: gelo antártico/ártico decai fisicamente em vez
       ! de desaparecer instantaneamente no passo seguinte ao t=0.
@@ -179,9 +195,7 @@ contains
     end if
   end subroutine update_ice_fraction_from_docn
 
-  !============================================================================
-  !> @brief Fração de gelo na malha de fluxo sem o SIS2 dinâmico (até a
-  !! R-FASE11-19, no fim de calc_bulk_ncar, em med_bulk_ncar).
+  !> @brief Fração de gelo na malha de fluxo sem o SIS2 dinâmico.
   !!
   !! Com use_docn_ice, is%ice%ifrac já tem o OISST (fill_ifrac_from_oisst).
   !! Sem ele, lê "Si_ifrac" (SEM sufixo, campo diferente de "Si_ifrac_sis2")
@@ -190,7 +204,6 @@ contains
   !! do gelo (SST no congelamento é esperada ali, não é sinal de terra). O
   !! mediador não anuncia "Si_ifrac", então a busca falha, e a fração sai
   !! do limiar de SST (docs/estado-do-projeto.md, seção 6).
-  !============================================================================
   subroutine legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
     type(MED_InternalState), intent(inout) :: is
     type(ESMF_State), intent(inout) :: importState
@@ -236,7 +249,7 @@ contains
             where (fptr < 0.0_ESMF_KIND_R8) fptr = 0.0_ESMF_KIND_R8
             where (fptr > 1.0_ESMF_KIND_R8) fptr = 1.0_ESMF_KIND_R8
             where (fptr /= fptr)            fptr = 0.0_ESMF_KIND_R8  ! NaN
-            ! 5.2: defesa em profundidade — zera ifrac onde sst = T_FILL_LAND
+            ! Defesa em profundidade: zera ifrac onde sst = T_FILL_LAND
               if (associated(sst)) then
                 n_ifrac_land = count(abs(sst - T_FREEZE_SEAWATER) < TOL_LAND &
                                      .and. fptr > 0.0_ESMF_KIND_R8)
@@ -255,11 +268,11 @@ contains
       end if
     end if
 
-    ! Fallback: limiar de SST (.5.2 — condicao mais restritiva)
+    ! Fallback: limiar de SST (.5.2 — condição mais restritiva)
     if (.not. regrid_ok) then
       call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
       if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
-        ! SST efetiva de cada celula em sst_eff_if, com clamp.
+        ! SST efetiva de cada célula em sst_eff_if, com clamp.
           do j = j1, j2
             do i = i1, i2
               ! Clamp: valores fora de [271, 308] K são inválidos ou terra.
@@ -278,7 +291,6 @@ contains
   end subroutine legacy_ice_fraction
 
 
-  !============================================================================
   !> @brief Preenche is%ice%ifrac com dados OISST (use_docn_ice).
   !!
   !! Lê arquivo NetCDF OISST diretamente via netcdf + ESMF_VMBroadcast.
@@ -354,7 +366,7 @@ contains
     end if
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
 
-    ! Numero de instantes do arquivo, lido no PET 0 e difundido
+    ! Número de instantes do arquivo, lido no PET 0 e difundido
     call oisst_ntime(vm, localPet, ntime)
 
     ! Calcular índices de interpolação
@@ -400,9 +412,9 @@ contains
 
   end subroutine fill_ifrac_from_oisst
 
-  !> Numero de instantes (dimensao time ou Time) do arquivo de gelo do
+  !> Número de instantes (dimensão time ou Time) do arquivo de gelo do
   !! OISST, lido pelo PET 0 e difundido a todos os PETs da VM. Sem arquivo
-  !! ou sem a dimensao, e se a difusao falhar, vale 365.
+  !! ou sem a dimensão, e se a difusão falhar, vale 365.
   subroutine oisst_ntime(vm, localPet, ntime)
     type(ESMF_VM), intent(in)  :: vm
     integer,       intent(in)  :: localPet
@@ -435,8 +447,8 @@ contains
 
   !> Le do arquivo de gelo do OISST os instantes tidx0 e tidx1, interpola
   !! linearmente com peso alpha, converte de porcentagem se preciso e limita
-  !! a [0,1]; o resultado fica em f0. Chamada so' pelo PET 0. Sem arquivo ou
-  !! sem a variavel, f0 fica como estava.
+  !! a [0,1]; o resultado fica em f0. Chamada só pelo PET 0. Sem arquivo ou
+  !! sem a variável, f0 fica como estava.
   subroutine read_oisst_ifrac(nx_o, ny_o, tidx0, tidx1, alpha, f0, f1)
     integer,            intent(in)    :: nx_o, ny_o, tidx0, tidx1
     real(ESMF_KIND_R8), intent(in)    :: alpha
@@ -460,8 +472,8 @@ contains
     end if
   end subroutine read_oisst_ifrac
 
-  !> Leva a fracao de gelo do OISST (f0, grade nx_o x ny_o) a porcao local
-  !! fptr da grade ATM interna, pelo ponto mais proximo, limitada a [0,1].
+  !> Leva a fração de gelo do OISST (f0, grade nx_o x ny_o) a porção local
+  !! fptr da grade ATM interna, pelo ponto mais próximo, limitada a [0,1].
   subroutine oisst_to_atm_nearest(f0, nx_o, ny_o, dx_o, dy_o, dx_a, dy_a, fptr)
     integer,            intent(in) :: nx_o, ny_o
     real(ESMF_KIND_R8), intent(in) :: f0(nx_o, ny_o)

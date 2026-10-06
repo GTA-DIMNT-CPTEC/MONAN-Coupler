@@ -1,13 +1,12 @@
 !> @file med_cap_netcdf.F90
 !! @brief Diagnóstico NetCDF do mediador MED — leitura de configuração e escrita de campos.
 !!
-!! Sub-rotinas de I/O NetCDF separadas de MED_cap.F90:
+!! Rotinas:
 !!
 !!   med_read_import_config    — lê mom6_output.nml → configura diagnóstico
 !!   med_write_import_fields   — escreve mom6_import_YYYYMMDD_HHMMSS.nc
 !!
-!! Estas rotinas não pertencem à lógica de um mediador NUOPC. Separadas aqui
-!! para reduzir MED_cap.F90 e concentrar I/O NetCDF neste módulo.
+!! Diagnóstico de saída, fora da lógica do mediador NUOPC.
 
 module med_cap_netcdf_mod
 
@@ -35,7 +34,6 @@ module med_cap_netcdf_mod
 
 contains
 
-  !============================================================================
   !> @brief Lê configuração de diagnóstico de importação de mom6_output.nml.
   !!
   !! Usa namelist &mom6_output com apenas 2 variáveis: write_import_diag e
@@ -46,7 +44,6 @@ contains
   !! @param[inout] diag  configuração do diagnóstico de importação do
   !!                     estado interno (is%diag); sem o arquivo, ficam os
   !!                     padrões
-  !============================================================================
   subroutine med_read_import_config(diag)
     type(med_diag_config_t), intent(inout) :: diag
 
@@ -84,13 +81,12 @@ contains
 
   end subroutine med_read_import_config
 
-  !============================================================================
   !> @brief Escreve os campos do exportState MED→OCN em arquivo NetCDF CF-1.8.
   !!
   !! Lê dos campos ATM internos (grade 360×180 global), faz MPI_Allreduce(MAX)
   !! para montar o campo global completo, e PET0 cria o NetCDF.
   !!
-  !! Caracteristicas do arquivo:
+  !! Características do arquivo:
   !! MPI gather global (Allreduce MAX) — campo completo no NetCDF.
   !! Coordenadas lat/lon variáveis CF com eixo centrado em células.
   !! Variável 'time' CF com units="hours since...".
@@ -116,7 +112,6 @@ contains
   !! @param[in]   currTime  Tempo corrente (para nome do arquivo e atributo time)
   !! @param[inout] is       Estado interno do mediador (campos ATM internos)
   !! @param[out]  rc        Código de retorno ESMF
-  !============================================================================
   subroutine med_write_import_fields(state, currTime, is, rc)
     type(ESMF_State),        intent(inout) :: state
     type(ESMF_Time),         intent(in)    :: currTime
@@ -125,7 +120,7 @@ contains
 
     real(ESMF_KIND_R8), pointer     :: fptr2d(:,:)
     real(ESMF_KIND_R8), allocatable :: grid_local(:,:), grid_global(:,:)
-    ! mascara terra/oceano do MOM6 na grade de saida.
+    ! máscara terra/oceano do MOM6 na grade de saída.
     real(ESMF_KIND_R8), allocatable :: mask_global(:,:)
     logical :: mask_ok, ok
     integer :: fieldCount, n, ncid, varid, ios
@@ -170,7 +165,7 @@ contains
     nx_global = ATM_NX
     ny_global = ATM_NY
 
-    ! PET0: criar arquivo NetCDF, definir variaveis e gravar os eixos
+    ! PET0: criar arquivo NetCDF, definir variáveis e gravar os eixos
     if (is%par%local_pet == 0) then
       if (.not. nc_create(fname, ncid, subname)) then
         deallocate(fieldNameList); return
@@ -209,9 +204,9 @@ contains
         grid_global = FILL_VALUE_R8
       end where
 
-      ! continentes saem como _FillValue. A propria
-      ! mascara e' a excecao obvia — mascara-la apagaria a informacao de
-      ! onde a terra fica, que e' o unico conteudo dela.
+      ! continentes saem como _FillValue. A própria
+      ! máscara é a exceção óbvia — máscara-la apagaria a informação de
+      ! onde a terra fica, que é o único conteúdo dela.
       if (mask_ok .and. trim(fieldNameList(n)) /= 'Sx_omask') then
         where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_VALUE_R8
       end if
@@ -232,7 +227,6 @@ contains
     end if
   end subroutine med_write_import_fields
 
-  !============================================================================
   !> @brief Dimensões locais do primeiro campo 2D do estado.
   !!
   !! Percorre os itens do estado e para no primeiro campo de posto 2 cujo
@@ -243,7 +237,6 @@ contains
   !! @param[in]    fieldNameList  nomes dos itens do estado
   !! @param[out]   nx_local       tamanho local na primeira dimensão
   !! @param[out]   ny_local       tamanho local na segunda dimensão
-  !============================================================================
   subroutine local_field_shape(state, fieldNameList, nx_local, ny_local)
     type(ESMF_State),  intent(inout) :: state
     character(len=64), intent(in)    :: fieldNameList(:)
@@ -274,7 +267,6 @@ contains
     end do
   end subroutine local_field_shape
 
-  !============================================================================
   !> @brief Define o arquivo mom6_import (PET 0) e grava os eixos e o tempo.
   !!
   !! Cabeçalho global, eixos lat/lon centrados em células, variável 'time'
@@ -289,7 +281,6 @@ contains
   !! @param[in]  ny_global      número de latitudes
   !! @param[in]  pet_count      número de PETs do mediador (atributo petCount)
   !! @param[out] ok             .false. se a definição dos eixos ou o enddef falhou
-  !============================================================================
   subroutine define_import_file(ncid, fieldNameList, tstamp, yy, mm, dd, hh, mn, ss, &
                                 nx_global, ny_global, pet_count, ok)
     integer,           intent(in)  :: ncid
@@ -361,7 +352,6 @@ contains
     ok = .true.
   end subroutine define_import_file
 
-  !============================================================================
   !> @brief Monta em todos os PETs a máscara terra/oceano global do MOM6.
   !!
   !! A máscara real do MOM6 é montada uma vez por arquivo, pelo mesmo caminho
@@ -387,7 +377,6 @@ contains
   !! @param[in]  ny_global    número de latitudes da grade de saída
   !! @param[out] mask_global  máscara global (1=oceano, 0=terra)
   !! @param[out] mask_ok      .true. se a máscara tem ao menos uma célula de oceano
-  !============================================================================
   subroutine gather_ocean_mask(is, nx_global, ny_global, mask_global, mask_ok)
     type(MED_InternalState), intent(in)  :: is
     integer,                 intent(in)  :: nx_global, ny_global
@@ -405,7 +394,7 @@ contains
     mask_ok    = .false.
     nullify(pmask2d)
     ! ESMF_FieldGet(farrayPtr) falha em PET sem DE local. Verificar
-    ! antes de acessar, como ja' e' feito no resto do mediador — senao o
+    ! antes de acessar, como já é feito no resto do mediador — senão o
     ! ERROR do ESMF poluiria o log a cada passo nesses PETs.
     ldec_mask = 0
     call ESMF_FieldGet(is%ocn%omask, localDeCount=ldec_mask, rc=rc_mask)
@@ -424,10 +413,10 @@ contains
                        MPI_DOUBLE_PRECISION, MPI_MAX, is%par%comm, mpi_ierr)
     deallocate(mask_local)
 
-    ! mask_ok e' decidido DEPOIS do gather, e nao por PET: um PET sem DE
-    ! local nao ve mascara nenhuma, mas isso nao significa que ela faltou.
-    ! Mascara toda zerada = nao chegou de lugar nenhum -> nao mascarar, que
-    ! e' o comportamento anterior. Falhar para o lado de nao apagar dado.
+    ! mask_ok é decidido DEPOIS do gather, e não por PET: um PET sem DE
+    ! local não ve máscara nenhuma, mas isso não significa que ela faltou.
+    ! Máscara toda zerada = não chegou de lugar nenhum -> não mascarar:
+    ! na dúvida, não apagar dado.
     mask_ok = any(mask_global >= 0.5_ESMF_KIND_R8)
 
     if (is%par%local_pet == 0) then
@@ -445,7 +434,6 @@ contains
     end if
   end subroutine gather_ocean_mask
 
-  !============================================================================
   !> @brief Ponteiro para o campo interno (grade ATM 360×180) de um nome do estado.
   !!
   !! Um campo do exportState sem mapeamento aqui viraria variável vazia no
@@ -456,7 +444,6 @@ contains
   !! @param[in]  name    nome do campo no exportState
   !! @param[out] fptr2d  ponteiro para os dados locais; nulo se sem mapeamento
   !! @param[out] rc      código de retorno do ESMF_FieldGet
-  !============================================================================
   subroutine internal_field_ptr(is, name, fptr2d, rc)
     type(MED_InternalState),     intent(in)  :: is
     character(len=*),            intent(in)  :: name
@@ -492,13 +479,13 @@ contains
       case ('Fioi_evap');      call ESMF_FieldGet(is%ice%evap,   farrayPtr=fptr2d, rc=rc)
       case ('Fioi_lwnet');     call ESMF_FieldGet(is%ice%lwnet,  farrayPtr=fptr2d, rc=rc)
       ! Onda curta sobre gelo (f_sw*_ice, calculados no
-      ! med_bulk_ncar) e temperatura de superficie usada pelo bulk sobre gelo.
+      ! med_bulk_ncar) e temperatura de superfície usada pelo bulk sobre gelo.
       case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%ice%swvdr,  farrayPtr=fptr2d, rc=rc)
       case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%ice%swvdf,  farrayPtr=fptr2d, rc=rc)
       case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%ice%swidr,  farrayPtr=fptr2d, rc=rc)
       case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%ice%swidf,  farrayPtr=fptr2d, rc=rc)
       case ('Sx_tsfc');        call ESMF_FieldGet(is%sfc%tsfc,   farrayPtr=fptr2d, rc=rc)
-      ! a propria mascara vira variavel do arquivo.
+      ! a própria máscara vira variável do arquivo.
       case ('Sx_omask');       call ESMF_FieldGet(is%ocn%omask,  farrayPtr=fptr2d, rc=rc)
       case default
         call log_warning(COMP_MED, ROUTINE//': campo "'// &
@@ -509,7 +496,6 @@ contains
     end select
   end subroutine internal_field_ptr
 
-  !============================================================================
   !> @brief Reúne em todos os PETs um campo da grade ATM 360×180.
   !!
   !! Cada PET copia a sua fatia para um buffer global preenchido com
@@ -523,7 +509,6 @@ contains
   !! @param[in]  comm         comunicador MPI do mediador
   !! @param[out] grid_local   buffer de trabalho (fatia local + preenchimento)
   !! @param[out] grid_global  campo global combinado
-  !============================================================================
   subroutine gather_field_global(fptr2d, nx_global, ny_global, comm, grid_local, grid_global)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr2d(:,:)
     integer,            intent(in)  :: nx_global, ny_global
@@ -546,6 +531,13 @@ contains
                        MPI_DOUBLE_PRECISION, MPI_MAX, comm, mpi_ierr)
   end subroutine gather_field_global
 
+  !> @brief Grava os atributos units, long_name e standard_name da variável
+  !! de um campo importado, pela tabela de nomes desta rotina.
+  !! @param[in]    fieldNameList  nomes dos campos
+  !! @param[in]    n              índice do campo
+  !! @param[inout] ios            código da última chamada do NetCDF
+  !! @param[in]    ncid           arquivo aberto
+  !! @param[in]    varid          variável do campo
   subroutine put_field_metadata(fieldNameList, n, ios, ncid, varid)
     integer, intent(in) :: n
     integer, intent(inout) :: ios
@@ -571,9 +563,9 @@ contains
       case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
       case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
       ! Todo campo exportado pelo mediador precisa de um caso aqui e no
-      ! select case de dados abaixo: sem ele, a variavel sai com
-      ! metadados genericos e, pelo 'cycle' do select case de dados,
-      ! fica so com _FillValue.
+      ! select case de dados abaixo: sem ele, a variável sai com
+      ! metadados genéricos e, pelo 'cycle' do select case de dados,
+      ! fica só com _FillValue.
       case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
       case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
       case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
@@ -586,16 +578,16 @@ contains
       case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
       ! Fioi_swnet_* e Sx_tsfc caiam no
       ! case default e saiam com units='1'/standard_name='unknown' — os
-      ! quatro Fioi_swnet_* sao fluxos de onda curta (W m-2) e Sx_tsfc e'
-      ! a temperatura de superficie (pele) usada pelo bulk sobre gelo (K).
+      ! quatro Fioi_swnet_* são fluxos de onda curta (W m-2) e Sx_tsfc é
+      ! a temperatura de superfície (pele) usada pelo bulk sobre gelo (K).
       case ('Fioi_swnet_vdr'); f_units='W m-2';       f_long='Onda curta vis. direto (gelo)';   f_std='surface_net_downward_shortwave_flux'
       case ('Fioi_swnet_vdf'); f_units='W m-2';       f_long='Onda curta vis. difuso (gelo)';   f_std='surface_net_downward_shortwave_flux'
       case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
       case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
       case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
-      ! mascara terra/oceano do MOM6. E' a UNICA
-      ! variavel do arquivo que nao recebe _FillValue sobre terra —
-      ! e' justamente ela que diz onde a terra fica.
+      ! máscara terra/oceano do MOM6. É a ÚNICA
+      ! variável do arquivo que não recebe _FillValue sobre terra —
+      ! é justamente ela que diz onde a terra fica.
       case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'
       case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
     end select

@@ -30,7 +30,6 @@ module med_ice_mod
 
 contains
 
-  !============================================================================
   !> @brief Traz o gelo do SIS2 para a grade ATM: fração, albedos e temperatura.
   !!
   !! Etapas, nesta ordem (a rota mascarada 'ocn2atm_ice' já foi criada pela
@@ -45,7 +44,6 @@ contains
   !! origem e a interpolação da fração dependem do resultado do último
   !! preenchimento da etapa 1, e o diagnóstico do destino depende do
   !! resultado da interpolação.
-  !============================================================================
   subroutine update_ice_fields_on_atm_grid(is, importState)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -114,7 +112,6 @@ contains
   end subroutine update_ice_fields_on_atm_grid
 
 
-  !============================================================================
   !> @brief Preenche os seis campos de gelo na grade ATM com a sentinela -999.
   !!
   !! A rota 'ocn2atm_ice' não zera o destino (sem_valor 'sentinela' em
@@ -124,7 +121,6 @@ contains
   !! passariam por válidas.
   !!
   !! rc recebe o resultado do último preenchimento (is%ice%tice).
-  !============================================================================
   subroutine fill_ice_sentinels(is, rc_ice)
     type(MED_InternalState), intent(inout) :: is
     integer,                 intent(out)   :: rc_ice
@@ -137,11 +133,9 @@ contains
     call FillInternalField(is%ice%tice,     -999.0_ESMF_KIND_R8, rc_ice)
   end subroutine fill_ice_sentinels
 
-  !============================================================================
   !> @brief Interpola um campo do SIS2 pela rota 'ocn2atm_ice', se ele existir.
   !!
   !! Sem o campo no importState, o destino fica como está (com a sentinela).
-  !============================================================================
   subroutine regrid_ice_member(regrid, importState, item_name, dst)
     type(regrid_manager_t), intent(inout) :: regrid
     type(ESMF_State),       intent(inout) :: importState
@@ -156,9 +150,7 @@ contains
       call regrid%apply('ocn2atm_ice', f_src, dst, rc_ice)
   end subroutine regrid_ice_member
 
-  !============================================================================
   !> @brief Extrapola por vizinhança um campo de gelo na grade ATM.
-  !============================================================================
   subroutine extrapolate_ice_field(field, fill, cont)
     type(ESMF_Field),     intent(in)    :: field
     type(regrid_fill_t),  intent(in)    :: fill

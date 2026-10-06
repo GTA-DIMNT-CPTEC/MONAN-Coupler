@@ -3,36 +3,32 @@
 !!
 !! O mediador troca campos com os componentes em fases fixas, na
 !! inicialização e a cada passo (ver docs/arquitetura-acoplamento.md, seção
-!! 2). Este módulo reúne as fases à medida que saem de MED_cap:
+!! 2). Este módulo reúne essas fases:
 !!
 !!   initialize_data
 !!              InitializeDataComplete: rotas de inicialização (coluna
 !!              create='inicio' de ROUTES), espera da primeira SST do oceano e
-!!              valores de t=0 no exportState (R-FASE11-17)
+!!              valores de t=0 no exportState
 !!   go_to_flux_grid
 !!              antes da física: leva os campos do oceano e do gelo da
-!!              grade do oceano para a malha de fluxo (R-FASE11-16)
+!!              grade do oceano para a malha de fluxo
 !!   compute_fluxes
 !!              a física bulk (calc_bulk_ncar, em med_bulk_ncar) sobre os
 !!              arrays da malha de fluxo (med_flux_t), associados aqui aos
-!!              campos internos (R-FASE11-20)
+!!              campos internos
 !!   ice_fraction_without_sis2
 !!              logo depois da física, sem o SIS2: a fração de gelo na malha
 !!              de fluxo (OISST ou limiar de SST) para a exportação e para o
-!!              passo seguinte (R-FASE11-19)
+!!              passo seguinte
 !!   deliver    no fim do passo, depois da física: leva os campos da malha
 !!              de fluxo para o exportState (export_to_components, em
 !!              med_export) e carimba o tempo dos campos exportados
-!!              (R-FASE11-15)
 !!
 !! O carimbo de tempo dos campos que o mediador entrega fica só aqui. Na
 !! inicialização, cada campo do exportState recebe startTime
 !! (idc_stamp_export). A cada passo, cada campo recebe stampTime (ver med_stamp_time, em MED_cap)
 !! e, com use_med_to_mpas, o exportState inteiro recebe depois o tempo atual
-!! do relógio, que prevalece. A ordem das duas marcações é a de antes da
-!! R-FASE11-15, quando a segunda ficava em RouteOcnToAtm (med_cap_methods);
-!! as mensagens do log continuam com esse nome, que as ferramentas de
-!! pós-processamento procuram (tools/postproc/postproc_monan2_import.py).
+!! do relógio, que prevalece.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -65,9 +61,7 @@ module med_exchange_mod
 
 contains
 
-  ! ---------------------------------------------------------------------------
   ! Fase de inicialização
-  ! ---------------------------------------------------------------------------
 
   !> Fase de inicialização (InitializeDataComplete do mediador). Pode ser
   !! chamada MAIS DE UMA VEZ: o laço de resolução de dependência de dados do
@@ -183,8 +177,8 @@ contains
 
   !> Fase A da inicialização: cria as rotas da coluna create='inicio' de
   !! ROUTES (create_start_routes), interpola as correntes e preenche o
-  !! exportState com valores iniciais. Roda uma unica vez (enquanto a rota
-  !! 'ocn2atm' nao existe).
+  !! exportState com valores iniciais. Roda uma única vez (enquanto a rota
+  !! 'ocn2atm' não existe).
   subroutine prepare_start(is, importState, exportState, exp_field, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -200,9 +194,9 @@ contains
 
     call idc_init_export_fields(exportState)
 
-    ! Si_ifrac_sis2 e os 4 albedos do gelo sao realizados pelo MED em
+    ! Si_ifrac_sis2 e os 4 albedos do gelo são realizados pelo MED em
     ! ocn_grid, a MESMA grade de So_t (ver InitializeRealize); a rota
-    ! mascarada propria do gelo, 'ocn2atm_ice', e' criada na primeira chamada
+    ! mascarada própria do gelo, 'ocn2atm_ice', é criada na primeira chamada
     ! de update_ice_fields_on_atm_grid.
 
     call log_info(COMP_MED, 'IDC fase A: rotas de interpolacao criadas')
@@ -214,13 +208,13 @@ contains
   !! O mom_cap (e o DOCN) carimbam TODOS os campos exportados com startTime em
   !! seu InitializeDataComplete, e o conector NUOPC propaga o carimbo ao campo
   !! de destino. Portanto NUOPC_IsAtTime distingue exatamente os dois casos:
-  !! So_t recem-chegado do oceano (carimbado) contra o campo ainda nao escrito
-  !! (sem carimbo). Carimbo, porem, nao e' dado: ver sst_has_physical_values.
+  !! So_t recém-chegado do oceano (carimbado) contra o campo ainda não escrito
+  !! (sem carimbo). Carimbo, porém, não é dado: ver sst_has_physical_values.
   !!
-  !! Enquanto o dado nao chega, declaramos Progress=true (a fase A progrediu:
-  !! os routehandles existem) e Complete=false (idc_wait_for_sst). Isso forca
+  !! Enquanto o dado não chega, declaramos Progress=true (a fase A progrediu:
+  !! os routehandles existem) e Complete=false (idc_wait_for_sst). Isso força
   !! o driver a percorrer a RunSequence outra vez; na segunda passagem o
-  !! "OCN -> MED" ja' encontra o So_t escrito pelo "OCN" da passagem
+  !! "OCN -> MED" já encontra o So_t escrito pelo "OCN" da passagem
   !! anterior, e o portão abre.
   !!
   !! @param[out] ocn_field  So_t no importState (grade OCN)
@@ -263,9 +257,9 @@ contains
     ready = .true.
   end subroutine wait_first_sst
 
-  !> Confere que o campo de referencia da grade ATM existe no importState:
+  !> Confere que o campo de referência da grade ATM existe no importState:
   !! Sa_u10m_mpas no modo MPAS, Sa_u10m no modo DATM (is%use_mpas_atm, lido
-  !! em InitializeRealize). rc de falha quando o campo nao existe.
+  !! em InitializeRealize). rc de falha quando o campo não existe.
   subroutine idc_check_atm_field(is, importState, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -287,19 +281,17 @@ contains
     end if
   end subroutine idc_check_atm_field
 
-  !> CARIMBO NAO E' DADO: com So_t carimbado (sst_ready), exige tambem VALOR
-  !! fisicamente plausivel, em [270,310] K, em alguma celula, contado
-  !! GLOBALMENTE (um DE pode legitimamente conter so' terra e gelo). Sem
+  !> CARIMBO NÃO É DADO: com So_t carimbado (sst_ready), exige também VALOR
+  !! fisicamente plausível, em [270,310] K, em alguma célula, contado
+  !! GLOBALMENTE (um DE pode legitimamente conter só terra e gelo). Sem
   !! nenhuma, sst_ready passa a .false.
   !!
   !! O mom_cap aplica NUOPC_SetTimestamp a TODOS os campos do exportState em
   !! seu InitializeDataComplete, em laco cego sobre o itemNameList, sem
   !! verificar quais deles o mom_export realmente preencheu. Um So_t
-  !! identicamente nulo passa no NUOPC_IsAtTime. Foi o que aconteceu quando
-  !! ocean_model_init_sfc nao era chamado: o gate abria, o mediador seguia, e
-  !! a extrapolacao da secao 3 convertia o campo inteiro em T_FILL=271.35 K,
-  !! o que levava a mascara de terra, entao baseada na SST, a classificar o
-  !! planeta inteiro como terra e zerar os 11 campos de fluxo.
+  !! identicamente nulo passa no NUOPC_IsAtTime; sem esta conferência, a
+  !! extrapolação levaria o campo inteiro a T_FILL=271.35 K e os fluxos
+  !! sairiam como se o planeta fosse todo terra.
   !!
   !! Coletivo sobre a VM do MED (ESMF_VMAllReduce): todos os PETs do
   !! mediador entram aqui.
@@ -342,13 +334,12 @@ contains
     end if
   end subroutine sst_has_physical_values
 
-  !> So_t ainda sem dado: pede ao driver mais uma iteracao do laco de
-  !! dependencia de dados (Progress=true, Complete=false). Depois de
+  !> So_t ainda sem dado: pede ao driver mais uma iteração do laco de
+  !! dependência de dados (Progress=true, Complete=false). Depois de
   !! MAX_GATE_TRIES tentativas, avisa e declara Complete=true.
   !!
-  !! Falhar alto em vez de seguir com SST nula: era exatamente esse
-  !! prosseguimento silencioso que produzia mapas de fluxo em branco no
-  !! passo 1, com a causa escondida a tres camadas de distancia.
+  !! Avisa alto em vez de seguir em silêncio com SST nula, que produziria
+  !! mapas de fluxo em branco no passo 1 sem indicar a causa.
   subroutine idc_wait_for_sst(gcomp, is, rc)
     type(ESMF_GridComp) :: gcomp
     type(MED_InternalState), pointer :: is
@@ -357,14 +348,13 @@ contains
 
     is%run%n_gate_tries = is%run%n_gate_tries + 1
     if (is%run%n_gate_tries >= MAX_GATE_TRIES) then
-      ! AVISO, nao aborto. O modelo de como o driver NUOPC percorre a
-      ! RunSequence durante a resolucao de dependencia de dados ainda nao
-      ! esta plenamente verificado: o gate ja' foi observado fechando uma
+      ! AVISO, não aborto. O modelo de como o driver NUOPC percorre a
+      ! RunSequence durante a resolução de dependência de dados ainda não
+      ! está plenamente verificado: o gate já foi observado fechando uma
       ! vez em coupling_mode='concurrent', onde a ordem dos elementos
-      ! preveria abertura imediata. Enquanto essa discrepancia nao for
-      ! entendida, abortar aqui arriscaria derrubar execucoes que hoje
-      ! funcionam. O aviso e' alto e nomeia o que inspecionar; o
-      ! comportamento anterior a este gate e' preservado.
+      ! preveria abertura imediata. Enquanto essa discrepância não for
+      ! entendida, abortar aqui arriscaria derrubar execuções que hoje
+      ! funcionam. O aviso nomeia o que inspecionar, e a rodada segue.
       call log_warning(COMP_MED, 'So_t sem valores fisicos apos varias iteracoes '// &
         'do laco de dependencia de dados; prosseguindo. A SST em t=0 pode estar '// &
         'nula: com log_level=''debug'', inspecione "DIAG sst raw" no passo 1 '// &
@@ -388,10 +378,10 @@ contains
   !! Primeiro regrid de So_u e So_v para is%ocn%u/is%ocn%v, pela rota
   !! 'ocn2atm' (bilinear, criada na fase A): So_u/So_v compartilham a grade
   !! OCN de So_t. Depois, a SST de t=0: sem ela, is%ocn%sst ficaria no valor
-  !! de bootstrap SST_BULK_FALLBACK ate' o primeiro MediatorAdvance, e o
-  !! conector MED -> MPAS entregaria essa constante ao MPAS. A SST e'
+  !! de bootstrap SST_BULK_FALLBACK até o primeiro MediatorAdvance, e o
+  !! conector MED -> MPAS entregaria essa constante ao MPAS. A SST é
   !! publicada no exportState (zerado na fase A), para que o "MED -> MPAS"
-  !! desta mesma passagem entregue SST fisica, e nao zero.
+  !! desta mesma passagem entregue SST física, e não zero.
   subroutine idc_publish_initial_sst(is, importState, exportState, ocn_field)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -412,7 +402,7 @@ contains
     end if
   end subroutine idc_publish_initial_sst
 
-  !> Carimba os campos exportados com startTime: e' o que permite ao MPAS
+  !> Carimba os campos exportados com startTime: é o que permite ao MPAS
   !! (e a qualquer consumidor futuro) aplicar o mesmo gate NUOPC_IsAtTime.
   subroutine idc_stamp_export(exportState, startTime, rc)
     type(ESMF_State), intent(inout) :: exportState
@@ -438,8 +428,8 @@ contains
     end if
   end subroutine idc_stamp_export
 
-  !> Inicializa o exportState com valores fisicamente razoaveis: Sa_pslv
-  !! com 101325 Pa e os demais campos com zero. PETs sem DE local nao tem o
+  !> Inicializa o exportState com valores fisicamente razoáveis: Sa_pslv
+  !! com 101325 Pa e os demais campos com zero. PETs sem DE local não tem o
   !! que inicializar (ESMF_FieldGet com farrayPtr falharia neles).
   subroutine idc_init_export_fields(exportState)
     type(ESMF_State), intent(inout) :: exportState
@@ -473,9 +463,7 @@ contains
     end if
   end subroutine idc_init_export_fields
 
-  ! ---------------------------------------------------------------------------
   ! Fases de cada passo
-  ! ---------------------------------------------------------------------------
 
   !> Fase go_to_flux_grid: os campos do oceano e do gelo na malha de
   !! fluxo, antes da física, nesta ordem:
@@ -527,8 +515,7 @@ contains
   !!                e mar; até lá, a SST usa a rota ocn2atm;
   !!   ocn2atm_ice  'primeiro_uso': com o SIS2, na primeira vez que
   !!                Si_ifrac_sis2 está no importState (add_ice_route).
-  !! Nada é criado antes da rota ocn2atm (fase A da inicialização), como
-  !! quando a criação ficava em med_ocean e med_ice, até a R-FASE11-18.
+  !! Nada é criado antes da rota ocn2atm (fase A da inicialização).
   !!
   !! @param[in]    is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
@@ -555,7 +542,7 @@ contains
   !> Prepara e cria a rota 'ocn2atm_sst' (coluna create 'mascara_mista' de
   !! ROUTES): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
   !! de um limiar de SST) e cria a rota no primeiro passo em que a máscara
-  !! tem terra e mar no conjunto dos PETs. Até a R-FASE11-18, em med_ocean.
+  !! tem terra e mar no conjunto dos PETs.
   subroutine set_ocean_mask_for_sst(is, importState, sst_ocn, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -571,17 +558,17 @@ contains
 
     call ESMF_VMGetCurrent(vm, rc=rc)
 
-    ! Preferencial: mascara real do MOM6 (So_omask, 1=oceano/0=terra; a
-    ! mesma convencao do GRIDITEM_MASK aqui: valores em srcMaskValues sao
-    ! EXCLUIDOS da fonte do regrid, logo terra=0 e' o valor a excluir).
+    ! Preferencial: máscara real do MOM6 (So_omask, 1=oceano/0=terra; a
+    ! mesma convenção do GRIDITEM_MASK aqui: valores em srcMaskValues são
+    ! EXCLUÍDOS da fonte do regrid, logo terra=0 é o valor a excluir).
     call set_ocn_grid_mask(is%ocn_grid, importState, n_land, n_sea, found, got_omask)
     if (.not. found) then
       call log_warning(COMP_MED, 'So_omask indisponivel no importState: ' // &
         'mascara pelo limiar de SST (menos confiavel na costa)')
     end if
 
-    ! Fallback defensivo (nao deveria ocorrer com So_omask anunciado/
-    ! realizado): mantem o comportamento antigo em vez de travar.
+    ! Sem So_omask (não deveria ocorrer com o campo anunciado e realizado):
+    ! máscara pelo limiar de SST, em vez de parar a rodada.
     if (.not. got_omask) then
         n_land = 0; n_sea = 0
         call ESMF_GridGet(is%ocn_grid, localDeCount=ldec_ocn, rc=rc)
@@ -621,7 +608,6 @@ contains
     end if
   end subroutine set_ocean_mask_for_sst
 
-  !============================================================================
   !> @brief Cria a rota 'ocn2atm_ice' (conservativa, com máscara na origem).
   !!
   !! Antes de criar a rota, copia So_omask (1 = oceano, 0 = terra) para a
@@ -632,7 +618,6 @@ contains
   !!
   !! Com log_level='debug', registra quantos pontos de terra e de oceano
   !! este PET viu na máscara (log_ocean_mask, em med_diag).
-  !============================================================================
   subroutine add_ice_route(is, importState, f_ifrac_src)
     type(MED_InternalState), intent(inout) :: is
     type(ESMF_State),        intent(inout) :: importState
@@ -686,9 +671,7 @@ contains
 
   !> Fase da física bulk: associa os arrays de med_flux_t aos campos
   !! internos da malha de fluxo (associate_fluxes) e chama calc_bulk_ncar com
-  !! eles e com os forçantes atmosféricos reunidos na grade global. Até a
-  !! R-FASE11-20, calc_bulk_ncar recebia o estado interno e pedia cada campo
-  !! ao ESMF.
+  !! eles e com os forçantes atmosféricos reunidos na grade global.
   !!
   !! @param[in]    is             estado interno do mediador
   !! @param[in]    uas..snow_g    forçantes atmosféricos na grade ATM global
@@ -774,9 +757,7 @@ contains
   !> Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
   !! gelo na malha de fluxo (legacy_ice_fraction, em med_ocean). A física
   !! deste passo já usou a fração que estava em is%ice%ifrac; a nova vai
-  !! para a exportação (Si_ifrac) e para o passo seguinte. Até a
-  !! R-FASE11-19, a mesma chamada era a última de calc_bulk_ncar, e a
-  !! física bulk ficou sem rotas nem estados.
+  !! para a exportação (Si_ifrac) e para o passo seguinte.
   !!
   !! @param[inout] is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
@@ -804,7 +785,6 @@ contains
   !!                     regrid_land_mask (med_export) a aplica uma vez;
   !!   atm2ocn_ice       se Si_ifrac está no exportState e a rota de reserva
   !!                     atm2ocn já existe; export_ice_fraction a aplica.
-  !! Até a R-FASE11-18, cada uma era criada por quem a aplica, em med_export.
   !!
   !! @param[in]    is           estado interno do mediador
   !! @param[inout] importState  estado de importação do mediador
@@ -851,8 +831,7 @@ contains
     deallocate(fieldNameList)
   end subroutine stamp_export_fields
 
-  !> Carimba o exportState inteiro com o tempo atual do relógio (até a
-  !! R-FASE11-15, RouteOcnToAtm, em med_cap_methods). Só depois que a rota
+  !> Carimba o exportState inteiro com o tempo atual do relógio. Só depois que a rota
   !! ocn2atm existe; antes disso, avisa no log e não carimba.
   !!
   !! @param[inout] exportState  estado de exportação do mediador

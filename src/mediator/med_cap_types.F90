@@ -43,10 +43,8 @@ module med_cap_types_mod
   ! Chaves de configuração que escolhem os campos do mediador
   public :: MED_KEYS
 
-  !----------------------------------------------------------------------------
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
   ! As constantes físicas vêm de coupler_constants_mod e são re-exportadas aqui.
-  !----------------------------------------------------------------------------
   real(ESMF_KIND_R8), parameter :: Cd_neut    = 1.3e-3_ESMF_KIND_R8  !< Coef. arrasto neutro
   real(ESMF_KIND_R8), parameter :: Ch_neut    = 1.0e-3_ESMF_KIND_R8  !< Coef. calor sensível
   real(ESMF_KIND_R8), parameter :: Ce_neut    = 1.15e-3_ESMF_KIND_R8 !< Coef. calor latente
@@ -64,12 +62,10 @@ module med_cap_types_mod
   real(ESMF_KIND_R8), parameter :: f_nir_dir = 0.285_ESMF_KIND_R8
   real(ESMF_KIND_R8), parameter :: f_nir_dif = 0.215_ESMF_KIND_R8
 
-  !----------------------------------------------------------------------------
   ! Estado interno do mediador, agrupado por assunto
   !
   ! Todos os campos ESMF abaixo estão na grade ATM regular 360×180 do
   ! mediador (is%atm_grid).
-  !----------------------------------------------------------------------------
 
   !> Fluxos e estados que o mediador envia ao oceano (MOM6): os fluxos do bulk
   !! NCAR sobre água aberta (Foxx_*) e os campos da atmosfera repassados
@@ -172,8 +168,7 @@ module med_cap_types_mod
   !> Arrays da física bulk (med_bulk_ncar), na malha de fluxo, com os
   !! limites locais da DE: ponteiros para os valores dos campos internos,
   !! associados pela fase compute_fluxes (med_exchange) a cada passo. Um
-  !! ponteiro nulo é um campo indisponível, como antes da R-FASE11-20, quando
-  !! a física pedia cada campo ao ESMF. A física lê e escreve só por aqui,
+  !! ponteiro nulo é um campo indisponível. A física lê e escreve só por aqui,
   !! sem conhecer o estado interno, os campos do ESMF nem as rotas.
   type :: med_flux_t
     ! Entradas: oceano e gelo (is%ocn, is%ice)
@@ -286,9 +281,7 @@ module med_cap_types_mod
     type(MED_InternalState), pointer :: wrap => null()
   end type MED_InternalStateWrapper
 
-  !----------------------------------------------------------------------------
   ! Campos anunciados e realizados pelo mediador
-  !----------------------------------------------------------------------------
 
   !> Chaves de &nuopc_mode que o mediador consulta para anunciar e realizar
   !! os campos: a fonte atmosférica (use_datm) e o gelo do SIS2

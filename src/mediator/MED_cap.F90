@@ -30,7 +30,7 @@ module MED_cap_MONAN_mod
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
                                   cfg_use_docn, cfg_mom6_mesh_ocn,  &
                                   cfg_use_datm, cfg_use_med_to_mpas, &
-                                  cfg_use_sis2_dynamic,             & ! gelo dinamico do SIS2
+                                  cfg_use_sis2_dynamic,             & ! gelo dinâmico do SIS2
                                   cfg_coupling_mode,                &
                                   cfg_seq_repro,                    & ! seq_repro (reprodutibilidade)
                                   cfg_stop_date, config_parse_date
@@ -65,9 +65,11 @@ module MED_cap_MONAN_mod
 
 contains
 
-  !============================================================================
-  ! SetServices
-  !============================================================================
+  !> @brief Registra o mediador no NUOPC: fases de inicialização,
+  !! especializações (Advance, CheckImport, DataInitialize) e o relatório
+  !! do último passo.
+  !! @param[inout] gcomp  componente do mediador
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -103,7 +105,6 @@ contains
 
   end subroutine SetServices
 
-  !============================================================================
   !> Passo do mediador (MediatorAdvance) e, no último passo da rodada, as
   !! linhas do relatório de acoplamento com os pontos completados por
   !! vizinhança (report_fills), que só escrevem no log.
@@ -114,7 +115,6 @@ contains
   !! relógio do próprio mediador não serve, porque o NUOPC o faz parar no fim
   !! de cada passo. Todos os PETs do mediador chegam aqui, inclusive os que
   !! saem cedo de MediatorAdvance, porque report_fills é coletiva.
-  !============================================================================
   subroutine mediatoradvancereport(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -149,9 +149,10 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine mediatoradvancereport
 
-  !============================================================================
-  ! CheckImportNoop
-  !============================================================================
+  !> @brief CheckImport sem verificação: o mediador aceita os campos
+  !! importados com qualquer carimbo de tempo.
+  !! @param[inout] gcomp  componente do mediador
+  !! @param[out]   rc     sempre ESMF_SUCCESS
   subroutine CheckImportNoop(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -159,9 +160,13 @@ contains
     call log_debug(COMP_MED, 'CheckImport desabilitado (no-op)')
   end subroutine CheckImportNoop
 
-  !============================================================================
-  ! InitializeAdvertise
-  !============================================================================
+  !> @brief Anuncia os campos importados e exportados, lidos do mapa de
+  !! acoplamento, e cria o estado interno do mediador.
+  !! @param[inout] gcomp        componente do mediador
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do mediador
+  !! @param[out]   rc           código de retorno
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -192,7 +197,7 @@ contains
       call log_info(COMP_MED, 'use_med_to_mpas=true: contorno da atmosfera pelo mediador')
 
     ! Importação e exportação lidas do mapa de acoplamento (cpl_arrivals),
-    ! com as chaves de MED_KEYS, na ordem do mapa, que é a de antes:
+    ! com as chaves de MED_KEYS, na ordem do mapa:
     !   - forçantes do MONAN-A (_mpas) ou do DATM, nunca os dois: o NUOPC
     !     aborta em IPDv03p6 se um campo anunciado não tiver conector ativo;
     !   - So_t, So_u, So_v e So_omask, do oceano. Sem o anúncio de So_u e
@@ -200,7 +205,7 @@ contains
     !     máscara real do MOM6, usada no lugar de um limiar de SST;
     !   - com o SIS2, os seis campos *_sis2. O sufixo evita que os conectores
     !     OCN -> MED e ICE -> MED cheguem ao mesmo nome (Si_ifrac).
-    ! A importação usa SharePolicyField="share", como antes; a exportação
+    ! A importação usa SharePolicyField="share"; a exportação
     ! oferece a grade ("will provide").
     call cpl_arrivals('MED', .true., cpl_current_config(), MED_KEYS, names)
     do n = 1, size(names)
@@ -220,13 +225,17 @@ contains
     call log_info(COMP_MED, 'InitializeAdvertise concluido')
   end subroutine InitializeAdvertise
 
-  !============================================================================
-  ! InitializeRealize
-  ! Cria as grades internas ATM e OCN e realiza os campos. So_t (SST) e'
-  ! realizado na grade OCN, a grade nativa do campo: na atm_grid, a rota
-  ! OCN->ATM teria origem e destino na mesma grade e o regrid ficaria
-  ! incorreto.
-  !============================================================================
+  !> @brief Cria as grades internas ATM e OCN, realiza os campos e cria os
+  !! campos internos do mediador.
+  !!
+  !! So_t (SST) é realizado na grade OCN, a grade nativa do campo: na
+  !! atm_grid, a rota OCN->ATM teria origem e destino na mesma grade e a
+  !! interpolação ficaria incorreta.
+  !! @param[inout] gcomp        componente do mediador
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do mediador
+  !! @param[out]   rc           código de retorno
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -250,9 +259,9 @@ contains
     is => iswrap%wrap
 
 
-    ! petCount define a decomposicao das duas grades (cpl_regdecomp): um DE
+    ! petCount define a decomposição das duas grades (cpl_regdecomp): um DE
     ! por PET, sem DEs vazios nem de largura 1, que o conector bilinear
-    ! automatico do NUOPC nao aceita.
+    ! automático do NUOPC não aceita.
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha VMGetCurrent', &
       line=__LINE__, file=__FILE__)) return
@@ -260,25 +269,24 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='MED: falha VMGet petCount', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ---------------------------------------------------------------------------
     ! Dimensões das grades internas do mediador:
     !   ATM: ATM_NX x ATM_NY (360x180, 1°), a mesma grade de saída do cap MPAS.
     !   OCN: com DOCN, cfg_docn_nx x cfg_docn_ny de nuopc.input (&nuopc_docn);
     !        com MOM6, a grade T lida de ocean_hgrid.nc (ver abaixo).
     nx_atm = ATM_NX
     ny_atm = ATM_NY
-    ! cfg_docn_nx/ny (1440x720) sao a grade do
-    ! DOCN/OISST (0.25 grau, regular). Quando o OCN real e' o MOM6+SIS2
-    ! dinamico (cfg_use_docn=.false., modo de producao), a grade T real do
-    ! MOM6 e' definida por NIGLOBAL/NJGLOBAL no MOM_input e normalmente NAO
+    ! cfg_docn_nx/ny (1440x720) são a grade do
+    ! DOCN/OISST (0.25 grau, regular). Quando o OCN real é o MOM6+SIS2
+    ! dinâmico (cfg_use_docn=.false., modo de produção), a grade T real do
+    ! MOM6 é definida por NIGLOBAL/NJGLOBAL no MOM_input e normalmente NÃO
     ! coincide com a grade DOCN (ex.: 180x155 vs 1440x720 observado em
-    ! producao). Usar cfg_docn_nx/ny nesse caso faz o mediador declarar uma
+    ! produção). Usar cfg_docn_nx/ny nesse caso faz o mediador declarar uma
     ! grade ~8x maior e geometricamente uniforme (lat/lon regular) onde a
-    ! grade real e' tripolar/nao-uniforme -> o conector NUOPC OCN->MED monta
-    ! um regrid automatico usando coordenadas erradas, contaminando TODOS os
-    ! campos (So_t, So_u, So_v, So_omask) antes mesmo da mascara de costa
-    ! entrar em acao. Por isso, em modo MOM6 lemos a dimensao real da grade T
-    ! diretamente do supergrid ocean_hgrid.nc (nx/ny do arquivo / 2, convencao
+    ! grade real é tripolar e não uniforme -> o conector NUOPC OCN->MED monta
+    ! um regrid automático usando coordenadas erradas, contaminando TODOS os
+    ! campos (So_t, So_u, So_v, So_omask) antes mesmo da máscara de costa
+    ! entrar em ação. Por isso, em modo MOM6 lemos a dimensão real da grade T
+    ! diretamente do supergrid ocean_hgrid.nc (nx/ny do arquivo / 2, convenção
     ! FRE-NCtools) em vez de reutilizar a config do DOCN.
     if (cfg_use_docn) then
       nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
@@ -295,37 +303,29 @@ contains
       call log_info(COMP_MED, trim(msg_tmp))
     end if
 
-    !--------------------------------------------------------------------------
     ! Criar grade ATM regular (ATM_NX x ATM_NY)
-    !--------------------------------------------------------------------------
-    ! Malha atm_med, construida por cpl_latlon_grid (cpl_grids), com a
-    ! decomposicao de cpl_regdecomp: um DE por PET, como a grade do cap MPAS.
+    ! Malha atm_med, construída por cpl_latlon_grid (cpl_grids), com a
+    ! decomposição de cpl_regdecomp: um DE por PET, como a grade do cap MPAS.
     call create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
     ! Criar grade OCN (grade do DOCN ou grade T do MOM6)
-    !--------------------------------------------------------------------------
-    ! Mesma fatoracao exata da grade ATM: um DE por PET, com colunas <=
+    ! Mesma fatoração exata da grade ATM: um DE por PET, com colunas <=
     ! nx_ocn/2 e linhas <= ny_ocn.
     call create_ocn_grid(petCount, nx_ocn, ny_ocn, ocn_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
-    ! Realizar campos de import conforme a fonte atmosferica configurada.
+    ! Realizar campos de import conforme a fonte atmosférica configurada.
     ! Espelha exatamente o que foi anunciado em InitializeAdvertise.
-    !--------------------------------------------------------------------------
     call realize_component_fields(is, importState, exportState, atm_grid, ocn_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    !--------------------------------------------------------------------------
     ! Atualizar estado interno com grades criadas nesta fase.
-    ! NAO re-alocar iswrap%wrap: ja alocado em InitializeAdvertise.
-    !--------------------------------------------------------------------------
+    ! NÃO re-alocar iswrap%wrap: já alocado em InitializeAdvertise.
     is%atm_grid   = atm_grid
     is%ocn_grid   = ocn_grid
-    ! use_mpas_atm ja lido logo apos GetInternalState (ver acima).
-    ! Nao sobrescrever com .false. aqui.
+    ! use_mpas_atm já lido logo após GetInternalState (ver acima).
+    ! Não sobrescrever com .false. aqui.
 
 
     ! Criar campos internos na grade ATM
@@ -361,12 +361,12 @@ contains
   end subroutine InitializeRealize
 
 
-  !============================================================================
-  ! InitializeDataComplete - fase de inicialização do mediador
-  ! importState/exportState vem de NUOPC_MediatorGet, a API propria dos
-  ! mediadores NUOPC. O resto (rotas de inicialização, espera da primeira
-  ! SST, valores de t=0) é a fase initialize_data, em med_exchange.
-  !============================================================================
+  !> @brief Fase de dados da inicialização: obtém os estados por
+  !! NUOPC_MediatorGet (a API dos mediadores NUOPC) e chama initialize_data
+  !! (med_exchange), que cria as rotas, espera a primeira SST e publica os
+  !! valores de t=0.
+  !! @param[inout] gcomp  componente do mediador
+  !! @param[out]   rc     código de retorno
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -382,7 +382,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-    ! NUOPC_MediatorGet e a API correta para mediadores
+    ! NUOPC_MediatorGet é a API dos mediadores
     call NUOPC_MediatorGet(gcomp, mediatorClock=clock, &
       importState=importState, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -392,17 +392,17 @@ contains
     call initialize_data(gcomp, is, importState, exportState, clock, rc)
   end subroutine InitializeDataComplete
 
-  !============================================================================
-  ! MediatorAdvance - com fallback MPAS -> DATM
-  !
-  ! Etapas: med_stamp_time, zero_med_fluxes, get_atm_forcing,
-  ! gather_atm_forcing, local_atm_bounds, go_to_flux_grid
-  ! (med_exchange: update_ocean_fields_on_atm_grid e
-  ! update_ice_fraction_from_docn), compute_fluxes (med_exchange:
-  ! calc_bulk_ncar), ice_fraction_without_sis2 (med_exchange), apply_native_fluxes,
-  ! deliver (med_exchange: export_to_components e carimbo de tempo),
-  ! log_ice_export (med_diag) e med_write_import_fields.
-  !============================================================================
+  !> @brief Um passo do mediador: forçante atmosférica (MONAN-A ou DATM),
+  !! campos do oceano e do gelo na malha de fluxo, fluxos e exportação.
+  !!
+  !! Etapas, nesta ordem: med_stamp_time, zero_med_fluxes, get_atm_forcing,
+  !! gather_atm_forcing, local_atm_bounds, go_to_flux_grid (med_exchange),
+  !! compute_fluxes (med_exchange), ice_fraction_without_sis2 (med_exchange),
+  !! apply_native_fluxes, deliver (med_exchange: exportação e carimbo de
+  !! tempo), log_ice_export (med_diag, com log_level='debug') e
+  !! med_write_import_fields.
+  !! @param[inout] gcomp  componente do mediador
+  !! @param[out]   rc     código de retorno
   subroutine MediatorAdvance(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -410,7 +410,7 @@ contains
     type(ESMF_State)         :: importState, exportState
     type(ESMF_Clock)         :: clock
     type(ESMF_Time)          :: currTime, nextTime
-    ! instante que representa o CONTEUDO desta execucao do mediador (ver
+    ! instante que representa o CONTEÚDO desta execução do mediador (ver
     ! med_stamp_time).
     type(ESMF_Time)          :: stampTime
     type(ESMF_TimeInterval)  :: dt
@@ -419,21 +419,21 @@ contains
     integer :: localDeCount_med  ! guard para PETs sem DE local
     logical :: proceed
 
-    ! Forcantes atmosfericos na grade ATM local (MPAS ou DATM)
+    ! Forçantes atmosféricos na grade ATM local (MPAS ou DATM)
     real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
     real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    ! fluxos nativos do PBL do MONAN-A (opcionais — ausencia mantem
+    ! fluxos nativos do PBL do MONAN-A (opcionais — ausência mantém
     ! o fallback bulk NCAR via calc_bulk_ncar, ex. modo DATM)
     real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: taux_mpas(:,:) => null()
     real(ESMF_KIND_R8), pointer :: tauy_mpas(:,:) => null()
-    ! valores padrao quando Sa_shum_mpas / Faxa_snow_mpas estao ausentes
+    ! valores padrão quando Sa_shum_mpas / Faxa_snow_mpas estão ausentes
     real(ESMF_KIND_R8), pointer     :: shum_local(:,:) => null()
     real(ESMF_KIND_R8), pointer     :: snow_local(:,:) => null()
     integer :: i1, i2, j1, j2
-    ! Forcantes reunidos na grade ATM global (1:ATM_NX, 1:ATM_NY)
+    ! Forçantes reunidos na grade ATM global (1:ATM_NX, 1:ATM_NY)
     real(ESMF_KIND_R8), allocatable :: uas_g(:,:), vas_g(:,:), tas_g(:,:)
     real(ESMF_KIND_R8), allocatable :: psl_g(:,:), swdn_g(:,:), lwdn_g(:,:)
     real(ESMF_KIND_R8), allocatable :: rain_g(:,:), shum_g(:,:), snow_g(:,:)
@@ -444,7 +444,7 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => iswrap%wrap
 
-    ! NUOPC_MediatorGet e ESMF_ClockGet sao chamados ANTES da guarda
+    ! NUOPC_MediatorGet e ESMF_ClockGet são chamados ANTES da guarda
     ! localDeCount==0. med_write_import_fields contém MPI_Allreduce e
     ! MPI_Reduce, operações coletivas que exigem participação de TODOS os
     ! PETs: um PET sem DE local que retornasse sem chamá-la deixaria os PETs
@@ -474,18 +474,14 @@ contains
       return
     end if
 
-    !==========================================================================
     ! zerar f_*_atm antes do bulk para evitar persistência de
     ! valores não inicializados em células fora do alcance de uas/vas
     ! (grade MPAS Voronoi parcialmente sobreposta à grade MED regular).
     ! O loop bulk só preenche (i1:i2, j1:j2) = lbound:ubound(uas); sem
     ! zerar antes, regiões sem dados MPAS aparecem como lixo nos plots.
-    !==========================================================================
     call zero_med_fluxes(is, rc)
 
-    !==========================================================================
-    ! 1 e 2. FORCANTES ATMOSFERICOS: MPAS (primario) ou DATM (fallback)
-    !==========================================================================
+    ! 1 e 2. FORÇANTES ATMOSFÉRICOS: MPAS (primário) ou DATM (fallback)
     call get_atm_forcing(is, importState, uas, vas, tas, shum, psl, swdn, lwdn, &
                          rain, snow, shum_local, snow_local,                     &
                          sen_mpas, lat_mpas, taux_mpas, tauy_mpas, proceed, rc)
@@ -494,7 +490,7 @@ contains
     i1 = lbound(uas,1); i2 = ubound(uas,1)
     j1 = lbound(uas,2); j2 = ubound(uas,2)
 
-    ! Forcantes reunidos na grade ATM global em todos os PETs do mediador
+    ! Forçantes reunidos na grade ATM global em todos os PETs do mediador
     call gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                             i1, i2, j1, j2, is%par%comm,                       &
                             uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
@@ -505,15 +501,11 @@ contains
     ! bulk percorre os limites locais, acessando os arrays globais nas mesmas coordenadas.
     call local_atm_bounds(is, i1, i2, j1, j2, rc)
 
-    !==========================================================================
     ! 3. Campos do oceano e do gelo na malha de fluxo: fase
     ! go_to_flux_grid (med_exchange)
-    !==========================================================================
     call go_to_flux_grid(is, importState, clock, rc)
 
-    !==========================================================================
     ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
-    !==========================================================================
     call compute_fluxes(is, &
                         uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
                         i1, i2, j1, j2, clock, rc)
@@ -526,31 +518,29 @@ contains
 
     call apply_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
 
-    !==========================================================================
     ! 5. REGRID E EXPORTA PARA O OCEANO
     !
     ! RegridOrCopy leva cada campo interno (grade ATM) ao exportState (grade
     ! OCN) pela rota 'atm2ocn'; sem a rota, copia direto, para que os campos
-    ! exportados nao fiquem zerados silenciosamente.
+    ! exportados não fiquem zerados silenciosamente.
     !
-    ! Antes do export, os fluxos sobre terra sao zerados no proprio MED
-    ! (zero_fluxes_over_land). O bulk NCAR roda em TODAS as celulas da grade
+    ! Antes do export, os fluxos sobre terra são zerados no próprio MED
+    ! (zero_fluxes_over_land). O bulk NCAR roda em TODAS as células da grade
     ! ATM (oceano + terra); com T_2m, U_10m e P_slv continentais, produz
     ! fluxos enormes sobre terra (Foxx_sen saturando em +-500 W/m^2;
-    ! Foxx_lwnet em -300 W/m^2 sobre o Saara). O MOM6 descarta essas celulas
-    ! em state_setexport (mask2dT), mas o diagnostico NetCDF do MED e' escrito
-    ! antes dessa mascara.
+    ! Foxx_lwnet em -300 W/m^2 sobre o Saara). O MOM6 descarta essas células
+    ! em state_setexport (mask2dT), mas o diagnóstico NetCDF do MED é escrito
+    ! antes dessa máscara.
     !
-    ! A mascara de terra e' So_omask interpolada para a grade ATM uma unica
-    ! vez (regrid_land_mask, NEAREST_STOD: so' precisa distinguir terra e
-    ! oceano). Uma heuristica pela SST (celulas de terra com exatamente
-    ! 271,35 K) colidiria com agua aberta no ponto de congelamento (borda do
+    ! A máscara de terra é So_omask interpolada para a grade ATM uma única
+    ! vez (regrid_land_mask, NEAREST_STOD: só precisa distinguir terra e
+    ! oceano). Uma heurística pela SST (células de terra com exatamente
+    ! 271,35 K) colidiria com água aberta no ponto de congelamento (borda do
     ! gelo).
     !
     ! A exportação e o carimbo de tempo dos campos exportados formam a fase
     ! deliver (med_exchange); com use_med_to_mpas, o exportState recebe
     ! depois o tempo atual do relógio.
-    !==========================================================================
     call deliver(is, importState, exportState, clock, stampTime, rc)
     if (allocated(uas_g)) deallocate(uas_g)
     if (allocated(vas_g)) deallocate(vas_g)
@@ -568,8 +558,8 @@ contains
     if (log_debug_enabled()) call log_ice_export(exportState)
 
     call med_write_import_fields(exportState, stampTime, is, rc)
-    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! nao-fatal
-    ! Liberar arrays temporarios de defaults (se alocados)
+    if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS  ! não-fatal
+    ! Liberar arrays temporários de defaults (se alocados)
     if (associated(shum_local)) then
       deallocate(shum_local); nullify(shum_local)
     end if
@@ -578,54 +568,51 @@ contains
     end if
   end subroutine MediatorAdvance
 
-  !============================================================================
-  !> @brief Instante que rotula o resultado desta execucao do mediador.
+  !> @brief Instante que rotula o resultado desta execução do mediador.
   !!
   !! O instante que rotula o resultado do
   !! mediador depende de ONDE o elemento 'MED' esta na RunSequence.
   !!
-  !! O relogio do mediador marca currTime = t durante toda a execucao do passo,
-  !! nos dois modos: o NUOPC so' avanca o relogio depois que o Advance retorna.
-  !! O que muda e' o conteudo que chega ao importState:
+  !! O relógio do mediador marca currTime = t durante toda a execução do passo,
+  !! nos dois modos: o NUOPC só avança o relógio depois que o Advance retorna.
+  !! O que muda é o conteúdo que chega ao importState:
   !!
-  !!   concurrent : 'MED' e' o ULTIMO elemento do passo. Os conectores
-  !!                'MPAS -> MED', 'OCN -> MED' e 'ICE -> MED' ja' rodaram
-  !!                DEPOIS dos avancos, entao os campos importados descrevem o
-  !!                estado em t+dt. O rotulo correto e' nextTime.
+  !!   concurrent : 'MED' é o ÚLTIMO elemento do passo. Os conectores
+  !!                'MPAS -> MED', 'OCN -> MED' e 'ICE -> MED' já rodaram
+  !!                DEPOIS dos avanços, então os campos importados descrevem o
+  !!                estado em t+dt. O rótulo correto é nextTime.
   !!
-  !!   sequential : 'MED' e' o QUARTO elemento, ANTES de 'MPAS', 'OCN' e 'ICE'.
-  !!                Os conectores que o alimentam rodaram no inicio do passo, e
+  !!   sequential : 'MED' é o QUARTO elemento, ANTES de 'MPAS', 'OCN' e 'ICE'.
+  !!                Os conectores que o alimentam rodaram no início do passo, e
   !!                os campos importados descrevem o estado em t (o que cada
-  !!                componente escreveu no fim do passo anterior). O rotulo
-  !!                correto e' currTime.
+  !!                componente escreveu no fim do passo anterior). O rótulo
+  !!                correto é currTime.
   !!
-  !! Usar nextTime tambem no modo sequencial teria duas consequencias:
+  !! Usar nextTime também no modo sequencial teria duas consequências:
   !!
-  !!   (a) Todo arquivo de diagnostico mom6_import_YYYYMMDD_HHMMSS.nc e
-  !!       monan2_import_YYYYMMDD_HHMMSS.nc sairia com o nome e a variavel de
-  !!       tempo adiantados em um dt_coupling em relacao ao dado que contem.
+  !!   (a) Todo arquivo de diagnóstico mom6_import_YYYYMMDD_HHMMSS.nc e
+  !!       monan2_import_YYYYMMDD_HHMMSS.nc sairia com o nome e a variável de
+  !!       tempo adiantados em um dt_coupling em relação ao dado que contém.
   !!       Uma rodada sequential e uma concurrent ficariam deslocadas de um
-  !!       passo, e as animacoes, fora de fase.
+  !!       passo, e as animações, fora de fase.
   !!   (b) O exportState seria carimbado com t+dt e entregue a componentes
-  !!       cujo relogio marca t. Os tres caps usam CheckImport tolerante
-  !!       (janela de +/- dt_coupling) ou no-op, entao isso nao abortaria a
-  !!       execucao; passaria sem sinal nenhum. Com currTime o carimbo
-  !!       coincide exatamente com o relogio do consumidor.
+  !!       cujo relógio marca t. Os três caps usam CheckImport tolerante
+  !!       (janela de +/- dt_coupling) ou no-op, então isso não abortaria a
+  !!       execução; passaria sem sinal nenhum. Com currTime o carimbo
+  !!       coincide exatamente com o relógio do consumidor.
   !!
   !! No modo concorrente, stampTime = nextTime.
-  !!--------------------------------------------------------------------------
-  !! seq_repro: na variante REPRODUTIVEL do sequential+split+SIS2 o elemento
+  !! seq_repro: na variante REPRODUTÍVEL do sequential+split+SIS2 o elemento
   !! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
-  !! campos importados descrevem o estado em t+dt e o rotulo correto e'
-  !! nextTime — nao currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
-  !! sairia adiantado de um dt e quebraria a comparacao bit-a-bit contra o
-  !! concurrent. O sequential classico (cfg_seq_repro=.false.) usa
+  !! campos importados descrevem o estado em t+dt e o rótulo correto é
+  !! nextTime — não currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
+  !! sairia adiantado de um dt e quebraria a comparação bit-a-bit contra o
+  !! concurrent. O sequential clássico (cfg_seq_repro=.false.) usa
   !! 'MED' cedo -> currTime; o concurrent usa nextTime.
   !!
-  !! @param[in] currTime  instante corrente do relogio do mediador
+  !! @param[in] currTime  instante corrente do relógio do mediador
   !! @param[in] nextTime  currTime + dt_coupling
-  !! @return             currTime no sequencial classico, nextTime nos demais
-  !============================================================================
+  !! @return             currTime no sequencial clássico, nextTime nos demais
   function med_stamp_time(currTime, nextTime) result(stampTime)
     type(ESMF_Time), intent(in) :: currTime, nextTime
     type(ESMF_Time)             :: stampTime

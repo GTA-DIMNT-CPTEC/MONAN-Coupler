@@ -5,8 +5,6 @@
 !! interna, substituição pelos fluxos nativos do MONAN-A e zeragem dos
 !! fluxos do mediador.
 !!
-!! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
-!!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module med_flux_mod
@@ -30,23 +28,21 @@ module med_flux_mod
 
 contains
 
-  !============================================================================
-  !> @brief Ponteiros dos forcantes atmosfericos: MPAS (primario) ou DATM.
+  !> @brief Ponteiros dos forçantes atmosféricos: MPAS (primário) ou DATM.
   !!
-  !! Obtem do importState os campos do MPAS (7 obrigatorios, umidade e neve opcionais e 4
-  !! fluxos nativos opcionais). Sem os obrigatorios, e com use_mpas_atm
-  !! falso, usa os campos do DATM. Os ponteiros de saida apontam para os
+  !! Obtém do importState os campos do MPAS (7 obrigatórios, umidade e neve opcionais e 4
+  !! fluxos nativos opcionais). Sem os obrigatórios, e com use_mpas_atm
+  !! falso, usa os campos do DATM. Os ponteiros de saída apontam para os
   !! dados do importState ou, para shum e snow ausentes, para shum_local e
-  !! snow_local, alocados aqui com os valores padrao.
+  !! snow_local, alocados aqui com os valores padrão.
   !!
   !! @param[in]    is          estado interno (use_mpas_atm)
-  !! @param[in]    importState estado de importacao do mediador
-  !! @param[inout] uas..snow   forcantes na grade ATM local
-  !! @param[inout] shum_local, snow_local  valores padrao, se alocados
+  !! @param[in]    importState estado de importação do mediador
+  !! @param[inout] uas..snow   forçantes na grade ATM local
+  !! @param[inout] shum_local, snow_local  valores padrão, se alocados
   !! @param[inout] sen_mpas, lat_mpas, taux_mpas, tauy_mpas  fluxos nativos
   !! @param[out]   proceed     .false. quando MediatorAdvance deve retornar
-  !! @param[inout] rc          codigo de retorno ESMF
-  !============================================================================
+  !! @param[inout] rc          código de retorno ESMF
   subroutine get_atm_forcing(is, importState, uas, vas, tas, shum, psl, swdn, lwdn, &
                              rain, snow, shum_local, snow_local,                     &
                              sen_mpas, lat_mpas, taux_mpas, tauy_mpas, proceed, rc)
@@ -61,7 +57,7 @@ contains
     logical,                     intent(out)   :: proceed
     integer,                     intent(inout) :: rc
 
-    ! Campos do MPAS (primario)
+    ! Campos do MPAS (primário)
     real(ESMF_KIND_R8), pointer :: uas_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: vas_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: tas_mpas(:,:)  => null()
@@ -76,16 +72,12 @@ contains
 
     proceed = .false.
 
-    !==========================================================================
-    ! 1. TENTAR OBTER FIELDS DO MPAS (PRIMARIO)
-    !==========================================================================
+    ! 1. TENTAR OBTER FIELDS DO MPAS (PRIMÁRIO)
     ! use_mpas_atm vem do atributo NUOPC definido em esm.F90.
     ! Se false, pula a tentativa e vai direto ao DATM.
     mpas_available = is%use_mpas_atm
 
-    !--------------------------------------------------------------------------
-    ! 1a. FIELDS OBRIGATORIOS DO MPAS (campos exportados pelo cap do MPAS)
-    !--------------------------------------------------------------------------
+    ! 1a. FIELDS OBRIGATÓRIOS DO MPAS (campos exportados pelo cap do MPAS)
     i1_glob = 1; i2_glob = 1; j1_glob = 1; j2_glob = 1  ! defaults
     if (mpas_available) then
       call GetFieldPtrOptional(importState, "Sa_u10m_mpas", uas_mpas, rc)
@@ -105,7 +97,7 @@ contains
       call GetFieldPtrOptional(importState, "Faxa_lwdn_mpas", lwdn_mpas, rc)
       call GetFieldPtrOptional(importState, "Faxa_rain_mpas", rain_mpas, rc)
 
-      ! Verificar apenas os 7 campos obrigatorios
+      ! Verificar apenas os 7 campos obrigatórios
       if (.not. (associated(uas_mpas)  .and. associated(vas_mpas)  .and. &
                  associated(tas_mpas)  .and. associated(psl_mpas)  .and. &
                  associated(swdn_mpas) .and. associated(lwdn_mpas) .and. &
@@ -114,22 +106,18 @@ contains
       end if
     end if
 
-    !--------------------------------------------------------------------------
     ! 1b. FIELDS OPCIONAIS DE UMIDADE E NEVE (Sa_shum_mpas, Faxa_snow_mpas)
-    !     Na ausencia, usar valores padrao fisicos.
-    !--------------------------------------------------------------------------
+    !     Na ausência, usar valores padrão físicos.
     if (mpas_available) then
       call GetFieldPtrOptional(importState, "Sa_shum_mpas",   shum_mpas, rc)
       call GetFieldPtrOptional(importState, "Faxa_snow_mpas", snow_mpas, rc)
-      ! rc pode ser ESMF_FAILURE se os campos opcionais estiverem ausentes — nao e erro
+      ! rc pode ser ESMF_FAILURE se os campos opcionais estiverem ausentes — não e erro
     end if
 
-    !--------------------------------------------------------------------------
     ! 1c. FIELDS OPCIONAIS — fluxos nativos do PBL do MONAN-A.
-    !     Ausencia (modo DATM, ou cap MPAS sem esses campos) NAO desabilita
-    !     mpas_available; apenas mantem sen/evap/taux/tauy vindos do bulk
+    !     Ausência (modo DATM, ou cap MPAS sem esses campos) NÃO desabilita
+    !     mpas_available; apenas mantém sen/evap/taux/tauy vindos do bulk
     !     NCAR (calc_bulk_ncar) mais abaixo.
-    !--------------------------------------------------------------------------
     if (mpas_available) then
       call GetFieldPtrOptional(importState, "Faxa_sen_mpas",  sen_mpas,  rc)
       call GetFieldPtrOptional(importState, "Faxa_lat_mpas",  lat_mpas,  rc)
@@ -137,17 +125,15 @@ contains
       call GetFieldPtrOptional(importState, "Faxa_tauy_mpas", tauy_mpas, rc)
     end if
 
-    !==========================================================================
-    ! 2. SE MPAS NAO DISPONIVEL E use_mpas_atm=false: USAR DATM (FALLBACK)
-    !    SE use_mpas_atm=true mas campos obrigatorios ausentes: verificar se
+    ! 2. SE MPAS NÃO DISPONÍVEL E use_mpas_atm=false: USAR DATM (FALLBACK)
+    !    SE use_mpas_atm=true mas campos obrigatórios ausentes: verificar se
     !    é PET sem DE local na grade MPAS (caso normal) ou erro real.
-    !==========================================================================
     if (.not. mpas_available) then
       if (is%use_mpas_atm) then
-        ! PETs sem DE local na grade MPAS nao tem dados locais dos campos MPAS, e
-        ! GetFieldPtrOptional devolve mpas_available=false para eles, o que e'
-        ! normal. Retorno silencioso (rc=SUCCESS): o calculo bulk e' local, e
-        ! esses PETs simplesmente nao contribuem para os campos internos.
+        ! PETs sem DE local na grade MPAS não tem dados locais dos campos MPAS, e
+        ! GetFieldPtrOptional devolve mpas_available=false para eles, o que é
+        ! normal. Retorno silencioso (rc=SUCCESS): o cálculo bulk é local, e
+        ! esses PETs simplesmente não contribuem para os campos internos.
         call log_debug(COMP_MED, 'PET sem dados MPAS locais: bulk pulado')
         rc = ESMF_SUCCESS; return
       end if
@@ -167,9 +153,9 @@ contains
     proceed = .true.
   end subroutine get_atm_forcing
 
-  !> Forcantes do DATM (uso quando use_mpas_atm e' falso): os nove campos
-  !! do importState, todos obrigatorios. Na falta de um deles, retorna com o
-  !! codigo de erro de GetFieldPtr e os ponteiros de saida como estavam.
+  !> Forçantes do DATM (uso quando use_mpas_atm é falso): os nove campos
+  !! do importState, todos obrigatórios. Na falta de um deles, retorna com o
+  !! código de erro de GetFieldPtr e os ponteiros de saída como estavam.
   subroutine get_datm_forcing(importState, uas, vas, tas, shum, psl, swdn, lwdn, rain, snow, rc)
     type(ESMF_State),            intent(in)    :: importState
     real(ESMF_KIND_R8), pointer, intent(inout) :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
@@ -206,9 +192,9 @@ contains
   end subroutine get_datm_forcing
 
   !> Umidade e neve do MPAS, opcionais: aponta shum e snow para os campos do
-  !! importState quando existem; senao, aloca shum_local (SHUM_OCEAN_DEFAULT)
+  !! importState quando existem; senão, aloca shum_local (SHUM_OCEAN_DEFAULT)
   !! e snow_local (zero) nos limites locais de Sa_u10m_mpas e aponta para
-  !! eles, registrando a ausencia no log.
+  !! eles, registrando a ausência no log.
   subroutine select_optional_mpas_forcing(shum_mpas, snow_mpas, i1_glob, i2_glob, j1_glob, j2_glob, &
                                           shum, snow, shum_local, snow_local)
     real(ESMF_KIND_R8), pointer, intent(in)    :: shum_mpas(:,:), snow_mpas(:,:)
@@ -237,8 +223,7 @@ contains
     end if
   end subroutine select_optional_mpas_forcing
 
-  !============================================================================
-  !> @brief Reune os forcantes atmosfericos na grade ATM global, em todos os PETs.
+  !> @brief Reúne os forçantes atmosféricos na grade ATM global, em todos os PETs.
   !!
   !! O MPAS-A roda apenas num subconjunto dos PETs do MED. Em PETs onde
   !! MPAS não roda, os campos uas, vas, tas, psl, swdn, lwdn, rain, shum,
@@ -252,13 +237,12 @@ contains
   !! allreduce_atm_tile), na ordem uas, vas, tas, psl, swdn, lwdn, rain, shum,
   !! snow. Onde shum_g ficou sem dado (<= 0), vale SHUM_OCEAN_DEFAULT.
   !!
-  !! @param[in]  uas..snow        forcantes na grade ATM local
-  !! @param[in]  i1, i2, j1, j2   limites locais dos forcantes
+  !! @param[in]  uas..snow        forçantes na grade ATM local
+  !! @param[in]  i1, i2, j1, j2   limites locais dos forçantes
   !! @param[in]  comm             comunicador MPI do mediador
-  !! @param[out] uas_g..snow_g    forcantes na grade ATM global
+  !! @param[out] uas_g..snow_g    forçantes na grade ATM global
   !! @param[inout] first_summary  .true. até o resumo dos forçantes ser registrado
-  !! @param[inout] rc             codigo de retorno (log_atm_forcing_summary)
-  !============================================================================
+  !! @param[inout] rc             código de retorno (log_atm_forcing_summary)
   subroutine gather_atm_forcing(uas, vas, tas, psl, swdn, lwdn, rain, shum, snow, &
                                 i1, i2, j1, j2, comm,                              &
                                 uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g,        &
@@ -300,19 +284,17 @@ contains
     deallocate(tmp_local)
   end subroutine gather_atm_forcing
 
-  !============================================================================
-  !> @brief Reune um campo da grade ATM por MPI_Allreduce(SUM) sobre tiles disjuntos.
+  !> @brief Reúne um campo da grade ATM por MPI_Allreduce(SUM) sobre tiles disjuntos.
   !!
-  !! uas e outros campos podem ser negativos, entao MAX nao serve. Cada PET
+  !! uas e outros campos podem ser negativos, então MAX não serve. Cada PET
   !! escreve seu tile num buffer global zerado; com tiles disjuntos, a soma
-  !! entre PETs e o proprio campo global.
+  !! entre PETs e o próprio campo global.
   !!
   !! @param[in]  src        campo na grade ATM local (limites preservados)
   !! @param[in]  i1, i2, j1, j2  limites locais do tile
   !! @param[in]  comm       comunicador MPI do mediador
   !! @param[out] tmp_local  buffer de trabalho (1:ATM_NX, 1:ATM_NY)
   !! @param[out] dst        campo global (1:ATM_NX, 1:ATM_NY)
-  !============================================================================
   subroutine allreduce_atm_tile(src, i1, i2, j1, j2, comm, tmp_local, dst)
     real(ESMF_KIND_R8), pointer, intent(in) :: src(:,:)
     integer,            intent(in)  :: i1, i2, j1, j2
@@ -330,16 +312,14 @@ contains
       MPI_SUM, comm, mpi_ierr_g)
   end subroutine allreduce_atm_tile
 
-  !============================================================================
   !> @brief Limites locais da DE dos campos internos, restritos a grade ATM global.
   !!
-  !! Obtidos de is%ocn_flx%taux (mesma decomposicao para todos os campos
-  !! internos). Em PET sem DE local, limites vazios: os laces nao executam.
+  !! Obtidos de is%ocn_flx%taux (mesma decomposição para todos os campos
+  !! internos). Em PET sem DE local, limites vazios: os laces não executam.
   !!
   !! @param[in]    is              estado interno do mediador
   !! @param[out]   i1, i2, j1, j2  limites locais
-  !! @param[inout] rc              codigo de retorno do ESMF_FieldGet
-  !============================================================================
+  !! @param[inout] rc              código de retorno do ESMF_FieldGet
   subroutine local_atm_bounds(is, i1, i2, j1, j2, rc)
     type(MED_InternalState), intent(in)    :: is
     integer,                 intent(out)   :: i1, i2, j1, j2
@@ -363,40 +343,38 @@ contains
     end if
   end subroutine local_atm_bounds
 
-  !============================================================================
   !> @brief Fluxos nativos do MONAN-A no lugar dos do bulk NCAR.
   !!
   !! 4b. SUBSTITUIR sen/evap/taux/tauy BULK PELOS FLUXOS NATIVOS DO
   !!     MONAN-A (Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas,
-  !!     Faxa_tauy_mpas), onde disponiveis. calc_bulk_ncar acima continua
-  !!     sendo a fonte para celulas/execucoes sem esses campos (ex. DATM).
+  !!     Faxa_tauy_mpas), onde disponíveis. calc_bulk_ncar acima continua
+  !!     sendo a fonte para células/execucoes sem esses campos (ex. DATM).
   !!
-  !! Motivacao: o MONAN-A ja fecha seu proprio balanco de PBL usando
+  !! Motivação: o MONAN-A já fecha seu próprio balanco de PBL usando
   !! hfx/lh/ust internos (ver mpas_atm_fluxes.F90/mpas_adapter.F90).
   !! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
   !! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
-  !! inconsistencia entre o balanco de energia do MONAN-A e o forcante
+  !! inconsistência entre o balanco de energia do MONAN-A e o forçante
   !! entregue ao MOM6/SIS2.
   !!
-  !! CONFIRMADO: sinal de hfx/lh e' POSITIVO PARA CIMA (convencao
-  !!  usual WRF/MPAS/GFS), verificado com a equipe de fisica do MONAN-A —
+  !! CONFIRMADO: sinal de hfx/lh é POSITIVO PARA CIMA (convenção
+  !!  usual WRF/MPAS/GFS), verificado com a equipe de física do MONAN-A —
   !!  por isso invertido (-sen_g2, -lat_g2) abaixo, para bater com a
-  !!  convencao Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
-  !!  NAO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
-  !!  parte em med_bulk_ncar.F90 com T_gelo, nao com hfx/lh nativos) — ver
+  !!  convenção Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
+  !!  NÃO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
+  !!  parte em med_bulk_ncar.F90 com T_gelo, não com hfx/lh nativos) — ver
   !!  sis_cap_fields.F90 para o sinal desses.
   !!
   !!  taux_sfc/tauy_sfc (de mpas_atm_fluxes.F90) usam a mesma forma
-  !!     rho*Cd*|V|*V do bulk NCAR — nao invertidos aqui, mas confirme
-  !!     que a rotacao de referencial (Terra vs. grade) ja e tratada
-  !!     antes de exportar (deve ser, pois MPAS ja roda em lat/lon).
+  !!     rho*Cd*|V|*V do bulk NCAR — não invertidos aqui, mas confirme
+  !!     que a rotação de referencial (Terra vs. grade) já e tratada
+  !!     antes de exportar (deve ser, pois MPAS já roda em lat/lon).
   !!  3) Faxa_lat_mpas vem em W/m^2 (energia); Foxx_evap e fluxo de MASSA
-  !!     (kg/m^2/s) — por isso a divisao por L_evap abaixo.
+  !!     (kg/m^2/s) — por isso a divisão por L_evap abaixo.
   !!
   !! @param[in]    is          estado interno do mediador
   !! @param[in]    sen_mpas, lat_mpas, taux_mpas, tauy_mpas  fluxos nativos
-  !! @param[inout] rc          codigo de retorno
-  !============================================================================
+  !! @param[inout] rc          código de retorno
   subroutine apply_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
     type(MED_InternalState), pointer, intent(in) :: is
     real(ESMF_KIND_R8), pointer, intent(in) :: sen_mpas(:,:), lat_mpas(:,:)
@@ -414,6 +392,11 @@ contains
     end if
   end subroutine apply_native_fluxes
 
+  !> @brief Substitui sen, evap, taux e tauy do bulk pelos fluxos nativos do
+  !! MONAN-A, reunidos na grade ATM global.
+  !! @param[in]    is                         estado interno do mediador
+  !! @param[in]    sen_mpas..tauy_mpas         fluxos do MONAN-A, na grade local
+  !! @param[inout] rc                         código de retorno
   subroutine substitute_native_fluxes(is, sen_mpas, lat_mpas, taux_mpas, tauy_mpas, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
@@ -431,7 +414,7 @@ contains
     allocate(sen_g2(ATM_NX,ATM_NY), lat_g2(ATM_NX,ATM_NY))
     allocate(taux_g2(ATM_NX,ATM_NY), tauy_g2(ATM_NX,ATM_NY), tmp2(ATM_NX,ATM_NY))
 
-    ! Gather global (mesmo padrao SUM com tiles disjuntos)
+    ! Gather global (mesmo padrão SUM com tiles disjuntos)
     tmp2 = 0.0_ESMF_KIND_R8
     do gj2 = lbound(sen_mpas,2), ubound(sen_mpas,2)
       do gi2 = lbound(sen_mpas,1), ubound(sen_mpas,1)
@@ -483,8 +466,8 @@ contains
       do jj = lbound(fptr_sen,2), ubound(fptr_sen,2)
         do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
           if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
-            ! so sobrescreve onde ha dado nativo real (fora do fill=0
-            ! dos PETs sem tile MONAN-A local — mesmo criterio)
+            ! só sobrescreve onde há dado nativo real (fora do fill=0
+            ! dos PETs sem tile MONAN-A local — mesmo critério)
             if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
               fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
               fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s
@@ -499,6 +482,10 @@ contains
     deallocate(sen_g2, lat_g2, taux_g2, tauy_g2, tmp2)
   end subroutine substitute_native_fluxes
 
+  !> @brief Zera os fluxos do mediador no início do passo (e a fração de
+  !! gelo, nos modos em que ela é preenchida de novo no passo).
+  !! @param[in]    is  estado interno do mediador
+  !! @param[inout] rc  código de retorno
   subroutine zero_med_fluxes(is, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
@@ -508,7 +495,8 @@ contains
     ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o
     ! MPAS receberia Si_ifrac=0 em todos os passos seguintes ao t=1.
     ! O campo é zerado apenas nos modos em que será repreenchido neste ciclo.
-    ! No modo init_only, o decaimento é aplicado no bloco 3b.
+    ! No modo init_only, o decaimento é aplicado por
+    ! update_ice_fraction_from_docn (med_ocean).
     if (.not. (cfg_use_docn_ice .and. &
                cfg_docn_ice_init_only .and. is%run%ifrac_init_done)) then
       call ZeroInternalField(is%ice%ifrac, rc)

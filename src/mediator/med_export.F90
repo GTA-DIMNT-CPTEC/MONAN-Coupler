@@ -4,9 +4,7 @@
 !! Fluxos, temperatura de superfície e fração de gelo levados da grade ATM
 !! interna para os campos do exportState, com a zeragem sobre terra. Chamado
 !! pela fase deliver (med_exchange), que carimba o tempo dos campos
-!! exportados (até a R-FASE11-15, stamp_export_fields ficava aqui).
-!!
-!! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
+!! exportados.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -25,6 +23,13 @@ module med_export_mod
 
 contains
 
+  !> @brief Leva os campos da malha de fluxo para o exportState: máscara de
+  !! terra (uma vez), zeragem dos fluxos sobre terra, temperatura de
+  !! superfície composta, fluxos, correntes, rugosidade e fração de gelo.
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] importState  estado de importação (So_omask)
+  !! @param[inout] exportState  estado de exportação
+  !! @param[inout] rc           código de retorno
   subroutine export_to_components(is, importState, exportState, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState
@@ -33,9 +38,8 @@ contains
     if (.not. is%ocn%omask_done) then
       call regrid_land_mask(is, importState)
     end if
-    ! (So_omask e' estatico no tempo -- uma vez regridada corretamente na
-    ! 1a chamada, is%ocn%omask permanece valida sem precisar refazer o
-    ! regrid a cada passo.)
+    ! So_omask não muda no tempo: interpolada na primeira chamada,
+    ! is%ocn%omask vale para os passos seguintes.
 
     call zero_fluxes_over_land(is, rc)
 
@@ -51,23 +55,23 @@ contains
     call RegridOrCopy(is%ocn_flx%rain,   exportState, "Faxa_rain",      is, rc)
     call RegridOrCopy(is%ocn_flx%snow,   exportState, "Faxa_snow",      is, rc)
     call RegridOrCopy(is%ocn_flx%pslv,   exportState, "Sa_pslv",        is, rc)
-    ! Si_ifrac e' exportado SEM o RegridOrCopy generico, que faria a perna
+    ! Si_ifrac é exportado SEM o RegridOrCopy genérico, que faria a perna
     ! ATM->OCN pela rota 'atm2ocn' (NEAREST_STOD, zeroregion=TOTAL, sem
-    ! mascara nem extrapolacao) e deixaria zeradas as celulas nao mapeadas
-    ! perto da dobra tripolar: manchas isoladas em vez de calota continua,
+    ! máscara nem extrapolação) e deixaria zeradas as células não mapeadas
+    ! perto da dobra tripolar: manchas isoladas em vez de calota contínua,
     ! mesmo com is%ice%ifrac correto. export_ice_fraction usa a rota
-    ! conservativa 'atm2ocn_ice' e extrapola por vizinhanca.
+    ! conservativa 'atm2ocn_ice' e extrapola por vizinhança.
     call export_ice_fraction(is, exportState, rc)
     call RegridOrCopy(is%ocn_flx%duu10n, exportState, "So_duu10n",      is, rc)
-    ! Mascara terra/oceano REAL do MOM6 no exportState. is%ocn%omask ja'
-    ! esta' pronta neste ponto (regridada uma unica vez logo acima). Aqui ela
-    ! segue para o conector MED->MPAS, que a leva ate' o cap atmosferico; o diagnostico
-    ! mom6_import_*.nc NAO passa por este caminho — le is%ocn%omask
+    ! Máscara terra/oceano REAL do MOM6 no exportState. is%ocn%omask já
+    ! está pronta neste ponto (regridada uma única vez logo acima). Aqui ela
+    ! segue para o conector MED->MPAS, que a leva até o cap atmosférico; o diagnóstico
+    ! mom6_import_*.nc NÃO passa por este caminho — le is%ocn%omask
     ! diretamente na grade ATM (med_cap_netcdf.F90), evitando o ida-e-volta
-    ! ATM->OCN->Voronoi. O corte binario fica sempre no consumidor final,
-    ! nunca no meio do caminho, para nao criar escadinha na linha de costa.
+    ! ATM->OCN->Voronoi. O corte binário fica sempre no consumidor final,
+    ! nunca no meio do caminho, para não criar escadinha na linha de costa.
     call RegridOrCopy(is%ocn%omask,  exportState, "Sx_omask",       is, rc)
-    call RegridOrCopy(is%sfc%coszen, exportState, "Faxa_coszen",    is, rc)  ! angulo zenital solar -> SIS2
+    call RegridOrCopy(is%sfc%coszen, exportState, "Faxa_coszen",    is, rc)  ! ângulo zenital solar -> SIS2
     call RegridOrCopy(is%sfc%albedo, exportState, "Sf_albedo",      is, rc)  ! albedo de banda larga -> MPAS
     ! Fluxos turbulentos e de onda longa sobre o gelo -> SIS2
     call RegridOrCopy(is%ice%taux,   exportState, "Fioi_taux",      is, rc)
@@ -75,23 +79,22 @@ contains
     call RegridOrCopy(is%ice%sen,    exportState, "Fioi_sen",       is, rc)
     call RegridOrCopy(is%ice%evap,   exportState, "Fioi_evap",      is, rc)
     call RegridOrCopy(is%ice%lwnet,  exportState, "Fioi_lwnet",     is, rc)
-    ! Onda curta liquida sobre o gelo, por banda -> SIS2
+    ! Onda curta líquida sobre o gelo, por banda -> SIS2
     call RegridOrCopy(is%ice%swvdr,  exportState, "Fioi_swnet_vdr", is, rc)
     call RegridOrCopy(is%ice%swvdf,  exportState, "Fioi_swnet_vdf", is, rc)
     call RegridOrCopy(is%ice%swidr,  exportState, "Fioi_swnet_idr", is, rc)
     call RegridOrCopy(is%ice%swidf,  exportState, "Fioi_swnet_idf", is, rc)
 
-    ! Sx_tsfc: temperatura de superficie composta para o MPAS-A,
+    ! Sx_tsfc: temperatura de superfície composta para o MPAS-A,
     ! (1-ifrac)*SST + ifrac*Si_t_sis2, num campo SEPARADO (is%sfc%tsfc).
-    ! is%ocn%sst NUNCA e' sobrescrito: "So_t" (abaixo) permanece SST pura,
-    ! porque o sis_cap_MONAN.F90 tambem importa "So_t" para o fluxo de calor
+    ! is%ocn%sst NUNCA é sobrescrito: "So_t" (abaixo) permanece SST pura,
+    ! porque o sis_cap_MONAN.F90 também importa "So_t" para o fluxo de calor
     ! da BASE do gelo (ICE_KMELT no SIS2, que precisa da SST REAL do oceano
-    ! sob o gelo). Devolver ao SIS2 uma So_t misturada com a propria
+    ! sob o gelo). Devolver ao SIS2 uma So_t misturada com a própria
     ! temperatura de pele do gelo seria circular: o gradiente T_oceano -
     ! T_congelamento que controla o derretimento/crescimento basal ficaria
-    ! artificialmente reduzido em celulas com gelo, suprimindo o derretimento
-    ! basal e engrossando o gelo em excesso (efeito observado quando a mistura
-    ! era feita na propria So_t). Sx_tsfc so' e' importado pelo MPAS-A
+    ! artificialmente reduzido em células com gelo, suprimindo o derretimento
+    ! basal e engrossando o gelo em excesso. Sx_tsfc só é importado pelo MPAS-A
     ! (ponto ATM@atm_cap do mapa de acoplamento, para atm_bnd%sst).
     call export_surface_temperature(is)
 
@@ -111,13 +114,12 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ──────────────────────────────────────────
     ! So_u, So_v: correntes superficiais MOM6 -> exportState para conector
     ! MED -> MPAS. Os campos is%ocn%u/is%ocn%v já contêm os valores
     ! regridados OCN -> ATM (preenchidos no bloco acima a partir
     ! do importState.So_u/So_v). RegridOrCopy faz ATM -> OCN para o exportState;
-    ! depois o conector MED -> MPAS fará OCN -> ATM. Mesmo round-trip que So_t —
-    ! mantém consistência arquitetural até a refatoração para grade unificada.
+    ! depois o conector MED -> MPAS fará OCN -> ATM, o mesmo caminho de ida e
+    ! volta de So_t.
     !
     ! Sobre regiões continentais e PETs sem dados: ZeroInternalField em
     ! InitializeRealize e os clamps em RegridOrCopy garantem zeros físicos.
@@ -134,7 +136,6 @@ contains
       rc = ESMF_SUCCESS  ! não fatal — manter pipeline ativo
     end if
 
-    ! ──────────────────────────────────────────
     ! Sf_zorl: rugosidade superficial Charnock+Smith calculada no bulk NCAR
     ! a partir de Foxx_taux/tauy. Mesmo padrão arquitetural de So_t/So_u/So_v:
     ! is%sfc%zorl (grade ATM interna) -> RegridOrCopy -> exportState.Sf_zorl
@@ -149,6 +150,9 @@ contains
 
   end subroutine export_to_components
 
+  !> @brief Temperatura de superfície composta (Sx_tsfc), média da SST e da
+  !! temperatura do gelo ponderada pela fração de gelo.
+  !! @param[in] is  estado interno do mediador
   subroutine export_surface_temperature(is)
     type(MED_InternalState), pointer :: is
     real(ESMF_KIND_R8), pointer :: p_sst_src(:,:), p_tice_comp(:,:), p_ifrac_comp(:,:)
@@ -165,8 +169,8 @@ contains
         associated(p_ifrac_comp) .and. associated(p_tsfc_out)) then
       do jj_c = lbound(p_sst_src,2), ubound(p_sst_src,2)
         do ii_c = lbound(p_sst_src,1), ubound(p_sst_src,1)
-          ! Clamp defensivo local — nao confia cegamente nas extrapolacoes
-          ! upstream, mesma filosofia dos guards de NaN/faixa fisica
+          ! Clamp defensivo local — não confia cegamente nas extrapolações
+          ! upstream, mesma filosofia dos guards de NaN/faixa física
           ! usados no resto do arquivo (ex. clamp de Sf_albedo, So_t).
           ifrac_c = p_ifrac_comp(ii_c,jj_c)
           if (ifrac_c /= ifrac_c) ifrac_c = 0.0_ESMF_KIND_R8   ! NaN guard
@@ -177,9 +181,9 @@ contains
             p_tsfc_out(ii_c,jj_c) = (1.0_ESMF_KIND_R8 - ifrac_c) * p_sst_src(ii_c,jj_c) &
                                      + ifrac_c * p_tice_comp(ii_c,jj_c)
           else
-            ! Si_t_sis2 nao regridou/extrapolou para um valor fisico
-            ! nesta celula — mantem SST pura em vez de contaminar com
-            ! um valor suspeito, mesma logica defensiva do fallback de
+            ! Si_t_sis2 não regridou/extrapolou para um valor físico
+            ! nesta célula — mantém SST pura em vez de contaminar com
+            ! um valor suspeito, mesma lógica defensiva do fallback de
             ! Sf_albedo.
             p_tsfc_out(ii_c,jj_c) = p_sst_src(ii_c,jj_c)
           end if
@@ -194,6 +198,11 @@ contains
     end if
   end subroutine export_surface_temperature
 
+  !> @brief Fração de gelo exportada ao oceano (Si_ifrac), pela rota
+  !! conservativa 'atm2ocn_ice', com a contagem dos pontos completados.
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] exportState  estado de exportação
+  !! @param[inout] rc           código de retorno
   subroutine export_ice_fraction(is, exportState, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: exportState
@@ -221,12 +230,16 @@ contains
       if (n_invalid_pts >= 0) &
         call record_fill(is%run%fill_counts(COMPL_IFRAC_EXP), n_invalid_pts, n_fixed_pts)
     else
-      ! Fallback: exportState sem Si_ifrac realizado (nao deveria
-      ! acontecer) -- mantem o comportamento antigo em vez de travar.
+      ! exportState sem Si_ifrac realizado (não deveria acontecer): cópia
+      ! direta, em vez de parar a rodada.
       call RegridOrCopy(is%ice%ifrac, exportState, "Si_ifrac", is, rc)
     end if
   end subroutine export_ice_fraction
 
+  !> @brief Zera, sobre terra (máscara is%ocn%omask), os fluxos que o
+  !! mediador envia ao oceano.
+  !! @param[in]    is  estado interno do mediador
+  !! @param[inout] rc  código de retorno
   subroutine zero_fluxes_over_land(is, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
@@ -245,7 +258,7 @@ contains
 
     call ESMF_FieldGet(is%ocn%omask, farrayPtr=p_omask, rc=rc)
     if (associated(p_omask)) then
-      ! Mascara REAL (So_omask regridada), e nao
+      ! Máscara REAL (So_omask regridada), e não
       ! inferida por SST. p_omask < 0.5 = terra (limiar central entre
       ! 0=terra e 1=oceano; robusto a pequena mistura de borda do
       ! regrid NEAREST_STOD, que deveria ser quase sempre exatamente
@@ -255,7 +268,7 @@ contains
       land_mask = (p_omask < 0.5_ESMF_KIND_R8)
       n_land_masked = count(land_mask)
 
-      ! Helper macro: aplicar mascara em cada fluxo
+      ! Helper macro: aplicar máscara em cada fluxo
       call ESMF_FieldGet(is%ocn_flx%taux,  farrayPtr=p_taux,  rc=rc)
       if (rc == ESMF_SUCCESS .and. associated(p_taux))  &
         where (land_mask) p_taux  = 0.0_ESMF_KIND_R8
@@ -299,6 +312,10 @@ contains
     end if
   end subroutine zero_fluxes_over_land
 
+  !> @brief Interpola So_omask para a grade ATM (is%ocn%omask), uma vez por
+  !! rodada, pela rota 'ocn2atm_landmask'.
+  !! @param[in]    is           estado interno do mediador
+  !! @param[inout] importState  estado de importação
   subroutine regrid_land_mask(is, importState)
     type(MED_InternalState), pointer :: is
     type(ESMF_State), intent(inout) :: importState

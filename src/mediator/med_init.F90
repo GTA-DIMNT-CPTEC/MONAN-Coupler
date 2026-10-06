@@ -3,10 +3,8 @@
 !!
 !! Criação das grades internas ATM e OCN (com a verificação dos cantos da
 !! grade OCN), realização dos campos dos componentes e dos campos internos.
-!! A criação das rotas de InitializeDataComplete (idc_create_routes, até a
-!! R-FASE11-17) passou para a fase de inicialização, em med_exchange.
-!!
-!! Separado de MED_cap.F90 sem mudar instruções (R-FASE8-01).
+!! As rotas da inicialização são criadas pela fase initialize_data, em
+!! med_exchange.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -125,6 +123,10 @@ contains
     rc = ESMF_SUCCESS
   end subroutine create_ocn_grid
 
+  !> @brief Confere os cantos da grade OCN perto do polo (dobra tripolar):
+  !! avisa se há célula quase degenerada ou salto de longitude muito maior
+  !! que a média entre vizinhos.
+  !! @param[in] coordX, coordY  cantos do DE local [graus]
   subroutine check_corner_coordinates(coordX, coordY)
     real(ESMF_KIND_R8), pointer :: coordX(:,:)
     real(ESMF_KIND_R8), pointer :: coordY(:,:)
@@ -138,38 +140,38 @@ contains
     real(ESMF_KIND_R8) :: dist_here
     real(ESMF_KIND_R8) :: dlon_raw
     integer :: i_next
-    ! Checagem especifica da(s)
-    ! ultima(s) linha(s) de j perto do polo (fold tripolar). So' roda
-    ! neste DE se ele de fato alcancar perto do polo (maxval(coordY)
-    ! > 80) -- a maioria dos PETs nao chega la' e nao tem o que checar.
+    ! Checagem específica da(s)
+    ! última(s) linha(s) de j perto do polo (dobra tripolar). Só roda
+    ! neste DE se ele de fato alcançar perto do polo (maxval(coordY)
+    ! > 80) -- a maioria dos PETs não chega lá e não tem o que checar.
     ! Dois sintomas procurados, ambos assinatura de fold mal capturado
-    ! ou celula degenerada perto do polo:
-    !   (a) celula quase degenerada: distancia entre cantos vizinhos
-    !       (em i, na linha mais ao norte) proxima de zero -- area de
-    !       celula colapsando, o que faz CONSERVE tratar aquela celula
+    ! ou célula degenerada perto do polo:
+    !   (a) célula quase degenerada: distância entre cantos vizinhos
+    !       (em i, na linha mais ao norte) próxima de zero -- área de
+    !       célula colapsando, o que faz CONSERVE tratar aquela célula
     !       como praticamente inexistente (peso ~0), mesmo que fisicamente
-    !       deva ter area finita.
-    !   (b) salto de longitude entre celulas vizinhas em i, na mesma
-    !       linha, muito maior que o espacamento medio do resto da
-    !       grade -- indica descontinuidade de indice atraves da dobra
+    !       deva ter área finita.
+    !   (b) salto de longitude entre células vizinhas em i, na mesma
+    !       linha, muito maior que o espaçamento médio do resto da
+    !       grade -- indica descontinuidade de índice através da dobra
     !       (dado de um lado do polo aparecendo ao lado do dado do
-    !       lado oposto sem a rotacao de 180 graus que o fold real exige).
+    !       lado oposto sem a rotação de 180 graus que o fold real exige).
     if (maxval(coordY) > 80.0_ESMF_KIND_R8) then
         iN_c = ubound(coordX,1); jN_c = ubound(coordX,2)
         dlon_avg = 0.0_ESMF_KIND_R8; dlon_max_found = 0.0_ESMF_KIND_R8
         dist_corner_min = huge(1.0_ESMF_KIND_R8)
         do i_c = lbound(coordX,1), iN_c
           ! Salto de longitude entre vizinhos em i, na linha mais ao
-          ! norte (jN_c) -- usa a diferenca angular MINIMA (trata
-          ! travessia de 0/360 corretamente, para nao confundir isso
+          ! norte (jN_c) -- usa a diferença angular MÍNIMA (trata
+          ! travessia de 0/360 corretamente, para não confundir isso
           ! com um salto real de fold).
             i_next = merge(lbound(coordX,1), i_c+1, i_c == iN_c)
             dlon_raw = abs(coordX(i_next,jN_c) - coordX(i_c,jN_c))
             dlon_step = min(dlon_raw, 360.0_ESMF_KIND_R8 - dlon_raw)
             dlon_avg = dlon_avg + dlon_step
             dlon_max_found = max(dlon_max_found, dlon_step)
-            ! Distancia (aprox., em graus, sem correcao de cos(lat) --
-            ! suficiente para detectar colapso grosseiro de celula)
+            ! Distância (aprox., em graus, sem correção de cos(lat) --
+            ! suficiente para detectar colapso grosseiro de célula)
             dist_here = sqrt(dlon_step**2 + &
               (coordY(i_next,jN_c)-coordY(i_c,jN_c))**2)
             dist_corner_min = min(dist_corner_min, dist_here)
@@ -238,6 +240,11 @@ contains
     end do
   end subroutine realize_on_grid
 
+  !> @brief Cria os campos internos do mediador na grade ATM e os preenche
+  !! com os valores iniciais.
+  !! @param[in]    is        estado interno do mediador
+  !! @param[inout] atm_grid  grade ATM do mediador
+  !! @param[inout] rc        código de retorno
   subroutine create_internal_fields(is, atm_grid, rc)
     type(MED_InternalState), pointer :: is
     type(ESMF_Grid), intent(inout) :: atm_grid
@@ -255,11 +262,11 @@ contains
     call CreateInternalField(is%ocn_flx%snow,   atm_grid, "med_snow",   rc)
     call CreateInternalField(is%ocn_flx%pslv,   atm_grid, "med_pslv",   rc)
     call CreateInternalField(is%ice%ifrac,  atm_grid, "med_ifrac",  rc)
-    ! mascara terra/oceano real na grade ATM (1=oceano,
-    ! 0=terra). Default 1.0 (oceano) ate' o primeiro regrid de So_omask —
-    ! seguro porque so' e' USADA para EXCLUIR terra, nao para validar
-    ! oceano; ficar em "tudo oceano" ate' o regrid real e' menos arriscado
-    ! do que ficar em "tudo terra" (zeraria fluxos legitimos ate' la').
+    ! máscara terra/oceano real na grade ATM (1=oceano,
+    ! 0=terra). Default 1.0 (oceano) até o primeiro regrid de So_omask —
+    ! seguro porque só é USADA para EXCLUIR terra, não para validar
+    ! oceano; ficar em "tudo oceano" até o regrid real é menos arriscado
+    ! do que ficar em "tudo terra" (zeraria fluxos legítimos até lá).
     call CreateInternalField(is%ocn%omask,  atm_grid, "med_omask",  rc)
     call FillInternalField(is%ocn%omask, 1.0_ESMF_KIND_R8, rc)
     call CreateInternalField(is%ocn_flx%duu10n, atm_grid, "med_duu10n", rc)
@@ -287,7 +294,7 @@ contains
     call CreateInternalField(is%ice%sen,     atm_grid, "med_sen_ice",    rc)
     call CreateInternalField(is%ice%evap,    atm_grid, "med_evap_ice",   rc)
     call CreateInternalField(is%ice%lwnet,   atm_grid, "med_lwnet_ice",  rc)
-    ! Onda curta liquida sobre o gelo, por banda
+    ! Onda curta líquida sobre o gelo, por banda
     call CreateInternalField(is%ice%swvdr,   atm_grid, "med_swvdr_ice",  rc)
     call CreateInternalField(is%ice%swvdf,   atm_grid, "med_swvdf_ice",  rc)
     call CreateInternalField(is%ice%swidr,   atm_grid, "med_swidr_ice",  rc)
@@ -297,18 +304,18 @@ contains
     call ZeroOcnFluxFields(is%ocn_flx, rc)
     call ZeroInternalField(is%ice%ifrac,  rc)
     call ZeroInternalField(is%ocn_flx%duu10n, rc)
-    ! fallback nao-zero (ALB_ICE_DEFAULT, o mesmo valor que o cap do gelo usa
-    ! como ALBEDO_ICE_FALLBACK) ate o primeiro regrid real do gelo — evita
-    ! um albedo de gelo erroneamente zero (que superestimaria absorcao de
-    ! SW) no bootstrap, mesma logica de SST_BULK_FALLBACK abaixo.
+    ! fallback não-zero (ALB_ICE_DEFAULT, o mesmo valor que o cap do gelo usa
+    ! como ALBEDO_ICE_FALLBACK) até o primeiro regrid real do gelo — evita
+    ! um albedo de gelo erroneamente zero (que superestimaria absorção de
+    ! SW) no bootstrap, mesma lógica de SST_BULK_FALLBACK abaixo.
     call FillInternalField(is%ice%alb_vdr, ALB_ICE_DEFAULT, rc)
     call FillInternalField(is%ice%alb_vdf, ALB_ICE_DEFAULT, rc)
     call FillInternalField(is%ice%alb_idr, ALB_ICE_DEFAULT, rc)
     call FillInternalField(is%ice%alb_idf, ALB_ICE_DEFAULT, rc)
     call ZeroInternalField(is%sfc%coszen, rc)
     call FillInternalField(is%sfc%albedo, ALB_OCEAN_DEFAULT, rc)
-    ! T_gelo default = ponto de congelamento da agua do mar; fluxos
-    ! turbulentos do gelo comecam zerados ate o 1o calc_bulk_ncar real.
+    ! T_gelo default = ponto de congelamento da água do mar; fluxos
+    ! turbulentos do gelo começam zerados até o 1o calc_bulk_ncar real.
     call FillInternalField(is%ice%tice,   T_FREEZE_SEAWATER, rc)
     call FillInternalField(is%sfc%tsfc,   T_FREEZE_SEAWATER, rc)
     call ZeroInternalField(is%ice%taux,  rc)
@@ -316,13 +323,13 @@ contains
     call ZeroInternalField(is%ice%sen,   rc)
     call ZeroInternalField(is%ice%evap,  rc)
     call ZeroInternalField(is%ice%lwnet, rc)
-    ! comeca zerado ate o 1o calc_bulk_ncar real,
-    ! mesma logica de is%ice%sen/is%ice%lwnet acima.
+    ! começa zerado até o 1o calc_bulk_ncar real,
+    ! mesma lógica de is%ice%sen/is%ice%lwnet acima.
     call ZeroInternalField(is%ice%swvdr, rc)
     call ZeroInternalField(is%ice%swvdf, rc)
     call ZeroInternalField(is%ice%swidr, rc)
     call ZeroInternalField(is%ice%swidf, rc)
-    ! Inicializa SST com valor padrao (nao zero, para evitar bulk erratico no t=0)
+    ! Inicializa SST com valor padrão (não zero, para evitar bulk errático no t=0)
     call FillInternalField(is%ocn%sst, SST_BULK_FALLBACK, rc)
     ! Valor de bootstrap: será substituído no primeiro passo pelo So_t do DOCN/MOM6.
     ! correntes oceânicas inicializadas a zero (oceano em repouso).
@@ -330,7 +337,7 @@ contains
     call ZeroInternalField(is%ocn%u, rc)
     call ZeroInternalField(is%ocn%v, rc)
     ! rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
-    ! Substituida no primeiro passo pela parametrizacao Charnock no bulk NCAR.
+    ! Substituída no primeiro passo pela parametrização Charnock no bulk NCAR.
     call FillInternalField(is%sfc%zorl, 0.01_ESMF_KIND_R8, rc)
   end subroutine create_internal_fields
 

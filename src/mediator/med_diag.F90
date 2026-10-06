@@ -57,7 +57,6 @@ module med_diag_mod
 
 contains
 
-  !============================================================================
   !> @brief Resumo da forçante atmosférica reunida na grade ATM, no primeiro
   !! passo, só no PET 0: células com valor e faixa de cada campo.
   !!
@@ -67,7 +66,6 @@ contains
   !! @param[in]    uas_g..lwdn_g     forçantes na grade ATM global
   !! @param[inout] first_call_diag   .true. até o PET 0 registrar o resumo
   !! @param[inout] rc                código de retorno da consulta à VM
-  !============================================================================
   subroutine log_atm_forcing_summary(uas_g, tas_g, psl_g, swdn_g, vas_g, shum_g, rain_g, lwdn_g, &
                                      first_call_diag, rc)
     logical, intent(inout) :: first_call_diag
@@ -112,7 +110,6 @@ contains
     call log_debug(COMP_MED, DIAG_ATM//trim(msg))
   end subroutine log_atm_forcing_summary
 
-  !============================================================================
   !> @brief Máscara do oceano vista por este PET ao criar a rota do gelo:
   !! se So_omask foi encontrada e quantos pontos de terra e de oceano tem.
   !!
@@ -123,7 +120,6 @@ contains
   !! @param[in] found   So_omask encontrada no importState
   !! @param[in] n_land  pontos de terra neste PET
   !! @param[in] n_sea   pontos de oceano neste PET
-  !============================================================================
   subroutine log_ocean_mask(found, n_land, n_sea)
     logical, intent(in) :: found
     integer, intent(in) :: n_land, n_sea
@@ -134,7 +130,6 @@ contains
     call log_debug(COMP_MED, trim(msg))
   end subroutine log_ocean_mask
 
-  !============================================================================
   !> @brief So_t como chega do oceano, antes de qualquer interpolação ou
   !! máscara do mediador, no primeiro DE local: índices e quatro valores da
   !! primeira linha. Separa um problema da exportação do MOM6 de um problema
@@ -142,7 +137,6 @@ contains
   !!
   !! @param[in]    field  So_t no importState
   !! @param[inout] done   .true. depois do primeiro registro neste PET
-  !============================================================================
   subroutine log_sst_raw(field, done)
     type(ESMF_Field), intent(in)    :: field
     logical,          intent(inout) :: done
@@ -167,7 +161,6 @@ contains
     done = .true.
   end subroutine log_sst_raw
 
-  !============================================================================
   !> @brief Fração de gelo na grade do oceano, antes da interpolação (etapa 1
   !! de 4): mínimo, máximo e soma no DE local, com dezessete algarismos, e a
   !! soma de bits.
@@ -177,7 +170,6 @@ contains
   !! vem do SIS2 ou nasce na interpolação.
   !!
   !! @param[in] f_ifrac_src  Si_ifrac_sis2 no importState
-  !============================================================================
   subroutine log_ice_source(f_ifrac_src)
     type(ESMF_Field), intent(in) :: f_ifrac_src
     real(ESMF_KIND_R8), pointer :: p(:,:)
@@ -197,7 +189,6 @@ contains
     call diag_bitsum_log(COMP_MED, BITSUM_ICE//'etapa1 origem', f_ifrac_src, rc_bs)
   end subroutine log_ice_source
 
-  !============================================================================
   !> @brief Fração de gelo na grade ATM, logo depois da interpolação e antes
   !! da extrapolação (etapa 2 de 4): máximo e soma das células mapeadas, com
   !! dezessete algarismos, número de células com a sentinela -999 (não
@@ -206,7 +197,6 @@ contains
   !! A sentinela domina o mínimo e a soma, por isso entra contada à parte.
   !!
   !! @param[in] ifrac  fração de gelo na grade ATM (is%ice%ifrac)
-  !============================================================================
   subroutine log_ice_destination(ifrac)
     type(ESMF_Field), intent(in) :: ifrac
     real(ESMF_KIND_R8), pointer :: p(:,:)
@@ -224,13 +214,11 @@ contains
     call diag_bitsum_log(COMP_MED, BITSUM_ICE//'etapa2 pos-interpolacao', ifrac, rc_bs)
   end subroutine log_ice_destination
 
-  !============================================================================
   !> @brief Fração de gelo interpolada, antes da extrapolação: mínimo, máximo
   !! e células exatamente iguais a zero. Muitas células em zero indicam
   !! problema na interpolação ou na máscara, e não na física do SIS2.
   !!
   !! @param[in] ifrac  fração de gelo na grade ATM (is%ice%ifrac)
-  !============================================================================
   subroutine log_ice_raw(ifrac)
     type(ESMF_Field), intent(in) :: ifrac
     real(ESMF_KIND_R8), pointer :: p(:,:)
@@ -254,12 +242,10 @@ contains
     call diag_bitsum_log(COMP_MED, BITSUM_ICE//'etapa3 pos-extrapolacao', ifrac, rc_bs)
   end subroutine log_ice_extrapolated
 
-  !============================================================================
   !> @brief Soma de bits de Si_ifrac como sai do mediador (etapa 4 de 4): o
   !! que o conector entrega ao MONAN-A e o que aparece no monan2_import_*.nc.
   !!
   !! @param[inout] exportState  estado de exportação do mediador
-  !============================================================================
   subroutine log_ice_export(exportState)
     type(ESMF_State), intent(inout) :: exportState
     type(ESMF_Field) :: f_bs
@@ -274,7 +260,6 @@ contains
     end if
   end subroutine log_ice_export
 
-  !============================================================================
   !> @brief Células em que o calor sensível sobre o gelo passou de 490 W/m2
   !! antes do limite de +-500 W/m2, e os dados da primeira delas. Saturação
   !! frequente indica vento ou diferença de temperatura extremos.
@@ -284,7 +269,6 @@ contains
   !! @param[in] v             da primeira: vento, tas, temperatura efetiva do
   !!                          gelo, diferença tas - gelo, Rib, fator de
   !!                          estabilidade e valor antes do limite
-  !============================================================================
   subroutine log_ice_stability(n_sat, i_sat, j_sat, v)
     integer,            intent(in) :: n_sat, i_sat, j_sat
     real(ESMF_KIND_R8), intent(in) :: v(7)
@@ -301,7 +285,6 @@ contains
     call log_debug(COMP_MED, trim(msg))
   end subroutine log_ice_stability
 
-  !============================================================================
   !> @brief Aviso de gelo em latitude implausível: células com fração acima
   !! de 0,05 em |lat| < 55 graus, onde não existe gelo marinho em nenhuma
   !! época do ano. Registra o número e a primeira encontrada neste PET.
@@ -311,7 +294,6 @@ contains
   !!
   !! @param[in] p_ifrac_out  fração de gelo na grade ATM, depois da
   !!                         extrapolação
-  !============================================================================
   subroutine check_ice_geography(p_ifrac_out)
     real(ESMF_KIND_R8), pointer, intent(in) :: p_ifrac_out(:,:)
     real(ESMF_KIND_R8), parameter :: LAT_MAX_ICE = 55.0_ESMF_KIND_R8

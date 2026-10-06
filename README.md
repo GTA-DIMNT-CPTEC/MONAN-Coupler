@@ -105,7 +105,7 @@ Convenções para código novo:
 | Texto | `int_to_str`, `real_to_str` e `str_lower` de `coupler_utils_mod`; não criar cópias locais |
 | Configuração | nova chave em `coupler_config.F90`, com validação em `valid_config`; não usar atributos NUOPC para repassar configuração |
 | Componentes e conectores | registrar pelo `add_model` e `add_connector` de `esm.F90` |
-| Comentários | explicar o que o código faz e por quê; o histórico de correções vai para `docs/CHANGELOG.md` (scripts de `tools/`: `docs/historico-scripts.md`) |
+| Comentários | explicar o que o código faz hoje e por quê, em português com acentos; sem citar etapas da refatoração, investigações ou versões (o histórico vai para `docs/CHANGELOG.md` e o `git log`; scripts de `tools/`: `docs/historico-scripts.md`); sem molduras (`!====`, `!----`); cabeçalho de módulo e de rotina no modelo Doxygen descrito abaixo |
 | Novo fonte | criá-lo num diretório de `SRC_SUBDIRS` (todo `.F90` desses diretórios é compilado) e gerar de novo as dependências (`tools/dev/dependencias.py gera`, que reescreve `src/dependencies.mk` a partir dos `use`); com real de 8 bytes do MOM6, incluí-lo também em `MOM6_SRCS` |
 | Interpolação | sempre por uma rota do `regrid_manager_t` (ver [`docs/interpolacao-plugavel.md`](docs/interpolacao-plugavel.md)); não chamar `ESMF_FieldRegridStore` diretamente. No mediador, a rota é criada por `create_route` (`med_cap_methods`), com a configuração da sua linha em `ROUTES` (`src/coupling/cpl_map.F90`); rota nova ganha uma linha na tabela. Esquema novo: um arquivo em `src/regrid/`, a partir do modelo `regrid_idw.F90` (base de pesos), e uma linha em `regrid_schemes.F90`; opções do esquema em texto (`regrid_options` no `&nuopc_regrid`) |
 | Campos trocados | todo campo novo ganha uma linha em `FIELDS` (`src/coupling/cpl_fields.F90`) e as linhas das suas passagens em `EXCHANGES` (`src/coupling/cpl_map.F90`); desde a R-FASE11-25, só os nomes de `FIELDS` estão no dicionário do NUOPC, e a conferência do mapa interrompe a rodada em caso de diferença (lacunas conhecidas ficam em `GAPS`); campo que um modelo exporta, a linha em `EXPORTS`, na ordem do anúncio; rota nova ou alterada, a linha em `ROUTES`; depois, `tools/dev/mapa-acoplamento.py` para atualizar [`docs/acoplamento.md`](docs/acoplamento.md). Na rodada, as linhas `CPL-REL: DIFERENCA` do log do PET 0 apontam o que não confere entre o mapa e os campos anunciados |
@@ -114,6 +114,20 @@ Convenções para código novo:
 | Construção `BLOCK` | não usar: uma etapa completa vira procedimento com nome; variáveis temporárias são declaradas no início do procedimento |
 | Constantes físicas e da grade | em `src/shared/coupler_constants.F90`; não redeclarar localmente |
 | Etapas de uma rotina longa | procedimento de módulo com argumentos explícitos e `intent` declarado, em vez de procedimento interno (`contains` dentro da rotina), que enxerga todas as variáveis da rotina hospedeira |
+
+Modelo dos cabeçalhos (Doxygen). O módulo começa por `!> @file nome.F90`, `!! @brief` com uma linha e, depois de uma linha `!!` vazia, o que o módulo faz, em texto corrido ou tabela. Cada rotina de módulo tem, logo antes da declaração:
+
+```fortran
+  !> @brief O que a rotina faz, numa linha.
+  !!
+  !! Detalhes, quando ajudam: por que é assim, a ordem das etapas, o que
+  !! acontece quando um campo falta.
+  !! @param[in]    nome  descrição
+  !! @param[inout] rc    código de retorno
+  subroutine nome(...)
+```
+
+As rotinas internas (`contains` dentro de outra rotina) e as funções curtas podem ter só a linha `!>`.
 
 O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
 

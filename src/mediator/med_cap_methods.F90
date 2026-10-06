@@ -1,10 +1,10 @@
 !> @file med_cap_methods.F90
 !! @brief Utilitários de manipulação de campos ESMF/NUOPC do mediador.
 !!
-!! Utilitários do mediador separados de MED_cap.F90:
+!! Rotinas:
 !!
 !!   CreateInternalField        cria campo ESMF na grade interna
-!!   ZeroInternalField          zera campo com guard
+!!   ZeroInternalField          zera campo, com proteção para PETs sem DE
 !!   ZeroOcnFluxFields          zera os fluxos enviados ao oceano
 !!   FillInternalField          preenche campo com valor constante
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
@@ -46,13 +46,11 @@ module med_cap_methods_mod
 
 contains
 
-  !============================================================================
   !> @brief Cria um campo ESMF na grade interna do mediador.
   !! @param[out] field  Campo a criar
   !! @param[in]  grid   Grade ESMF de destino
   !! @param[in]  name   Nome do campo
   !! @param[out] rc     Código de retorno ESMF
-  !============================================================================
   subroutine CreateInternalField(field, grid, name, rc)
     type(ESMF_Field), intent(out) :: field
     type(ESMF_Grid),  intent(in)  :: grid
@@ -66,12 +64,10 @@ contains
       line=__LINE__, file=__FILE__)) return
   end subroutine CreateInternalField
 
-  !============================================================================
-  ! > @brief Zera um campo ESMF com guard para PETs sem DE local.
+  !> @brief Zera um campo ESMF, com proteção para PETs sem DE local.
   !!
   !! ESMF_FieldGet(farrayPtr) falha com "localDe is out of range"
   !! em PETs sem DE local (localDeCount=0). Verificar antes de acessar.
-  !============================================================================
   subroutine ZeroInternalField(field, rc)
     type(ESMF_Field), intent(inout) :: field
     integer,          intent(out)   :: rc
@@ -80,14 +76,12 @@ contains
 
   end subroutine ZeroInternalField
 
-  !============================================================================
   !> @brief Zera os doze fluxos enviados ao oceano, sempre na mesma ordem.
   !!
   !! Usada na criação dos campos internos (med_init) e no início de cada
-  !! passo (med_flux). O rc final é o do último campo, como antes.
+  !! passo (med_flux). O rc final é o do último campo.
   !! @param[inout] flx  fluxos do mediador para o oceano
   !! @param[out]   rc   código de retorno ESMF
-  !============================================================================
   subroutine ZeroOcnFluxFields(flx, rc)
     type(med_ocn_flux_fields_t), intent(inout) :: flx
     integer,                     intent(out)   :: rc
@@ -107,10 +101,8 @@ contains
 
   end subroutine ZeroOcnFluxFields
 
-  !============================================================================
   !> @brief Preenche campo ESMF com valor constante.
   !! Guard PETs sem DE local não têm dados a preencher.
-  !============================================================================
   subroutine FillInternalField(field, value, rc)
     type(ESMF_Field),   intent(inout) :: field
     real(ESMF_KIND_R8), intent(in)    :: value
@@ -130,9 +122,7 @@ contains
 
   end subroutine FillInternalField
 
-  !============================================================================
   !> @brief Obtém ponteiro para campo (falha se o campo não existir no State).
-  !============================================================================
   subroutine GetFieldPtr(state, name, ptr, rc)
     type(ESMF_State),            intent(in)    :: state
     character(len=*),            intent(in)    :: name
@@ -157,13 +147,11 @@ contains
 
   end subroutine GetFieldPtr
 
-  !============================================================================
   !> @brief Obtém ponteiro para campo sem gerar log de erro quando ausente.
   !!
   !! Enumera os itens do State e verifica existência do nome ANTES de chamar
   !! ESMF_StateGet pelo nome. Impede mensagens "no ESMF_Field found named: X"
   !! no log para campos opcionais (Sa_shum_mpas, Faxa_snow_mpas).
-  !============================================================================
   subroutine GetFieldPtrOptional(state, name, ptr, rc)
     type(ESMF_State),            intent(in)    :: state
     character(len=*),            intent(in)    :: name
@@ -208,15 +196,11 @@ contains
 
   end subroutine GetFieldPtrOptional
 
-  !============================================================================
   !> @brief Interpola src_field (malha de fluxo) para o campo dst_name do
   !! exportState (grade OCN), pela rota 'atm2ocn'.
   !!
-  !! A rota existe desde a fase A da inicialização. Até a R-FASE11-18, esta
-  !! rotina a criava quando ainda não existia, caso que nunca ocorre: a fase
-  !! A roda antes de qualquer chamada, e uma falha nela interrompe a
-  !! inicialização.
-  !============================================================================
+  !! A rota é criada na fase A da inicialização, que roda antes de qualquer
+  !! chamada; uma falha nela interrompe a inicialização.
   subroutine RegridOrCopy(src_field, dst_state, dst_name, is, rc)
     type(ESMF_Field),        intent(inout) :: src_field
     type(ESMF_State),        intent(inout) :: dst_state
@@ -244,10 +228,9 @@ contains
 
   end subroutine RegridOrCopy
 
-  !============================================================================
   !> @brief Configuração da rota nome na tabela ROUTES (cpl_map): métodos em
   !! ordem de preferência, esquema, máscara na origem (se a rota tem
-  !! mascara), o que fazer com os pontos do destino que a interpolação não
+  !! máscara), o que fazer com os pontos do destino que a interpolação não
   !! alcança (no_value: 'zerar' zera o destino inteiro antes, zero_total;
   !! 'manter' e 'sentinela' preservam o valor anterior), a troca de NaN no
   !! destino (nan_to), o preenchimento por vizinhança depois da
@@ -260,7 +243,6 @@ contains
   !! preenche o destino com a sentinela antes (o gelo, em med_ice e
   !! med_export), porque o preenchimento vale mesmo quando a rota não é
   !! aplicada.
-  !============================================================================
   subroutine route_spec(name, spec, fallback, ok)
     character(len=*),    intent(in)  :: name
     type(regrid_spec_t), intent(out) :: spec
@@ -283,12 +265,10 @@ contains
     fallback = ROUTES(k)%fallback
   end subroutine route_spec
 
-  !============================================================================
   !> @brief Preenchimento por vizinhança (coluna fill de ROUTES) da rota
   !! nome; desligado se a rota não está em ROUTES. Serve para completar como
   !! a rota quando ela ainda não existe e outra interpola no lugar dela (a
   !! SST pela rota ocn2atm enquanto a máscara do oceano é uniforme).
-  !============================================================================
   function route_fill(name) result(fill)
     character(len=*), intent(in) :: name
     type(regrid_fill_t) :: fill
@@ -299,10 +279,8 @@ contains
     if (k > 0) fill = ROUTES(k)%fill
   end function route_fill
 
-  !============================================================================
   !> @brief Cria a rota nome em regrid com a configuração de ROUTES, e com a
   !! rota de reserva da tabela, quando houver.
-  !============================================================================
   subroutine create_route(regrid, name, src, dst, rc)
     type(regrid_manager_t), intent(inout) :: regrid
     character(len=*),       intent(in)    :: name
@@ -325,15 +303,13 @@ contains
     end if
   end subroutine create_route
 
-  !============================================================================
   !> @brief Copia So_omask (1 = oceano, 0 = terra) do importState para o item
   !! de máscara de ocn_grid, DE a DE, e conta os pontos de terra e de
-  !! oceano deste PET. É a máscara que as rotas com mascara em ROUTES usam
+  !! oceano deste PET. É a máscara que as rotas com máscara em ROUTES usam
   !! na origem (valores excluídos: terra = 0).
   !!
   !! achou: So_omask está no importState; copiou: algum DE recebeu a
   !! máscara.
-  !============================================================================
   subroutine set_ocn_grid_mask(ocn_grid, importState, n_land_pts, n_sea_pts, found, copied)
     type(ESMF_Grid),  intent(inout) :: ocn_grid
     type(ESMF_State), intent(inout) :: importState

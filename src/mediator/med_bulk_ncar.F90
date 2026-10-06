@@ -11,8 +11,8 @@
 !!
 !! A sub-rotina recebe os campos ATM globais reunidos por MPI_Allreduce e lê e
 !! escreve só arrays (med_flux_t), associados pela fase compute_fluxes de
-!! med_exchange: desde a R-FASE11-20, a física não conhece o estado interno
-!! do mediador, os campos do ESMF nem as rotas.
+!! med_exchange: a física não conhece o estado interno do mediador, os
+!! campos do ESMF nem as rotas.
 
 module med_bulk_ncar_mod
 
@@ -49,11 +49,11 @@ module med_bulk_ncar_mod
   public :: ice_temp_eff, louis_stability, ocean_direct_albedo
 
   ! Parâmetros dos fluxos sobre o gelo (compute_ice_fluxes).
-  real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referencia [m]
-  real(ESMF_KIND_R8), parameter :: LOUIS_B = 5.0_ESMF_KIND_R8     ! Louis (1979), caso estavel
-  real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instavel
-  real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ nao zerar o fluxo
-  real(ESMF_KIND_R8), parameter :: STAB_FAC_MAX = 3.0_ESMF_KIND_R8   ! teto de seguranca (nao e' do Louis original)
+  real(ESMF_KIND_R8), parameter :: Z_REF = 10.0_ESMF_KIND_R8      ! altura de referência [m]
+  real(ESMF_KIND_R8), parameter :: LOUIS_B = 5.0_ESMF_KIND_R8     ! Louis (1979), caso estável
+  real(ESMF_KIND_R8), parameter :: LOUIS_C = 5.0_ESMF_KIND_R8     ! Louis (1979), caso instável
+  real(ESMF_KIND_R8), parameter :: STAB_FAC_MIN = 0.05_ESMF_KIND_R8  ! piso p/ não zerar o fluxo
+  real(ESMF_KIND_R8), parameter :: STAB_FAC_MAX = 3.0_ESMF_KIND_R8   ! teto de segurança (não é do Louis original)
   ! Abaixo desta fração de gelo, Si_t_sis2 é o valor padrão do cap do gelo
   ! (ponto de congelamento), e não uma temperatura real: os Fioi_* recebem
   ! os fluxos da água aberta (Foxx_*).
@@ -61,7 +61,6 @@ module med_bulk_ncar_mod
 
 contains
 
-  !============================================================================
   !> @brief Calcula fluxos superficiais bulk NCAR + rugosidade Charnock/Smith.
   !!
   !! Executa as seções 4 (bulk NCAR) e Charnock do MediatorAdvance.
@@ -103,7 +102,6 @@ contains
   !! @param[in]   snow_g      Precipitação sólida (alocável, pode ser vazia) [kg/m²/s]
   !! @param[in]   i1,i2,j1,j2 Limites locais da DE na grade ATM
   !! @param[out]  rc          Código de retorno ESMF
-  !============================================================================
   subroutine calc_bulk_ncar(fluxes, &
                              uas, vas, tas, psl, swdn, lwdn, rain, shum, snow_g, &
                              i1, i2, j1, j2, clock, rc)
@@ -116,8 +114,8 @@ contains
     type(ESMF_Clock),        intent(in)    :: clock
     integer,                 intent(out)   :: rc
 
-    ! Declinacao solar e hora UTC, calculadas uma vez por chamada (nao
-    ! dependem de i,j) e reaproveitadas por todas as celulas.
+    ! Declinação solar e hora UTC, calculadas uma vez por chamada (não
+    ! dependem de i,j) e reaproveitadas por todas as células.
     real(ESMF_KIND_R8) :: decl
     real(ESMF_KIND_R8) :: utc_hour
 
@@ -129,73 +127,67 @@ contains
     rc = ESMF_SUCCESS
     nullify(fptr, sst, uocn, vocn)
 
-    ! Hora UTC e declinacao solar do instante de acoplamento
+    ! Hora UTC e declinação solar do instante de acoplamento
     call solar_time_and_declination(clock, utc_hour, decl, rc)
 
-    ! SST da grade ATM interna (preenchida na seção 3 por regrid OCN→ATM)
+    ! SST na malha de fluxo (fase go_to_flux_grid, rota OCN→ATM)
     sst => fluxes%sst
 
-    ! Correntes oceânicas na grade ATM (preenchidas na seção 3 ou zeros)
+    ! Correntes oceânicas na malha de fluxo (fase go_to_flux_grid, ou zeros)
     uocn => fluxes%uocn
     vocn => fluxes%vocn
     rc = ESMF_SUCCESS
 
-    ! Tensao, calor sensivel, evaporacao e balanco LW sobre agua aberta
+    ! Tensão, calor sensível, evaporação e balanco LW sobre água aberta
     call compute_ocean_fluxes(fluxes, sst, uas, vas, tas, psl, lwdn, shum, &
                               i1, i2, j1, j2)
 
-    !==========================================================================
     ! Componentes SW: 4 bandas (vis-dir, vis-dif, nir-dir, nir-dif)
     !
-    ! O albedo efetivo de cada célula e'
+    ! O albedo efetivo de cada célula é
     ! uma média ponderada pela fração de gelo real (fluxo%ifrac,
     ! interpolada de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
     ! (fluxo%alb_*, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
-    ! em sis_cap_fields.F90). Com albedo_ocn = 0,06 em toda celula, a absorcao
+    ! em sis_cap_fields.F90). Com albedo_ocn = 0,06 em toda célula, a absorção
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
-    !==========================================================================
     call blend_albedo_with_ice(fluxes, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
 
-    !==========================================================================
     ! Fluxos Fioi_*: mesma forma bulk NCAR de acima, mas com a temperatura
     ! de pele REAL do gelo (fluxo%tice, interpolada de Si_t_sis2) em vez
     ! da SST. Enviar ao SIS2 os mesmos Foxx_* calculados com a SST seria
-    ! fisicamente incorreto: a diferenca de temperatura ar-superficie sobre
+    ! fisicamente incorreto: a diferença de temperatura ar-superficie sobre
     ! gelo frio pode ser MUITO maior que ar-SST (a SST fica travada perto do
     ! ponto de congelamento; T_gelo pode chegar a -40 C ou mais frio).
     !
-    ! Coeficientes de transferencia: reusa Cd_neut/Ch_neut/Ce_neut (mesmos
-    ! da agua aberta) como base, MODULADOS por um fator de estabilidade
+    ! Coeficientes de transferência: reusa Cd_neut/Ch_neut/Ce_neut (mesmos
+    ! da água aberta) como base, MODULADOS por um fator de estabilidade
     ! (Louis, 1979 — "A parametric model of vertical eddy fluxes in the
     ! atmosphere", Boundary-Layer Meteorology 17, constantes b=c=d=5) —
-    ! necessario porque o ar sobre gelo frio tipicamente forma uma camada
+    ! necessário porque o ar sobre gelo frio tipicamente forma uma camada
     ! ESTAVELMENTE estratificada (T_ar > T_gelo), onde a troca turbulenta
-    ! REAL e' bem menor que a que os coeficientes "neutros" (calibrados
-    ! para agua aberta, tipicamente proxima do neutro) preveem — sem essa
-    ! correcao, mostrou Fioi_sen saturando repetidamente
-    ! no teto de seguranca de ±500 W/m^2 em varios PETs, sinal de
-    ! superestimativa sistematica, nao de evento fisico isolado.
+    ! REAL é bem menor que a que os coeficientes "neutros" (calibrados
+    ! para água aberta, tipicamente próxima do neutro) preveem. Sem o fator,
+    ! Fioi_sen satura repetidamente no teto de segurança de ±500 W/m^2,
+    ! sinal de superestimativa sistemática, não de evento físico isolado.
     !
-    ! Ambos os ramos de Louis (1979) estao implementados: Rib>0 (estavel,
-    ! amortece) e Rib<0 (INSTAVEL — superficie mais quente que o ar, ex.
-    ! polinias/gelo fino sob ar frio — REFORCA a troca turbulenta em vez de
-    ! amortecer). STAB_FAC_MAX=3,0 e' um teto de seguranca numerico
-    ! (nao vem do artigo original) para evitar crescimento sem limite do
-    ! fator de reforco em Rib muito negativo.
+    ! Ambos os ramos de Louis (1979) estão implementados: Rib>0 (estável,
+    ! amortece) e Rib<0 (INSTÁVEL — superfície mais quente que o ar, ex.
+    ! polínias/gelo fino sob ar frio — REFORÇA a troca turbulenta em vez de
+    ! amortecer). STAB_FAC_MAX=3,0 é um teto de segurança numérico
+    ! (não vem do artigo original) para evitar crescimento sem limite do
+    ! fator de reforço em Rib muito negativo.
     !
-    ! Refinamento futuro adicional: coeficientes proprios de rugosidade de
-    ! gelo (ex. Andreas et al.), ainda nao implementado.
+    ! Refinamento futuro adicional: coeficientes próprios de rugosidade de
+    ! gelo (ex. Andreas et al.), ainda não implementado.
     !
-    ! Emissividade do gelo/neve (0,99) e' ligeiramente maior que a de agua
-    ! aberta (0,97) usada acima — valor padrao bem estabelecido na
-    ! literatura, nao e' erro de digitacao.
+    ! Emissividade do gelo/neve (0,99) é ligeiramente maior que a de água
+    ! aberta (0,97) usada acima — valor padrão bem estabelecido na
+    ! literatura, não é erro de digitação.
     call compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
 
-    !==========================================================================
     ! Rain, snow, pslv — cópia direta (pass-through para o OCN)
-    !==========================================================================
     fptr => fluxes%rain
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(rain(i,j), 0.0_ESMF_KIND_R8)  ! clamp ≥ 0 (artefato bilinear)
@@ -211,7 +203,6 @@ contains
       fptr(i,j) = psl(i,j)
     end do; end do
 
-    !==========================================================================
     ! rugosidade superficial via Charnock + Smith (1988)
     !
     ! z0 = alpha * u*² / g  +  beta * nu / u*
@@ -222,12 +213,9 @@ contains
     ! g     = 9.81 m/s²
     ! nu    = 1.5e-5 m²/s  (viscosidade cinemática do ar a 20 °C)
     ! u*    = sqrt( |tau| / rho_ar )
-    !==========================================================================
     call compute_roughness_length(fluxes, j1, j2, i1, i2)
 
-    !==========================================================================
     ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS)
-    !==========================================================================
     fptr => fluxes%duu10n
     if (associated(uocn) .and. associated(vocn)) then
       do j=j1,j2; do i=i1,i2
@@ -243,22 +231,22 @@ contains
 
     ! Sem o SIS2 dinâmico, a fração de gelo da malha de fluxo é recalculada
     ! logo depois desta rotina, pela fase ice_fraction_without_sis2
-    ! (med_exchange; até a R-FASE11-19, aqui, em legacy_ice_fraction). Os
-    ! fluxos deste passo usam a fração que já estava em fluxo%ifrac.
+    ! (med_exchange). Os fluxos deste passo usam a fração que já estava em
+    ! fluxo%ifrac.
 
     rc = ESMF_SUCCESS
   end subroutine calc_bulk_ncar
 
-  !> Hora UTC decimal e declinacao solar do instante corrente do relogio.
+  !> Hora UTC decimal e declinação solar do instante corrente do relógio.
   !!
-  !! O dia do ano e a hora sao os mesmos para toda a grade neste instante de
-  !! acoplamento; o angulo zenital, que muda por celula, e' calculado em
-  !! ocean_direct_albedo a partir destes dois valores. Se o relogio falhar,
-  !! usa o meio-dia do equinocio (rc volta com ESMF_SUCCESS).
+  !! O dia do ano e a hora são os mesmos para toda a grade neste instante de
+  !! acoplamento; o ângulo zenital, que muda por célula, é calculado em
+  !! ocean_direct_albedo a partir destes dois valores. Se o relógio falhar,
+  !! usa o meio-dia do equinócio (rc volta com ESMF_SUCCESS).
   !!
-  !! @param[in]  clock     relogio do mediador
+  !! @param[in]  clock     relógio do mediador
   !! @param[out] utc_hour  hora UTC decimal [h]
-  !! @param[out] decl      declinacao solar [rad]
+  !! @param[out] decl      declinação solar [rad]
   !! @param[out] rc        sempre ESMF_SUCCESS
   subroutine solar_time_and_declination(clock, utc_hour, decl, rc)
     type(ESMF_Clock),   intent(in)  :: clock
@@ -271,18 +259,16 @@ contains
     integer :: doy, yy, mm, dd, hh, mn, ss
     type(ESMF_Time) :: currT
 
-    !==========================================================================
     ! dia-do-ano e hora UTC decimal, uma vez por
-    ! chamada (o angulo zenital muda por celula via lat/lon, mas doy/hora
-    ! sao os mesmos para toda a grade neste instante de acoplamento).
-    !==========================================================================
+    ! chamada (o ângulo zenital muda por célula via lat/lon, mas doy/hora
+    ! são os mesmos para toda a grade neste instante de acoplamento).
     call ESMF_ClockGet(clock, currTime=currT, rc=rc)
     if (rc == ESMF_SUCCESS) then
       call ESMF_TimeGet(currT, yy=yy, mm=mm, dd=dd, h=hh, m=mn, s=ss, &
         dayOfYear=doy, rc=rc)
     end if
     if (rc /= ESMF_SUCCESS) then
-      ! Fallback seguro: meio-dia do equinocio (decl~0, zenite so' por
+      ! Fallback seguro: meio-dia do equinócio (decl~0, zênite só por
       ! latitude) — nunca deixa a formula indefinida se o clock falhar.
       doy = 80; utc_hour = 12.0_ESMF_KIND_R8
       rc = ESMF_SUCCESS
@@ -291,8 +277,8 @@ contains
                  + real(ss, ESMF_KIND_R8)/3600.0_ESMF_KIND_R8
     end if
 
-    ! Declinacao solar — aproximacao de Spencer (1971), erro tipico < 0,1
-    ! grau. gamma = angulo fracionario do ano [rad].
+    ! Declinação solar — aproximação de Spencer (1971), erro típico < 0,1
+    ! grau. gamma = ângulo fracionário do ano [rad].
     gamma_doy = 2.0_ESMF_KIND_R8 * PI_ZEN * real(doy-1, ESMF_KIND_R8) / 365.0_ESMF_KIND_R8
     decl = 0.006918_ESMF_KIND_R8 &
          - 0.399912_ESMF_KIND_R8 * cos(gamma_doy)   + 0.070257_ESMF_KIND_R8 * sin(gamma_doy) &
@@ -300,14 +286,14 @@ contains
          - 0.002697_ESMF_KIND_R8 * cos(3.0_ESMF_KIND_R8*gamma_doy) + 0.001480_ESMF_KIND_R8 * sin(3.0_ESMF_KIND_R8*gamma_doy)
   end subroutine solar_time_and_declination
 
-  !> Fluxos sobre agua aberta pelas formulas bulk NCAR, com coeficientes
-  !! neutros: tensao do vento (taux, tauy), calor sensivel, evaporacao e
-  !! balanco de onda longa, escritos em fluxo. A SST e' a da grade ATM
+  !> Fluxos sobre água aberta pelas formulas bulk NCAR, com coeficientes
+  !! neutros: tensão do vento (taux, tauy), calor sensível, evaporação e
+  !! balanco de onda longa, escritos em fluxo. A SST é a da grade ATM
   !! interna; fora de (271, 308) K, ou sem SST, usa SST_BULK_FALLBACK.
   !!
   !! @param[in]    fluxo   arrays da física (escreve taux, tauy, sen, evap, lwnet)
   !! @param[in]    sst     SST na grade ATM (pode estar desassociado)
-  !! @param[in]    uas..shum  campos atmosfericos na grade ATM
+  !! @param[in]    uas..shum  campos atmosféricos na grade ATM
   !! @param[in]    i1,i2,j1,j2  limites locais da DE
   subroutine compute_ocean_fluxes(fluxes, sst, uas, vas, tas, psl, lwdn, shum, &
                                   i1, i2, j1, j2)
@@ -323,9 +309,7 @@ contains
 
     nullify(fptr)
 
-    !==========================================================================
     ! Taux = rho * Cd * |V| * u10
-    !==========================================================================
     fptr => fluxes%taux
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
@@ -334,9 +318,7 @@ contains
         rho_air * Cd_neut * wspd * uas(i,j)))
     end do; end do
 
-    !==========================================================================
     ! Tauy = rho * Cd * |V| * v10
-    !==========================================================================
     fptr => fluxes%tauy
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
@@ -344,9 +326,7 @@ contains
         rho_air * Cd_neut * wspd * vas(i,j)))
     end do; end do
 
-    !==========================================================================
     ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
-    !==========================================================================
     fptr => fluxes%sen
     do j=j1,j2; do i=i1,i2
       ! pular células sem tas físico (tas < 100 K = sem dado)
@@ -358,27 +338,25 @@ contains
         rho_air * Cp_air * Ch_neut * wspd * (tas(i,j) - sst_eff)))
     end do; end do
 
-    !==========================================================================
     ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
-    !==========================================================================
     fptr => fluxes%evap
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
-      ! Pular celulas sem psl fisico, simetrico as guardas de lwdn e de tas.
+      ! Pular células sem psl físico, simétrico as guardas de lwdn e de tas.
       !
       ! O `max(psl,1.0)` no denominador de qsat, logo abaixo, protege contra
-      ! divisao por zero mas produz um resultado fisicamente absurdo em vez de
-      ! pular a celula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
-      ! qsat sai cinco ordens de grandeza alto. A evaporacao entao satura no
+      ! divisão por zero mas produz um resultado fisicamente absurdo em vez de
+      ! pular a célula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
+      ! qsat sai cinco ordens de grandeza alto. A evaporação então satura no
       ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro — e esse fluxo
-      ! saturado e' entregue ao oceano, nao fica so' no diagnostico.
+      ! saturado é entregue ao oceano, não fica só no diagnóstico.
       !
       ! Isso aparecia no passo 1 de coupling_mode='sequential': ali o mediador
-      ! roda ANTES do primeiro avanco do MPAS, e os diagnosticos de fisica da
-      ! atmosfera (radiacao, precipitacao, pressao ao nivel do mar) ainda estao
-      ! zerados. As demais guardas ja' tratavam lwdn e swdn; psl nao tinha.
-      ! Pressao ao nivel do mar nunca desce de ~870 hPa na natureza, entao
-      ! 500 hPa e' um limiar seguro para "ausencia de dado".
+      ! roda ANTES do primeiro avanço do MPAS, e os diagnósticos de física da
+      ! atmosfera (radiação, precipitação, pressão ao nível do mar) ainda estão
+      ! zerados. As demais guardas já tratavam lwdn e swdn; psl não tinha.
+      ! Pressão ao nível do mar nunca desce de ~870 hPa na natureza, então
+      ! 500 hPa é um limiar seguro para "ausência de dado".
       if (psl(i,j) < 5.0e4_ESMF_KIND_R8) cycle
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       sst_eff = effective_sst(sst, i, j)
@@ -391,9 +369,7 @@ contains
         rho_air * Ce_neut * wspd * (qsat - shum(i,j))))
     end do; end do
 
-    !==========================================================================
     ! Balanço LW = lwdn − emissividade·σ·SST⁴
-    !==========================================================================
     fptr => fluxes%lwnet
     do j=j1,j2; do i=i1,i2
       ! pular células sem lwdn real (lwdn=0 indica ausência)
@@ -405,10 +381,10 @@ contains
     end do; end do
   end subroutine compute_ocean_fluxes
 
-  !> SST usada nos fluxos sobre agua aberta: sst(i,j) dentro de (271, 308) K;
+  !> SST usada nos fluxos sobre água aberta: sst(i,j) dentro de (271, 308) K;
   !! fora da faixa, ou sem SST (ponteiro nulo), SST_BULK_FALLBACK. Os testes
-  !! ficam em if separados porque o Fortran nao garante o curto-circuito do
-  !! .and.: com o ponteiro nulo, sst(i,j) nao pode ser lido.
+  !! ficam em if separados porque o Fortran não garante o curto-circuito do
+  !! .and.: com o ponteiro nulo, sst(i,j) não pode ser lido.
   pure function effective_sst(sst, i, j) result(sst_eff)
     real(ESMF_KIND_R8), pointer, intent(in) :: sst(:,:)
     integer,                     intent(in) :: i, j
@@ -420,7 +396,12 @@ contains
     end if
   end function effective_sst
 
-
+  !> @brief Comprimento de rugosidade do mar (Sf_zorl) pela tensão do vento:
+  !! Charnock (ondas) mais Smith (1988, viscosa), limitado a [Z0_MIN, Z0_MAX];
+  !! sobre terra (So_omask < 0,5), Z0_MIN.
+  !! @param[in] fluxes          arrays da malha de fluxo (lê taux, tauy e omask;
+  !!                            escreve zorl)
+  !! @param[in] j1, j2, i1, i2  limites locais da DE
   subroutine compute_roughness_length(fluxes, j1, j2, i1, i2)
     type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
@@ -445,9 +426,9 @@ contains
     p_taux => fluxes%taux
     p_tauy => fluxes%tauy
     p_zorl => fluxes%zorl
-    ! mascara real (So_omask regridada), nao mais
-    ! heuristica de SST~=T_FILL_LAND (colidia com agua aberta genuina no
-    ! ponto de congelamento, perto da borda do gelo).
+    ! máscara real (So_omask interpolada); uma heurística de SST~=T_FILL_LAND
+    ! colidiria com água aberta no ponto de congelamento, perto da borda do
+    ! gelo.
     p_omask_z => fluxes%omask
 
     if (associated(p_taux) .and. associated(p_tauy) .and. associated(p_zorl)) then
@@ -459,7 +440,7 @@ contains
           z0_charnock = ALPHA_CHARNOCK * ustar**2 / GRAV
           z0_smith    = BETA_SMITH * NU_AIR / ustar
           z0_total    = max(Z0_MIN, min(Z0_MAX, z0_charnock + z0_smith))
-          ! Sobre terra (mascara real So_omask, ver): usar default
+          ! Sobre terra (máscara real So_omask, ver): usar default
           if (associated(p_omask_z)) then
             if (p_omask_z(i,j) < 0.5_ESMF_KIND_R8) z0_total = Z0_MIN
           end if
@@ -470,7 +451,6 @@ contains
     end if
   end subroutine compute_roughness_length
 
-  !============================================================================
   !> @brief Fluxos entre o gelo e a atmosfera (Fioi_*) com a temperatura real do gelo.
   !!
   !! Calcula, nesta ordem, taux, tauy, calor sensível, evaporação e balanço
@@ -484,7 +464,6 @@ contains
   !! água aberta (Foxx_*), em vez de um gradiente de temperatura fictício.
   !!
   !! Sem fluxo%tice associado, os Fioi_* ficam com o valor inicial.
-  !============================================================================
   subroutine compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
     type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
@@ -543,12 +522,10 @@ contains
     rc = ESMF_SUCCESS
   end subroutine compute_ice_fluxes
 
-  !============================================================================
   !> @brief Temperatura efetiva do gelo.
   !!
   !! Si_t_sis2 quando está na faixa física (180 K; 273,16 K], a mesma
   !! validada em export_si_tskin; fora dela, o ponto de congelamento.
-  !============================================================================
   pure function ice_temp_eff(tice) result(tice_eff)
     real(ESMF_KIND_R8), intent(in) :: tice
     real(ESMF_KIND_R8) :: tice_eff
@@ -557,7 +534,6 @@ contains
       tice > T_ICE_MIN .and. tice <= T_ICE_MAX)
   end function ice_temp_eff
 
-  !============================================================================
   !> @brief Número de Richardson bulk e fator de estabilidade de Louis (1979).
   !!
   !! rib > 0 indica estratificação estável (ar mais quente que a superfície,
@@ -565,7 +541,6 @@ contains
   !! entre STAB_FAC_MIN e 1. rib <= 0 indica estratificação instável: a
   !! convecção reforça a troca, com fator entre 1 e STAB_FAC_MAX. O mesmo
   !! fator vale para o momento, o calor e a umidade.
-  !============================================================================
   pure subroutine louis_stability(tas, tice_eff, wspd, rib, stab_fac)
     real(ESMF_KIND_R8), intent(in)  :: tas, tice_eff, wspd
     real(ESMF_KIND_R8), intent(out) :: rib, stab_fac
@@ -584,12 +559,10 @@ contains
     end if
   end subroutine louis_stability
 
-  !============================================================================
   !> @brief Tensão do vento sobre o gelo, numa componente (Fioi_taux ou Fioi_tauy).
   !!
   !! wind é a componente do vento na direção da tensão (uas para taux, vas
   !! para tauy); f_ocn é o fluxo da água aberta na mesma direção.
-  !============================================================================
   subroutine ice_wind_stress(fptr_ice, f_ocn, ifr_g, tice, uas, vas, tas, wind, &
                              i1, i2, j1, j2)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
@@ -614,7 +587,6 @@ contains
     end do; end do
   end subroutine ice_wind_stress
 
-  !============================================================================
   !> @brief Calor sensível sobre o gelo (Fioi_sen), limitado a +-500 W/m2.
   !!
   !! Células com tas < 100 K (sem dado da atmosfera) ficam como estão.
@@ -622,7 +594,6 @@ contains
   !! log_level='debug', registra a primeira delas (log_ice_stability):
   !! saturação frequente indica vento ou diferença de temperatura extremos.
   !! No ramo instável, stab_fac pode passar de 1 (reforço da troca).
-  !============================================================================
   subroutine ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
                                i1, i2, j1, j2)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
@@ -675,14 +646,12 @@ contains
       [wspd_sat, tas_sat, tice_sat, dt_sat, rib_sat, stab_sat, raw_sat])
   end subroutine ice_sensible_heat
 
-  !============================================================================
   !> @brief Evaporação sobre o gelo (Fioi_evap), limitada a +-1e-4 kg/m2/s.
   !!
   !! Células com psl < 5e4 Pa (sem dado da atmosfera) ficam como estão. A
   !! umidade de saturação sobre o gelo usa a mesma fórmula de
   !! Clausius-Clapeyron da água aberta; a fórmula exata sobre o gelo tem
   !! constantes um pouco diferentes, e a aproximação basta aqui.
-  !============================================================================
   subroutine ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
                              i1, i2, j1, j2)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
@@ -711,13 +680,11 @@ contains
     end do; end do
   end subroutine ice_evaporation
 
-  !============================================================================
   !> @brief Balanço de onda longa sobre o gelo (Fioi_lwnet), limitado a -300 W/m2.
   !!
   !! Células com lwdn < 1 W/m2 (sem dado da atmosfera) ficam como estão. A
   !! emissividade do gelo e da neve (0,99) é um pouco maior que a da água
   !! aberta (0,97).
-  !============================================================================
   subroutine ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
     real(ESMF_KIND_R8), pointer, intent(in) :: fptr_ice(:,:)
     real(ESMF_KIND_R8), pointer, intent(in) :: f_lwnet_ocn(:,:), ifr_g(:,:), tice(:,:)
@@ -744,20 +711,20 @@ contains
   !> @brief Onda curta líquida por banda (água aberta e gelo) e albedo de
   !! banda larga para a atmosfera, com o gelo real do SIS2.
   !!
-  !! Foxx_swnet_* usa SOMENTE o albedo de agua aberta (Briegleb nas bandas
-  !! diretas, albedo_ocn nas difusas) e vai para o MOM6, que representa so' a
-  !! fracao (1-Si_ifrac) da celula. Fioi_swnet_* usa SOMENTE o albedo do gelo
+  !! Foxx_swnet_* usa SOMENTE o albedo de água aberta (Briegleb nas bandas
+  !! diretas, albedo_ocn nas difusas) e vai para o MOM6, que representa só a
+  !! fração (1-Si_ifrac) da célula. Fioi_swnet_* usa SOMENTE o albedo do gelo
   !! por banda (alb_vdr/vdf/idr/idf) e vai para o SIS2 (ver
-  !! sis_cap_fields.F90::import_forcing). Com um unico valor calculado pelo
-  !! albedo medio para os dois, o gelo absorveria SW com um albedo mais baixo
-  !! que o seu proprio (contaminado pela agua aberta) e o oceano, com um mais
-  !! alto (contaminado pelo gelo): dupla contabilizacao fisica incorreta em
-  !! qualquer celula com 0 < Si_ifrac < 1. O blend ponderado por Si_ifrac vai
+  !! sis_cap_fields.F90::import_forcing). Com um único valor calculado pelo
+  !! albedo médio para os dois, o gelo absorveria SW com um albedo mais baixo
+  !! que o seu próprio (contaminado pela água aberta) e o oceano, com um mais
+  !! alto (contaminado pelo gelo): dupla contabilização física incorreta em
+  !! qualquer célula com 0 < Si_ifrac < 1. O blend ponderado por Si_ifrac vai
   !! para fluxo%albedo (Sf_albedo): esse composto de banda larga PARA A
-  !! ATMOSFERA e' correto e necessario (a atmosfera so' enxerga uma celula).
+  !! ATMOSFERA é correto e necessário (a atmosfera só enxerga uma célula).
   !!
-  !! Sem a fracao ou os albedos do gelo, usa albedo_ocn constante em toda
-  !! celula (sw_band_fallback).
+  !! Sem a fração ou os albedos do gelo, usa albedo_ocn constante em toda
+  !! célula (sw_band_fallback).
   subroutine blend_albedo_with_ice(fluxes, j1, j2, i1, i2, utc_hour, decl, swdn, rc)
     type(med_flux_t), intent(in) :: fluxes
     integer, intent(in) :: j1
@@ -782,8 +749,8 @@ contains
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
       ! Ordem das bandas: a primeira atribui o albedo de banda larga, as
-      ! demais somam; a ultima deixa em fluxo%albedo o albedo efetivo
-      ! completo (soma das 4 contribuicoes ponderadas).
+      ! demais somam; a última deixa em fluxo%albedo o albedo efetivo
+      ! completo (soma das 4 contribuições ponderadas).
       call sw_band(fluxes, fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdr, f_vis_dir, .true., .true., utc_hour, decl, rc)
       call sw_band(fluxes, fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
@@ -794,7 +761,7 @@ contains
                    alb_idf, f_nir_dif, .false., .false., utc_hour, decl, rc)
     else
       ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
-      ! mesmo valor em Fioi_swnet_* (nao ha' base para calcular algo
+      ! mesmo valor em Fioi_swnet_* (não há base para calcular algo
       ! diferente).
       call log_warning(COMP_MED, 'f_ifrac_atm/f_alb_*_ice nao associados: ' // &
         'onda curta com albedo_ocn constante')
@@ -802,7 +769,7 @@ contains
       call sw_band_fallback(fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif)
       call sw_band_fallback(fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir)
       call sw_band_fallback(fluxes%swidf, fluxes%swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif)
-      ! Sem dado de gelo nem de zenite, exporta a constante tambem como
+      ! Sem dado de gelo nem de zênite, exporta a constante também como
       ! albedo de banda larga (degrada de forma consistente).
       fptr_alb => fluxes%albedo
       if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
@@ -810,14 +777,14 @@ contains
     rc = ESMF_SUCCESS
   end subroutine blend_albedo_with_ice
 
-  !> Uma banda de onda curta com o gelo real: Foxx_swnet (agua aberta),
-  !! Fioi_swnet (gelo) e a contribuicao da banda ao albedo de banda larga.
+  !> Uma banda de onda curta com o gelo real: Foxx_swnet (água aberta),
+  !! Fioi_swnet (gelo) e a contribuição da banda ao albedo de banda larga.
   !!
-  !! Nas bandas diretas (direct), o albedo da agua aberta depende do zenite
-  !! solar (ocean_direct_albedo, Briegleb et al. 1986); nas difusas, e' a
-  !! constante albedo_ocn. A banda visivel direta tambem grava o cosseno do
-  !! zenite (fluxo%coszen). Na primeira banda (first), o albedo de banda
-  !! larga recebe a contribuicao; nas demais, soma-se a ela.
+  !! Nas bandas diretas (direct), o albedo da água aberta depende do zênite
+  !! solar (ocean_direct_albedo, Briegleb et al. 1986); nas difusas, é a
+  !! constante albedo_ocn. A banda visível direta também grava o cosseno do
+  !! zênite (fluxo%coszen). Na primeira banda (first), o albedo de banda
+  !! larga recebe a contribuição; nas demais, soma-se a ela.
   subroutine sw_band(fluxes, f_sw, f_sw_ice, j1, j2, i1, i2, swdn, ifr, alb_ice, frac, &
                      direct, first, utc_hour, decl, rc)
     type(med_flux_t), intent(in) :: fluxes
@@ -860,7 +827,7 @@ contains
       else
         alb_ocn = albedo_ocn
       end if
-      ! Foxx_swnet (MOM6): SOMENTE albedo de agua aberta.
+      ! Foxx_swnet (MOM6): SOMENTE albedo de água aberta.
       fptr(i,j) = max(swdn(i,j),0.0_ESMF_KIND_R8) * (1.0_ESMF_KIND_R8 - alb_ocn) * frac
       ! Fioi_swnet (SIS2): SOMENTE albedo do gelo por banda.
       if (associated(fptr_ice2)) &
@@ -878,13 +845,13 @@ contains
     rc = ESMF_SUCCESS
   end subroutine sw_band
 
-  !> Cosseno do zenite solar e albedo da agua aberta para feixe direto na
-  !! celula (i,j) da grade ATM 360x180.
+  !> Cosseno do zênite solar e albedo da água aberta para feixe direto na
+  !! célula (i,j) da grade ATM 360x180.
   !!
-  !! lat/lon analiticos da grade ATM (mesma formula da criacao da grade em
+  !! lat/lon analíticos da grade ATM (mesma formula da criação da grade em
   !! med_init.F90::create_atm_grid). Albedo de Briegleb et al. (1986); o
-  !! corte coszen>=0.02 evita divergencia perto do horizonte (ali a celula
-  !! ja recebe swdn~0), e o resultado fica em [0.03, 0.99].
+  !! corte coszen>=0.02 evita divergência perto do horizonte (ali a célula
+  !! já recebe swdn~0), e o resultado fica em [0.03, 0.99].
   subroutine ocean_direct_albedo(i, j, utc_hour, decl, coszen_ij, alb_ocn_dir)
     real(ESMF_KIND_R8), parameter :: PI_ZEN = 3.14159265358979_ESMF_KIND_R8
     integer, intent(in) :: i
