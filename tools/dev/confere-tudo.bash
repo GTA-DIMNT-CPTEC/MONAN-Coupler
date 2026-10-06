@@ -38,6 +38,8 @@
 #               configuração por argumento (tools/dev/confere-camadas.py)
 #   cplcheck    conferência do mapa num driver NUOPC com as listas de campos
 #               de hoje (tests/cplcheck/confere-cplcheck.bash)
+#   config      tests/config/compara-config.bash REV (leitura do nuopc.input:
+#               mensagens, código de retorno e valores em 29 casos)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
 #   docn        tests/docn/compara-docn.bash REV (o mais demorado: compila
 #               as duas versões e roda o DOCN num driver NUOPC)
@@ -61,7 +63,7 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito exportacao dependencias camadas cplcheck supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito exportacao dependencias camadas cplcheck config supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
@@ -226,6 +228,7 @@ quer exportacao && executa exportacao python3 tools/dev/confere-exportacao.py
 quer dependencias && executa dependencias python3 tools/dev/dependencias.py gera -c
 quer camadas && executa camadas python3 tools/dev/confere-camadas.py
 quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"
+quer config     && executa config tests/config/compara-config.bash "${REV}" "${SAIDA}/config"
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"
 
