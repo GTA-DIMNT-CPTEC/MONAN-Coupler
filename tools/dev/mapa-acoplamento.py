@@ -492,9 +492,13 @@ def gera(t):
     out += md_tabela(['Malha', 'Componente', 'Tipo', 'Descrição'],
                      [[codigo(m['name']), m['component'], m['grid_type'], m['description']]
                       for m in malhas])
-    out += ['', '## 7. Campos', '']
-    out += md_tabela(['Campo', 'Unidade', 'Sinal', 'Descrição'],
-                     [[codigo(c['name']), c['units'], c['sign_conv'], c['description']]
+    out += ['', '## 7. Campos', '',
+            'Nome longo e nome CF são os atributos `long_name` e `standard_name` que os',
+            'gravadores de diagnóstico do mediador e da exportação do MONAN-A escrevem',
+            '(`cpl_field_attributes`); campo sem nome longo sai com os atributos padrão.', '']
+    out += md_tabela(['Campo', 'Unidade', 'Sinal', 'Descrição', 'Nome longo', 'Nome CF'],
+                     [[codigo(c['name']), c['units'], c['sign_conv'], c['description'],
+                       c['long_name'], codigo(c['cf_name'])]
                       for c in campos])
     out.append('')
     return '\n'.join(out)

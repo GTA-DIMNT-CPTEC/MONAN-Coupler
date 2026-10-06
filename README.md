@@ -81,7 +81,7 @@ MONAN-Coupler/
 │   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_exchange (trocas por fase), med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS, com o adaptador mpas_adapter.F90), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit, idw), lista em regrid_schemes.F90
-│   ├── coupling/    mapa de acoplamento: malhas regulares (cpl_grids), dicionário de campos (cpl_fields), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
+│   ├── coupling/    mapa de acoplamento: malhas regulares (cpl_grids), dicionário de campos (cpl_fields: unidade, nome longo e nome CF, que os gravadores de diagnóstico consultam), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
 │   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash

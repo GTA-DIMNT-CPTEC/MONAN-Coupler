@@ -50,6 +50,7 @@ module mpas_cap_netcdf_mod
   use coupler_log_mod,    only : COMP_ATM, log_error, log_warning, log_info
   use nc_writer_mod,      only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use cpl_grids_mod,      only : index_round, lon_m180to180_loop
+  use cpl_fields_mod,     only : cpl_field_attributes
 
   implicit none
   private
@@ -397,6 +398,11 @@ contains
     real(ESMF_KIND_R8) :: time_val
     character(len=36) :: fname_base
     character(len=19) :: time_units_str
+    ! Atributos de cada campo, gravados com o comprimento destas variáveis
+    ! (brancos à direita incluídos), como sempre foram.
+    character(len=32) :: f_units
+    character(len=96) :: f_long
+    character(len=80) :: f_std
 
       fname_base     = datetime_to_fname(c_yr,c_mo,c_dy,c_hr,c_mn,c_sc)
       fname          = trim(diag%output_dir)//'/'//trim(fname_base)
@@ -458,10 +464,9 @@ contains
       ! Variáveis dos campos (lon, lat) em Fortran column-major
       ! Python: nc['campo'][:] → shape (diag%nlat, diag%nlon) = (181, 360)  ✓
       do i = 1, itemCount
+        call cpl_field_attributes(fldnames(i), f_units, f_long, f_std)
         if (.not. nc_def_field2d(ncid, fldnames(i), dimid_lon, dimid_lat, varid, subname, &
-                                 long_name=field_long_name(fldnames(i)),             &
-                                 units=field_units(fldnames(i)),                     &
-                                 standard_name=field_stdname(fldnames(i)),           &
+                                 long_name=f_long, units=f_units, standard_name=f_std, &
                                  fill_r8=FILL_VALUE_R8, missing=.true.)) cycle
         ncstat = nf90_put_att(ncid, varid, 'CMEPS_name', trim(fldnames(i)))
       end do
@@ -643,7 +648,7 @@ contains
     end do
   end subroutine voronoi_accum_local
 
-  ! Funções auxiliares de metadados de campo
+  ! Limiar de outlier de cada campo (os atributos vêm de cpl_field_attributes)
 
   !> @brief Limiar de outlier por campo (filtra lixo de memória e fill values).
   !!
@@ -694,92 +699,6 @@ contains
         field_outlier_threshold = 1.0e20_ESMF_KIND_R8
     end select
   end function field_outlier_threshold
-
-  !> @brief Unidades dos campos após conversão (corrige metadados do MPAS).
-  function field_units(fname) result(units)
-    character(len=*), intent(in) :: fname
-    character(len=32) :: units
-    select case (trim(fname))
-      ! Nomes _mpas (o sufixo identifica a fonte MPAS)
-      case ('Sa_pslv_mpas')                          ; units = 'Pa'
-      case ('Sa_tbot_mpas')                          ; units = 'K'
-      case ('Sa_u10m_mpas', 'Sa_v10m_mpas')          ; units = 'm s-1'
-      case ('Sa_shum_mpas')                          ; units = 'kg kg-1'
-      case ('Faxa_swdn_mpas', 'Faxa_lwdn_mpas')      ; units = 'W m-2'
-      case ('Faxa_rain_mpas', 'Faxa_snow_mpas')      ; units = 'kg m-2 s-1'
-      ! Nomes sem o sufixo _mpas
-      case ('Sa_pslv')                               ; units = 'Pa'
-      case ('Sa_tbot')                               ; units = 'K'
-      case ('Sa_ubot', 'Sa_vbot')                    ; units = 'm s-1'
-      case ('Faxa_swdn', 'Faxa_lwdn')                ; units = 'W m-2'
-      case ('Faxa_prec')                             ; units = 'kg m-2 s-1'
-      case ('Faxa_taux', 'Faxa_tauy')                ; units = 'N m-2'
-      case ('Faxa_lhflx', 'Faxa_shflx')             ; units = 'W m-2'
-      case default                                   ; units = '1'
-    end select
-  end function field_units
-
-  !> @brief Long name descritivo para cada campo CMEPS.
-  function field_long_name(fname) result(lname)
-    character(len=*), intent(in) :: fname
-    character(len=96) :: lname
-    select case (trim(fname))
-      ! Nomes _mpas
-      case ('Sa_pslv_mpas')    ; lname = 'Pressao ao nivel do mar'
-      case ('Sa_tbot_mpas')    ; lname = 'Temperatura do ar a 2 m'
-      case ('Sa_u10m_mpas')    ; lname = 'Vento zonal a 10 m'
-      case ('Sa_v10m_mpas')    ; lname = 'Vento meridional a 10 m'
-      case ('Sa_shum_mpas')    ; lname = 'Umidade especifica a 2 m'
-      case ('Faxa_swdn_mpas')  ; lname = 'Radiacao SW descendente media no intervalo'
-      case ('Faxa_lwdn_mpas')  ; lname = 'Radiacao LW descendente media no intervalo'
-      case ('Faxa_rain_mpas')  ; lname = 'Precipitacao liquida media no intervalo'
-      case ('Faxa_snow_mpas')  ; lname = 'Precipitacao solida (neve) media no intervalo'
-      ! Nomes sem o sufixo _mpas
-      case ('Sa_pslv')    ; lname = 'Pressao ao nivel do mar'
-      case ('Sa_tbot')    ; lname = 'Temperatura do ar a 2 m'
-      case ('Sa_ubot')    ; lname = 'Vento zonal a 10 m'
-      case ('Sa_vbot')    ; lname = 'Vento meridional a 10 m'
-      case ('Faxa_swdn')  ; lname = 'Radiacao SW descendente media no intervalo de acoplamento'
-      case ('Faxa_lwdn')  ; lname = 'Radiacao LW descendente media no intervalo de acoplamento'
-      case ('Faxa_prec')  ; lname = 'Taxa de precipitacao total media no intervalo de acoplamento'
-      case ('Faxa_taux')  ; lname = 'Tensao de cisalhamento zonal na superficie'
-      case ('Faxa_tauy')  ; lname = 'Tensao de cisalhamento meridional na superficie'
-      case ('Faxa_lhflx') ; lname = 'Fluxo de calor latente na superficie'
-      case ('Faxa_shflx') ; lname = 'Fluxo de calor sensivel na superficie'
-      case default        ; lname = trim(fname)
-    end select
-  end function field_long_name
-
-  !> @brief CF standard_name para campos CMEPS.
-  function field_stdname(fname) result(sname)
-    character(len=*), intent(in) :: fname
-    character(len=80) :: sname
-    select case (trim(fname))
-      ! Nomes _mpas
-      case ('Sa_pslv_mpas')    ; sname = 'air_pressure_at_mean_sea_level'
-      case ('Sa_tbot_mpas')    ; sname = 'air_temperature'
-      case ('Sa_u10m_mpas')    ; sname = 'eastward_wind'
-      case ('Sa_v10m_mpas')    ; sname = 'northward_wind'
-      case ('Sa_shum_mpas')    ; sname = 'specific_humidity'
-      case ('Faxa_swdn_mpas')  ; sname = 'surface_downwelling_shortwave_flux_in_air'
-      case ('Faxa_lwdn_mpas')  ; sname = 'surface_downwelling_longwave_flux_in_air'
-      case ('Faxa_rain_mpas')  ; sname = 'rainfall_flux'
-      case ('Faxa_snow_mpas')  ; sname = 'snowfall_flux'
-      ! Nomes sem o sufixo _mpas
-      case ('Sa_pslv')    ; sname = 'air_pressure_at_mean_sea_level'
-      case ('Sa_tbot')    ; sname = 'air_temperature'
-      case ('Sa_ubot')    ; sname = 'eastward_wind'
-      case ('Sa_vbot')    ; sname = 'northward_wind'
-      case ('Faxa_swdn')  ; sname = 'surface_downwelling_shortwave_flux_in_air'
-      case ('Faxa_lwdn')  ; sname = 'surface_downwelling_longwave_flux_in_air'
-      case ('Faxa_prec')  ; sname = 'precipitation_flux'
-      case ('Faxa_taux')  ; sname = 'surface_downward_eastward_stress'
-      case ('Faxa_tauy')  ; sname = 'surface_downward_northward_stress'
-      case ('Faxa_lhflx') ; sname = 'surface_upward_latent_heat_flux'
-      case ('Faxa_shflx') ; sname = 'surface_upward_sensible_heat_flux'
-      case default        ; sname = 'unknown'
-    end select
-  end function field_stdname
 
   !> @brief Instante inicial = instante atual menos 'elapsed' segundos, pelo
   !! calendário gregoriano do ESMF, que trata o recuo para o mês anterior

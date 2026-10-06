@@ -365,64 +365,68 @@ Esquema de todas as rotas: `esmf` (trocável no grupo `&nuopc_regrid`).
 
 ## 7. Campos
 
-| Campo | Unidade | Sinal | Descrição |
-| --- | --- | --- | --- |
-| `Sa_u10m_mpas` | m s-1 |   | vento zonal a 10 m (MONAN-A) |
-| `Sa_v10m_mpas` | m s-1 |   | vento meridional a 10 m (MONAN-A) |
-| `Sa_tbot_mpas` | K |   | temperatura do ar a 2 m (MONAN-A) |
-| `Sa_pslv_mpas` | Pa |   | pressao ao nivel do mar (MONAN-A) |
-| `Faxa_swdn_mpas` | W m-2 |   | onda curta descendente (MONAN-A) |
-| `Faxa_lwdn_mpas` | W m-2 |   | onda longa descendente (MONAN-A) |
-| `Faxa_rain_mpas` | kg m-2 s-1 |   | precipitacao liquida (MONAN-A) |
-| `Sa_shum_mpas` | kg kg-1 |   | umidade especifica a 2 m (MONAN-A) |
-| `Faxa_snow_mpas` | kg m-2 s-1 |   | precipitacao solida (MONAN-A) |
-| `Faxa_sen_mpas` | W m-2 | positivo para cima; o mediador inverte | calor sensivel do PBL do MONAN-A (hfx) |
-| `Faxa_lat_mpas` | W m-2 | positivo para cima; o mediador inverte | calor latente do PBL do MONAN-A (lh) |
-| `Faxa_taux_mpas` | N m-2 |   | tensao zonal do MONAN-A (de ust) |
-| `Faxa_tauy_mpas` | N m-2 |   | tensao meridional do MONAN-A (de ust) |
-| `Sa_u10m` | m s-1 |   | vento zonal a 10 m (DATM) |
-| `Sa_v10m` | m s-1 |   | vento meridional a 10 m (DATM) |
-| `Sa_tbot` | K |   | temperatura do ar (DATM) |
-| `Sa_shum` | kg kg-1 |   | umidade especifica (DATM) |
-| `Sa_pslv` | Pa |   | pressao ao nivel do mar |
-| `Faxa_swdn` | W m-2 |   | onda curta descendente (DATM) |
-| `Faxa_lwdn` | W m-2 |   | onda longa descendente (DATM) |
-| `Faxa_rain` | kg m-2 s-1 |   | precipitacao liquida |
-| `Faxa_snow` | kg m-2 s-1 |   | precipitacao solida |
-| `So_t` | K |   | temperatura da superficie do mar |
-| `So_u` | m s-1 |   | corrente zonal superficial |
-| `So_v` | m s-1 |   | corrente meridional superficial |
-| `So_omask` | 1 |   | mascara do MOM6 (1 oceano, 0 terra) |
-| `So_s` | psu |   | salinidade da superficie do mar |
-| `Fioo_q` | W m-2 |   | potencial de fusao ou congelamento (frazil) |
-| `Si_ifrac` | 1 |   | fracao de gelo, entre 0 e 1 |
-| `Sf_zorl` | m |   | rugosidade da superficie |
-| `Si_ifrac_sis2` | 1 |   | fracao de gelo do SIS2 |
-| `Si_avsdr_sis2` | 1 |   | albedo do gelo, visivel direto |
-| `Si_avsdf_sis2` | 1 |   | albedo do gelo, visivel difuso |
-| `Si_anidr_sis2` | 1 |   | albedo do gelo, infravermelho proximo direto |
-| `Si_anidf_sis2` | 1 |   | albedo do gelo, infravermelho proximo difuso |
-| `Si_t_sis2` | K |   | temperatura de pele do gelo |
-| `Foxx_taux` | Pa |   | tensao zonal sobre o oceano |
-| `Foxx_tauy` | Pa |   | tensao meridional sobre o oceano |
-| `Foxx_sen` | W m-2 | positivo para a superficie | calor sensivel sobre o oceano |
-| `Foxx_evap` | kg m-2 s-1 |   | evaporacao sobre o oceano |
-| `Foxx_lwnet` | W m-2 |   | onda longa liquida sobre o oceano |
-| `Foxx_swnet_vdr` | W m-2 |   | onda curta liquida, visivel direto |
-| `Foxx_swnet_vdf` | W m-2 |   | onda curta liquida, visivel difuso |
-| `Foxx_swnet_idr` | W m-2 |   | onda curta liquida, infravermelho direto |
-| `Foxx_swnet_idf` | W m-2 |   | onda curta liquida, infravermelho difuso |
-| `So_duu10n` | m2 s-2 |   | quadrado do vento relativo ao oceano |
-| `Sx_tsfc` | K |   | temperatura de pele composta agua e gelo |
-| `Sx_omask` | 1 |   | mascara do MOM6 na grade da atmosfera |
-| `Sf_albedo` | 1 |   | albedo de banda larga (agua e gelo) |
-| `Faxa_coszen` | 1 |   | cosseno do angulo zenital solar |
-| `Fioi_taux` | Pa |   | tensao zonal sobre o gelo |
-| `Fioi_tauy` | Pa |   | tensao meridional sobre o gelo |
-| `Fioi_sen` | W m-2 | positivo para a superficie; cap do SIS2 inverte | calor sensivel sobre o gelo |
-| `Fioi_evap` | kg m-2 s-1 |   | evaporacao sobre o gelo |
-| `Fioi_lwnet` | W m-2 |   | onda longa liquida sobre o gelo |
-| `Fioi_swnet_vdr` | W m-2 |   | onda curta liquida no gelo, visivel direto |
-| `Fioi_swnet_vdf` | W m-2 |   | onda curta liquida no gelo, visivel difuso |
-| `Fioi_swnet_idr` | W m-2 |   | onda curta liquida no gelo, infravermelho direto |
-| `Fioi_swnet_idf` | W m-2 |   | onda curta liquida no gelo, infravermelho difuso |
+Nome longo e nome CF são os atributos `long_name` e `standard_name` que os
+gravadores de diagnóstico do mediador e da exportação do MONAN-A escrevem
+(`cpl_field_attributes`); campo sem nome longo sai com os atributos padrão.
+
+| Campo | Unidade | Sinal | Descrição | Nome longo | Nome CF |
+| --- | --- | --- | --- | --- | --- |
+| `Sa_u10m_mpas` | m s-1 |   | vento zonal a 10 m (MONAN-A) | Vento zonal a 10 m | `eastward_wind` |
+| `Sa_v10m_mpas` | m s-1 |   | vento meridional a 10 m (MONAN-A) | Vento meridional a 10 m | `northward_wind` |
+| `Sa_tbot_mpas` | K |   | temperatura do ar a 2 m (MONAN-A) | Temperatura do ar a 2 m | `air_temperature` |
+| `Sa_pslv_mpas` | Pa |   | pressao ao nivel do mar (MONAN-A) | Pressao ao nivel do mar | `air_pressure_at_mean_sea_level` |
+| `Faxa_swdn_mpas` | W m-2 |   | onda curta descendente (MONAN-A) | Radiacao SW descendente media no intervalo | `surface_downwelling_shortwave_flux_in_air` |
+| `Faxa_lwdn_mpas` | W m-2 |   | onda longa descendente (MONAN-A) | Radiacao LW descendente media no intervalo | `surface_downwelling_longwave_flux_in_air` |
+| `Faxa_rain_mpas` | kg m-2 s-1 |   | precipitacao liquida (MONAN-A) | Precipitacao liquida media no intervalo | `rainfall_flux` |
+| `Sa_shum_mpas` | kg kg-1 |   | umidade especifica a 2 m (MONAN-A) | Umidade especifica a 2 m | `specific_humidity` |
+| `Faxa_snow_mpas` | kg m-2 s-1 |   | precipitacao solida (MONAN-A) | Precipitacao solida (neve) media no intervalo | `snowfall_flux` |
+| `Faxa_sen_mpas` | W m-2 | positivo para cima; o mediador inverte | calor sensivel do PBL do MONAN-A (hfx) |   |   |
+| `Faxa_lat_mpas` | W m-2 | positivo para cima; o mediador inverte | calor latente do PBL do MONAN-A (lh) |   |   |
+| `Faxa_taux_mpas` | N m-2 |   | tensao zonal do MONAN-A (de ust) |   |   |
+| `Faxa_tauy_mpas` | N m-2 |   | tensao meridional do MONAN-A (de ust) |   |   |
+| `Sa_u10m` | m s-1 |   | vento zonal a 10 m (DATM) |   |   |
+| `Sa_v10m` | m s-1 |   | vento meridional a 10 m (DATM) |   |   |
+| `Sa_tbot` | K |   | temperatura do ar (DATM) |   |   |
+| `Sa_shum` | kg kg-1 |   | umidade especifica (DATM) |   |   |
+| `Sa_pslv` | Pa |   | pressao ao nivel do mar | Pressao nivel do mar | `air_pressure_at_mean_sea_level` |
+| `Faxa_swdn` | W m-2 |   | onda curta descendente (DATM) |   |   |
+| `Faxa_lwdn` | W m-2 |   | onda longa descendente (DATM) |   |   |
+| `Faxa_rain` | kg m-2 s-1 |   | precipitacao liquida | Precipitacao liquida | `rainfall_flux` |
+| `Faxa_snow` | kg m-2 s-1 |   | precipitacao solida | Precipitacao solida | `snowfall_flux` |
+| `So_t` | K |   | temperatura da superficie do mar | SST dinamica MOM6 | `sea_surface_temperature` |
+| `So_u` | m s-1 |   | corrente zonal superficial | Corrente zonal superficial | `surface_eastward_sea_water_velocity` |
+| `So_v` | m s-1 |   | corrente meridional superficial | Corrente meridional superficial | `surface_northward_sea_water_velocity` |
+| `So_omask` | 1 |   | mascara do MOM6 (1 oceano, 0 terra) |   |   |
+| `So_s` | psu |   | salinidade da superficie do mar |   |   |
+| `Fioo_q` | W m-2 |   | potencial de fusao ou congelamento (frazil) |   |   |
+| `Si_ifrac` | 1 |   | fracao de gelo, entre 0 e 1 | Fracao de gelo marinho | `sea_ice_area_fraction` |
+| `Sf_zorl` | m |   | rugosidade da superficie | Rugosidade superficial Charnock | `surface_roughness_length` |
+| `Si_ifrac_sis2` | 1 |   | fracao de gelo do SIS2 |   |   |
+| `Si_avsdr_sis2` | 1 |   | albedo do gelo, visivel direto |   |   |
+| `Si_avsdf_sis2` | 1 |   | albedo do gelo, visivel difuso |   |   |
+| `Si_anidr_sis2` | 1 |   | albedo do gelo, infravermelho proximo direto |   |   |
+| `Si_anidf_sis2` | 1 |   | albedo do gelo, infravermelho proximo difuso |   |   |
+| `Si_t_sis2` | K |   | temperatura de pele do gelo |   |   |
+| `Foxx_taux` | Pa |   | tensao zonal sobre o oceano | Tensao cisalhamento zonal | `surface_downward_eastward_stress` |
+| `Foxx_tauy` | Pa |   | tensao meridional sobre o oceano | Tensao cisalhamento meridional | `surface_downward_northward_stress` |
+| `Foxx_sen` | W m-2 | positivo para a superficie | calor sensivel sobre o oceano | Fluxo de calor sensivel | `surface_upward_sensible_heat_flux` |
+| `Foxx_evap` | kg m-2 s-1 |   | evaporacao sobre o oceano | Fluxo de evaporacao | `water_evaporation_flux` |
+| `Foxx_lwnet` | W m-2 |   | onda longa liquida sobre o oceano | Balanco onda longa | `surface_net_downward_longwave_flux` |
+| `Foxx_swnet_vdr` | W m-2 |   | onda curta liquida, visivel direto | Onda curta vis. direto | `surface_net_downward_shortwave_flux` |
+| `Foxx_swnet_vdf` | W m-2 |   | onda curta liquida, visivel difuso | Onda curta vis. difuso | `surface_net_downward_shortwave_flux` |
+| `Foxx_swnet_idr` | W m-2 |   | onda curta liquida, infravermelho direto | Onda curta IR direto | `surface_net_downward_shortwave_flux` |
+| `Foxx_swnet_idf` | W m-2 |   | onda curta liquida, infravermelho difuso | Onda curta IR difuso | `surface_net_downward_shortwave_flux` |
+| `So_duu10n` | m2 s-2 |   | quadrado do vento relativo ao oceano | Vento relativo ao oceano^2 | `square_of_air_velocity` |
+| `Sx_tsfc` | K |   | temperatura de pele composta agua e gelo | Temperatura de superficie (pele) | `surface_temperature` |
+| `Sx_omask` | 1 |   | mascara do MOM6 na grade da atmosfera | Mascara oceano/terra do MOM6 (1=oceano, 0=terra) | `sea_binary_mask` |
+| `Sf_albedo` | 1 |   | albedo de banda larga (agua e gelo) | Albedo de banda larga efetivo (agua+gelo) | `surface_albedo` |
+| `Faxa_coszen` | 1 |   | cosseno do angulo zenital solar | Cosseno do angulo zenital solar | `cosine_of_solar_zenith_angle` |
+| `Fioi_taux` | Pa |   | tensao zonal sobre o gelo | Tensao cisalhamento zonal (gelo, T_gelo) | `surface_downward_eastward_stress` |
+| `Fioi_tauy` | Pa |   | tensao meridional sobre o gelo | Tensao cisalhamento meridional (gelo, T_gelo) | `surface_downward_northward_stress` |
+| `Fioi_sen` | W m-2 | positivo para a superficie; cap do SIS2 inverte | calor sensivel sobre o gelo | Fluxo de calor sensivel (gelo, T_gelo) | `surface_upward_sensible_heat_flux` |
+| `Fioi_evap` | kg m-2 s-1 |   | evaporacao sobre o gelo | Fluxo de evaporacao (gelo, T_gelo) | `water_evaporation_flux` |
+| `Fioi_lwnet` | W m-2 |   | onda longa liquida sobre o gelo | Balanco onda longa (gelo, T_gelo) | `surface_net_downward_longwave_flux` |
+| `Fioi_swnet_vdr` | W m-2 |   | onda curta liquida no gelo, visivel direto | Onda curta vis. direto (gelo) | `surface_net_downward_shortwave_flux` |
+| `Fioi_swnet_vdf` | W m-2 |   | onda curta liquida no gelo, visivel difuso | Onda curta vis. difuso (gelo) | `surface_net_downward_shortwave_flux` |
+| `Fioi_swnet_idr` | W m-2 |   | onda curta liquida no gelo, infravermelho direto | Onda curta IR direto (gelo) | `surface_net_downward_shortwave_flux` |
+| `Fioi_swnet_idf` | W m-2 |   | onda curta liquida no gelo, infravermelho difuso | Onda curta IR difuso (gelo) | `surface_net_downward_shortwave_flux` |

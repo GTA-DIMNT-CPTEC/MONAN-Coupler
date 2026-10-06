@@ -67,7 +67,7 @@
 !! Saída: uma linha PASSOU/FALHOU por caso e, no fim, "TODOS OS TESTES
 !! PASSARAM" ou o número de falhas; termina com código 1 se algum falhar.
 program test_cpl_map
-  use cpl_fields_mod,    only : FIELDS, cpl_field_index
+  use cpl_fields_mod,    only : FIELDS, cpl_field_index, cpl_field_attributes
   use cpl_map_mod,       only : GRIDS, EXCHANGES, ROUTES, cpl_config_t, cpl_exchange_applies, &
                                 cpl_valid_conditions, cpl_route_index, cpl_grid_index, &
                                 cpl_point_component, cpl_point_grid, cpl_exchange_t
@@ -103,6 +103,7 @@ program test_cpl_map
   nfailures = 0
 
   call check_fields()
+  call check_field_attributes()
   call check_modes()
   call check_grids_and_routes()
   call check_exchanges()
@@ -160,6 +161,37 @@ contains
     call outcome('CAMPOS: nome, unidade e descricao preenchidos', nempty == 0)
     call outcome('CAMPOS: todo campo aparece em TROCAS ou EXPORTACOES', nunused == 0)
   end subroutine check_fields
+
+  !> Nome longo e nome CF: preenchidos juntos; cpl_field_attributes devolve
+  !! os textos do dicionário para um campo com nome longo e os padrões ('1',
+  !! o nome, 'unknown') para um campo sem nome longo e para um nome fora do
+  !! dicionário.
+  subroutine check_field_attributes()
+    character(len=32) :: u
+    character(len=96) :: l
+    character(len=80) :: s
+    integer :: i, nerr
+
+    nerr = 0
+    do i = 1, size(FIELDS)
+      if ((len_trim(FIELDS(i)%long_name) == 0) .neqv. (len_trim(FIELDS(i)%cf_name) == 0)) then
+        nerr = nerr + 1
+        call fail_at('nome longo sem nome CF, ou o contrario: '//trim(FIELDS(i)%name))
+      end if
+    end do
+    call outcome('CAMPOS: nome longo e nome CF preenchidos juntos', nerr == 0)
+
+    call cpl_field_attributes('Foxx_taux', u, l, s)
+    call outcome('atributos de Foxx_taux pelo dicionario',                       &
+                 u == 'Pa' .and. l == 'Tensao cisalhamento zonal' .and.           &
+                 s == 'surface_downward_eastward_stress')
+    call cpl_field_attributes('Faxa_sen_mpas', u, l, s)
+    call outcome('atributos padrao para campo sem nome longo (Faxa_sen_mpas)',   &
+                 u == '1' .and. l == 'Faxa_sen_mpas' .and. s == 'unknown')
+    call cpl_field_attributes('Sa_ubot', u, l, s)
+    call outcome('atributos padrao para nome fora do dicionario (Sa_ubot)',      &
+                 u == '1' .and. l == 'Sa_ubot' .and. s == 'unknown')
+  end subroutine check_field_attributes
 
   !> COUPLER_MODES: as 16 combinações, uma vez cada, com situação e nota;
   !! as suportadas são as duas de produção (com e sem o SIS2); as

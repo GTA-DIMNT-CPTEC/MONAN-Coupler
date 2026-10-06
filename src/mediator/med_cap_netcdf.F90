@@ -19,6 +19,7 @@ module med_cap_netcdf_mod
 
   use med_cap_types_mod, only: MED_InternalState, med_diag_config_t
   use coupler_log_mod, only: COMP_MED, log_info, log_warning, log_debug
+  use cpl_fields_mod, only: cpl_field_attributes
 
   implicit none
   private
@@ -532,7 +533,7 @@ contains
   end subroutine gather_field_global
 
   !> @brief Grava os atributos units, long_name e standard_name da variável
-  !! de um campo importado, pela tabela de nomes desta rotina.
+  !! de um campo, pelo dicionário de campos (cpl_field_attributes).
   !! @param[in]    fieldNameList  nomes dos campos
   !! @param[in]    n              índice do campo
   !! @param[inout] ios            código da última chamada do NetCDF
@@ -546,51 +547,7 @@ contains
     character(len=64), allocatable, intent(in) :: fieldNameList(:)
     character(len=32) :: f_units
     character(len=80) :: f_long, f_std
-    select case (trim(fieldNameList(n)))
-      case ('Foxx_taux');      f_units='Pa';         f_long='Tensao cisalhamento zonal';     f_std='surface_downward_eastward_stress'
-      case ('Foxx_tauy');      f_units='Pa';         f_long='Tensao cisalhamento meridional'; f_std='surface_downward_northward_stress'
-      case ('Foxx_sen');       f_units='W m-2';      f_long='Fluxo de calor sensivel';       f_std='surface_upward_sensible_heat_flux'
-      case ('Foxx_evap');      f_units='kg m-2 s-1'; f_long='Fluxo de evaporacao';           f_std='water_evaporation_flux'
-      case ('Foxx_lwnet');     f_units='W m-2';      f_long='Balanco onda longa';            f_std='surface_net_downward_longwave_flux'
-      case ('Foxx_swnet_vdr'); f_units='W m-2';      f_long='Onda curta vis. direto';        f_std='surface_net_downward_shortwave_flux'
-      case ('Foxx_swnet_vdf'); f_units='W m-2';      f_long='Onda curta vis. difuso';        f_std='surface_net_downward_shortwave_flux'
-      case ('Foxx_swnet_idr'); f_units='W m-2';      f_long='Onda curta IR direto';          f_std='surface_net_downward_shortwave_flux'
-      case ('Foxx_swnet_idf'); f_units='W m-2';      f_long='Onda curta IR difuso';          f_std='surface_net_downward_shortwave_flux'
-      case ('Faxa_rain');      f_units='kg m-2 s-1'; f_long='Precipitacao liquida';          f_std='rainfall_flux'
-      case ('Faxa_snow');      f_units='kg m-2 s-1'; f_long='Precipitacao solida';           f_std='snowfall_flux'
-      case ('Sa_pslv');        f_units='Pa';          f_long='Pressao nivel do mar';          f_std='air_pressure_at_mean_sea_level'
-      case ('Si_ifrac');       f_units='1';           f_long='Fracao de gelo marinho';        f_std='sea_ice_area_fraction'
-      case ('So_duu10n');      f_units='m2 s-2';      f_long='Vento relativo ao oceano^2';    f_std='square_of_air_velocity'
-      case ('So_t');           f_units='K';            f_long='SST dinamica MOM6';             f_std='sea_surface_temperature'
-      ! Todo campo exportado pelo mediador precisa de um caso aqui e no
-      ! select case de dados abaixo: sem ele, a variável sai com
-      ! metadados genéricos e, pelo 'cycle' do select case de dados,
-      ! fica só com _FillValue.
-      case ('So_u');           f_units='m s-1';       f_long='Corrente zonal superficial';     f_std='surface_eastward_sea_water_velocity'
-      case ('So_v');           f_units='m s-1';       f_long='Corrente meridional superficial'; f_std='surface_northward_sea_water_velocity'
-      case ('Sf_zorl');        f_units='m';           f_long='Rugosidade superficial Charnock'; f_std='surface_roughness_length'
-      case ('Sf_albedo');      f_units='1';           f_long='Albedo de banda larga efetivo (agua+gelo)'; f_std='surface_albedo'
-      case ('Faxa_coszen');    f_units='1';           f_long='Cosseno do angulo zenital solar'; f_std='cosine_of_solar_zenith_angle'
-      case ('Fioi_taux');      f_units='Pa';          f_long='Tensao cisalhamento zonal (gelo, T_gelo)';     f_std='surface_downward_eastward_stress'
-      case ('Fioi_tauy');      f_units='Pa';          f_long='Tensao cisalhamento meridional (gelo, T_gelo)'; f_std='surface_downward_northward_stress'
-      case ('Fioi_sen');       f_units='W m-2';       f_long='Fluxo de calor sensivel (gelo, T_gelo)';        f_std='surface_upward_sensible_heat_flux'
-      case ('Fioi_evap');      f_units='kg m-2 s-1';  f_long='Fluxo de evaporacao (gelo, T_gelo)';            f_std='water_evaporation_flux'
-      case ('Fioi_lwnet');     f_units='W m-2';       f_long='Balanco onda longa (gelo, T_gelo)';             f_std='surface_net_downward_longwave_flux'
-      ! Fioi_swnet_* e Sx_tsfc caiam no
-      ! case default e saiam com units='1'/standard_name='unknown' — os
-      ! quatro Fioi_swnet_* são fluxos de onda curta (W m-2) e Sx_tsfc é
-      ! a temperatura de superfície (pele) usada pelo bulk sobre gelo (K).
-      case ('Fioi_swnet_vdr'); f_units='W m-2';       f_long='Onda curta vis. direto (gelo)';   f_std='surface_net_downward_shortwave_flux'
-      case ('Fioi_swnet_vdf'); f_units='W m-2';       f_long='Onda curta vis. difuso (gelo)';   f_std='surface_net_downward_shortwave_flux'
-      case ('Fioi_swnet_idr'); f_units='W m-2';       f_long='Onda curta IR direto (gelo)';     f_std='surface_net_downward_shortwave_flux'
-      case ('Fioi_swnet_idf'); f_units='W m-2';       f_long='Onda curta IR difuso (gelo)';     f_std='surface_net_downward_shortwave_flux'
-      case ('Sx_tsfc');        f_units='K';           f_long='Temperatura de superficie (pele)'; f_std='surface_temperature'
-      ! máscara terra/oceano do MOM6. É a ÚNICA
-      ! variável do arquivo que não recebe _FillValue sobre terra —
-      ! é justamente ela que diz onde a terra fica.
-      case ('Sx_omask');       f_units='1';           f_long='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)'; f_std='sea_binary_mask'
-      case default;            f_units='1';           f_long=trim(fieldNameList(n));           f_std='unknown'
-    end select
+    call cpl_field_attributes(fieldNameList(n), f_units, f_long, f_std)
     ios = nf90_put_att(ncid, varid, 'units',         trim(f_units))
     ios = nf90_put_att(ncid, varid, 'long_name',     trim(f_long))
     ios = nf90_put_att(ncid, varid, 'standard_name', trim(f_std))

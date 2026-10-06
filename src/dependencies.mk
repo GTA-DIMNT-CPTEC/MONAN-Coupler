@@ -19,7 +19,7 @@ $(OBJDIR)/esmApp.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDI
 $(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
 $(OBJDIR)/MED_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_exchange.o $(OBJDIR)/med_flux.o $(OBJDIR)/med_init.o $(OBJDIR)/mom6_supergrid.o
 $(OBJDIR)/med_cap_methods.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/regrid_base.o $(OBJDIR)/regrid_manager.o
-$(OBJDIR)/med_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/nc_writer.o
+$(OBJDIR)/med_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/med_cap_types.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/regrid_manager.o
 $(OBJDIR)/med_diag.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/diag_bitsum.o $(OBJDIR)/med_cap_types.o
 $(OBJDIR)/med_exchange.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_bulk_ncar.o $(OBJDIR)/med_cap_methods.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_export.o $(OBJDIR)/med_ocean.o
@@ -38,7 +38,7 @@ $(OBJDIR)/mpas_atm_fluxes.o: $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_atm_model.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/mpas_atm_fluxes.o $(OBJDIR)/mpas_atm_setup.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_atm_setup.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mpas_adapter.o $(OBJDIR)/mpas_atm_model.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/mpas_cap_netcdf.o $(OBJDIR)/mpas_import_diag.o
-$(OBJDIR)/mpas_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpi_allreduce_wrappers.o $(OBJDIR)/nc_writer.o
+$(OBJDIR)/mpas_cap_netcdf.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpi_allreduce_wrappers.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/mpas_cell_binning.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o
 $(OBJDIR)/mpas_import_diag.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/mpas_atm_types.o $(OBJDIR)/nc_writer.o
 $(OBJDIR)/mpi_allreduce_wrappers.o: $(OBJDIR)/mpi_allreduce_i4.o $(OBJDIR)/mpi_allreduce_r8.o
