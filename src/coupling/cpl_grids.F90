@@ -273,10 +273,10 @@ contains
   !! @param[out] grade         a grade criada
   !! @param[out] rc            ESMF_SUCCESS, ou o código da falha
   !! @param[in]  blocos        decomposição do modelo (opcional)
-  !! @param[in]  tag           prefixo das mensagens da leitura dos centros
-  !! @param[in]  tag_corners   prefixo das mensagens da leitura dos cantos
+  !! @param[in]  comp          marca do componente nas mensagens da leitura
+  !!                           do supergrid (padrão: OCN)
   subroutine cpl_tripolar_grid(name, file_name, nx, ny, petCount, corners, grid, rc, &
-                                blocks, tag, tag_corners)
+                                blocks, comp)
     character(len=*),   intent(in)  :: name
     character(len=*),   intent(in)  :: file_name
     integer,            intent(in)  :: nx, ny
@@ -285,7 +285,7 @@ contains
     type(ESMF_Grid),    intent(out) :: grid
     integer,            intent(out) :: rc
     type(cpl_blocks_t), intent(in), optional :: blocks
-    character(len=*),   intent(in), optional :: tag, tag_corners
+    character(len=*),   intent(in), optional :: comp
 
     real(r8), pointer :: coordX(:,:), coordY(:,:)
     integer :: localDeCount, lde
@@ -301,7 +301,7 @@ contains
     do lde = 0, localDeCount - 1
       call de_coordinates(grid, ESMF_STAGGERLOC_CENTER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call mom6_supergrid_tcoords(trim(file_name), coordX, coordY, rc, tag=tag)
+      call mom6_supergrid_tcoords(trim(file_name), coordX, coordY, rc, comp=comp)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(name)// &
           ': falha ao ler os centros de '//trim(file_name), line=__LINE__, file=u_FILE_u)) return
     end do
@@ -313,7 +313,7 @@ contains
     do lde = 0, localDeCount - 1
       call de_coordinates(grid, ESMF_STAGGERLOC_CORNER, lde, coordX, coordY, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call mom6_supergrid_corners(trim(file_name), coordX, coordY, rc, tag=tag_corners)
+      call mom6_supergrid_corners(trim(file_name), coordX, coordY, rc, comp=comp)
       if (ESMF_LogFoundError(rcToCheck=rc, msg='cpl_malha_tripolar: '//trim(name)// &
           ': falha ao ler os cantos de '//trim(file_name), line=__LINE__, file=u_FILE_u)) return
     end do

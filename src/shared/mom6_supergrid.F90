@@ -4,7 +4,7 @@
 !! Usado pelo mediador e pelo cap do SIS2, que vivem na mesma grade tripolar do
 !! MOM6. As duas cópias que existiam (MED_* em MED_cap.F90 e ICE_* em
 !! sis_cap_MONAN.F90) tinham a mesma lógica; só as mensagens de log diferiam,
-!! e passam a usar o prefixo dado em 'tag'.
+!! e passam a usar a marca do componente dada em 'comp' (coupler_log_mod).
 !!
 !! Supergrid: dimensões nx, ny = 2 × grade T; centros T nos índices pares
 !! (2i, 2j); cantos nos índices ímpares (2i-1, 2j-1).
@@ -12,6 +12,7 @@ module mom6_supergrid_mod
 
   use ESMF
   use netcdf
+  use coupler_log_mod, only : COMP_OCN, log_error, log_warning, log_debug, log_debug_enabled
 
   implicit none
   private
@@ -52,22 +53,22 @@ contains
   ! que e' metade da resolucao do supergrid em cada eixo (convencao padrao
   ! FRE-NCtools/make_hgrid: supergrid inclui vertices + centros das celulas).
   !----------------------------------------------------------------------------
-  subroutine mom6_supergrid_dims(filename, ni, nj, rc, tag)
+  subroutine mom6_supergrid_dims(filename, ni, nj, rc, comp)
     character(len=*), intent(in)  :: filename
     integer,           intent(out) :: ni, nj
     integer,           intent(out) :: rc
-    character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
+    character(len=*), intent(in), optional :: comp  !< marca do componente nas mensagens (padrão: OCN)
     character(len=64) :: pfx
     integer :: ncid, dimid, nx_super, ny_super, ncstat
 
-    pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
+    pfx = COMP_OCN; if (present(comp)) pfx = comp
     rc = ESMF_SUCCESS
     ni = 0; nj = 0
 
     ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao abrir ' // trim(filename) // &
-        ' para ler dimensoes da grade T real do MOM6', ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao abrir ' // trim(filename) // &
+        ' para ler dimensoes da grade T real do MOM6')
       rc = ESMF_FAILURE
       return
     end if
@@ -75,8 +76,7 @@ contains
     ncstat = nf90_inq_dimid(ncid, 'nx', dimid)
     if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=nx_super)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler dimensao "nx" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao ler dimensao "nx" de ' // trim(filename))
       rc = ESMF_FAILURE
       ncstat = nf90_close(ncid)
       return
@@ -85,8 +85,7 @@ contains
     ncstat = nf90_inq_dimid(ncid, 'ny', dimid)
     if (ncstat == NF90_NOERR) ncstat = nf90_inquire_dimension(ncid, dimid, len=ny_super)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler dimensao "ny" de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao ler dimensao "ny" de ' // trim(filename))
       rc = ESMF_FAILURE
       ncstat = nf90_close(ncid)
       return
@@ -95,10 +94,9 @@ contains
     ncstat = nf90_close(ncid)
 
     if (mod(nx_super,2) /= 0 .or. mod(ny_super,2) /= 0) then
-      call ESMF_LogWrite(trim(pfx)//': AVISO - nx/ny impar em ' // &
+      call log_warning(trim(pfx), 'nx/ny impar em ' // &
         trim(filename) // ' (formato inesperado; nao parece supergrid ' // &
-        'FRE-NCtools padrao). Prosseguindo com divisao inteira por 2.', &
-        ESMF_LOGMSG_WARNING)
+        'FRE-NCtools padrao). Prosseguindo com divisao inteira por 2.')
     end if
 
     ni = nx_super / 2
@@ -113,11 +111,11 @@ contains
   ! Convencao FRE-NCtools: celula T global (i,j), i=1..NIGLOBAL, j=1..NJGLOBAL,
   ! esta no indice de supergrid (2*i, 2*j), 1-based.
   !----------------------------------------------------------------------------
-  subroutine mom6_supergrid_tcoords(filename, coordX, coordY, rc, tag)
+  subroutine mom6_supergrid_tcoords(filename, coordX, coordY, rc, comp)
     character(len=*),    intent(in)    :: filename
     real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
     integer,              intent(out)  :: rc
-    character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
+    character(len=*), intent(in), optional :: comp  !< marca do componente nas mensagens (padrão: OCN)
     character(len=64) :: pfx
     logical :: was_read
     integer :: i1, i2, j1, j2, ni_local, nj_local
@@ -127,7 +125,7 @@ contains
     real(ESMF_KIND_R8) :: y_col_min
     real(ESMF_KIND_R8) :: y_col_max
 
-    pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
+    pfx = COMP_OCN; if (present(comp)) pfx = comp
     ! Ponto T (i,j) [global, 1-based] = vertice de supergrid (2*i, 2*j).
     call read_supergrid_points(filename, 0, ' para ler coordenadas T reais do MOM6', &
       '"x" (lon)', '"y" (lat)', pfx, coordX, coordY, was_read, rc)
@@ -138,7 +136,9 @@ contains
     ni_local = i2 - i1 + 1
     nj_local = j2 - j1 + 1
 
-    ! DIAGNOSTICO TEMPORARIO comprova o que foi lido de fato.
+    ! Diagnóstico de depuração ("DIAG supergrid tcoords"): comprova o que foi
+    ! lido de fato. Fora do nível de depuração, nem é calculado.
+    if (.not. log_debug_enabled()) return
     ! coordX deve VARIAR com i (longitude) e ser ~constante ao longo de j
     ! (exceto perto do fold tripolar); coordY o oposto. Se coordX nao variar
     ! com i, a longitude "colapsou" e o regrid produz bandas puramente
@@ -156,12 +156,12 @@ contains
         y_col_min = -999.0_ESMF_KIND_R8; y_col_max = -999.0_ESMF_KIND_R8
       end if
       write(dbgmsg,'(A,I0,A,I0,A,I0,A,I0,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3,A,F9.3)') &
-        trim(pfx)//' DIAG: DE i=[',i1,',',i2,'] j=[',j1,',',j2, &
+        'DIAG supergrid tcoords: DE i=[',i1,',',i2,'] j=[',j1,',',j2, &
         '] coordX(i,j1) min=', x_row_min, ' max=', x_row_max, &
         ' | coordY(i1,j) min=', y_col_min, ' max=', y_col_max, &
         ' | coordX(i1,j1)=', coordX(i1,j1), ' coordX(i2,j1)=', coordX(i2,j1), &
         ' | coordY(i1,j1)=', coordY(i1,j1), ' coordY(i1,j2)=', coordY(i1,j2)
-      call ESMF_LogWrite(trim(dbgmsg), ESMF_LOGMSG_INFO)
+      call log_debug(trim(pfx), trim(dbgmsg))
   end subroutine mom6_supergrid_tcoords
 
   !----------------------------------------------------------------------------
@@ -182,15 +182,15 @@ contains
   ! o que coordX/coordY (ja' alocados pelo ESMF) pedirem, usando lbound/ubound
   ! deles — nao supoe o tamanho a priori.
   !----------------------------------------------------------------------------
-  subroutine mom6_supergrid_corners(filename, coordX, coordY, rc, tag)
+  subroutine mom6_supergrid_corners(filename, coordX, coordY, rc, comp)
     character(len=*),    intent(in)    :: filename
     real(ESMF_KIND_R8), pointer        :: coordX(:,:), coordY(:,:)
     integer,              intent(out)  :: rc
-    character(len=*), intent(in), optional :: tag   !< prefixo das mensagens de log
+    character(len=*), intent(in), optional :: comp  !< marca do componente nas mensagens (padrão: OCN)
     character(len=64) :: pfx
     logical :: was_read
 
-    pfx = 'MOM6 supergrid'; if (present(tag)) pfx = tag
+    pfx = COMP_OCN; if (present(comp)) pfx = comp
     ! Canto (i,j) [global, 1-based, ate NI+1/NJ+1] = vertice de supergrid
     ! (2*i-1, 2*j-1). Unico offset em relacao ao centro (2*i, 2*j).
     call read_supergrid_points(filename, 1, ' para ler cantos (vertices) do MOM6', &
@@ -213,7 +213,7 @@ contains
   !! @param[in]  txt_open  complemento da mensagem de falha ao abrir
   !! @param[in]  txt_x     nome de "x" nas mensagens de falha de leitura
   !! @param[in]  txt_y     nome de "y" nas mensagens de falha de leitura
-  !! @param[in]  pfx       prefixo das mensagens de log
+  !! @param[in]  pfx       marca do componente nas mensagens de log
   !! @param[out] lido      se o arquivo foi aberto e lido
   !! @param[out] rc        ESMF_SUCCESS ou ESMF_FAILURE
   !----------------------------------------------------------------------------
@@ -241,8 +241,7 @@ contains
 
     ncstat = nf90_open(trim(filename), NF90_NOWRITE, ncid)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao abrir ' // trim(filename) // &
-        txt_open, ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao abrir ' // trim(filename) // txt_open)
       rc = ESMF_FAILURE
       return
     end if
@@ -250,8 +249,7 @@ contains
     ncstat = nf90_inq_varid(ncid, 'x', varid_x)
     if (ncstat == NF90_NOERR) ncstat = nf90_inq_varid(ncid, 'y', varid_y)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': variaveis "x"/"y" nao encontradas em ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'variaveis "x"/"y" nao encontradas em ' // trim(filename))
       rc = ESMF_FAILURE
       ncstat = nf90_close(ncid)
       return
@@ -267,8 +265,7 @@ contains
     ncstat = nf90_get_var(ncid, varid_x, coordX, start=start2, count=count2, &
       stride=stride2)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler ' // txt_x // ' de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao ler ' // txt_x // ' de ' // trim(filename))
       rc = ESMF_FAILURE
     end if
 
@@ -286,8 +283,7 @@ contains
     ncstat = nf90_get_var(ncid, varid_y, coordY, start=start2, count=count2, &
       stride=stride2)
     if (ncstat /= NF90_NOERR) then
-      call ESMF_LogWrite(trim(pfx)//': falha ao ler ' // txt_y // ' de ' // &
-        trim(filename), ESMF_LOGMSG_ERROR)
+      call log_error(trim(pfx), 'falha ao ler ' // txt_y // ' de ' // trim(filename))
       rc = ESMF_FAILURE
     end if
 

@@ -16,7 +16,10 @@
 !! que o mesmo programa sirva às duas versões comparadas por
 !! compara-malhas.bash. Desde a R-FASE11-24, mpas_create_grid está no
 !! adaptador do MPAS (mpas_adapter_mod); o script compila com
-!! -DCOM_ADAPTADOR a versão que o tem. O hgrid.nc vem de tests/supergrid/gera-supergrid.py.
+!! -DCOM_ADAPTADOR a versão que o tem, e com -DCOM_LOG_LEVEL a versão com a
+!! chave log_level (desde a R-FASE13-09), que pede o nível de depuração para
+!! que o diagnóstico da leitura do supergrid entre no log. O hgrid.nc vem de
+!! tests/supergrid/gera-supergrid.py.
 program test_grids
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
@@ -107,6 +110,11 @@ contains
     write(u,'(A)') '&nuopc_ocn'
     write(u,'(A)') "  mesh_ocn = 'hgrid.nc'"
     write(u,'(A)') '/'
+#ifdef COM_LOG_LEVEL
+    write(u,'(A)') '&nuopc_driver'
+    write(u,'(A)') "  log_level = 'debug'"
+    write(u,'(A)') '/'
+#endif
     close(u)
   end subroutine write_nml
 

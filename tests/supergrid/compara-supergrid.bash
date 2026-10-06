@@ -4,13 +4,15 @@
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
 # A rodada da linha de base lê um único supergrid, sempre sem erro. Este teste
-# compila src/shared/mom6_supergrid.F90 de um commit e o da árvore de
-# trabalho, liga a cada um o programa tests/supergrid/test_supergrid.F90 da
-# árvore de trabalho e o executa sobre supergrids sintéticos
+# compila a versão de um commit e a da árvore de trabalho (compila-local.bash),
+# liga a cada uma o programa tests/supergrid/test_supergrid.F90 da árvore de
+# trabalho, com os objetos de que ele depende (mom6_supergrid e, desde a
+# R-FASE13-12, o registro do acoplador), e o executa sobre supergrids sintéticos
 # (tests/supergrid/gera-supergrid.py), inclusive com dimensões ímpares, sem as
 # variáveis x e y e com arquivo inexistente. Têm de ser idênticos, bit a bit:
 # os códigos de retorno, as dimensões e as coordenadas gravados (saida.bin) e
-# as mensagens do log do ESMF, sem data e hora.
+# as mensagens do log do ESMF, sem data, hora e severidade (as da versão
+# anterior passam antes pelas traduções de tests/log-traduzido.sed).
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/supergrid/compara-supergrid.bash REV [SAIDA]
@@ -34,23 +36,27 @@ mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
 FL="-O2 -ffp-contract=off -ffree-line-length-none -fallow-argument-mismatch"
+# Objetos de que o programa depende, tirados dos 'use' da árvore dada
+objetos() { python3 "${RAIZ}/tools/dev/dependencias.py" objetos -s "$1" -i "${RAIZ}/tests/interfaces" "$2"; }
 
 python3 "${RAIZ}/tests/supergrid/gera-supergrid.py" "${SAIDA}/dados" \
   || { echo "ERRO: geração dos supergrids sintéticos" >&2; exit 2; }
 
-rm -rf "${SAIDA}/antiga" "${SAIDA}/nova"; mkdir -p "${SAIDA}/antiga" "${SAIDA}/nova"
-git -C "${RAIZ}" show "${REV}:src/shared/mom6_supergrid.F90" > "${SAIDA}/antiga/mom6_supergrid.F90" \
-  || { echo "ERRO: não foi possível extrair mom6_supergrid.F90 de ${REV}" >&2; exit 2; }
-cp "${RAIZ}/src/shared/mom6_supergrid.F90" "${SAIDA}/nova/"
+rm -rf "${SAIDA}/antiga" "${SAIDA}/nova" "${SAIDA}/fonte_antiga"
+mkdir -p "${SAIDA}/antiga" "${SAIDA}/nova" "${SAIDA}/fonte_antiga"
+git -C "${RAIZ}" archive "${REV}" src Makefile | tar -x -C "${SAIDA}/fonte_antiga" \
+  || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
 
 for versao in antiga nova; do
+  if [[ ${versao} == antiga ]]; then src="${SAIDA}/fonte_antiga"; else src="${RAIZ}"; fi
   dir="${SAIDA}/${versao}"
   echo "--- versão ${versao}: compilando e executando"
   # shellcheck disable=SC2086,SC2046
-  ( cd "${dir}" || exit 2
-    ${FC} ${EINC} $(nf-config --fflags) ${FL} -c mom6_supergrid.F90 -o mom6_supergrid.o &&
+  ( bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" &&
+    cd "${dir}" &&
     ${FC} ${EINC} -I. ${FL} -c "${RAIZ}/tests/supergrid/test_supergrid.F90" -o test_supergrid.o &&
-    ${FC} -o test_supergrid test_supergrid.o mom6_supergrid.o ${ELIB} $(nf-config --flibs)
+    ${FC} -o test_supergrid test_supergrid.o $(objetos "${src}" "${RAIZ}/tests/supergrid/test_supergrid.F90") \
+      ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/compila_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   mkdir -p "${dir}/run"
@@ -66,15 +72,17 @@ if cmp -s "${a}/saida.bin" "${n}/saida.bin"; then
 else
   echo "  DIFERE         saida.bin"; difere=1
 fi
-# mensagens do módulo: sem data e hora, e sem as linhas de abertura do ESMF
-filtra() { cut -d' ' -f3- "$1" | grep -E 'supergrid|DIAG|AVISO|variaveis|falha'; }
-nlin=$(filtra "${a}/log.txt" | wc -l)
+# mensagens do módulo: sem data, hora e severidade, e sem as linhas de
+# abertura do ESMF; as da versão anterior passam pelas traduções de texto
+filtra() { sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//' | grep -E 'supergrid|DIAG|AVISO|variaveis|falha'; }
+nlin=$(sed -Ef "${RAIZ}/tests/log-traduzido.sed" "${a}/log.txt" | filtra | wc -l)
 [[ ${nlin} -gt 0 ]] || { echo "ERRO: nenhuma mensagem do módulo em ${a}/log.txt" >&2; exit 2; }
-if diff -q <(filtra "${a}/log.txt") <(filtra "${n}/log.txt") > /dev/null; then
+if diff -q <(sed -Ef "${RAIZ}/tests/log-traduzido.sed" "${a}/log.txt" | filtra) \
+           <(filtra < "${n}/log.txt") > /dev/null; then
   echo "  log igual      log.txt (${nlin} linhas)"
 else
   echo "  log DIFERE     log.txt"; difere=1
-  diff <(filtra "${a}/log.txt") <(filtra "${n}/log.txt") | head -20
+  diff <(sed -Ef "${RAIZ}/tests/log-traduzido.sed" "${a}/log.txt" | filtra) <(filtra < "${n}/log.txt") | head -20
 fi
 if [[ ${difere} -eq 0 ]]; then echo "RESULTADO: supergrid idêntico"; else echo "RESULTADO: há diferenças"; fi
 exit ${difere}

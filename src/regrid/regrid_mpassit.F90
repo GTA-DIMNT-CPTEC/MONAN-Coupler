@@ -21,6 +21,7 @@
 module regrid_mpassit_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_info
   use regrid_base_mod, only : regridder_t
   use regrid_esmf_mod, only : esmf_regridder_t, regrid_method_flag
   use coupler_constants_mod, only : RAD2DEG
@@ -88,8 +89,8 @@ contains
     if (rc /= ESMF_SUCCESS) return
 
     this%ready = .true.
-    call ESMF_LogWrite('regrid: rota '//trim(this%label)//' pronta, esquema mpassit, metodo '// &
-      trim(this%method_used), ESMF_LOGMSG_INFO)
+    call log_info(COMP_REGRID, 'rota '//trim(this%label)//' pronta, esquema mpassit, metodo '// &
+      trim(this%method_used))
   end subroutine mpassit_setup
 
   subroutine mpassit_execute(this, src, dst, zero_total, rc)
@@ -203,8 +204,7 @@ contains
       end do
     end do
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('mpas_mesh_create: celula com vertice sem coordenada', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'mpas_mesh_create: celula com vertice sem coordenada')
       return
     end if
     nodeIDs = pack([(id, id = minID, maxID)], is_used)

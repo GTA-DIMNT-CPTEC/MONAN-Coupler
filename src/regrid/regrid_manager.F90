@@ -25,6 +25,7 @@
 module regrid_manager_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_info, log_warning, log_report
   use regrid_base_mod,     only : regridder_t, regrid_spec_t, regrid_fill_t, neighbor_fill, &
                                   NAME_LEN, MAX_METHODS
   use regrid_registry_mod, only : regrid_create
@@ -99,12 +100,12 @@ contains
     integer :: k
 
     if (this%has(name)) then
-      call ESMF_LogWrite('regrid: rota repetida: '//trim(name), ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota repetida: '//trim(name))
       rc = ESMF_FAILURE
       return
     end if
     if (this%n == MAX_ROUTES) then
-      call ESMF_LogWrite('regrid: numero maximo de rotas atingido', ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'numero maximo de rotas atingido')
       rc = ESMF_FAILURE
       return
     end if
@@ -123,8 +124,8 @@ contains
       if (.not. present(fallback)) return
       this%routes(k)%alias = find(this, fallback)
       if (this%routes(k)%alias == 0) return
-      call ESMF_LogWrite('regrid: rota '//trim(name)//' usara a rota de reserva '// &
-        trim(fallback), ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_REGRID, 'rota '//trim(name)//' usara a rota de reserva '// &
+        trim(fallback))
       rc = ESMF_SUCCESS
     end if
     this%routes(k)%name = name
@@ -148,7 +149,7 @@ contains
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
     if (rc /= ESMF_SUCCESS .or. localPet /= 0) return
 
-    line = 'CPL-REL: rota '//trim(this%routes(k)%name)//': esquema '//trim(spec%scheme)// &
+    line = 'rota '//trim(this%routes(k)%name)//': esquema '//trim(spec%scheme)// &
            ', metodos '
     do m = 1, MAX_METHODS
       if (len_trim(spec%methods(m)) == 0) exit
@@ -164,7 +165,7 @@ contains
     else
       line = line//', aceito '//trim(this%routes(k)%r%method_used)
     end if
-    call ESMF_LogWrite(line, ESMF_LOGMSG_INFO)
+    call log_report(line)
   end subroutine report_route
 
   !> Interpola pela rota, nesta ordem (a das etapas de ROUTES, em cpl_map):
@@ -198,7 +199,7 @@ contains
     k_requested = find(this, name)
     k = resolve(this, name)
     if (k == 0) then
-      call ESMF_LogWrite('regrid: rota inexistente: '//trim(name), ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota inexistente: '//trim(name))
       rc = ESMF_FAILURE
       return
     end if
@@ -333,8 +334,7 @@ contains
       if (len_trim(cfg_regrid_weights(k)) > 0) spec%weights_file = cfg_regrid_weights(k)
       if (len_trim(cfg_regrid_class(k))   > 0) spec%field_class  = cfg_regrid_class(k)
       if (len_trim(cfg_regrid_options(k)) > 0) spec%options      = cfg_regrid_options(k)
-      call ESMF_LogWrite('regrid: rota '//trim(name)//' configurada por &nuopc_regrid', &
-        ESMF_LOGMSG_INFO)
+      call log_info(COMP_REGRID, 'rota '//trim(name)//' configurada por &nuopc_regrid')
       return
     end do
   end subroutine apply_config

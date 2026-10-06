@@ -8,11 +8,14 @@
 !! módulo concentra essa sequência; cada gravador cuida só dos seus campos.
 !!
 !! As rotinas devolvem .true. em caso de sucesso. Uma falha do NetCDF é
-!! registrada no log do ESMF com a mensagem de nf90_strerror; quem chama
-!! decide se a falha interrompe a gravação.
+!! registrada como aviso (coupler_log_mod) com a mensagem de nf90_strerror,
+!! precedida do contexto dado por quem chama (a marca do componente e o nome
+!! da rotina, por exemplo 'MED:med_write_import_fields'); quem chama decide
+!! se a falha interrompe a gravação.
 module nc_writer_mod
 
-  use ESMF,   only : ESMF_KIND_R8, ESMF_KIND_R4, ESMF_LogWrite, ESMF_LOGMSG_WARNING
+  use ESMF,   only : ESMF_KIND_R8, ESMF_KIND_R4
+  use coupler_log_mod, only : log_warning
   use netcdf
 
   implicit none
@@ -28,8 +31,7 @@ contains
     integer,          intent(in) :: status
     character(len=*), intent(in) :: context
     nc_ok = (status == NF90_NOERR)
-    if (.not. nc_ok) call ESMF_LogWrite(trim(context)//': '//trim(nf90_strerror(status)), &
-                                        ESMF_LOGMSG_WARNING)
+    if (.not. nc_ok) call log_warning(trim(context), trim(nf90_strerror(status)))
   end function nc_ok
 
   !> Cria (ou sobrescreve) o arquivo fname e abre em modo de definição.

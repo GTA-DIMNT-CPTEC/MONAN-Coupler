@@ -85,7 +85,7 @@ contains
       ! conector NUOPC OCN->MED interpola usando posições erradas e a costa
       ! fica sistematicamente deslocada em todo o domínio.
       call cpl_tripolar_grid('ocn_med', cfg_mom6_mesh_ocn, nx_ocn, ny_ocn, petCount, .true., &
-                              ocn_grid, rc, tag='MED B-OCNGRID-01', tag_corners='MED B-CONSERVE-01')
+                              ocn_grid, rc, comp=COMP_MED)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end if
     call log_info(COMP_MED, 'stagger CORNER da grade OCN preenchido')

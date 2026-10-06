@@ -13,7 +13,8 @@
 
 module regrid_registry_mod
 
-  use ESMF,               only : ESMF_SUCCESS, ESMF_FAILURE, ESMF_LogWrite, ESMF_LOGMSG_ERROR
+  use ESMF,               only : ESMF_SUCCESS, ESMF_FAILURE
+  use coupler_log_mod,    only : COMP_REGRID, log_error
   use regrid_base_mod,    only : regridder_t, regridder_ctor, NAME_LEN
   use regrid_schemes_mod, only : regrid_coupler_schemes
 
@@ -47,7 +48,7 @@ contains
     k = find(name)
     if (k == 0) then
       if (n_schemes == MAX_SCHEMES) then
-        call ESMF_LogWrite('regrid: catalogo de esquemas cheio', ESMF_LOGMSG_ERROR)
+        call log_error(COMP_REGRID, 'catalogo de esquemas cheio')
         rc = ESMF_FAILURE
         return
       end if
@@ -75,7 +76,7 @@ contains
     call register_builtins()
     k = find(scheme)
     if (k == 0) then
-      call ESMF_LogWrite('regrid: esquema nao registrado: '//trim(scheme), ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'esquema nao registrado: '//trim(scheme))
       rc = ESMF_FAILURE
       return
     end if

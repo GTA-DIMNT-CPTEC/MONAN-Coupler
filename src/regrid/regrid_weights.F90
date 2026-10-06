@@ -13,6 +13,7 @@
 module regrid_weights_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_info
   use regrid_base_mod, only : regridder_t
 
   implicit none
@@ -47,8 +48,8 @@ contains
 
     inquire(file=trim(this%spec%weights_file), exist=exists)
     if (.not. exists) then
-      call ESMF_LogWrite('regrid: rota '//trim(this%label)//': arquivo de pesos ' // &
-        'inexistente: '//trim(this%spec%weights_file), ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota '//trim(this%label)//': arquivo de pesos ' // &
+        'inexistente: '//trim(this%spec%weights_file))
       rc = ESMF_FAILURE
       return
     end if
@@ -60,8 +61,8 @@ contains
 
     this%method_used = 'weights_file'
     this%ready = .true.
-    call ESMF_LogWrite('regrid: rota '//trim(this%label)//' pronta, pesos de '// &
-      trim(this%spec%weights_file), ESMF_LOGMSG_INFO)
+    call log_info(COMP_REGRID, 'rota '//trim(this%label)//' pronta, pesos de '// &
+      trim(this%spec%weights_file))
   end subroutine weights_setup
 
   subroutine weights_execute(this, src, dst, zero_total, rc)

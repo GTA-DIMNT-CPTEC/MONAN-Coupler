@@ -48,6 +48,7 @@ module ESM_MONAN
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count
   use coupler_utils_mod,  only : ChkErr, int_to_str
+  use coupler_log_mod,    only : COMP_DRV, log_error, log_info
   use cpl_check_mod,      only : cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
   use cpl_map_mod,        only : cpl_current_config, cpl_driver_connectors, &
                                  CONNECTOR_SRC, CONNECTOR_DST, N_CONNECTORS, EXCHANGES
@@ -126,10 +127,10 @@ contains
 
     if (cfg_use_docn) then
       call add_model(driver, OCN_LABEL, DOCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      call ESMF_LogWrite('ESM: OCN = DOCN OISST (use_docn=T)', ESMF_LOGMSG_INFO)
+      call log_info(COMP_DRV, 'OCN = DOCN OISST (use_docn=T)')
     else
       call add_model(driver, OCN_LABEL, OCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      call ESMF_LogWrite('ESM: OCN = MOM6+SIS2 dinamico (use_docn=F)', ESMF_LOGMSG_INFO)
+      call log_info(COMP_DRV, 'OCN = MOM6+SIS2 dinamico (use_docn=F)')
     end if
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -143,7 +144,7 @@ contains
       if (ChkErr(rc, __LINE__, __FILE__)) return
       call NUOPC_CompAttributeSet(iceComp, name='timeStampValidation', value='false', rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
-      call ESMF_LogWrite('ESM: componente ICE (SIS2) registrado', ESMF_LOGMSG_INFO)
+      call log_info(COMP_DRV, 'componente ICE (SIS2) registrado')
     end if
 
     ! ---- Conectores ---------------------------------------------------------
@@ -152,7 +153,7 @@ contains
     call add_connectors(driver, driverClock, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('ESM: componentes e conectores registrados', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DRV, 'componentes e conectores registrados')
   end subroutine SetModelServices
 
   !> Calcula o tamanho dos blocos ATM | OCN | ICE no layout split.
@@ -189,9 +190,9 @@ contains
 
     if (nAtm < 1 .or. nOcn < 1 .or. (use_ice .and. nIce < 1) .or. &
         nAtm + nOcn + nIce /= petCount) then
-      call ESMF_LogWrite('ESM: ERRO particao split invalida: nAtm='//int_to_str(nAtm)// &
+      if (on_root()) call log_error(COMP_DRV, 'particao split invalida: nAtm='//int_to_str(nAtm)// &
         ' nOcn='//int_to_str(nOcn)//' nIce='//int_to_str(nIce)// &
-        ' devem somar petCount='//int_to_str(petCount)//'.', ESMF_LOGMSG_ERROR)
+        ' devem somar petCount='//int_to_str(petCount)//'.')
       rc = ESMF_FAILURE
     end if
   end subroutine split_pets
@@ -212,11 +213,11 @@ contains
       else
         msg = 'MPAS, MED e OCN em todos os PETs'
       end if
-      call ESMF_LogWrite('ESM: layout SHARED (execucao '//exec//'): '//msg, ESMF_LOGMSG_INFO)
+      call log_info(COMP_DRV, 'layout SHARED (execucao '//exec//'): '//msg)
       return
     end if
 
-    msg = 'ESM: layout SPLIT (execucao '//exec//'): ATM=PET[0..'//int_to_str(nAtm-1)// &
+    msg = 'layout SPLIT (execucao '//exec//'): ATM=PET[0..'//int_to_str(nAtm-1)// &
           '] OCN=PET['//int_to_str(nAtm)//'..'//int_to_str(nAtm+nOcn-1)//']'
     if (use_ice) then
       msg = msg//' ICE=PET['//int_to_str(nAtm+nOcn)//'..'//int_to_str(petCount-1)// &
@@ -224,15 +225,15 @@ contains
     else
       msg = msg//' MED=todos (ICE desativado)'
     end if
-    call ESMF_LogWrite(msg, ESMF_LOGMSG_INFO)
+    call log_info(COMP_DRV, msg)
 
     ! No sequential+split parte dos PETs fica parada em cada fase; registrar
     ! quantos ajuda a interpretar o consumo de fila (nós x tempo de parede).
     if (exec == 'SEQUENTIAL') then
-      msg = 'ESM: sequential+split: PETs parados: '//int_to_str(petCount-nAtm)// &
+      msg = 'sequential+split: PETs parados: '//int_to_str(petCount-nAtm)// &
             ' durante o ATM, '//int_to_str(petCount-nOcn)//' durante o OCN'
       if (use_ice) msg = msg//', '//int_to_str(petCount-nIce)//' durante o ICE'
-      call ESMF_LogWrite(msg//' (de '//int_to_str(petCount)//').', ESMF_LOGMSG_INFO)
+      call log_info(COMP_DRV, msg//' (de '//int_to_str(petCount)//').')
     end if
   end subroutine log_layout
 
@@ -384,16 +385,16 @@ contains
     end do
     deallocate(connectors)
 
-    call ESMF_LogWrite('ESM: reprodutibilidade dos conectores: termorder=srcseq em '// &
+    call log_info(COMP_DRV, 'reprodutibilidade dos conectores: termorder=srcseq em '// &
       int_to_str(n_order)//' entrada(s), srcTermProcessing=0 em '//int_to_str(n_src)// &
-      ' entrada(s)', ESMF_LOGMSG_INFO)
+      ' entrada(s)')
 
     call cpl_write_methods(driver,                                                   &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_method, n_full_method, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    call ESMF_LogWrite('ESM: metodo dos conectores pelo mapa: remapmethod em '// &
-      int_to_str(n_method)//' entrada(s)', ESMF_LOGMSG_INFO)
+    call log_info(COMP_DRV, 'metodo dos conectores pelo mapa: remapmethod em '// &
+      int_to_str(n_method)//' entrada(s)')
 
     call cpl_check_coupling(driver,                                                  &
       [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
@@ -401,13 +402,13 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     if (n_full > 0) then
-      call ESMF_LogWrite('ESM: '//int_to_str(n_full)//' entrada(s) de CplList sem espaco '// &
-        'para as opcoes de reprodutibilidade; aumentar len de cplList', ESMF_LOGMSG_ERROR)
+      if (on_root()) call log_error(COMP_DRV, int_to_str(n_full)//' entrada(s) de CplList '// &
+        'sem espaco para as opcoes de reprodutibilidade; aumentar len de cplList')
       rc = ESMF_FAILURE
     end if
     if (n_full_method > 0) then
-      call ESMF_LogWrite('ESM: '//int_to_str(n_full_method)//' entrada(s) de CplList sem espaco '// &
-        'para o metodo do mapa; aumentar len em cpl_escreve_metodos', ESMF_LOGMSG_ERROR)
+      if (on_root()) call log_error(COMP_DRV, int_to_str(n_full_method)//' entrada(s) de '// &
+        'CplList sem espaco para o metodo do mapa; aumentar len em cpl_write_methods')
       rc = ESMF_FAILURE
     end if
 
@@ -527,8 +528,20 @@ contains
     call NUOPC_FreeFormatDestroy(runSeqFF, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    call ESMF_LogWrite('ESM: RunSequence '//title//' (dt='//int_to_str(int(dt_s))//' s)', &
-      ESMF_LOGMSG_INFO)
+    call log_info(COMP_DRV, 'RunSequence '//title//' (dt='//int_to_str(int(dt_s))//' s)')
   end subroutine SetRunSequence
+
+  !> Verdadeiro no PET 0 da VM atual: erros que valem em todos os PETs são
+  !! registrados por log_error só uma vez (a saída padrão não repete a linha).
+  logical function on_root()
+    type(ESMF_VM) :: vm
+    integer :: localPet, lrc
+    on_root = .true.
+    call ESMF_VMGetCurrent(vm, rc=lrc)
+    if (lrc /= ESMF_SUCCESS) return
+    call ESMF_VMGet(vm, localPet=localPet, rc=lrc)
+    if (lrc /= ESMF_SUCCESS) return
+    on_root = (localPet == 0)
+  end function on_root
 
 end module ESM_MONAN

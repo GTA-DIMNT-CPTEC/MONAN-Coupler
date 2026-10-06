@@ -68,6 +68,7 @@ for versao in antiga nova; do
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   defs=""
   [[ -f "${src}/src/caps/atmos/mpas_adapter.F90" ]] && defs="-DCOM_ADAPTADOR"
+  grep -qi 'cfg_log_level' "${src}/src/shared/coupler_config.F90" 2>/dev/null && defs+=" -DCOM_LOG_LEVEL"
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch ${defs} \

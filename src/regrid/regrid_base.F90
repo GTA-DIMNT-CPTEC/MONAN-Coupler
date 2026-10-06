@@ -29,6 +29,7 @@
 module regrid_base_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_warning
 
   implicit none
   private
@@ -146,8 +147,7 @@ contains
     logical, optional,  intent(in)    :: zero_total
 
     if (.not. this%ready) then
-      call ESMF_LogWrite('regrid: rota '//trim(this%label)//' usada antes do setup', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota '//trim(this%label)//' usada antes do setup')
       rc = ESMF_FAILURE
       return
     end if
@@ -192,8 +192,8 @@ contains
         opt%skip_fraction) then
       if (present(n_left)) n_left = count(.not. valid)
       where (.not. valid) arr = opt%vfill
-      call ESMF_LogWrite('regrid: fracao de pontos invalidos acima do limiar; ' // &
-        'difusao pulada, valor de preenchimento aplicado', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_REGRID, 'fracao de pontos invalidos acima do limiar; ' // &
+        'difusao pulada, valor de preenchimento aplicado')
       return
     end if
 
@@ -241,8 +241,7 @@ contains
     read(text, *, iostat=ios) val
     if (ios /= 0) then
       val = default_val
-      call ESMF_LogWrite('regrid: opcao '//trim(key)//' com valor invalido: '//trim(text), &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'opcao '//trim(key)//' com valor invalido: '//trim(text))
       rc = ESMF_FAILURE
     end if
   end subroutine regrid_option_real
@@ -270,8 +269,7 @@ contains
     end if
     if (ios /= 0) then
       val = default_val
-      call ESMF_LogWrite('regrid: opcao '//trim(key)//' com valor invalido: '//trim(text), &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'opcao '//trim(key)//' com valor invalido: '//trim(text))
       rc = ESMF_FAILURE
     end if
   end subroutine regrid_option_int
@@ -300,12 +298,12 @@ contains
       if (len(item) == 0) cycle
       p = index(item, '=')
       if (p <= 1) then
-        call ESMF_LogWrite('regrid: opcao sem valor: '//item, ESMF_LOGMSG_ERROR)
+        call log_error(COMP_REGRID, 'opcao sem valor: '//item)
         rc = ESMF_FAILURE
         return
       end if
       if (.not. any(known == trim(adjustl(item(1:p-1))))) then
-        call ESMF_LogWrite('regrid: opcao desconhecida: '//item(1:p-1), ESMF_LOGMSG_ERROR)
+        call log_error(COMP_REGRID, 'opcao desconhecida: '//item(1:p-1))
         rc = ESMF_FAILURE
         return
       end if

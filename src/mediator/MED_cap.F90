@@ -284,7 +284,7 @@ contains
       nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
       ny_ocn = cfg_docn_ny  ! Grade DOCN de nuopc.input (ex: OISST 0.25° =  720)
     else
-      call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ocn, ny_ocn, rc, tag='MED B-OCNGRID-01')
+      call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ocn, ny_ocn, rc, comp=COMP_MED)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg="MED: falha ao ler dimensoes reais de ocean_hgrid.nc " // &
             "(NIGLOBAL/NJGLOBAL do MOM6) - verifique cfg_mom6_mesh_ocn", &

@@ -52,6 +52,7 @@ module cpl_check_mod
                                  NUOPC_GetStateMemberLists
   use NUOPC_Driver,       only : NUOPC_DriverGetComp
   use coupler_utils_mod,  only : int_to_str, ChkErr
+  use coupler_log_mod,    only : COMP_DRV, log_error, log_report
   use NUOPC,              only : NUOPC_FieldDictionaryHasEntry, NUOPC_FieldDictionaryAddEntry, &
                                  NUOPC_FieldDictionarySetAutoAdd
   use cpl_fields_mod,     only : cpl_field_index, FIELDS
@@ -65,9 +66,8 @@ module cpl_check_mod
   public :: cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
   public :: cpl_check_connector_fields, cpl_check_methods, cpl_check_state
   public :: cpl_method_of_entry
-  public :: CPL_PREFIX, CPL_MSG_LEN
+  public :: CPL_MSG_LEN
 
-  character(len=*), parameter :: CPL_PREFIX = 'CPL-REL: '
   integer,          parameter :: CPL_MSG_LEN = 200
 
   !> Opção do conector NUOPC que escolhe o método de interpolação.
@@ -209,9 +209,9 @@ contains
     call ESMF_VMBroadcast(vm, ndif, 1, 0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     if (ndif(1) > 0) then
-      call ESMF_LogWrite('cpl_check: conferencia do mapa com '//int_to_str(ndif(1))// &
-        ' diferenca(s) (linhas DIFERENCA do relatorio no log do PET 0); inicializacao interrompida', &
-        ESMF_LOGMSG_ERROR)
+      if (localPet == 0) call log_error(COMP_DRV, 'cpl_check: conferencia do mapa com '// &
+        int_to_str(ndif(1))//' diferenca(s) (linhas DIFERENCA do relatorio no log do '// &
+        'PET 0); inicializacao interrompida')
       call ESMF_LogFlush(rc=lrc)
       rc = ESMF_FAILURE
     end if
@@ -585,7 +585,7 @@ contains
 
   subroutine write_line(msg)
     character(len=*), intent(in) :: msg
-    call ESMF_LogWrite(CPL_PREFIX//trim(msg), ESMF_LOGMSG_INFO)
+    call log_report(trim(msg))
   end subroutine write_line
 
 end module cpl_check_mod

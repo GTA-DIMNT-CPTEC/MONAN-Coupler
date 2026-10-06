@@ -248,7 +248,7 @@ contains
     call cpl_blocks_from_bounds(reshape(all4, [4, petCount]), petCount, nx, ny, b, msg, ok)
     if (.not. ok) error stop 'cpl_blocos_de_limites'
     call cpl_tripolar_grid('ice_sis2', 'hgrid.nc', nx, ny, petCount, .false., g_new, rc, &
-                            blocks=b, tag='ICE(SIS2)')
+                            blocks=b, comp='ICE')
     if (rc /= ESMF_SUCCESS) error stop 'cpl_malha_tripolar'
 
     ! como antes (sis_cap_MONAN::create_ice_grid, tag fase11-09-validada)
@@ -263,7 +263,7 @@ contains
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=xr, rc=rc)
     call ESMF_GridGetCoord(g_ref, coordDim=2, localDE=0, &
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=yr, rc=rc)
-    call mom6_supergrid_tcoords('hgrid.nc', xr, yr, rc, tag='ICE(SIS2)')
+    call mom6_supergrid_tcoords('hgrid.nc', xr, yr, rc, comp='ICE')
     if (rc /= ESMF_SUCCESS) error stop 'mom6_supergrid_tcoords'
 
     call ESMF_GridGetCoord(g_new, coordDim=1, localDE=0, &

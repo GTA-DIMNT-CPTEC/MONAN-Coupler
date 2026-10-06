@@ -153,3 +153,21 @@ s/OCN\(proxy\): si_ifrac_mem_valid=T — aplicando persistencia/OCN: si_ifrac_me
 s/OCN\(proxy\): si_ifrac_mem_valid=F — sem persistencia/OCN: si_ifrac_mem_valid=F: sem persistencia/
 s/OCN\(MOM6\): Si_ifrac via sigmoide DT_TRANS=2K \+ frazil contínuo \(v2\.3\)/OCN: Si_ifrac pela sigmoide DT_TRANS=2K + frazil continuo/
 s/OCN\((MOM6|Alt1)\): /OCN: /
+
+# ---- R-FASE13-12: driver, coupling, regrid e shared ----
+
+# mom6_supergrid (marca do componente no lugar do rótulo)
+s/MED B-OCNGRID-01 DIAG: DE /MED: DIAG supergrid tcoords: DE /
+s/ICE\(SIS2\) DIAG: DE /ICE: DIAG supergrid tcoords: DE /
+s/MOM6 supergrid DIAG: DE /OCN: DIAG supergrid tcoords: DE /
+s/(PET[0-9]+ +)([A-Z]) DIAG: DE /\1\2: DIAG supergrid tcoords: DE /
+s/MED B-(OCNGRID|CONSERVE)-01: /MED: /
+s/MOM6 supergrid: /OCN: /
+s/: AVISO - nx\/ny impar em /: nx\/ny impar em /
+
+# driver, cpl_check e regrid
+s/ESM: ERRO particao split invalida: /ESM: particao split invalida: /
+s/ESM: ([0-9]+) entrada\(s\) de CplList sem espaco para as opcoes/ESM: \1 entrada(s) de CplList sem espaco para as opcoes/
+s/para o metodo do mapa; aumentar len em cpl_escreve_metodos/para o metodo do mapa; aumentar len em cpl_write_methods/
+s/(PET[0-9]+ +)cpl_check: conferencia do mapa com /\1ESM: cpl_check: conferencia do mapa com /
+s/(PET[0-9]+ +)mpas_mesh_create: /\1regrid: mpas_mesh_create: /

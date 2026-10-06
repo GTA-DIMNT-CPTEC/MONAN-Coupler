@@ -12,6 +12,7 @@
 module regrid_esmf_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_info, log_warning
   use regrid_base_mod, only : regridder_t, MAX_METHODS
 
   implicit none
@@ -52,15 +53,14 @@ contains
       if (rc == ESMF_SUCCESS) then
         this%method_used = this%spec%methods(k)
         this%ready = .true.
-        call ESMF_LogWrite('regrid: rota '//trim(this%label)//' pronta, esquema esmf, metodo '// &
-          trim(this%method_used), ESMF_LOGMSG_INFO)
+        call log_info(COMP_REGRID, 'rota '//trim(this%label)//' pronta, esquema esmf, metodo '// &
+          trim(this%method_used))
         return
       end if
-      call ESMF_LogWrite('regrid: rota '//trim(this%label)//' metodo '// &
-        trim(this%spec%methods(k))//' falhou; tentando o proximo', ESMF_LOGMSG_WARNING)
+      call log_warning(COMP_REGRID, 'rota '//trim(this%label)//' metodo '// &
+        trim(this%spec%methods(k))//' falhou; tentando o proximo')
     end do
-    call ESMF_LogWrite('regrid: rota '//trim(this%label)//' sem metodo utilizavel', &
-      ESMF_LOGMSG_ERROR)
+    call log_error(COMP_REGRID, 'rota '//trim(this%label)//' sem metodo utilizavel')
   end subroutine esmf_setup
 
   !> Calcula o route handle para um método (usado também pelas extensões).
@@ -128,7 +128,7 @@ contains
     case ('nearest_stod'); flag = ESMF_REGRIDMETHOD_NEAREST_STOD
     case ('nearest_dtos'); flag = ESMF_REGRIDMETHOD_NEAREST_DTOS
     case default
-      call ESMF_LogWrite('regrid: metodo desconhecido: '//trim(method), ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'metodo desconhecido: '//trim(method))
       rc = ESMF_FAILURE
     end select
   end subroutine regrid_method_flag

@@ -38,6 +38,7 @@
 module regrid_weights_base_mod
 
   use ESMF
+  use coupler_log_mod, only : COMP_REGRID, log_error, log_info
   use regrid_base_mod, only : regridder_t
 
   implicit none
@@ -107,13 +108,12 @@ contains
 
     call this%compute_weights(src_points, dst_points, this%factors, this%src_index, this%dst_index, rc)
     if (rc /= ESMF_SUCCESS) then
-      call ESMF_LogWrite('regrid: rota '//trim(this%label)//': calculo dos pesos falhou', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota '//trim(this%label)//': calculo dos pesos falhou')
       return
     end if
     if (size(this%src_index) /= size(this%factors) .or. size(this%dst_index) /= size(this%factors)) then
-      call ESMF_LogWrite('regrid: rota '//trim(this%label)//': listas de pesos de tamanhos '// &
-        'diferentes', ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'rota '//trim(this%label)//': listas de pesos de tamanhos '// &
+        'diferentes')
       rc = ESMF_FAILURE
       return
     end if
@@ -128,8 +128,8 @@ contains
 
     if (len_trim(this%method_used) == 0) this%method_used = this%spec%scheme
     this%ready = .true.
-    call ESMF_LogWrite('regrid: rota '//trim(this%label)//' pronta, esquema de pesos '// &
-      trim(this%spec%scheme), ESMF_LOGMSG_INFO)
+    call log_info(COMP_REGRID, 'rota '//trim(this%label)//' pronta, esquema de pesos '// &
+      trim(this%spec%scheme))
   end subroutine wb_setup
 
   subroutine wb_execute(this, src, dst, zero_total, rc)
@@ -179,16 +179,14 @@ contains
     call ESMF_FieldGet(field, geomtype=geomtype, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     if (.not. (geomtype == ESMF_GEOMTYPE_GRID)) then
-      call ESMF_LogWrite('regrid: esquema de pesos aceita so campos em ESMF_Grid', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'esquema de pesos aceita so campos em ESMF_Grid')
       rc = ESMF_FAILURE
       return
     end if
     call ESMF_FieldGet(field, grid=grid, localDeCount=localDeCount, rc=rc)
     if (rc /= ESMF_SUCCESS) return
     if (localDeCount > 1) then
-      call ESMF_LogWrite('regrid: esquema de pesos aceita no maximo um DE por PET', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'esquema de pesos aceita no maximo um DE por PET')
       rc = ESMF_FAILURE
       return
     end if
@@ -205,8 +203,8 @@ contains
     if (rc /= ESMF_SUCCESS) return
     n = size(x)
     if (elementCount /= n) then
-      call ESMF_LogWrite('regrid: esquema de pesos: coordenadas e DistGrid com tamanhos '// &
-        'diferentes', ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'esquema de pesos: coordenadas e DistGrid com tamanhos '// &
+        'diferentes')
       rc = ESMF_FAILURE
       return
     end if

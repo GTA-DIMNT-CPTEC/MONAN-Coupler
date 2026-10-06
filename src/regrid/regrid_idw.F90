@@ -35,8 +35,8 @@
 
 module regrid_idw_mod
 
-  use ESMF,                    only : ESMF_KIND_R8, ESMF_SUCCESS, ESMF_FAILURE, &
-                                      ESMF_LogWrite, ESMF_LOGMSG_ERROR
+  use ESMF,                    only : ESMF_KIND_R8, ESMF_SUCCESS, ESMF_FAILURE
+  use coupler_log_mod,         only : COMP_REGRID, log_error
   use regrid_base_mod,         only : regridder_t, regrid_option_real, regrid_option_int, &
                                       regrid_options_check, NAME_LEN
   use regrid_weights_base_mod, only : weights_regridder_t, regrid_points_t
@@ -86,8 +86,7 @@ contains
     if (rc /= ESMF_SUCCESS) return
     nvalid = count(src_points%valid)
     if (neighbors < 1 .or. power < 0.0_ESMF_KIND_R8 .or. nvalid == 0) then
-      call ESMF_LogWrite('regrid: idw: vizinhos < 1, expoente < 0 ou origem sem pontos validos', &
-        ESMF_LOGMSG_ERROR)
+      call log_error(COMP_REGRID, 'idw: vizinhos < 1, expoente < 0 ou origem sem pontos validos')
       rc = ESMF_FAILURE
       return
     end if

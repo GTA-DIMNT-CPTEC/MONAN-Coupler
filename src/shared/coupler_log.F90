@@ -58,6 +58,9 @@ module coupler_log_mod
   character(len=*), parameter, public :: COMP_DOCN = 'DOCN'
   character(len=*), parameter, public :: COMP_MED = 'MED'
   character(len=*), parameter, public :: COMP_DRV = 'ESM'
+  !> Marca do subsistema de interpolação (src/regrid), que serve ao mediador
+  !! e aos testes
+  character(len=*), parameter, public :: COMP_REGRID = 'regrid'
 
   !> Níveis, do mais restrito ao mais detalhado
   integer, parameter :: LEVEL_WARNING = 1

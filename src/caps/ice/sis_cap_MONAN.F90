@@ -357,7 +357,7 @@ contains
     logical :: ok_decomp
     real(ESMF_KIND_R8), pointer :: coordX(:,:)
 
-    call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, tag='ICE(SIS2)')
+    call mom6_supergrid_dims(trim(cfg_mom6_mesh_ocn), nx_ice, ny_ice, rc, comp=COMP_ICE)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha ao ler ' // &
       'dimensoes de ocean_hgrid.nc', line=__LINE__, file=__FILE__)) return
 
@@ -384,7 +384,7 @@ contains
     end if
 
     call cpl_tripolar_grid('ice_sis2', cfg_mom6_mesh_ocn, nx_ice, ny_ice, petCount, .false., &
-                            is%ice_grid, rc, blocks=blocks, tag='ICE(SIS2)')
+                            is%ice_grid, rc, blocks=blocks, comp=COMP_ICE)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Bloco deste PET (um DE por PET), para conferir com o do SIS2

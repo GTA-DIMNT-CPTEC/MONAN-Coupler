@@ -26,7 +26,7 @@ Sondas são trechos que registram, no meio do cálculo, valores de investigaçõ
 | `FIX-DIAG-TSKIN-01` | `sis_cap_fields` | faixa de `Si_t_sis2` (investigação da oscilação, encerrada) | retirada (R-FASE13-08) |
 | `FIX-DIAG-ALBFEEDBACK-01` | `mpas_atm_model` | albedo de uma célula antes e depois do MPAS | retirada (R-FASE13-08) |
 
-Desde a R-FASE13-10, os diagnósticos que ficam estão em `src/mediator/med_diag.F90` (exceto os alertas da grade, em `med_init`), com nomes que dizem o que medem (`DIAG <grandeza> <ponto>`), e todas as mensagens do mediador passam pelo `coupler_log_mod`. A troca de cada texto antigo pelo novo está em `tests/log-traduzido.sed`. Os rótulos `MED B-OCNGRID-01` e `MED B-CONSERVE-01` passados a `cpl_grids` e `mom6_supergrid` ficam para a etapa dos módulos compartilhados.
+Desde a R-FASE13-10, os diagnósticos que ficam estão em `src/mediator/med_diag.F90` (exceto os alertas da grade, em `med_init`), com nomes que dizem o que medem (`DIAG <grandeza> <ponto>`), e todas as mensagens do mediador passam pelo `coupler_log_mod`. A troca de cada texto antigo pelo novo está em `tests/log-traduzido.sed`. Na R-FASE13-12, os rótulos `MED B-OCNGRID-01` e `MED B-CONSERVE-01` passados a `cpl_grids` e `mom6_supergrid` deram lugar à marca do componente, e o diagnóstico da leitura dos centros do supergrid passou a `DIAG supergrid tcoords` (depuração).
 
 Desde a R-FASE13-09, as sondas de depuração só rodam com `log_level = 'debug'` no `&nuopc_driver` (antes, com `write_fixdiag`, que valia `.true.` por padrão); com o padrão `'info'`, nem são calculadas. Os avisos são gravados em qualquer nível.
 
