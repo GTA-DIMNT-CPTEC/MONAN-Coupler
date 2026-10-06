@@ -355,7 +355,7 @@ contains
     ! PET0 lê o arquivo; todos os outros PETs aguardam o broadcast.
     !
     ! Usa a VM do COMPONENTE, não a global, como DATM_cap.F90, DOCN_cap.F90
-    ! e docn_cap_netcdf.F90. Hoje o MED roda em todos os PETs nos dois
+    ! e ocn_data_reader.F90. Hoje o MED roda em todos os PETs nos dois
     ! layouts e as duas VMs coincidem, mas a chamada global ficaria incorreta
     ! se o mediador ganhasse uma petList própria, e falharia com deadlock, não
     ! com erro. ESMF_VMGetCurrent devolve a VM do componente em execução,

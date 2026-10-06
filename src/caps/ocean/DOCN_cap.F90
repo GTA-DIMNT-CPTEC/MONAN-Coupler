@@ -55,7 +55,8 @@ module DOCN_cap_mod
   use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGet, ESMF_VMBroadcast
   use ESMF, only: ESMF_CALKIND_GREGORIAN
 
-  use docn_cap_netcdf_mod, only: ReadOcnFieldInterp, WriteDOCNDiag
+  use docn_cap_netcdf_mod, only: WriteDOCNDiag
+  use ocn_data_reader_mod, only: ReadOcnFieldInterp
   use coupler_utils_mod,   only: ChkErr, int_to_str
   use coupler_log_mod,     only: COMP_DOCN, log_info, log_warning
   use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &

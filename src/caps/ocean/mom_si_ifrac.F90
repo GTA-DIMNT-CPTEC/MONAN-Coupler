@@ -20,7 +20,7 @@ module mom_si_ifrac_mod
   use coupler_log_mod, only : COMP_OCN, log_warning, log_info, log_debug
   use MOM_cap_methods,       only : ChkErr
   ! Leitura de Si_ifrac do arquivo OISST (use_docn_ice)
-  use docn_cap_netcdf_mod,   only : ReadOcnFieldInterp
+  use ocn_data_reader_mod,   only : ReadOcnFieldInterp
   use cpl_grids_mod,         only : index_trunc, lon_0to360_loop
   use coupler_config_mod,    only : cfg_docn_ice_file,       &
                                      cfg_docn_ice_varname,    &

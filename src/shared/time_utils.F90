@@ -9,7 +9,7 @@ module time_utils_mod
   use time_manager_mod, only : time_type, set_time, set_date
   use ESMF,             only : ESMF_Time, ESMF_TimeGet, ESMF_TimeInterval, &
                                ESMF_TimeIntervalGet
-  use MOM_cap_methods,  only : ChkErr
+  use coupler_utils_mod, only : ChkErr
 
   implicit none
   private

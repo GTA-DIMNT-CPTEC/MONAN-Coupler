@@ -82,7 +82,7 @@ MONAN-Coupler/
 │   ├── caps/        caps dos componentes: atmos (MPAS, com o adaptador mpas_adapter.F90), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit, idw), lista em regrid_schemes.F90
 │   ├── coupling/    mapa de acoplamento: malhas regulares (cpl_grids), dicionário de campos (cpl_fields: unidade, nome longo e nome CF, que os gravadores de diagnóstico consultam), trocas, exportações e rotas (cpl_map) e conferência no log (cpl_check)
-│   └── shared/      configuração (coupler_config), utilitários (coupler_utils), allreduce, tempo, diag_bitsum
+│   └── shared/      configuração (coupler_config), utilitários (coupler_utils), registro (coupler_log), leitor dos dados oceânicos do DOCN e do MOM6 (ocn_data_reader), allreduce, tempo, diag_bitsum
 ├── models/          submódulos: atmos/MONAN-Model, ocean/MOM6-examples
 ├── run/             run_esmApp.jaci, setenv-gnu.bash, setenv-site.bash
 ├── tools/           apoio: coupler, postproc, animation, atmos, ocean, dev

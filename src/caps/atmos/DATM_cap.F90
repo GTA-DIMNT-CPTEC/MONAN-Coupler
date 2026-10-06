@@ -409,7 +409,7 @@ contains
     ni = size(array, 1)
     nj = size(array, 2)
     allocate(buf_global(NX*NY))
-    ! VM do componente, não a global (ver docn_cap_netcdf.F90): evita
+    ! VM do componente, não a global (ver ocn_data_reader.F90): evita
     ! broadcast coletivo sobre todos os PETs quando o DATM roda só no
     ! subconjunto da atmosfera (teste DATM concorrente).
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
