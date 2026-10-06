@@ -51,6 +51,28 @@
 !                             (linhas FIX-DIAG, somas de bits do Si_ifrac)
 !                             lidos por tools/coupler/mede-taxa-repro.sh.
 !                A chave antiga write_fixdiag é obsoleta e não tem efeito.
+!   run_sequence_file  (opcional) arquivo com a sequência de execução de
+!                cada passo, no formato do NUOPC, sob o rótulo runSeq::,
+!                para experimentar outra ordem sem recompilar. Vazio
+!                (padrão): a sequência da tabela RUN_SEQUENCES
+!                (src/driver/run_sequences.F90), escolhida por
+!                coupling_mode, use_med_to_mpas, use_sis2_dynamic e
+!                seq_repro. O período da linha @ deve ser dt_coupling.
+!                Exemplo de arquivo (a sequência seq_mom6_ice):
+!                  runSeq::
+!                  @3600
+!                    OCN -> MED
+!                    ICE -> MED
+!                    MPAS -> MED
+!                    MED
+!                    MED -> MPAS
+!                    MPAS
+!                    MED -> OCN
+!                    OCN
+!                    MED -> ICE
+!                    ICE
+!                  @
+!                  ::
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'

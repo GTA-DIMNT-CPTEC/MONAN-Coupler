@@ -61,6 +61,8 @@ Modos de execução. O eixo espacial `split` dá a cada componente um bloco pró
 
 A chave `seq_repro = .true.` só tem efeito com `coupling_mode = 'sequential'`, `use_sis2_dynamic = .true.` e `pet_layout = 'split'`. Ela faz a RunSequence sequencial emitir o mesmo fluxo de dados do concorrente, tornando as duas rodadas comparáveis, sem alterar o modo concorrente. Fora desse contexto é ignorada, com aviso. O default `.false.` preserva o sequencial recomendado.
 
+A sequência de execução de cada passo (que componente avança e que conector roda, em que ordem) vem da tabela `RUN_SEQUENCES` (`src/driver/run_sequences.F90`): sete sequências escritas como texto, no formato do NUOPC, escolhidas por `coupling_mode`, `use_med_to_mpas`, `use_sis2_dynamic` e `seq_repro`. O nome da escolhida aparece no log (`RunSequence ...`). Para experimentar outra ordem sem recompilar, a chave `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência sob o rótulo `runSeq::` (exemplo no `nuopc.input` da raiz); o período da linha `@` deve ser `dt_coupling`. Uma sequência de arquivo não é conferida pelo acoplador: serve a experimentos, não à produção.
+
 Os componentes são escolhidos por quatro chaves: `use_datm`, `use_docn` e `use_med_to_mpas` (grupo `&nuopc_mode`) e `use_sis2_dynamic` (grupo `&nuopc_petlayout`). Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e SIS2, com o contorno da atmosfera pelo mediador. A tabela `COUPLER_MODES`, em `src/shared/coupler_config.F90`, diz o que acontece com cada combinação, e é a mesma que o mapa de acoplamento consulta:
 
 | Situação | Combinações | Efeito na leitura |
@@ -77,7 +79,7 @@ A lista completa, combinação por combinação, está na seção 1 de [`docs/ac
 MONAN-Coupler/
 ├── src/
 │   ├── main/        esmApp.F90 (programa principal)
-│   ├── driver/      esm.F90 (driver NUOPC, RunSequences, partição de PETs)
+│   ├── driver/      esm.F90 (driver NUOPC, partição de PETs) e run_sequences.F90 (sequências de execução como texto)
 │   ├── mediator/    MED_cap.F90 (pontos de entrada NUOPC) e módulos por assunto: med_init, med_flux, med_bulk_ncar, med_ocean, med_ice, med_export, med_exchange (trocas por fase), med_diag
 │   ├── caps/        caps dos componentes: atmos (MPAS, com o adaptador mpas_adapter.F90), ocean (MOM6), ice (SIS2)
 │   ├── regrid/      interpolação plugável (esmf, weights_file, mpassit, idw), lista em regrid_schemes.F90

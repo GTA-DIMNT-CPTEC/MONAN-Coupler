@@ -146,7 +146,7 @@ Cada fase de componente deixa no log ESMF um par de mensagens `intro.` e `extro.
 
 Com os três componentes ativos, são medidos três pares: atmosfera com oceano, atmosfera com gelo e oceano com gelo. Em execução sequencial os três devem ter interseção praticamente nula, dentro de `--overlap-tol`.
 
-Sobreposição em qualquer um dos pares significa que um ponto de encontro saiu do lugar na RunSequence. Convém ler, junto, o comentário em `esm.F90::SetRunSequence` sobre o que sincroniza a lista: uma linha de componente não sincroniza ninguém, e quem separa uma fase da outra é sempre uma linha de conector de ou para o mediador.
+Sobreposição em qualquer um dos pares significa que um ponto de encontro saiu do lugar na RunSequence. Convém ler, junto, o comentário no cabeçalho de `esm.F90` e em `run_sequences.F90` sobre o que sincroniza a lista: uma linha de componente não sincroniza ninguém, e quem separa uma fase da outra é sempre uma linha de conector de ou para o mediador.
 
 A medição precisa de `python3` no nó de execução. Sem ele, essa verificação é pulada com aviso.
 
@@ -191,7 +191,7 @@ Use `--keep` sempre que o resultado for FALHOU. Sem ele, o script apaga a config
 
 **Sobreposição não medida, com aviso.** Falta `python3` no nó de execução, ou os logs não têm janelas `Run`. As demais verificações continuam válidas, mas a que distingue sequencial de concorrente não foi feita.
 
-**FALHOU com sobreposição entre oceano e gelo.** Ver a seção 8 e o comentário em `esm.F90::SetRunSequence`.
+**FALHOU com sobreposição entre oceano e gelo.** Ver a seção 8 e os comentários no cabeçalho de `esm.F90` e em `run_sequences.F90`.
 
 ## 12. Limitação conhecida
 

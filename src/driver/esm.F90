@@ -46,10 +46,14 @@ module ESM_MONAN
                                  cfg_use_sis2_dynamic, cfg_seq_repro,   &
                                  cfg_coupling_mode, cfg_pet_layout,     &
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
-                                 cfg_ice_pet_count, cpl_current_config
+                                 cfg_ice_pet_count, cpl_current_config, &
+                                 cfg_run_sequence_file
   use coupler_utils_mod,  only : ChkErr, int_to_str
   use coupler_log_mod,    only : COMP_DRV, log_error, log_info
   use cpl_check_mod,      only : cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
+  use run_sequences_mod,  only : RUN_SEQUENCES, RUN_SEQUENCE_LINE_LEN, MAX_RUN_SEQUENCE_LINES, &
+                                 RUN_SEQUENCE_LABEL, run_sequence_name, run_sequence_index,     &
+                                 run_sequence_lines, run_sequence_from_file
   use cpl_map_mod,        only : cpl_driver_connectors, &
                                  CONNECTOR_SRC, CONNECTOR_DST, N_CONNECTORS, EXCHANGES
 
@@ -434,8 +438,9 @@ contains
 
   !> @brief Define a sequência de execução de cada passo de acoplamento.
   !!
-  !! Sete variantes, escolhidas pela configuração:
-  !!   modo        oceano     gelo   seq_repro   variante
+  !! A sequência vem da tabela RUN_SEQUENCES (run_sequences.F90), escolhida
+  !! pela configuração:
+  !!   modo        oceano     gelo   seq_repro   sequência
   !!   concurrent  MOM6       sim    -           conc_mom6_ice
   !!   concurrent  MOM6       não    -           conc_mom6
   !!   concurrent  DOCN       -      -           conc_docn
@@ -443,68 +448,24 @@ contains
   !!   sequential  MOM6       sim    não         seq_mom6_ice
   !!   sequential  MOM6       não    -           seq_mom6
   !!   sequential  DOCN       -      -           seq_docn
-  !! ("MOM6" aqui significa use_med_to_mpas=.true.)
-  !!
-  !! No modo concorrente MPAS, OCN e ICE aparecem em linhas consecutivas, sem
-  !! conector entre eles, e por isso avançam ao mesmo tempo em PETs
-  !! disjuntos; o mediador entrega no início do passo o que calculou no fim
-  !! do passo anterior. Na variante seq_mom6_ice_repro a ordem imita esse
-  !! fluxo de dados, mas executa um componente de cada vez; o resultado é
-  !! comparável bit a bit ao concorrente. Na seq_mom6_ice a linha MED -> ICE
-  !! entre OCN e ICE é intencional: ela impede que os dois avancem juntos.
+  !! ("MOM6" aqui significa use_med_to_mpas=.true.). Com a chave
+  !! run_sequence_file, vem do arquivo dado (run_sequence_from_file).
   subroutine SetRunSequence(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
 
-    character(len=*), parameter :: M2A = 'MED -> MPAS', M2O = 'MED -> OCN', M2I = 'MED -> ICE'
-    character(len=*), parameter :: A2M = 'MPAS -> MED', O2M = 'OCN -> MED', I2M = 'ICE -> MED'
-    character(len=*), parameter :: O2A = 'OCN -> MPAS'
-    integer, parameter :: LW = 24
-    character(len=LW)   :: steps(10)      ! no máximo 10 linhas por passo
-    character(len=LW+2) :: lines(12)
-    integer :: n
-    character(len=:),  allocatable :: title
+    character(len=RUN_SEQUENCE_LINE_LEN)   :: steps(MAX_RUN_SEQUENCE_LINES)
+    character(len=RUN_SEQUENCE_LINE_LEN+2) :: lines(MAX_RUN_SEQUENCE_LINES+2)
+    integer :: n, k
+    character(len=:), allocatable :: title
     type(NUOPC_FreeFormat)  :: runSeqFF
     type(ESMF_Clock)        :: driverClock
     type(ESMF_TimeInterval) :: timeStep
     integer(ESMF_KIND_I8)   :: dt_s
-    logical :: concurrent, mom6, ice
+    logical :: ice
     integer :: i
 
     rc = ESMF_SUCCESS
-    concurrent = (trim(cfg_coupling_mode) == 'concurrent')
-    mom6       = cfg_use_med_to_mpas
-    ice        = cfg_use_sis2_dynamic .and. mom6
-
-    if (concurrent .and. ice) then
-      title = 'Fase 2 CONCORRENTE + ICE (SIS2)'
-      n = 10
-      steps(1:n) = [character(len=LW) :: M2A, M2O, M2I, 'MPAS', 'OCN', 'ICE', A2M, O2M, I2M, 'MED']
-    else if (concurrent .and. mom6) then
-      title = 'Fase 2 CONCORRENTE (MED->MPAS)'
-      n = 7
-      steps(1:n) = [character(len=LW) :: M2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
-    else if (concurrent) then
-      title = 'Fase 1 CONCORRENTE (OCN->MPAS)'
-      n = 7
-      steps(1:n) = [character(len=LW) :: O2A, M2O, 'MPAS', 'OCN', A2M, O2M, 'MED']
-    else if (ice .and. cfg_seq_repro) then
-      title = 'Fase 2 SEQUENCIAL REPRODUTIVEL + ICE (SIS2)'
-      n = 10
-      steps(1:n) = [character(len=LW) :: M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE', A2M, O2M, I2M, 'MED']
-    else if (ice) then
-      title = 'Fase 2 SEQUENCIAL + ICE (SIS2)'
-      n = 10
-      steps(1:n) = [character(len=LW) :: O2M, I2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN', M2I, 'ICE']
-    else if (mom6) then
-      title = 'Fase 2 (MED->MPAS)'
-      n = 7
-      steps(1:n) = [character(len=LW) :: O2M, A2M, 'MED', M2A, 'MPAS', M2O, 'OCN']
-    else
-      title = 'Fase 1 (OCN->MPAS direto)'
-      n = 7
-      steps(1:n) = [character(len=LW) :: O2A, 'MPAS', A2M, O2M, 'MED', M2O, 'OCN']
-    end if
 
     ! Período do laço = passo do relógio do driver (dt_coupling)
     call ESMF_GridCompGet(driver, clock=driverClock, rc=rc)
@@ -514,17 +475,33 @@ contains
     call ESMF_TimeIntervalGet(timeStep, s_i8=dt_s, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! As linhas vão para uma variável antes da chamada: passado direto como
-    ! argumento, um construtor [character(len=...) :: ...] tem o comprimento
-    ! ignorado pelo gfortran (fica o do primeiro elemento, '@3600', e 'MPAS'
-    ! vira 'MPA').
-    lines(1) = '@'//int_to_str(int(dt_s))
-    do i = 1, n
-      lines(i+1) = '  '//steps(i)
-    end do
-    lines(n+2) = '@'
-    runSeqFF = NUOPC_FreeFormatCreate(stringList=lines(1:n+2), rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
+    if (len_trim(cfg_run_sequence_file) > 0) then
+      call run_sequence_from_file(cfg_run_sequence_file, runSeqFF, rc)
+      if (rc /= ESMF_SUCCESS) then
+        if (on_root()) call log_error(COMP_DRV, 'run_sequence_file: nao foi possivel ler a '// &
+          'sequencia '//RUN_SEQUENCE_LABEL//' de '//trim(cfg_run_sequence_file))
+        return
+      end if
+      title = 'do arquivo '//trim(cfg_run_sequence_file)
+    else
+      ice = cfg_use_sis2_dynamic .and. cfg_use_med_to_mpas
+      k = run_sequence_index(run_sequence_name(trim(cfg_coupling_mode) == 'concurrent', &
+                                               cfg_use_med_to_mpas, ice, cfg_seq_repro))
+      call run_sequence_lines(RUN_SEQUENCES(k)%text, steps, n)
+      title = trim(RUN_SEQUENCES(k)%title)
+
+      ! As linhas vão para uma variável antes da chamada: passado direto como
+      ! argumento, um construtor [character(len=...) :: ...] tem o comprimento
+      ! ignorado pelo gfortran (fica o do primeiro elemento, '@3600', e 'MPAS'
+      ! vira 'MPA').
+      lines(1) = '@'//int_to_str(int(dt_s))
+      do i = 1, n
+        lines(i+1) = '  '//steps(i)
+      end do
+      lines(n+2) = '@'
+      runSeqFF = NUOPC_FreeFormatCreate(stringList=lines(1:n+2), rc=rc)
+      if (ChkErr(rc, __LINE__, __FILE__)) return
+    end if
     call NUOPC_DriverIngestRunSequence(driver, runSeqFF, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call NUOPC_FreeFormatDestroy(runSeqFF, rc=rc)

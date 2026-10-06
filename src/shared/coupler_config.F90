@@ -7,7 +7,8 @@
 !! as variáveis cfg_* (somente leitura, atributo protected).
 !!
 !! Grupos do namelist e o que controlam:
-!!   &nuopc_driver     datas, passo de acoplamento, diretório, tipo e nível de log
+!!   &nuopc_driver     datas, passo de acoplamento, diretório, tipo e nível de log,
+!!                     sequência de execução lida de arquivo (opcional)
 !!   &nuopc_mode       quais componentes de dados (DATM/DOCN) substituem modelos
 !!   &nuopc_atm        malha e diretório de configuração do MONAN-A
 !!   &nuopc_netcdf     escrita dos NetCDF exportados pelo cap ATM
@@ -61,6 +62,7 @@ module coupler_config_mod
   character(len=256), public, protected :: cfg_log_dir      = 'logs'
   character(len=16),  public, protected :: cfg_log_kind     = 'multi'     ! multi | multi_on_error
   character(len=16),  public, protected :: cfg_log_level    = 'info'      ! warning | info | debug
+  character(len=256), public, protected :: cfg_run_sequence_file = ''     ! vazio: sequência da tabela
 
   ! &nuopc_atm
   character(len=256), public, protected :: cfg_mesh_atm     = 'mpas_mesh.nc'
@@ -205,6 +207,7 @@ module coupler_config_mod
     character(len=256) :: log_dir
     character(len=16)  :: log_kind, log_level
     logical            :: write_fixdiag             !< chave obsoleta, sem efeito
+    character(len=256) :: run_sequence_file
   end type driver_group_t
 
   !> Valores de &nuopc_atm durante a leitura.
@@ -507,20 +510,23 @@ contains
     character(len=256) :: log_dir
     character(len=16)  :: log_kind, log_level
     logical            :: write_fixdiag
+    character(len=256) :: run_sequence_file
     namelist /nuopc_driver/ start_date, stop_date, dt_coupling, dt_atm, &
-                            log_dir, log_kind, log_level, write_fixdiag
+                            log_dir, log_kind, log_level, write_fixdiag, &
+                            run_sequence_file
 
     start_date = cfg_start_date;  stop_date = cfg_stop_date
     dt_coupling = cfg_dt_coupling; dt_atm = cfg_dt_atm
     log_dir = cfg_log_dir;  log_kind = cfg_log_kind;  log_level = cfg_log_level
     write_fixdiag = .false.
+    run_sequence_file = cfg_run_sequence_file
 
     rewind(unit); read(unit, nml=nuopc_driver, iostat=ios)
 
     call str_lower(log_kind)
     call str_lower(log_level)
     g = driver_group_t(start_date, stop_date, dt_coupling, dt_atm, log_dir, &
-                       log_kind, log_level, write_fixdiag)
+                       log_kind, log_level, write_fixdiag, run_sequence_file)
   end subroutine read_driver_group
 
   !> @brief Aviso para a chave obsoleta write_fixdiag.
@@ -541,8 +547,11 @@ contains
   logical function driver_group_valid(g, is_root) result(ok)
     type(driver_group_t), intent(in) :: g
     logical,              intent(in) :: is_root
+    logical :: exists
 
     ok = .false.
+    exists = .true.
+    if (len_trim(g%run_sequence_file) > 0) inquire(file=trim(g%run_sequence_file), exist=exists)
     if (trim(g%log_kind) /= 'multi' .and. trim(g%log_kind) /= 'multi_on_error') then
       call config_error(is_root, 'log_kind="'//trim(g%log_kind)//'" invalido; use multi|multi_on_error.')
     else if (trim(g%log_level) /= 'warning' .and. trim(g%log_level) /= 'info' .and. &
@@ -552,6 +561,8 @@ contains
       call config_error(is_root, 'dt_coupling deve ser positivo.')
     else if (g%dt_atm <= 0) then
       call config_error(is_root, 'dt_atm deve ser positivo.')
+    else if (.not. exists) then
+      call config_error(is_root, 'run_sequence_file="'//trim(g%run_sequence_file)//'" nao encontrado.')
     else
       ok = .true.
     end if
@@ -582,6 +593,7 @@ contains
     cfg_start_date = g%start_date;  cfg_stop_date = g%stop_date
     cfg_dt_coupling = g%dt_coupling;  cfg_dt_atm = g%dt_atm
     cfg_log_dir = g%log_dir;  cfg_log_kind = g%log_kind;  cfg_log_level = g%log_level
+    cfg_run_sequence_file = g%run_sequence_file
   end subroutine publish_driver_group
 
   ! &nuopc_atm
