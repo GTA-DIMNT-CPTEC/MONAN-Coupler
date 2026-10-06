@@ -8,6 +8,7 @@ program test_writers
   use ESMF
   use mpi
   use med_cap_types_mod, only : MED_InternalState
+  use med_init_mod, only : create_internal_fields
   use med_cap_netcdf_mod, only : med_write_import_fields
   use mpas_atm_types_mod, only : atm_ocean_boundary_type, MPAS_RKIND
   use mpas_import_diag_mod, only : write_mpas_import_diag, set_mpas_diag_clock, &
@@ -28,7 +29,7 @@ program test_writers
   type(ESMF_Grid) :: grid
   type(ESMF_State) :: expState
   type(ESMF_Time) :: t1, t2
-  type(MED_InternalState) :: is
+  type(MED_InternalState), pointer :: is
   type(ESMF_Field) :: fld
   type(atm_ocean_boundary_type) :: bnd
   type(mpas_import_diag_clock_t) :: clk
@@ -53,6 +54,7 @@ program test_writers
   call config_read(rc, 'debug.nml')
 
   ! ── mediador ─────────────────────────────────────────────────────────
+  allocate(is)
   is%diag%write_import = .true.
   is%diag%import_dir   = 'out_med'
   is%par%comm  = comm
@@ -61,6 +63,9 @@ program test_writers
 
   grid = ESMF_GridCreateNoPeriDim(maxIndex=[360,180], regDecomp=[2,petCount/2], &
            indexflag=ESMF_INDEX_GLOBAL, rc=rc)
+  ! Os campos internos são criados como no mediador e depois recebem os
+  ! valores sintéticos (mk, mkmask), na mesma ordem de antes.
+  call create_internal_fields(is, grid, rc)
   k = 0
   call mk(is%ocn_flx%taux);  call mk(is%ocn_flx%tauy);  call mk(is%ocn_flx%sen);  call mk(is%ocn_flx%evap)
   call mk(is%ocn_flx%lwnet); call mk(is%ocn_flx%swvdr); call mk(is%ocn_flx%swvdf)
@@ -177,11 +182,10 @@ contains
   end subroutine export_cases
 
   subroutine mk(f)
-    type(ESMF_Field), intent(out) :: f
+    type(ESMF_Field), intent(inout) :: f
     real(ESMF_KIND_R8), pointer :: p(:,:)
     integer :: i, j
     k = k + 1
-    f = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, rc=rc)
     call ESMF_FieldGet(f, farrayPtr=p, rc=rc)
     do j = lbound(p,2), ubound(p,2)
       do i = lbound(p,1), ubound(p,1)
@@ -192,10 +196,9 @@ contains
   end subroutine mk
 
   subroutine mkmask(f)
-    type(ESMF_Field), intent(out) :: f
+    type(ESMF_Field), intent(inout) :: f
     real(ESMF_KIND_R8), pointer :: p(:,:)
     integer :: i, j
-    f = ESMF_FieldCreate(grid, typekind=ESMF_TYPEKIND_R8, rc=rc)
     call ESMF_FieldGet(f, farrayPtr=p, rc=rc)
     do j = lbound(p,2), ubound(p,2)
       do i = lbound(p,1), ubound(p,1)

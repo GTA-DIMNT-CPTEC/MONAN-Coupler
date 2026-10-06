@@ -21,6 +21,8 @@ module med_cap_types_mod
   use ESMF
   use coupler_constants_mod, only : rho_air, Cp_air, L_evap, T_freeze => T0_KELVIN, eps_q, es_coef_a, es_coef_b, es_coef_c, sigma_sb
   use regrid_manager_mod, only : regrid_manager_t
+  use cpl_fields_mod, only : CPL_NAME_LEN
+  use coupler_constants_mod, only : T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
 
   implicit none
   private
@@ -42,6 +44,7 @@ module med_cap_types_mod
   public :: f_vis_dir, f_vis_dif, f_nir_dir, f_nir_dif
   ! Chaves de configuração que escolhem os campos do mediador
   public :: MED_KEYS
+  public :: med_field_spec_t, MED_FIELDS, med_named_field_t, med_field_index
 
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
   ! As constantes físicas vêm de coupler_constants_mod e são re-exportadas aqui.
@@ -248,6 +251,65 @@ module med_cap_types_mod
     type(med_fill_count_t) :: fill_counts(N_FILL)
   end type med_run_flags_t
 
+  !> Um campo interno do mediador, na malha de fluxo: nome de acoplamento
+  !! (o do campo em FIELDS e no mapa), nome do ESMF_Field e valor inicial.
+  type :: med_field_spec_t
+    character(len=CPL_NAME_LEN) :: name      = ''
+    character(len=16)           :: esmf_name = ''
+    real(ESMF_KIND_R8)          :: initial   = 0.0_ESMF_KIND_R8
+  end type med_field_spec_t
+
+  !> Campos internos do mediador, na ordem de criação. create_internal_fields
+  !! (med_init) cria cada um na malha de fluxo, guarda-o no registro
+  !! is%fields com o nome de acoplamento e o preenche com o valor inicial;
+  !! os componentes de is%ocn_flx, is%ocn, is%ice e is%sfc apontam para as
+  !! entradas do registro. Para incluir um campo calculado no mediador:
+  !! uma linha aqui, o componente no tipo do assunto e a ligação em
+  !! bind_internal_fields (med_init).
+  type(med_field_spec_t), parameter :: MED_FIELDS(*) = [                    &
+    med_field_spec_t('Foxx_taux',      'med_taux',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_tauy',      'med_tauy',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_sen',       'med_sen',        0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_evap',      'med_evap',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_lwnet',     'med_lwnet',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_swnet_vdr', 'med_swvdr',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_swnet_vdf', 'med_swvdf',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_swnet_idr', 'med_swidr',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Foxx_swnet_idf', 'med_swidf',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Faxa_rain',      'med_rain',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Faxa_snow',      'med_snow',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Sa_pslv',        'med_pslv',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Si_ifrac',       'med_ifrac',      0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Sx_omask',       'med_omask',      1.0_ESMF_KIND_R8),   &
+    med_field_spec_t('So_duu10n',      'med_duu10n',     0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('So_t',           'med_sst',        SST_BULK_FALLBACK),  &
+    med_field_spec_t('So_u',           'med_uocn',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('So_v',           'med_vocn',       0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Sf_zorl',        'med_zorl',       0.01_ESMF_KIND_R8),  &
+    med_field_spec_t('Si_avsdr_sis2',  'med_albvdr_ice', ALB_ICE_DEFAULT),    &
+    med_field_spec_t('Si_avsdf_sis2',  'med_albvdf_ice', ALB_ICE_DEFAULT),    &
+    med_field_spec_t('Si_anidr_sis2',  'med_albidr_ice', ALB_ICE_DEFAULT),    &
+    med_field_spec_t('Si_anidf_sis2',  'med_albidf_ice', ALB_ICE_DEFAULT),    &
+    med_field_spec_t('Faxa_coszen',    'med_coszen',     0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Sf_albedo',      'med_albedo',     ALB_OCEAN_DEFAULT),  &
+    med_field_spec_t('Si_t_sis2',      'med_tice',       T_FREEZE_SEAWATER),  &
+    med_field_spec_t('Sx_tsfc',        'med_tsfc_comp',  T_FREEZE_SEAWATER),  &
+    med_field_spec_t('Fioi_taux',      'med_taux_ice',   0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_tauy',      'med_tauy_ice',   0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_sen',       'med_sen_ice',    0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_evap',      'med_evap_ice',   0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_lwnet',     'med_lwnet_ice',  0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_swnet_vdr', 'med_swvdr_ice',  0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_swnet_vdf', 'med_swvdf_ice',  0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_swnet_idr', 'med_swidr_ice',  0.0_ESMF_KIND_R8),   &
+    med_field_spec_t('Fioi_swnet_idf', 'med_swidf_ice',  0.0_ESMF_KIND_R8) ]
+
+  !> Uma entrada do registro de campos internos: nome de acoplamento e campo.
+  type :: med_named_field_t
+    character(len=CPL_NAME_LEN) :: name = ''
+    type(ESMF_Field)            :: field
+  end type med_named_field_t
+
   type :: MED_InternalState
 
     type(ESMF_Grid) :: atm_grid   !< Grade ATM regular 360×180 para cálculo do bulk
@@ -257,6 +319,8 @@ module med_cap_types_mod
     type(med_ocn_fields_t)      :: ocn       !< estado do oceano
     type(med_ice_fields_t)      :: ice       !< gelo marinho
     type(med_sfc_fields_t)      :: sfc       !< superfície para a atmosfera
+    !> Registro dos campos internos (MED_FIELDS): nome de acoplamento e campo.
+    type(med_named_field_t)     :: fields(size(MED_FIELDS))
 
     !> Rotas de interpolação do mediador (ver src/regrid):
     !!   atm2ocn          ATM -> OCN, vizinho mais próximo (fluxos exportados)
@@ -298,5 +362,24 @@ module med_cap_types_mod
   !! próprio para não formar um par importação e exportação homônimo com
   !! So_omask; vai para o diagnóstico mom6_import_*.nc e para o MONAN-A.
   character(len=*), parameter :: MED_KEYS = 'datm,sis2'
+
+contains
+
+  !> @brief Posição do campo name no registro de campos internos (0 se não está).
+  !! @param[in] is    estado interno do mediador
+  !! @param[in] name  nome de acoplamento do campo
+  pure integer function med_field_index(is, name) result(k)
+    type(MED_InternalState), intent(in) :: is
+    character(len=*),        intent(in) :: name
+    integer :: i
+
+    k = 0
+    do i = 1, size(is%fields)
+      if (trim(is%fields(i)%name) == trim(name)) then
+        k = i
+        return
+      end if
+    end do
+  end function med_field_index
 
 end module med_cap_types_mod

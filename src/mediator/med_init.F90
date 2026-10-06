@@ -15,14 +15,12 @@ module med_init_mod
   use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
                                 cfg_use_sis2_dynamic
   use NUOPC, only: NUOPC_Realize
-  use med_cap_types_mod, only: MED_InternalState, MED_KEYS, SST_BULK_FALLBACK
+  use med_cap_types_mod, only: MED_InternalState, MED_KEYS, MED_FIELDS, med_field_index
   use cpl_fields_mod, only: CPL_NAME_LEN
   use cpl_map_mod, only: cpl_arrivals, cpl_current_config, cpl_config_t
   use cpl_grids_mod, only: cpl_latlon_grid, cpl_tripolar_grid, ORIGIN_EAST0, &
                            ORIGIN_EAST0_CORNER
-  use med_cap_methods_mod, only: CreateInternalField, ZeroInternalField, &
-                                 ZeroOcnFluxFields, FillInternalField
-  use coupler_constants_mod, only: T_FREEZE_SEAWATER, ALB_OCEAN_DEFAULT, ALB_ICE_DEFAULT
+  use med_cap_methods_mod, only: CreateInternalField, FillInternalField
 
   implicit none
   private
@@ -240,8 +238,19 @@ contains
     end do
   end subroutine realize_on_grid
 
-  !> @brief Cria os campos internos do mediador na grade ATM e os preenche
-  !! com os valores iniciais.
+  !> @brief Cria os campos internos do mediador na malha de fluxo, na ordem de
+  !! MED_FIELDS, guarda-os no registro is%fields, liga os componentes do
+  !! estado interno às entradas e os preenche com os valores iniciais.
+  !!
+  !! Os valores iniciais (tabela MED_FIELDS, em med_cap_types) valem até o
+  !! primeiro passo: zero para os fluxos e as correntes (oceano em repouso);
+  !! 1 na máscara do oceano (usada só para excluir terra, e "tudo oceano"
+  !! até o primeiro regrid de So_omask não zera fluxos legítimos); a SST de
+  !! reserva SST_BULK_FALLBACK (não zero, para o bulk não sair errático em
+  !! t=0); o albedo do gelo ALB_ICE_DEFAULT, o mesmo de reserva do cap do
+  !! gelo, e o de água aberta ALB_OCEAN_DEFAULT; o ponto de congelamento da
+  !! água do mar nas temperaturas do gelo e composta; e a rugosidade 0,01 m,
+  !! o mesmo cfg_zorl_default do cap do MPAS.
   !! @param[in]    is        estado interno do mediador
   !! @param[inout] atm_grid  grade ATM do mediador
   !! @param[inout] rc        código de retorno
@@ -249,96 +258,76 @@ contains
     type(MED_InternalState), pointer :: is
     type(ESMF_Grid), intent(inout) :: atm_grid
     integer, intent(inout) :: rc
-    call CreateInternalField(is%ocn_flx%taux,   atm_grid, "med_taux",   rc)
-    call CreateInternalField(is%ocn_flx%tauy,   atm_grid, "med_tauy",   rc)
-    call CreateInternalField(is%ocn_flx%sen,    atm_grid, "med_sen",    rc)
-    call CreateInternalField(is%ocn_flx%evap,   atm_grid, "med_evap",   rc)
-    call CreateInternalField(is%ocn_flx%lwnet,  atm_grid, "med_lwnet",  rc)
-    call CreateInternalField(is%ocn_flx%swvdr,  atm_grid, "med_swvdr",  rc)
-    call CreateInternalField(is%ocn_flx%swvdf,  atm_grid, "med_swvdf",  rc)
-    call CreateInternalField(is%ocn_flx%swidr,  atm_grid, "med_swidr",  rc)
-    call CreateInternalField(is%ocn_flx%swidf,  atm_grid, "med_swidf",  rc)
-    call CreateInternalField(is%ocn_flx%rain,   atm_grid, "med_rain",   rc)
-    call CreateInternalField(is%ocn_flx%snow,   atm_grid, "med_snow",   rc)
-    call CreateInternalField(is%ocn_flx%pslv,   atm_grid, "med_pslv",   rc)
-    call CreateInternalField(is%ice%ifrac,  atm_grid, "med_ifrac",  rc)
-    ! máscara terra/oceano real na grade ATM (1=oceano,
-    ! 0=terra). Default 1.0 (oceano) até o primeiro regrid de So_omask —
-    ! seguro porque só é USADA para EXCLUIR terra, não para validar
-    ! oceano; ficar em "tudo oceano" até o regrid real é menos arriscado
-    ! do que ficar em "tudo terra" (zeraria fluxos legítimos até lá).
-    call CreateInternalField(is%ocn%omask,  atm_grid, "med_omask",  rc)
-    call FillInternalField(is%ocn%omask, 1.0_ESMF_KIND_R8, rc)
-    call CreateInternalField(is%ocn_flx%duu10n, atm_grid, "med_duu10n", rc)
-    ! is%ocn%sst: campo de SST interpolado para a grade ATM (destino do OCN->ATM)
-    call CreateInternalField(is%ocn%sst,    atm_grid, "med_sst",    rc)
-    ! Correntes oceânicas interpoladas OCN → ATM.
-    ! Usadas no cálculo de So_duu10n = |(V_atm − V_ocn)|² (protocolo CMEPS).
-    call CreateInternalField(is%ocn%u,   atm_grid, "med_uocn",   rc)
-    call CreateInternalField(is%ocn%v,   atm_grid, "med_vocn",   rc)
-    ! rugosidade Charnock + Smith — calculada no MED e enviada ao MPAS.
-    call CreateInternalField(is%sfc%zorl,   atm_grid, "med_zorl",   rc)
-    ! albedo do gelo por banda, regridado do SIS2.
-    call CreateInternalField(is%ice%alb_vdr, atm_grid, "med_albvdr_ice", rc)
-    call CreateInternalField(is%ice%alb_vdf, atm_grid, "med_albvdf_ice", rc)
-    call CreateInternalField(is%ice%alb_idr, atm_grid, "med_albidr_ice", rc)
-    call CreateInternalField(is%ice%alb_idf, atm_grid, "med_albidf_ice", rc)
-    call CreateInternalField(is%sfc%coszen,  atm_grid, "med_coszen",     rc)
-    call CreateInternalField(is%sfc%albedo,  atm_grid, "med_albedo",     rc)
-    ! Temperatura do gelo na grade ATM
-    call CreateInternalField(is%ice%tice,    atm_grid, "med_tice",       rc)
-    ! Temperatura composta (Sx_tsfc) e fluxos turbulentos e de onda longa do gelo
-    call CreateInternalField(is%sfc%tsfc,    atm_grid, "med_tsfc_comp",  rc)
-    call CreateInternalField(is%ice%taux,    atm_grid, "med_taux_ice",   rc)
-    call CreateInternalField(is%ice%tauy,    atm_grid, "med_tauy_ice",   rc)
-    call CreateInternalField(is%ice%sen,     atm_grid, "med_sen_ice",    rc)
-    call CreateInternalField(is%ice%evap,    atm_grid, "med_evap_ice",   rc)
-    call CreateInternalField(is%ice%lwnet,   atm_grid, "med_lwnet_ice",  rc)
-    ! Onda curta líquida sobre o gelo, por banda
-    call CreateInternalField(is%ice%swvdr,   atm_grid, "med_swvdr_ice",  rc)
-    call CreateInternalField(is%ice%swvdf,   atm_grid, "med_swvdf_ice",  rc)
-    call CreateInternalField(is%ice%swidr,   atm_grid, "med_swidr_ice",  rc)
-    call CreateInternalField(is%ice%swidf,   atm_grid, "med_swidf_ice",  rc)
+    integer :: k
 
-    ! Zerar campos internos
-    call ZeroOcnFluxFields(is%ocn_flx, rc)
-    call ZeroInternalField(is%ice%ifrac,  rc)
-    call ZeroInternalField(is%ocn_flx%duu10n, rc)
-    ! fallback não-zero (ALB_ICE_DEFAULT, o mesmo valor que o cap do gelo usa
-    ! como ALBEDO_ICE_FALLBACK) até o primeiro regrid real do gelo — evita
-    ! um albedo de gelo erroneamente zero (que superestimaria absorção de
-    ! SW) no bootstrap, mesma lógica de SST_BULK_FALLBACK abaixo.
-    call FillInternalField(is%ice%alb_vdr, ALB_ICE_DEFAULT, rc)
-    call FillInternalField(is%ice%alb_vdf, ALB_ICE_DEFAULT, rc)
-    call FillInternalField(is%ice%alb_idr, ALB_ICE_DEFAULT, rc)
-    call FillInternalField(is%ice%alb_idf, ALB_ICE_DEFAULT, rc)
-    call ZeroInternalField(is%sfc%coszen, rc)
-    call FillInternalField(is%sfc%albedo, ALB_OCEAN_DEFAULT, rc)
-    ! T_gelo default = ponto de congelamento da água do mar; fluxos
-    ! turbulentos do gelo começam zerados até o 1o calc_bulk_ncar real.
-    call FillInternalField(is%ice%tice,   T_FREEZE_SEAWATER, rc)
-    call FillInternalField(is%sfc%tsfc,   T_FREEZE_SEAWATER, rc)
-    call ZeroInternalField(is%ice%taux,  rc)
-    call ZeroInternalField(is%ice%tauy,  rc)
-    call ZeroInternalField(is%ice%sen,   rc)
-    call ZeroInternalField(is%ice%evap,  rc)
-    call ZeroInternalField(is%ice%lwnet, rc)
-    ! começa zerado até o 1o calc_bulk_ncar real,
-    ! mesma lógica de is%ice%sen/is%ice%lwnet acima.
-    call ZeroInternalField(is%ice%swvdr, rc)
-    call ZeroInternalField(is%ice%swvdf, rc)
-    call ZeroInternalField(is%ice%swidr, rc)
-    call ZeroInternalField(is%ice%swidf, rc)
-    ! Inicializa SST com valor padrão (não zero, para evitar bulk errático no t=0)
-    call FillInternalField(is%ocn%sst, SST_BULK_FALLBACK, rc)
-    ! Valor de bootstrap: será substituído no primeiro passo pelo So_t do DOCN/MOM6.
-    ! correntes oceânicas inicializadas a zero (oceano em repouso).
-    ! Serão regridadas de So_u/So_v a partir do primeiro passo de acoplamento.
-    call ZeroInternalField(is%ocn%u, rc)
-    call ZeroInternalField(is%ocn%v, rc)
-    ! rugosidade inicial = 0.01 m (mesmo cfg_zorl_default do cap MPAS).
-    ! Substituída no primeiro passo pela parametrização Charnock no bulk NCAR.
-    call FillInternalField(is%sfc%zorl, 0.01_ESMF_KIND_R8, rc)
+    do k = 1, size(MED_FIELDS)
+      is%fields(k)%name = MED_FIELDS(k)%name
+      call CreateInternalField(is%fields(k)%field, atm_grid, MED_FIELDS(k)%esmf_name, rc)
+    end do
+    call bind_internal_fields(is)
+    do k = 1, size(MED_FIELDS)
+      call FillInternalField(is%fields(k)%field, MED_FIELDS(k)%initial, rc)
+    end do
   end subroutine create_internal_fields
+
+  !> @brief Liga cada componente de is%ocn_flx, is%ocn, is%ice e is%sfc ao campo
+  !! de mesmo nome de acoplamento no registro is%fields. O ESMF_Field é uma
+  !! referência: componente e entrada do registro são o mesmo campo.
+  !! @param[in] is  estado interno do mediador, com o registro preenchido
+  subroutine bind_internal_fields(is)
+    type(MED_InternalState), pointer :: is
+
+    call bind(is%ocn_flx%taux,    'Foxx_taux')
+    call bind(is%ocn_flx%tauy,    'Foxx_tauy')
+    call bind(is%ocn_flx%sen,     'Foxx_sen')
+    call bind(is%ocn_flx%evap,    'Foxx_evap')
+    call bind(is%ocn_flx%lwnet,   'Foxx_lwnet')
+    call bind(is%ocn_flx%swvdr,   'Foxx_swnet_vdr')
+    call bind(is%ocn_flx%swvdf,   'Foxx_swnet_vdf')
+    call bind(is%ocn_flx%swidr,   'Foxx_swnet_idr')
+    call bind(is%ocn_flx%swidf,   'Foxx_swnet_idf')
+    call bind(is%ocn_flx%rain,    'Faxa_rain')
+    call bind(is%ocn_flx%snow,    'Faxa_snow')
+    call bind(is%ocn_flx%pslv,    'Sa_pslv')
+    call bind(is%ocn_flx%duu10n,  'So_duu10n')
+    call bind(is%ocn%sst,         'So_t')
+    call bind(is%ocn%u,           'So_u')
+    call bind(is%ocn%v,           'So_v')
+    call bind(is%ocn%omask,       'Sx_omask')
+    call bind(is%ice%ifrac,       'Si_ifrac')
+    call bind(is%ice%tice,        'Si_t_sis2')
+    call bind(is%ice%alb_vdr,     'Si_avsdr_sis2')
+    call bind(is%ice%alb_vdf,     'Si_avsdf_sis2')
+    call bind(is%ice%alb_idr,     'Si_anidr_sis2')
+    call bind(is%ice%alb_idf,     'Si_anidf_sis2')
+    call bind(is%ice%taux,        'Fioi_taux')
+    call bind(is%ice%tauy,        'Fioi_tauy')
+    call bind(is%ice%sen,         'Fioi_sen')
+    call bind(is%ice%evap,        'Fioi_evap')
+    call bind(is%ice%lwnet,       'Fioi_lwnet')
+    call bind(is%ice%swvdr,       'Fioi_swnet_vdr')
+    call bind(is%ice%swvdf,       'Fioi_swnet_vdf')
+    call bind(is%ice%swidr,       'Fioi_swnet_idr')
+    call bind(is%ice%swidf,       'Fioi_swnet_idf')
+    call bind(is%sfc%zorl,        'Sf_zorl')
+    call bind(is%sfc%coszen,      'Faxa_coszen')
+    call bind(is%sfc%albedo,      'Sf_albedo')
+    call bind(is%sfc%tsfc,        'Sx_tsfc')
+
+  contains
+
+    !> Atribui ao componente o campo do registro com o nome dado; um nome
+    !! fora do registro é erro de programação e para a execução.
+    subroutine bind(field, name)
+      type(ESMF_Field), intent(out) :: field
+      character(len=*), intent(in)  :: name
+      integer :: k
+
+      k = med_field_index(is, name)
+      if (k == 0) error stop 'bind_internal_fields: campo fora de MED_FIELDS'
+      field = is%fields(k)%field
+    end subroutine bind
+
+  end subroutine bind_internal_fields
 
 end module med_init_mod

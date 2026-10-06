@@ -17,7 +17,7 @@ module med_cap_netcdf_mod
   use mpi
   use ieee_arithmetic, only: ieee_is_finite   ! guard NaN/Inf antes de nf90_put_var
 
-  use med_cap_types_mod, only: MED_InternalState, med_diag_config_t
+  use med_cap_types_mod, only: MED_InternalState, med_diag_config_t, med_field_index
   use coupler_log_mod, only: COMP_MED, log_info, log_warning, log_debug
   use cpl_fields_mod, only: cpl_field_attributes
 
@@ -435,66 +435,37 @@ contains
     end if
   end subroutine gather_ocean_mask
 
-  !> @brief Ponteiro para o campo interno (grade ATM 360×180) de um nome do estado.
+  !> @brief Ponteiro para o campo interno (grade ATM 360×180) de um nome do estado,
+  !! procurado no registro de campos internos (is%fields).
   !!
-  !! Um campo do exportState sem mapeamento aqui viraria variável vazia no
-  !! arquivo, sem nenhum sinal; por isso o caso padrão registra um aviso,
-  !! para que a próxima lacuna apareça no log em vez de só aparecer no GrADS.
+  !! Um campo do exportState fora do registro viraria variável vazia no
+  !! arquivo, sem nenhum sinal; por isso esse caso registra um aviso, para
+  !! que a próxima lacuna apareça no log em vez de só aparecer no GrADS.
   !!
   !! @param[in]  is      estado interno do mediador
   !! @param[in]  name    nome do campo no exportState
-  !! @param[out] fptr2d  ponteiro para os dados locais; nulo se sem mapeamento
+  !! @param[out] fptr2d  ponteiro para os dados locais; nulo se fora do registro
   !! @param[out] rc      código de retorno do ESMF_FieldGet
   subroutine internal_field_ptr(is, name, fptr2d, rc)
     type(MED_InternalState),     intent(in)  :: is
     character(len=*),            intent(in)  :: name
     real(ESMF_KIND_R8), pointer, intent(out) :: fptr2d(:,:)
     integer,                     intent(out) :: rc
-
+    integer :: k
 
     nullify(fptr2d)
-    select case (trim(name))
-      case ('Foxx_taux');      call ESMF_FieldGet(is%ocn_flx%taux,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_tauy');      call ESMF_FieldGet(is%ocn_flx%tauy,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_sen');       call ESMF_FieldGet(is%ocn_flx%sen,    farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_evap');      call ESMF_FieldGet(is%ocn_flx%evap,   farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_lwnet');     call ESMF_FieldGet(is%ocn_flx%lwnet,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_vdr'); call ESMF_FieldGet(is%ocn_flx%swvdr,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_vdf'); call ESMF_FieldGet(is%ocn_flx%swvdf,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_idr'); call ESMF_FieldGet(is%ocn_flx%swidr,  farrayPtr=fptr2d, rc=rc)
-      case ('Foxx_swnet_idf'); call ESMF_FieldGet(is%ocn_flx%swidf,  farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_rain');      call ESMF_FieldGet(is%ocn_flx%rain,   farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_snow');      call ESMF_FieldGet(is%ocn_flx%snow,   farrayPtr=fptr2d, rc=rc)
-      case ('Sa_pslv');        call ESMF_FieldGet(is%ocn_flx%pslv,   farrayPtr=fptr2d, rc=rc)
-      case ('Si_ifrac');       call ESMF_FieldGet(is%ice%ifrac,  farrayPtr=fptr2d, rc=rc)
-      case ('So_duu10n');      call ESMF_FieldGet(is%ocn_flx%duu10n, farrayPtr=fptr2d, rc=rc)
-      case ('So_t');           call ESMF_FieldGet(is%ocn%sst,    farrayPtr=fptr2d, rc=rc)
-      case ('So_u');           call ESMF_FieldGet(is%ocn%u,   farrayPtr=fptr2d, rc=rc)
-      case ('So_v');           call ESMF_FieldGet(is%ocn%v,   farrayPtr=fptr2d, rc=rc)
-      case ('Sf_zorl');        call ESMF_FieldGet(is%sfc%zorl,   farrayPtr=fptr2d, rc=rc)
-      case ('Sf_albedo');      call ESMF_FieldGet(is%sfc%albedo, farrayPtr=fptr2d, rc=rc)
-      case ('Faxa_coszen');    call ESMF_FieldGet(is%sfc%coszen, farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_taux');      call ESMF_FieldGet(is%ice%taux,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_tauy');      call ESMF_FieldGet(is%ice%tauy,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_sen');       call ESMF_FieldGet(is%ice%sen,    farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_evap');      call ESMF_FieldGet(is%ice%evap,   farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_lwnet');     call ESMF_FieldGet(is%ice%lwnet,  farrayPtr=fptr2d, rc=rc)
-      ! Onda curta sobre gelo (f_sw*_ice, calculados no
-      ! med_bulk_ncar) e temperatura de superfície usada pelo bulk sobre gelo.
-      case ('Fioi_swnet_vdr'); call ESMF_FieldGet(is%ice%swvdr,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_vdf'); call ESMF_FieldGet(is%ice%swvdf,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_idr'); call ESMF_FieldGet(is%ice%swidr,  farrayPtr=fptr2d, rc=rc)
-      case ('Fioi_swnet_idf'); call ESMF_FieldGet(is%ice%swidf,  farrayPtr=fptr2d, rc=rc)
-      case ('Sx_tsfc');        call ESMF_FieldGet(is%sfc%tsfc,   farrayPtr=fptr2d, rc=rc)
-      ! a própria máscara vira variável do arquivo.
-      case ('Sx_omask');       call ESMF_FieldGet(is%ocn%omask,  farrayPtr=fptr2d, rc=rc)
-      case default
-        call log_warning(COMP_MED, ROUTINE//': campo "'// &
-          trim(name)//'" nao tem mapeamento no select case; '// &
-          'a variavel sera gravada apenas com _FillValue')
-        nullify(fptr2d)
-        rc = ESMF_SUCCESS
-    end select
+    k = med_field_index(is, name)
+    if (k > 0) then
+      call ESMF_FieldGet(is%fields(k)%field, farrayPtr=fptr2d, rc=rc)
+    else
+      ! O texto da mensagem é o de antes do registro, lido nas comparações
+      ! de log.
+      call log_warning(COMP_MED, ROUTINE//': campo "'// &
+        trim(name)//'" nao tem mapeamento no select case; '// &
+        'a variavel sera gravada apenas com _FillValue')
+      nullify(fptr2d)
+      rc = ESMF_SUCCESS
+    end if
   end subroutine internal_field_ptr
 
   !> @brief Reúne em todos os PETs um campo da grade ATM 360×180.
