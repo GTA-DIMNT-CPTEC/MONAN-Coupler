@@ -336,7 +336,7 @@ algum conector.
 
 Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),
 interpolar (métodos, reserva, esquema), completar (preenchimento por
-vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.
+vizinhança) e limitar (troca de NaN). Coluna vazia: etapa desligada.
 "Campos" é o número de campos que passam pela rota em EXCHANGES.
 
 | Rota | Malhas | Métodos | Máscara | Reserva | Sem valor | Completar | Limitar | Criar | Campos |

@@ -106,6 +106,7 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
 | `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
 | `tools/dev/confere-curto-circuito.py` | acusa guardas que contam com o curto-circuito do `.and.` (`associated`, `allocated` ou `present` e uso do mesmo nome na expressão) | `docs/conferencias-locais.md` |
+| `tools/dev/confere-exportacao.py` | confere que todo campo exportado pelo mediador por conector tem preenchimento em `src/mediator/`, e o inverso | `docs/conferencias-locais.md` |
 | `tools/dev/renomeia-identificadores.py` | troca nomes de identificadores Fortran por uma tabela de `tools/dev/nomes/` (`aplica`) e confere que a troca não mudou mais nada (`confere REV`) | `docs/conferencias-locais.md` |
 | `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit (etapas que só movem código) | `docs/conferencias-locais.md` |
 | `tests/writers/compara-gravadores.bash` | executa os gravadores de diagnóstico de duas versões com os mesmos dados e compara os arquivos byte a byte | `docs/conferencias-locais.md` |

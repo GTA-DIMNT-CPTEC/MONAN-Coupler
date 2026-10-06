@@ -38,7 +38,7 @@ Um **ponto** é um componente numa malha, `COMPONENTE@malha` (ex.: `OCN@ocn_mom6
 | `GRIDS` | malha citada no mapa | `name`, `component`, `grid_type`, `description` |
 | `EXCHANGES` | passagem de um campo de um ponto a outro | `field`, `src`, `dst`, `via` (`'conector'`, `'cap'` ou nome de rota), `when`, `method` (só nos conectores) |
 | `EXPORTS` | campo que um modelo exporta, na ordem do anúncio | `field`, `point`, `when` |
-| `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` (`min_limit` e `max_limit` existem, mas ainda não são aplicadas) |
+| `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` |
 | `GAPS` | lacuna conhecida, que não interrompe a rodada | `field`, `point`, `when`, `reason` |
 
 Exemplo, o caminho da SST até a malha de fluxo:

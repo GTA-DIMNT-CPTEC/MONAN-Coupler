@@ -472,15 +472,14 @@ def gera(t):
     out += ['', '## 5. Rotas do mediador', '',
             'Toda rota tem quatro etapas: preparar (máscara, pontos sem valor),',
             'interpolar (métodos, reserva, esquema), completar (preenchimento por',
-            'vizinhança) e limitar (faixa e NaN). Coluna vazia: etapa desligada.',
+            'vizinhança) e limitar (troca de NaN). Coluna vazia: etapa desligada.',
             '"Campos" é o número de campos que passam pela rota em EXCHANGES.', '']
     linhas = []
     for r in rotas:
         usos = sorted({x['field'] for x in trocas if x['via'] == r['name']})
         limites = []
-        for c, rot in (('min_limit', 'mín.'), ('max_limit', 'máx.'), ('nan_to', 'NaN para')):
-            if r[c] != 'CPL_UNSET':
-                limites.append('{} {}'.format(rot, numero(r[c])))
+        if r['nan_to'] != 'CPL_UNSET':
+            limites.append('NaN para {}'.format(numero(r['nan_to'])))
         linhas.append([codigo(r['name']), '{} para {}'.format(r['src'], r['dst']),
                        r['methods'].replace(',', ', '), codigo(r['mask']),
                        codigo(r['fallback']), r['no_value'], preenchimento(r['fill']),

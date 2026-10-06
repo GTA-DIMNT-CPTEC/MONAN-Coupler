@@ -92,7 +92,8 @@
 !!                  nenhum método servir) e esquema (padrão 'esmf', trocável
 !!                  no grupo &nuopc_regrid do nuopc.input)
 !!   3. completar   completar: preenchimento por vizinhança (regrid_fill_t)
-!!   4. limitar     min_limit, max_limit e nan_to; CPL_UNSET desliga
+!!   4. limitar     nan_to, o valor que substitui NaN no destino; CPL_UNSET
+!!                  desliga
 !! E a coluna create, que não é etapa: o momento em que a rota é criada.
 !!   'inicio'         em InitializeDataComplete
 !!   'primeiro_uso'   na primeira vez que o mediador precisa dela
@@ -139,7 +140,7 @@ module cpl_map_mod
     [character(len=CPL_METHOD_LEN) :: 'bilinear', 'patch', 'nearest_stod',          &
      'nearest_dtos', 'conserve', 'conserve_2nd', 'redist']
 
-  !> Valor que desliga as colunas min_limit, max_limit e nan_to.
+  !> Valor que desliga a coluna nan_to.
   real(r8), parameter :: CPL_UNSET = huge(1.0_r8)
 
   !> Condições aceitas na coluna when.
@@ -200,8 +201,6 @@ module cpl_map_mod
     character(len=CPL_VIA_LEN)   :: fallback   = ''
     character(len=12)            :: no_value   = 'zerar'
     type(regrid_fill_t)          :: fill       = regrid_fill_t()
-    real(r8)                     :: min_limit = CPL_UNSET
-    real(r8)                     :: max_limit = CPL_UNSET
     real(r8)                     :: nan_to     = CPL_UNSET
     character(len=16)            :: create     = 'inicio'
   end type cpl_route_t
