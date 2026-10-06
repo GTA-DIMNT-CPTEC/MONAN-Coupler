@@ -153,7 +153,7 @@ contains
     proceed = .true.
   end subroutine get_atm_forcing
 
-  !> Forçantes do DATM (uso quando use_mpas_atm é falso): os nove campos
+  !> @brief Forçantes do DATM (uso quando use_mpas_atm é falso): os nove campos
   !! do importState, todos obrigatórios. Na falta de um deles, retorna com o
   !! código de erro de GetFieldPtr e os ponteiros de saída como estavam.
   subroutine get_datm_forcing(importState, uas, vas, tas, shum, psl, swdn, lwdn, rain, snow, rc)
@@ -191,7 +191,7 @@ contains
     call log_debug(COMP_MED, 'forcante atmosferica do DATM (JRA55)')
   end subroutine get_datm_forcing
 
-  !> Umidade e neve do MPAS, opcionais: aponta shum e snow para os campos do
+  !> @brief Umidade e neve do MPAS, opcionais: aponta shum e snow para os campos do
   !! importState quando existem; senão, aloca shum_local (SHUM_OCEAN_DEFAULT)
   !! e snow_local (zero) nos limites locais de Sa_u10m_mpas e aponta para
   !! eles, registrando a ausência no log.

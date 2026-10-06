@@ -26,11 +26,8 @@
 !!                       acessar os dados.
 !! Os nomes dos campos estão escritos aqui; tests/unit/test_cpl_map.F90
 !! confere que as trocas 'cap' do mapa são as exportações e as importações
-!! do MONAN-A. O diagnóstico NetCDF fica em mpas_cap_netcdf.F90.
-!!
-!! Até a R-FASE11-23 este arquivo era mpas_cap_methods.F90, e
-!! find_local_field e state_set_field_1d estavam em mpas_cell_binning.F90;
-!! a R-FASE11-24 reuniu aqui a tradução, sem mudar instruções.
+!! do MONAN-A. O diagnóstico NetCDF fica em mpas_cap_netcdf.F90, e a média
+!! das células por caixa da grade regular, em mpas_cell_binning.F90.
 
 module mpas_adapter_mod
 
@@ -43,7 +40,7 @@ module mpas_adapter_mod
   use coupler_log_mod, only : COMP_ATM, log_info, log_warning, log_debug
   use cpl_grids_mod, only : cpl_latlon_grid, ORIGIN_WEST180, index_trunc, lon_m180to180_floor
   ! cfg_zorl_default e cfg_sst_default: valores de reserva de mpas_import
-  ! para rugosidade e SST invalidas (ver fill_invalid_sst).
+  ! para rugosidade e SST inválidas (ver fill_invalid_sst).
   use coupler_config_mod, only : cfg_zorl_default,          &
                                    cfg_sst_default,           &
                                    cfg_write_import_diag,     &
@@ -72,23 +69,23 @@ contains
   !! Importa os campos do mediador MED->MPAS (ponto ATM@atm_cap do mapa de
   !! acoplamento), entre eles:
   !!   Sx_tsfc   -> atm_bnd%sst           Temp. de pele composta [K]
-  !!                (So_t, SST pura, e' consumida so' pelo SIS2, para o
+  !!                (So_t, SST pura, é consumida só pelo SIS2, para o
   !!                fluxo de calor basal do gelo)
-  !!   Si_ifrac  -> atm_bnd%ice_fraction  Fracao de gelo [0-1] do SIS2/proxy
+  !!   Si_ifrac  -> atm_bnd%ice_fraction  Fração de gelo [0-1] do SIS2/proxy
   !!   So_u      -> atm_bnd%uocn          Corrente zonal [m/s] do MOM6 u_surf
   !!   So_v      -> atm_bnd%vocn          Corrente merid [m/s] do MOM6 v_surf
   !!   Sf_zorl   -> atm_bnd%zorl          Rugosidade [m]       Charnock+Smith MED
   !!
-  !! Sf_zorl chega no importState MPAS em rank-1
-  !! (malha Voronoi, via conector MED->MPAS). A decomposicao OCN local do PET
-  !! (nCells_OCN) difere da decomposicao MPAS (nCells_MPAS). A copia posicional
-  !! no ramo rank-1 de state_get_field_1d cobria apenas nCells_OCN celulas e
-  !! zerava o restante, resultando em atm_bnd%zorl ~ 0 (clampado a 1e-5 m)
-  !! nas celulas nao mapeadas. Por isso: pre-inicializar zorl com cfg_zorl_default
-  !! e nao sobrescrever as celulas nao cobertas (preservar o default 0.01 m).
+  !! Sf_zorl chega no importState MPAS em rank-1 (malha Voronoi, via
+  !! conector MED->MPAS), e a decomposição OCN local do PET (nCells_OCN)
+  !! difere da decomposição MPAS (nCells_MPAS). A cópia posicional do ramo
+  !! rank-1 de state_get_field_1d cobre só nCells_OCN células; por isso zorl
+  !! é preenchido antes com cfg_zorl_default, e as células não cobertas
+  !! ficam com esse valor (0.01 m), em vez de zero (que o corte levaria a
+  !! 1e-5 m).
   !!
-  !! Robustez: state_get_field_1d retorna rc=SUCCESS quando o campo nao
-  !! esta presente (apenas registra info no log ESMF). Isso permite usar
+  !! Robustez: state_get_field_1d retorna rc=SUCCESS quando o campo não
+  !! está presente (apenas registra info no log ESMF). Isso permite usar
   !! este cap tanto com o acoplamento completo quanto em modos de teste com
   !! subconjunto de campos.
   subroutine mpas_import(diag_clock, importState, atm_bnd, nCells, rc, lonCell, latCell)
@@ -97,8 +94,8 @@ contains
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
     integer,                       intent(in)    :: nCells
     integer,                       intent(inout) :: rc
-    real(MPAS_RKIND), optional,    intent(in)    :: lonCell(:)  !< lon celulas [rad, 0..2pi]
-    real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat celulas [rad, -pi/2..pi/2]
+    real(MPAS_RKIND), optional,    intent(in)    :: lonCell(:)  !< lon células [rad, 0..2pi]
+    real(MPAS_RKIND), optional,    intent(in)    :: latCell(:)  !< lat células [rad, -pi/2..pi/2]
 
     character(len=*), parameter :: subname = 'mpas_import'
           real(MPAS_RKIND), parameter :: ICE_POLAR = 0.5_MPAS_RKIND
@@ -108,44 +105,39 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! -- Temperatura de pele composta [K] -----------------------------------
-    ! passa coordenadas para mapeamento geografico correto
-    ! 'Sx_tsfc' (composto por Si_ifrac com Si_t_sis2), NAO 'So_t' (SST pura,
-    ! consumida so' pelo SIS2 para o fluxo de calor basal do gelo). Ver a
-    ! documentacao acima.
+    ! Temperatura de pele composta [K]: 'Sx_tsfc' (composta por Si_ifrac
+    ! com Si_t_sis2), e não 'So_t' (SST pura, consumida só pelo SIS2 para o
+    ! fluxo de calor basal do gelo). As coordenadas permitem o mapeamento
+    ! geográfico.
     call state_get_field_1d(importState, 'Sx_tsfc', nCells, atm_bnd%sst, rc, &
                             lonCell, latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    ! SST era o UNICO dos 4 campos importados
-    ! aqui sem clamp fisico nem guarda de NaN — Si_ifrac, So_u, So_v e Sf_zorl
-    ! ja tinham essa protecao (ver abaixo), mas Sx_tsfc/So_t nao, apesar de
-    ! ser usado
-    ! DIRETAMENTE em skintemp_field/sst_field logo antes de core_run
-    ! (mpas_atm_model.F90::inject_ocean_cells). Qualquer celula da malha Voronoi que caia perto de
-    ! uma regiao sem mapeamento valido no regrid grade-regular->Voronoi (ex.:
-    ! extremos de latitude/polos) pode chegar aqui como NaN ou valor fisico
-    ! absurdo, alimentando core_run sem protecao (candidato a causa de um
-    ! SIGSEGV em core_run ja observado). O corte usa a mesma faixa fisica do
-    ! mediador (med_ocean.F90, SST_FILL: 270 K a 310 K).
+
+    ! A SST vai DIRETAMENTE para skintemp_field/sst_field antes de core_run
+    ! (mpas_atm_model.F90::inject_ocean_cells). Uma célula Voronoi perto de
+    ! uma região sem mapeamento válido no regrid grade regular->Voronoi (por
+    ! exemplo, nos extremos de latitude) pode chegar aqui como NaN ou valor
+    ! absurdo, por isso a SST passa pelo mesmo corte físico do mediador
+    ! (med_ocean.F90, SST_FILL: 270 K a 310 K) e pela guarda de NaN, como os
+    ! demais campos importados.
     ! O valor de reserva depende da latitude: usar cfg_sst_default (~298 K,
-    ! valor tropical) em QUALQUER celula invalida, inclusive polar, criaria
-    ! um vies quente artificial de ~27 K nas altas latitudes (>60°), onde a
-    ! agua do mar fica perto do ponto de congelamento (~271.35 K = -1.8 °C,
-    ! T_FILL_POLAR abaixo, o mesmo valor de preenchimento do mediador).
-    ! Em vez de um degrau em 60°, usa-se
-    ! interpolacao LINEAR continua em |latitude| (graus), de T_FILL_TROPICAL
-    ! no equador (0°) ate T_FILL_POLAR no polo (90°). Mais realista que um
-    ! degrau (o perfil zonal real de SST decai suavemente, nao em bloco) e
-    ! evita uma descontinuidade artificial de temperatura logo em 60°N/S
-    ! caso o fallback seja usado numa faixa continua de celulas ali.
+    ! valor tropical) em QUALQUER célula inválida, inclusive polar, criaria
+    ! um viés quente artificial de ~27 K nas altas latitudes (>60°), onde a
+    ! água do mar fica perto do ponto de congelamento (~271.35 K = -1.8 °C,
+    ! T_FILL_POLAR, o mesmo valor de preenchimento do mediador). Usa-se
+    ! interpolação LINEAR contínua em |latitude| (graus), de T_FILL_TROPICAL
+    ! no equador (0°) até T_FILL_POLAR no polo (90°): o perfil zonal real de
+    ! SST decai suavemente, e um degrau em 60° criaria uma descontinuidade
+    ! artificial de temperatura caso o valor de reserva fosse usado numa
+    ! faixa contínua de células ali.
     if (allocated(atm_bnd%sst)) then
       call fill_invalid_sst(nCells, atm_bnd, latCell)
     end if
 
-    ! -- Fracao de gelo marinho [0-1] -------------------------------------
-    ! importada do SIS2 via mediador. Clamp fisico [0,1] aplicado defensivamente -- regrid bilinear pode
-    ! extrapolar levemente fora do intervalo (tipico +/- 0.02 em fronteiras
-    ! gelo/agua).
+    ! Fração de gelo marinho [0-1], importada do SIS2 via mediador. O corte
+    ! físico em [0,1] é defensivo: o regrid bilinear pode extrapolar
+    ! levemente fora do intervalo (tipicamente +/- 0.02 nas fronteiras
+    ! gelo/água).
     call state_get_field_1d(importState, 'Si_ifrac', nCells, &
                             atm_bnd%ice_fraction, rc, lonCell, latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -154,13 +146,10 @@ contains
         atm_bnd%ice_fraction = 0.0_MPAS_RKIND
       where (atm_bnd%ice_fraction > 1.0_MPAS_RKIND) &
         atm_bnd%ice_fraction = 1.0_MPAS_RKIND
-      ! Fallback de NaN para a fração de gelo: cair sempre em 0.0 (sem gelo)
-      ! tem o mesmo problema conceitual do fallback de SST. Nos trópicos "sem
-      ! gelo" é o palpite certo, mas perto dos polos é um palpite ruim, porque
-      ! ali gelo marinho é comum e esperado. Passa a interpolar linearmente de
-      ! 0.0 no equador até ICE_POLAR no polo, mesma lógica já usada para a SST
-      ! acima. Só o valor de preenchimento muda; o corte físico em [0,1] logo
-      ! acima continua igual, e aquele já estava correto.
+      ! Reserva para NaN na fração de gelo: zero (sem gelo) é o palpite
+      ! certo nos trópicos, mas ruim perto dos polos, onde o gelo marinho é
+      ! comum. Por isso o valor interpola linearmente de 0.0 no equador até
+      ! ICE_POLAR no polo, como a SST acima.
       if (present(latCell)) then
           n_2 = nCells
           allocate(ice_fallback(n_2))
@@ -177,22 +166,22 @@ contains
       end if
     end if
 
-    ! -- Corrente oceanica zonal So_u [m/s] -------------------------------
-    ! usado no esquema de superficie do MPAS para calcular tensao
+    ! Corrente oceânica zonal So_u [m/s]
+    ! usado no esquema de superfície do MPAS para calcular tensão
     ! de cisalhamento relativa ao oceano (vento aparente = V_atm - V_ocn).
-    ! Erro tipico se ignorado: < 1% em oceano calmo, ate 15% em correntes
+    ! Erro típico se ignorado: < 1% em oceano calmo, até 15% em correntes
     ! fortes (Kuroshio, Brasil, Agulhas, ACC).
     if (allocated(atm_bnd%uocn)) then
       call state_get_field_1d(importState, 'So_u', nCells, atm_bnd%uocn, rc, &
                               lonCell, latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! Clamp fisico: correntes superficiais oceanicas raramente > 3 m/s
+      ! Clamp físico: correntes superficiais oceânicas raramente > 3 m/s
       ! (recorde mundial Gulf Stream ~2.5 m/s; ACC ~1.5 m/s).
       where (abs(atm_bnd%uocn) > 5.0_MPAS_RKIND) atm_bnd%uocn = 0.0_MPAS_RKIND
       where (atm_bnd%uocn /= atm_bnd%uocn)       atm_bnd%uocn = 0.0_MPAS_RKIND
     end if
 
-    ! -- Corrente oceanica meridional So_v [m/s] --------------------------
+    ! Corrente oceânica meridional So_v [m/s]
     if (allocated(atm_bnd%vocn)) then
       call state_get_field_1d(importState, 'So_v', nCells, atm_bnd%vocn, rc, &
                               lonCell, latCell)
@@ -201,70 +190,67 @@ contains
       where (atm_bnd%vocn /= atm_bnd%vocn)       atm_bnd%vocn = 0.0_MPAS_RKIND
     end if
 
-    ! -- Rugosidade superficial Sf_zorl [m] -------------------------------
-    ! rugosidade via Charnock + Smith calculada no MED
-    ! a partir de Foxx_taux/tauy (mesmas variaveis usadas para u* no bulk).
-    ! Substitui o default fixo cfg_zorl_default = 0.01 m que vigorou ate o
-    ! Habilita feedback dinamico vento <-> rugosidade essencial em
-    ! tempestades (sob ventos fortes a rugosidade aumenta a ordens de 10x).
+    ! Rugosidade superficial Sf_zorl [m], calculada no MED por Charnock +
+    ! Smith a partir de Foxx_taux/tauy (as mesmas variáveis usadas para u*
+    ! no bulk). Dá a realimentação vento <-> rugosidade, essencial em
+    ! tempestades (sob ventos fortes a rugosidade cresce até 10 vezes).
     !
-    ! Clamp fisico [Z0_MIN, Z0_MAX] aplicado defensivamente:
-    !   Z0_MIN = 1e-5 m  (rugosidade molecular minima do ar)
-    !   Z0_MAX = 0.1 m   (limite superior — alem disso spray cat-5+)
+    ! Corte físico [Z0_MIN, Z0_MAX] aplicado defensivamente:
+    !   Z0_MIN = 1e-5 m  (rugosidade molecular mínima do ar)
+    !   Z0_MAX = 0.1 m   (limite superior; além disso, spray de categoria 5+)
     if (allocated(atm_bnd%zorl)) then
-      ! pré-inicializar com cfg_zorl_default antes de
-      ! state_get_field_1d. O ramo rank-1 de state_get_field_1d preserva
-      ! o valor inicial em data() para células sem mapeamento geográfico
-      ! (quando nCells_OCN < nCells_MPAS no PET). Sem isso, células não
-      ! mapeadas herdavam lixo de memória ou zero (clampado para 1e-5 m).
+      ! Preenche com cfg_zorl_default antes de state_get_field_1d: o ramo
+      ! rank-1 preserva o valor inicial de data() nas células sem
+      ! mapeamento geográfico (quando nCells_OCN < nCells_MPAS no PET), que
+      ! de outro modo ficariam com lixo de memória ou zero.
       atm_bnd%zorl = real(cfg_zorl_default, MPAS_RKIND)
       call state_get_field_1d(importState, 'Sf_zorl', nCells, atm_bnd%zorl, rc, &
                               lonCell, latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! Clamps fisicos [Z0_MIN, Z0_MAX]
+      ! Clamps físicos [Z0_MIN, Z0_MAX]
       where (atm_bnd%zorl < 1.0e-5_MPAS_RKIND) atm_bnd%zorl = 1.0e-5_MPAS_RKIND
       where (atm_bnd%zorl > 0.1_MPAS_RKIND)    atm_bnd%zorl = 0.1_MPAS_RKIND
       where (atm_bnd%zorl /= atm_bnd%zorl)     &                ! NaN guard
         atm_bnd%zorl = real(cfg_zorl_default, MPAS_RKIND)
     end if
 
-    ! -- Albedo de superfície Sf_albedo [0-1] -------------------------
-    ! Vindo do mediador: media ponderada por banda entre albedo dinamico de
-    ! agua aberta (Briegleb 1986, dependente do zenite solar) e albedo real
+    ! Albedo de superfície Sf_albedo [0-1]
+    ! Vindo do mediador: média ponderada por banda entre albedo dinâmico de
+    ! água aberta (Briegleb 1986, dependente do zênite solar) e albedo real
     ! do gelo (SIS2), ponderados por Si_ifrac. Substitui a climatologia
-    ! mensal (albedo12m) do MONAN-A sobre agua/gelo — requer
+    ! mensal (albedo12m) do MONAN-A sobre água/gelo — requer
     ! config_sfc_albedo=.false. no namelist (ver log_albedo_feedback em
     ! mpas_atm_model.F90, que confere se o NOAH LSM sobrescreve o valor
     ! depois de core_run).
     if (allocated(atm_bnd%alb)) then
-      atm_bnd%alb = 0.08_MPAS_RKIND   ! default agua aberta, mesmo padrao de zorl acima
+      atm_bnd%alb = 0.08_MPAS_RKIND   ! default água aberta, mesmo padrão de zorl acima
       call state_get_field_1d(importState, 'Sf_albedo', nCells, atm_bnd%alb, rc, &
                               lonCell, latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! Clamps fisicos [0,1] + NaN guard
+      ! Clamps físicos [0,1] + NaN guard
       where (atm_bnd%alb < 0.0_MPAS_RKIND) atm_bnd%alb = 0.08_MPAS_RKIND
       where (atm_bnd%alb > 1.0_MPAS_RKIND) atm_bnd%alb = 1.0_MPAS_RKIND
       where (atm_bnd%alb /= atm_bnd%alb)   atm_bnd%alb = 0.08_MPAS_RKIND
     end if
 
-    ! Mascara terra/oceano Sx_omask [0-1] ---------------
-    ! Mascara REAL do MOM6 (ocean_grid%mask2dT), vinda do mediador. Chega
+    ! Máscara terra/oceano Sx_omask [0-1]
+    ! Máscara REAL do MOM6 (ocean_grid%mask2dT), vinda do mediador. Chega
     ! fracionaria porque atravessou dois regrids (OCN->ATM no MED, ATM->
-    ! Voronoi no conector); NAO e' binarizada aqui de proposito — o corte
+    ! Voronoi no conector); NÃO é binarizada aqui de propósito — o corte
     ! fica no consumidor final (write_mpas_import_diag), depois do binning
     ! para a grade regular. Binarizar no meio do caminho produz escadinha
     ! na linha de costa.
     !
-    ! Este campo NAO alimenta a fisica do MONAN-A: o modelo tem a propria
-    ! landmask, e sobrepor a do oceano seria mudar o modelo, nao diagnostica-lo.
+    ! Este campo NÃO alimenta a física do MONAN-A: o modelo tem a própria
+    ! landmask, e sobrepor a do oceano seria mudar o modelo, não diagnostica-lo.
     if (allocated(atm_bnd%omask)) then
-      atm_bnd%omask = 1.0_MPAS_RKIND   ! default tudo oceano, mesmo padrao de zorl/alb
+      atm_bnd%omask = 1.0_MPAS_RKIND   ! default tudo oceano, mesmo padrão de zorl/alb
       call state_get_field_1d(importState, 'Sx_omask', nCells, atm_bnd%omask, rc, &
                               lonCell, latCell)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! Clamps [0,1] + NaN guard. Celula sem mapeamento geografico mantem
-      ! 1,0 (oceano) — falha para o lado de NAO mascarar, preservando o
-      ! comportamento anterior em vez de apagar dado bom.
+      ! Corte em [0,1] e guarda de NaN. Célula sem mapeamento geográfico
+      ! mantém 1,0 (oceano): na dúvida, não mascara, para não apagar dado
+      ! bom.
       where (atm_bnd%omask < 0.0_MPAS_RKIND) atm_bnd%omask = 1.0_MPAS_RKIND
       where (atm_bnd%omask > 1.0_MPAS_RKIND) atm_bnd%omask = 1.0_MPAS_RKIND
       where (atm_bnd%omask /= atm_bnd%omask)  atm_bnd%omask = 1.0_MPAS_RKIND
@@ -273,7 +259,7 @@ contains
     call log_debug(COMP_ATM, subname//': importacao concluida ' // &
       '(Sx_tsfc + Si_ifrac + So_u + So_v + Sf_zorl + Sf_albedo + Sx_omask)')
 
-    ! ── Diagnóstico de importação MED→MPAS ──────────────────────────────
+    ! Diagnóstico de importação MED→MPAS
     ! Escrito quando write_import_diag=.true. em &nuopc_docn do nuopc.input
     ! (mesmo flag usado pelo MED). Ativa a escrita dos 3 campos OCN→ATM:
     !   So_t     (SST [K])            — atm_bnd%sst
@@ -286,6 +272,14 @@ contains
     end if
   end subroutine mpas_import
 
+  !> @brief Substitui a SST inválida (fora de 270 K a 310 K, ou NaN) por um valor de reserva.
+  !!
+  !! O valor de reserva vai de cfg_sst_default no equador a T_FILL_POLAR no
+  !! polo, linear em |latitude|; sem latCell, é cfg_sst_default em todas as
+  !! células.
+  !! @param[in]    nCells   número de células com coordenadas
+  !! @param[inout] atm_bnd  contorno importado; atm_bnd%sst é corrigido
+  !! @param[in]    latCell  latitude das células [rad]
   subroutine fill_invalid_sst(nCells, atm_bnd, latCell)
     integer, intent(in) :: nCells
     type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
@@ -298,8 +292,8 @@ contains
     real(MPAS_RKIND) :: t_fill_tropical
     integer :: n
     ! Usa nCells (a mesma contagem de lonCell/latCell nas chamadas de
-    ! state_get_field_1d de mpas_import), e nao size(atm_bnd%sst): atm_bnd%sst
-    ! pode ser maior que latCell/lonCell (celulas de halo), e usar o tamanho
+    ! state_get_field_1d de mpas_import), e não size(atm_bnd%sst): atm_bnd%sst
+    ! pode ser maior que latCell/lonCell (células de halo), e usar o tamanho
     ! dele causa 'Array bound mismatch'.
     n = nCells
     t_fill_tropical = real(cfg_sst_default, MPAS_RKIND)
@@ -315,9 +309,9 @@ contains
       t_fallback = t_fill_tropical + (T_FILL_POLAR - t_fill_tropical) * frac
       deallocate(lat_deg, frac)
     else
-      ! Sem coordenadas disponiveis: mantem o fallback tropical unico,
-      ! por seguranca — nao deveria ocorrer em uso normal, ja que
-      ! lonCell/latCell sao sempre passados por quem chama.
+      ! Sem coordenadas disponíveis: mantém o fallback tropical único,
+      ! por segurança — não deveria ocorrer em uso normal, já que
+      ! lonCell/latCell são sempre passados por quem chama.
       t_fallback = t_fill_tropical
     end if
     where (invalid_sst) atm_bnd%sst(1:n) = t_fallback
@@ -330,20 +324,19 @@ contains
   !!   Sa_pslv_mpas, Sa_tbot_mpas, Sa_u10m_mpas, Sa_v10m_mpas, Sa_shum_mpas,
   !!   Faxa_swdn_mpas, Faxa_lwdn_mpas, Faxa_rain_mpas, Faxa_snow_mpas.
   !!
-  !! Tambem Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas e Faxa_tauy_mpas:
-  !!   fluxos JA calculados pelo esquema de camada limite do MONAN-A
+  !! Também Faxa_sen_mpas, Faxa_lat_mpas, Faxa_taux_mpas e Faxa_tauy_mpas:
+  !!   fluxos JÁ calculados pelo esquema de camada limite do MONAN-A
   !!   (atm_public%shflx/lhflx vindos de 'hfx'/'lh' do pool
   !!   diag/diag_physics; taux_sfc/tauy_sfc derivados de 'ust' em
   !!   mpas_atm_fluxes.F90). Com eles, o mediador usa o fluxo consistente com o
   !!   balanco de energia do PBL do MONAN-A (apply_native_fluxes em
-  !!   med_flux.F90), em vez de recalcular sensivel/latente/momento pelo bulk
+  !!   med_flux.F90), em vez de recalcular sensível/latente/momento pelo bulk
   !!   NCAR a partir de T/q/vento de 10 m.
   !!
-  !! CONFIRMADO: convencao de sinal de 'hfx'/'lh' verificada com a
-  !!   equipe de fisica do MONAN-A — POSITIVO PARA CIMA (superficie ->
-  !!   atmosfera), convencao usual WRF/MPAS/GFS. O mediador (med_flux.F90) inverte o
-  !!   sinal ao consumir estes campos (ver comentario la), consistente com
-  !!   esta confirmacao.
+  !! Convenção de sinal de 'hfx'/'lh', confirmada com a equipe de física do
+  !!   MONAN-A: POSITIVO PARA CIMA (superfície -> atmosfera), a convenção
+  !!   usual de WRF/MPAS/GFS. O mediador (med_flux.F90) inverte o sinal ao
+  !!   consumir estes campos (ver o comentário lá).
   !!
   !! Campos não associados (pool diag_physics inativo ou nome ausente no
   !! Registry.xml) são silenciosamente ignorados.
@@ -387,7 +380,7 @@ contains
     if (rc /= ESMF_SUCCESS) return
     call export_mpas_member(diag, exportState, 'Faxa_snow_mpas', atm_public%prec_snow, n, vm, atm_public, rc)
     if (rc /= ESMF_SUCCESS) return
-    ! ── fluxos nativos do PBL (ver docstring) ──────────────────────────
+    ! fluxos nativos do PBL (ver docstring)
     call export_mpas_member(diag, exportState, 'Faxa_sen_mpas',  atm_public%shflx, n, vm, atm_public, rc)
     if (rc /= ESMF_SUCCESS) return
     call export_mpas_member(diag, exportState, 'Faxa_lat_mpas',  atm_public%lhflx, n, vm, atm_public, rc)
@@ -400,7 +393,7 @@ contains
 
   end subroutine mpas_export
 
-  !> Exporta um membro de atm_public, se associado: guarda o dado MPAS local
+  !> @brief Exporta um membro de atm_public, se associado: guarda o dado MPAS local
   !! no gravador (netcdf_push_raw_field, cujo código de retorno é ignorado)
   !! e o leva ao campo fname do exportState (state_set_field_1d). Membro
   !! não associado é ignorado sem erro.
@@ -427,17 +420,17 @@ contains
 
   !> @brief Cria a ESMF_Grid regular 360x180 (1 grau) do cap MPAS.
   !!
-  !! O cap usa ESMF_Grid, e nao ESMF_Mesh: com ESMF_MOAB habilitado (build
-  !! do ESMF 8.9.1), as operacoes paralelas sobre ESMF_Mesh
+  !! O cap usa ESMF_Grid, e não ESMF_Mesh: com ESMF_MOAB habilitado (build
+  !! do ESMF 8.9.1), as operações paralelas sobre ESMF_Mesh
   !! (ESMF_MeshAddNodes, ESMF_MeshAddElements, ESMF_FieldCreate) entravam em
   !! deadlock depois de mpas_atm_init; o SMIOL do MPAS-A deixa o comunicador
-  !! MPI num estado incompativel com o MOAB. ESMF_Grid nao usa MOAB, e os
+  !! MPI num estado incompatível com o MOAB. ESMF_Grid não usa MOAB, e os
   !! conectores ficam Grid->Grid.
   !!
-  !! A grade e' a malha atm_cap do mapa de acoplamento, construida por
-  !! cpl_latlon_grid (cpl_grids): 64800 celulas, periodica em longitude,
+  !! A grade é a malha atm_cap do mapa de acoplamento, construída por
+  !! cpl_latlon_grid (cpl_grids): 64800 células, periódica em longitude,
   !! centros de -179.5 a +179.5 graus em longitude e de -89.5 a +89.5 em
-  !! latitude, um DE por PET, com a mesma decomposicao da malha de fluxo do
+  !! latitude, um DE por PET, com a mesma decomposição da malha de fluxo do
   !! mediador.
   subroutine mpas_create_grid(grid, rc)
     type(ESMF_Grid), intent(out) :: grid
@@ -530,17 +523,17 @@ contains
 
   end subroutine state_diagnose
 
-  ! ── privado ─────────────────────────────────────────────────────────────
+  ! privado
 
 
-  !> @brief Copia campo do ESMF_State para array Fortran 1D (celulas MPAS).
+  !> @brief Copia campo do ESMF_State para array Fortran 1D (células MPAS).
   !!
-  !! Campo rank-1: copia posicional das primeiras celulas, sem alterar o
-  !! resto de data(). Campo rank-2 (ESMF_Grid 360x180): o campo completo e'
+  !! Campo rank-1: copia posicional das primeiras células, sem alterar o
+  !! resto de data(). Campo rank-2 (ESMF_Grid 360x180): o campo completo é
   !! reunido no PET 0 (ESMF_FieldGather) e difundido a todos os PETs
   !! (ESMF_VMBroadcast), porque a malha MPAS e a grade do cap tem
-  !! decomposicoes independentes; com lon_rad/lat_rad presentes, cada celula
-  !! MPAS recebe o ponto da grade que contem sua posicao geografica; sem as
+  !! decomposições independentes; com lon_rad/lat_rad presentes, cada célula
+  !! MPAS recebe o ponto da grade que contém sua posição geográfica; sem as
   !! coordenadas, a copia segue a ordem global linear.
   subroutine state_get_field_1d(state, fldname, n, data, rc, lon_rad, lat_rad)
     type(ESMF_State),  intent(in)    :: state
@@ -596,10 +589,9 @@ contains
       ! data(n_esmf+1:n) mantido inalterado — preserva valor inicial
       nullify(fptr1d)
     else
-      ! ── Campo rank-2: ESMF_Grid regular 360×180 (INDEX_GLOBAL) ──
+      ! Campo rank-2: ESMF_Grid regular 360×180 (INDEX_GLOBAL)
       !
       ! Por que reunir o campo inteiro
-      ! ------------------------------------------------------------------
       ! Ler fptr2d(ig,jg) só quando o ponto de grade global (ig,jg) pertence ao
       ! tile LOCAL deste PET não basta: a malha MPAS (que CONSOME o dado) e a
       ! grade do cap (que o PRODUZ) têm decomposições MPI INDEPENDENTES, e a
@@ -646,7 +638,6 @@ contains
             lon_d = real(lon_rad(icell), ESMF_KIND_R8) * RAD2DEG
             lat_d = real(lat_rad(icell), ESMF_KIND_R8) * RAD2DEG
             ! Convenção de longitude da grade
-            ! ------------------------------------------------------------
             ! A grade do cap é criada em mpas_create_grid com longitudes de CENTRO
             ! coordX(ig) = -180 + (ig - 0.5)*DLON, ou seja ig=1 ↔ -179,5° e
             ! ig=360 ↔ +179,5° — convenção [-180, +180).
@@ -681,9 +672,7 @@ contains
   end subroutine state_get_field_1d
 
 
-  ! -------------------------------------------------------------------------
-  ! Acesso aos campos do ESMF_State (de mpas_cell_binning até a R-FASE11-23)
-  ! -------------------------------------------------------------------------
+  ! Acesso aos campos do ESMF_State
 
   !> @brief Procura o campo fldname no State e informa se há dados locais.
   !!
@@ -729,11 +718,11 @@ contains
     found = .true.
   end subroutine find_local_field
 
-  !> @brief Copia array Fortran 1D (celulas MPAS) para campo do ESMF_State.
+  !> @brief Copia array Fortran 1D (células MPAS) para campo do ESMF_State.
   !!
   !! Campo rank-1: copia posicional. Campo rank-2 (ESMF_Grid 360x180): com
-  !! lon_rad/lat_rad presentes, cada celula MPAS e' escrita no ponto da grade
-  !! que contem sua posicao geografica, pela media entre PETs de
+  !! lon_rad/lat_rad presentes, cada célula MPAS é escrita no ponto da grade
+  !! que contém sua posição geográfica, pela média entre PETs de
   !! map_cells_to_regular_grid; sem as coordenadas, copia na ordem
   !! column-major.
   subroutine state_set_field_1d(state, fldname, n, data, rc, lon_rad, lat_rad)
@@ -769,25 +758,25 @@ contains
       nullify(fptr1d)
     else
       ! Campo rank-2: ESMF_Grid regular (NLON x NLAT_local)
-      ! Percorrer column-major: elemento (i,j) = posicao (j-1)*dim1 + i
+      ! Percorrer column-major: elemento (i,j) = posição (j-1)*dim1 + i
       call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
       if (rc /= ESMF_SUCCESS .or. .not. associated(fptr2d)) then
         rc = ESMF_SUCCESS; return
       end if
       n_esmf = min(size(fptr2d), n)
 
-      ! Mapeamento geografico por MEDIA (map_cells_to_regular_grid): varias
-      ! celulas Voronoi, de PETs diferentes, podem cair no mesmo ponto (ig,jg)
+      ! Mapeamento geográfico por MÉDIA (map_cells_to_regular_grid): várias
+      ! células Voronoi, de PETs diferentes, podem cair no mesmo ponto (ig,jg)
       ! da grade 1°x1°, sobretudo perto dos polos. Uma soma simples dobraria o
-      ! valor (Sa_pslv chegou a 2017 hPa). Por isso somam-se valores e contagens
-      ! de todos os PETs, e o ponto recebe a media (zero onde nao ha celula):
+      ! valor (a pressão chegaria a 2017 hPa). Por isso somam-se valores e contagens
+      ! de todos os PETs, e o ponto recebe a média (zero onde não há célula):
       !   buf_global(ig,jg) = sum_global(ig,jg) / count_global(ig,jg)
       if (have_cell_coords(n, lon_rad, lat_rad)) then
 
           call map_cells_to_regular_grid(n, lon_rad, lat_rad, data, fldname, fptr2d, rc)
           if (ChkErr(rc, __LINE__, __FILE__)) return
       else
-        ! Fallback legado: mapeamento column-major (sem garantia geográfica)
+        ! Sem coordenadas: mapeamento column-major (sem garantia geográfica)
         idx = 0
         outer: do j = lbound(fptr2d,2), ubound(fptr2d,2)
           do i = lbound(fptr2d,1), ubound(fptr2d,1)
@@ -802,7 +791,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine state_set_field_1d
 
-  !> Há coordenadas das células: lon_rad e lat_rad presentes, cada um com ao
+  !> @brief Há coordenadas das células: lon_rad e lat_rad presentes, cada um com ao
   !! menos n elementos. Os testes ficam em if separados porque o Fortran não
   !! garante o curto-circuito do .and., e size de um argumento ausente não
   !! pode ser avaliado.

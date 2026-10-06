@@ -105,7 +105,7 @@ contains
 
   end subroutine SetServices
 
-  !> Passo do mediador (MediatorAdvance) e, no último passo da rodada, as
+  !> @brief Passo do mediador (MediatorAdvance) e, no último passo da rodada, as
   !! linhas do relatório de acoplamento com os pontos completados por
   !! vizinhança (report_fills), que só escrevem no log.
   !!

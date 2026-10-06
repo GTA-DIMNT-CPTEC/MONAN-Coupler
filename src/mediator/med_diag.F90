@@ -234,7 +234,7 @@ contains
     call log_debug(COMP_MED, trim(msg))
   end subroutine log_ice_raw
 
-  !> Soma de bits da fração de gelo depois da extrapolação (etapa 3 de 4).
+  !> @brief Soma de bits da fração de gelo depois da extrapolação (etapa 3 de 4).
   !! @param[in] ifrac  fração de gelo na grade ATM (is%ice%ifrac)
   subroutine log_ice_extrapolated(ifrac)
     type(ESMF_Field), intent(in) :: ifrac
@@ -333,7 +333,7 @@ contains
     end if
   end subroutine check_ice_geography
 
-  !> Soma um preenchimento por vizinhança à contagem do campo, neste PET.
+  !> @brief Soma um preenchimento por vizinhança à contagem do campo, neste PET.
   !!
   !! @param[inout] c          contagem do campo
   !! @param[in]    n_invalid  pontos fora da faixa válida antes do preenchimento
@@ -347,7 +347,7 @@ contains
     c%n_fixed_pts = c%n_fixed_pts + int(n_left,    ESMF_KIND_I8)
   end subroutine record_fill
 
-  !> Relatório dos pontos completados, no último passo: soma as contagens
+  !> @brief Relatório dos pontos completados, no último passo: soma as contagens
   !! de todos os PETs do mediador e o PET 0 escreve uma linha CPL-REL: por
   !! campo que foi completado alguma vez. Coletiva: todos os PETs do
   !! mediador chamam.

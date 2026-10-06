@@ -11,8 +11,7 @@
 !!   export_si_tskin   temperatura de pele (Si_t_sis2).
 !! O ciclo NUOPC, a grade e o avanço do modelo ficam em sis_cap_MONAN.F90.
 !!
-!! Separado de sis_cap_MONAN.F90 sem mudar instruções (R-FASE8-14); como
-!! o cap, é compilado com as opções do MOM6 (lista MOM6_SRCS do Makefile).
+!! Como o cap, é compilado com as opções do MOM6 (lista MOM6_SRCS do Makefile).
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -34,7 +33,7 @@ module sis_cap_fields_mod
   public :: import_forcing
   public :: export_si_ifrac, export_si_albedo, export_si_tskin
 
-  ! ── Estado interno do componente de gelo ──────────────────────────────────
+  ! Estado interno do componente de gelo
   type :: ice_internal_state_type
     type(ice_data_type)             :: ice
     type(ocean_ice_boundary_type)   :: oib   !< SST/correntes vindas do OCN (via MED)
@@ -47,8 +46,7 @@ module sis_cap_fields_mod
 
 contains
 
-  ! ============================================================================
-  !> @brief Le os campos importados do mediador (forcante ATM + SST/correntes
+  !> @brief Lê os campos importados do mediador (forçante ATM + SST/correntes
   !! OCN) e popula is%aib/is%oib.
   !!
   !! Nomes de campo iguais aos da exportação do mediador (mapa de
@@ -58,20 +56,22 @@ contains
   !!   Fioi_lwnet → lw_flux; Fioi_swnet_vdr/vdf/idr/idf → sw_flux_*
   !!   (albedo do gelo puro, sem blend);
   !!   Faxa_rain/snow → lprec/fprec; Sa_pslv → p; Faxa_coszen → coszen.
-  !!   Os campos 2D do mediador sao REPLICADOS (broadcast) para todas as
-  !!   categorias de espessura de gelo na 3a dimensao de is%aib — o mediador
-  !!   nao distingue por categoria.
+  !!   Os campos 2D do mediador são REPLICADOS (broadcast) para todas as
+  !!   categorias de espessura de gelo na 3a dimensão de is%aib — o mediador
+  !!   não distingue por categoria.
   !!
-  !! t_flux e' o UNICO campo desta lista
-  !! que precisa de inversao de sinal. Fioi_sen chega na convencao CMEPS
-  !! (positivo = aquece a superficie), mas o SIS2 (ice_boundary_types.F90)
-  !! define t_flux como positivo = sai da superficie (convencao legada FMS).
-  !! Fioi_evap e Fioi_lwnet ja' chegam na convencao que q_flux/lw_flux
-  !! esperam — NAO inverter esses dois.
-  !! - u_star e dhdt/dedt/drdt sem fonte no mediador — ficam nos valores de
-  !!   seguranca definidos em InitializeRealize (zero). Isso e' uma
-  !!   SIMPLIFICACAO: acoplamento explicito, sem os termos de derivada usados
-  !!   para acoplamento implicito.
+  !! t_flux é o ÚNICO campo desta lista que precisa de inversão de sinal.
+  !! Fioi_sen chega na convenção CMEPS (positivo = aquece a superfície), mas
+  !! o SIS2 (ice_boundary_types.F90) define t_flux como positivo = sai da
+  !! superfície (convenção do acoplador FMS). Fioi_evap e Fioi_lwnet já
+  !! chegam na convenção que q_flux/lw_flux esperam: NÃO inverter esses dois.
+  !! - u_star e dhdt/dedt/drdt não têm fonte no mediador e ficam nos valores
+  !!   de segurança definidos em InitializeRealize (zero). É uma
+  !!   SIMPLIFICAÇÃO: acoplamento explícito, sem os termos de derivada usados
+  !!   no acoplamento implícito.
+  !! @param[in]    is     estado interno do componente de gelo
+  !! @param[in]    gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine import_forcing(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp
@@ -84,27 +84,27 @@ contains
     call NUOPC_ModelGet(gcomp, importState=importState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! -- Forcante atmosferica: le 2D, replica (broadcast) para as N
-    !    categorias de espessura de gelo em is%aib. taux/tauy/sen/evap/lwnet
-    !    vem de Fioi_* (temperatura de pele do gelo), nao de Foxx_* (SST). --
+    ! Forçante atmosférica: lê 2D, replica (broadcast) para as N
+    ! categorias de espessura de gelo em is%aib. taux/tauy/sen/evap/lwnet
+    ! vêm de Fioi_* (temperatura de pele do gelo), não de Foxx_* (SST).
     call get_field_2d(importState, "Fioi_taux",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%u_flux)
     call get_field_2d(importState, "Fioi_tauy",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%v_flux)
-    ! Fioi_sen (convencao CMEPS, positivo =
-    ! aquece a superficie) precisa ser INVERTIDO ao entrar em t_flux (SIS2
-    ! espera positivo = sai da superficie, convencao legada FMS). Ver
-    ! docstring de broadcast_to_cat_neg abaixo para o raciocinio completo.
+    ! Fioi_sen (convenção CMEPS, positivo = aquece a superfície) precisa
+    ! ser INVERTIDO ao entrar em t_flux (o SIS2 espera positivo = sai da
+    ! superfície, convenção do acoplador FMS). Ver o cabeçalho de
+    ! broadcast_to_cat_neg abaixo.
     call get_field_2d(importState, "Fioi_sen",       ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat_neg(ptr2d, is%aib%t_flux)
     call get_field_2d(importState, "Fioi_evap",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%q_flux)
     call get_field_2d(importState, "Fioi_lwnet",     ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%lw_flux)
-    ! Fioi_swnet_* (albedo do gelo por banda, PURO, sem blend com agua
-    ! aberta), e nao Foxx_swnet_* (albedo MEDIO da celula, o enviado ao
-    ! MOM6). Ver o comentario de POINT_ICE em sis_cap_MONAN.F90 e med_bulk_ncar.F90
-    ! para o calculo.
+    ! Fioi_swnet_* (albedo do gelo por banda, PURO, sem blend com água
+    ! aberta), e não Foxx_swnet_* (albedo MÉDIO da célula, o enviado ao
+    ! MOM6). Ver o comentário de POINT_ICE em sis_cap_MONAN.F90 e med_bulk_ncar.F90
+    ! para o cálculo.
     call get_field_2d(importState, "Fioi_swnet_vdr", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_vis_dir)
     call get_field_2d(importState, "Fioi_swnet_vdf", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
@@ -113,7 +113,7 @@ contains
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_nir_dir)
     call get_field_2d(importState, "Fioi_swnet_idf", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%sw_flux_nir_dif)
-    ! lprec/fprec/p: chuva, neve e pressao ao nivel do mar do mediador.
+    ! lprec/fprec/p: chuva, neve e pressão ao nível do mar do mediador.
     call get_field_2d(importState, "Faxa_rain",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%lprec)
     call get_field_2d(importState, "Faxa_snow",      ptr2d, rc); if (rc/=ESMF_SUCCESS) return
@@ -121,9 +121,9 @@ contains
     call get_field_2d(importState, "Sa_pslv",        ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     call broadcast_to_cat(ptr2d, is%aib%p)
 
-    ! Angulo zenital solar real. Se o mediador nao exportar Faxa_coszen,
+    ! Ângulo zenital solar real. Se o mediador não exportar Faxa_coszen,
     ! degrada de forma segura para coszen=0 em vez de abortar toda a
-    ! forcante.
+    ! forçante.
     call get_field_2d(importState, "Faxa_coszen", ptr2d, rc)
     if (rc == ESMF_SUCCESS) then
       call broadcast_to_cat(ptr2d, is%aib%coszen)
@@ -133,21 +133,20 @@ contains
       rc = ESMF_SUCCESS
     end if
 
-    ! -- SST/correntes do oceano: cópia direta 2D para is%oib. --
+    ! SST/correntes do oceano: cópia direta 2D para is%oib.
     call get_field_2d(importState, "So_t", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     is%oib%t(:,:) = ptr2d(:,:)
     call get_field_2d(importState, "So_u", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     is%oib%u(:,:) = ptr2d(:,:)
     call get_field_2d(importState, "So_v", ptr2d, rc); if (rc/=ESMF_SUCCESS) return
     is%oib%v(:,:) = ptr2d(:,:)
-    ! is%oib%s (salinidade): sem fonte confirmada do mediador ainda — ver
-    ! nota no plano de integração ("So_s" listado como campo em aberto na
-    ! memória do projeto). Mantém o default de seguranca (34.7 psu)
-    ! definido em InitializeRealize.
+    ! is%oib%s (salinidade): o mediador não envia salinidade (So_s é campo
+    ! em aberto). Fica o valor de segurança (34.7 psu) definido em
+    ! InitializeRealize.
 
   end subroutine import_forcing
 
-  !> Helper: busca campo 2D no state pelo nome; rc=ESMF_SUCCESS se achou.
+  !> @brief Busca um campo 2D no State pelo nome; rc=ESMF_SUCCESS se achou.
   subroutine get_field_2d(state, name, ptr2d, rc)
     type(ESMF_State),    intent(in)    :: state
     character(len=*),    intent(in)    :: name
@@ -163,8 +162,8 @@ contains
     call ESMF_FieldGet(fld, farrayPtr=ptr2d, rc=rc)
   end subroutine get_field_2d
 
-  !> Helper: replica um campo 2D em todas as categorias de espessura (3a
-  !! dimensao) de um campo do atmos_ice_boundary_type.
+  !> @brief Replica um campo 2D em todas as categorias de espessura (3a
+  !! dimensão) de um campo do atmos_ice_boundary_type.
   subroutine broadcast_to_cat(src2d, dst3d)
     real(ESMF_KIND_R8), pointer, intent(in)    :: src2d(:,:)
     real(ESMF_KIND_R8),          intent(out)   :: dst3d(:,:,:)
@@ -174,24 +173,23 @@ contains
     end do
   end subroutine broadcast_to_cat
 
-  ! > variante de broadcast_to_cat que
-  !! inverte o sinal antes de replicar. Uso exclusivo para Fioi_sen -> t_flux.
+  !> @brief Variante de broadcast_to_cat que inverte o sinal antes de
+  !! replicar. Uso exclusivo para Fioi_sen -> t_flux.
   !!
-  !! Fioi_sen chega do MED_cap (med_bulk_ncar.F90) na convencao CMEPS
-  !! (positivo = fluxo sensivel PARA a superficie, aquece o gelo) — a mesma
-  !! convencao de Foxx_sen, confirmada contra o hfx/lh nativo do MONAN-A
-  !! (positivo-para-cima). O SIS2 (ice_boundary_types.F90::atmos_ice_boundary_type)
+  !! Fioi_sen chega do MED_cap (med_bulk_ncar.F90) na convenção CMEPS
+  !! (positivo = fluxo sensível PARA a superfície, aquece o gelo), a mesma
+  !! de Foxx_sen. O SIS2 (ice_boundary_types.F90::atmos_ice_boundary_type)
   !! documenta t_flux como "the net sensible heat flux from the ocean or ice
-  !! INTO the atmosphere" — ou seja, positivo = sai da superficie (convencao
-  !! legada do acoplador FMS, oposta a CMEPS). broadcast_to_cat (copia pura)
-  !! entregava Fioi_sen a t_flux sem essa inversao, fazendo o SIS2 interpretar
-  !! aquecimento real da superficie como perda de calor (e vice-versa) —
-  !! causa de derretimento espurio em condicoes que deveriam resfriar/
-  !! engrossar o gelo (ex. ar frio sobre gelo, comum em inverno polar).
+  !! INTO the atmosphere", ou seja, positivo = sai da superfície (convenção
+  !! do acoplador FMS, oposta à do CMEPS). Uma cópia pura (broadcast_to_cat)
+  !! faria o SIS2 interpretar aquecimento real da superfície como perda de
+  !! calor, e vice-versa, com derretimento espúrio onde o gelo deveria
+  !! resfriar e engrossar (por exemplo, ar frio sobre gelo no inverno
+  !! polar).
   !!
-  !! Fioi_evap -> q_flux e Fioi_lwnet -> lw_flux NAO precisam desta correcao:
-  !! Fioi_evap ja segue a convencao CMEPS "E>0 = superficie->atmosfera", que
-  !! coincide com q_flux; Fioi_lwnet ja e' liquido-para-dentro, que coincide
+  !! Fioi_evap -> q_flux e Fioi_lwnet -> lw_flux NÃO precisam desta inversão:
+  !! Fioi_evap já segue a convenção CMEPS "E>0 = superfície->atmosfera", que
+  !! coincide com q_flux; Fioi_lwnet já é líquido-para-dentro, que coincide
   !! com lw_flux ("from the atmosphere into the ice or ocean").
   subroutine broadcast_to_cat_neg(src2d, dst3d)
     real(ESMF_KIND_R8), pointer, intent(in)    :: src2d(:,:)
@@ -202,8 +200,11 @@ contains
     end do
   end subroutine broadcast_to_cat_neg
 
-
-  !! Confirmado em ice_type.F90. Ver SIS2_ativacao_plano_integracao.md.
+  !> @brief Exporta a fração de gelo Si_ifrac_sis2, soma das categorias de
+  !! gelo do estado interno do SIS2 (Ice%sCS%IST%part_size).
+  !! @param[in]    is     estado interno do componente de gelo
+  !! @param[in]    gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine export_si_ifrac(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp
@@ -233,36 +234,35 @@ contains
 
     lb1 = lbound(ptr_ifrac,1); ub1 = ubound(ptr_ifrac,1)
     lb2 = lbound(ptr_ifrac,2); ub2 = ubound(ptr_ifrac,2)
-    ! ------------------------------------------------------------------
-    ! Fracao de gelo marinho exportada ao mediador (Si_ifrac_sis2).
+    ! Fração de gelo marinho exportada ao mediador (Si_ifrac_sis2).
     !
-    ! FONTE DO CAMPO — ponto critico: usa Ice%sCS%IST%part_size (estado
-    ! interno real do SIS2, ice_state_type), NAO Ice%part_size. Este ultimo
-    ! e o campo de fachada do acoplador, preenchido apenas no caminho de
-    ! acoplamento rapido (ver ice_type.F90:191 - only available on fast PEs)
-    ! e permanece ZERADO nesta configuracao. IST%part_size e o mesmo array
-    ! que o proprio SIS2 usa para calcular area/massa em ice_stock_pe, ou
-    ! seja, os valores nao-zero que aparecem no log SIS Date.
+    ! FONTE DO CAMPO, ponto crítico: usa Ice%sCS%IST%part_size (estado
+    ! interno real do SIS2, ice_state_type), e NÃO Ice%part_size. Este último
+    ! é o campo de fachada do acoplador, preenchido apenas no caminho de
+    ! acoplamento rápido (ver ice_type.F90:191, "only available on fast
+    ! PEs"), e permanece ZERADO nesta configuração. IST%part_size é o mesmo
+    ! array que o próprio SIS2 usa para calcular área e massa em
+    ! ice_stock_pe, ou seja, os valores não nulos que aparecem no log "SIS
+    ! Date".
     !
-    ! INDEXACAO: IST%part_size tem halos (isd:ied, jsd:jed) e categorias com
-    ! base 0, onde a fatia 0 e AGUA ABERTA e 1..CatIce sao as categorias de
-    ! gelo. O deslocamento vem da grade do proprio SIS2 (Ice%sCS%G%isc/jsc),
-    ! padrao usado internamente por ice_model.F90 - acompanha corretamente
-    ! qualquer decomposicao MPI (verificado: PET6 i_off=4, PET7 i_off=-86).
-    ! A soma e feita de k_lo+1 ate k_hi (todas as categorias de gelo, isto e,
-    ! todas as fatias menos a primeira), robusto a base 0 ou 1.
+    ! INDEXAÇÃO: IST%part_size tem halos (isd:ied, jsd:jed) e categorias com
+    ! base 0, onde a fatia 0 é ÁGUA ABERTA e 1..CatIce são as categorias de
+    ! gelo. O deslocamento vem da grade do próprio SIS2 (Ice%sCS%G%isc/jsc),
+    ! padrão usado internamente por ice_model.F90, e acompanha qualquer
+    ! decomposição MPI (por exemplo, i_off=4 no PET 6 e i_off=-86 no PET 7).
+    ! A soma vai de k_lo+1 até k_hi (todas as categorias de gelo, isto é,
+    ! todas as fatias menos a primeira), robusta a base 0 ou 1.
     !
-    ! IST so existe em slow_ice_PE - garantido aqui, pois o cap forca
+    ! IST só existe em slow_ice_PE - garantido aqui, pois o cap força
     ! fast_ice_pe=.true. e slow_ice_pe=.true. antes de ice_model_init.
-    ! ------------------------------------------------------------------
     i_off = is%ice%sCS%G%isc - lb1
     j_off = is%ice%sCS%G%jsc - lb2
     k_lo  = lbound(is%ice%sCS%IST%part_size, 3)
     k_hi  = ubound(is%ice%sCS%IST%part_size, 3)
     do jj = lb2, ub2
       do ii = lb1, ub1
-        ! fracao de gelo = soma das categorias de gelo = todas as fatias
-        ! menos a primeira (agua aberta), robusto a base 0 ou 1
+        ! fração de gelo = soma das categorias de gelo = todas as fatias
+        ! menos a primeira (água aberta), robusto a base 0 ou 1
         ptr_ifrac(ii,jj) = &
           sum(is%ice%sCS%IST%part_size(ii+i_off, jj+j_off, k_lo+1:k_hi))
         ptr_ifrac(ii,jj) = max(0.0_ESMF_KIND_R8, &
@@ -272,25 +272,27 @@ contains
 
   end subroutine export_si_ifrac
 
-  !! exporta o albedo real do gelo, por banda,
-  !! calculado pela fisica do proprio SIS2 (esquema optico em
-  !! SIS_optics.F90/fast_radiation_diagnostics), acessivel porque
-  !! Ice%albedo_vis_dir/vis_dif/nir_dir/nir_dif (fachada publica) sao
+  !> @brief Exporta o albedo real do gelo, por banda (Si_avsdr/avsdf/anidr/anidf_sis2).
+  !!
+  !! O albedo é calculado pela física do próprio SIS2 (esquema óptico em
+  !! SIS_optics.F90/fast_radiation_diagnostics) e fica acessível porque
+  !! Ice%albedo_vis_dir/vis_dif/nir_dir/nir_dif (fachada pública) são
   !! preenchidos por set_ice_surface_state (ver sis_cap_MONAN.F90).
   !!
-  !! Diferente de Si_ifrac_sis2 (que le sCS%IST%part_size com deslocamento
-  !! i_off/j_off), aqui usamos Ice%part_size e Ice%albedo_* diretamente —
-  !! ambos sao campos da MESMA fachada publica, com a MESMA indexacao local
-  !! (sem halo, sem offset), confirmados no diagnostico
-  !! (que ja le is%ice%part_size(:,:,1) sem nenhum deslocamento).
+  !! Diferente de Si_ifrac_sis2 (que lê sCS%IST%part_size com deslocamento
+  !! i_off/j_off), aqui se usam Ice%part_size e Ice%albedo_* diretamente:
+  !! ambos são campos da MESMA fachada pública, com a MESMA indexação local
+  !! (sem halo, sem deslocamento).
   !!
-  !! *** VERIFICAR ***: os comentarios de ice_type.F90 (fonte NOAA-GFDL/SIS2)
+  !! A VERIFICAR: os comentários de ice_type.F90 (fonte NOAA-GFDL/SIS2)
   !! para albedo_vis_dif/albedo_nir_dir parecem trocados entre si ("The
   !! surface albedo for diffuse visible..." vs "...direct near-infrared...").
-  !! Usamos aqui os NOMES dos campos (vis_dir/vis_dif/nir_dir/nir_dif), que
-  !! sao a fonte de verdade da API, nao a prosa do comentario — mas vale
-  !! uma segunda conferencia cruzando com SIS_optics.F90 antes de validar
-  !! contra observacoes.
+  !! Valem aqui os NOMES dos campos (vis_dir/vis_dif/nir_dir/nir_dif), que
+  !! são a fonte de verdade da API, e não a prosa do comentário; convém
+  !! conferir com SIS_optics.F90 antes de validar contra observações.
+  !! @param[in]    is     estado interno do componente de gelo
+  !! @param[in]    gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine export_si_albedo(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp
@@ -304,9 +306,9 @@ contains
     real(ESMF_KIND_R8), pointer :: ptr_anidf(:,:) => null()
     real(ESMF_KIND_R8) :: ice_frac_ij
     integer :: ii, jj, k_lo, k_hi
-    ! Fallback usado apenas onde a fracao de gelo e desprezivel (o peso do
+    ! Fallback usado apenas onde a fração de gelo é desprezível (o peso do
     ! termo de gelo no blend por ifrac feito no mediador torna esse valor
-    ! quase irrelevante), ou onde Ice%albedo_* ainda nao estiver associado:
+    ! quase irrelevante), ou onde Ice%albedo_* ainda não estiver associado:
     ! ALBEDO_ICE_FALLBACK (ALB_ICE_DEFAULT de coupler_constants).
 
     rc = ESMF_SUCCESS
@@ -343,8 +345,8 @@ contains
       return
     end if
 
-    ! part_size/albedo_* tem a mesma 3a dimensao (categorias); categoria
-    ! k_lo = agua aberta (mesma convencao usada em export_si_ifrac).
+    ! part_size/albedo_* têm a mesma 3a dimensão (categorias); categoria
+    ! k_lo = água aberta (mesma convenção usada em export_si_ifrac).
     k_lo = lbound(is%ice%part_size, 3)
     k_hi = ubound(is%ice%part_size, 3)
 
@@ -352,7 +354,7 @@ contains
       do ii = lbound(ptr_avsdr,1), ubound(ptr_avsdr,1)
         ice_frac_ij = sum(real(is%ice%part_size(ii,jj,k_lo+1:k_hi), ESMF_KIND_R8))
         if (ice_frac_ij > 1.0e-6_ESMF_KIND_R8) then
-          ! media ponderada pela area de cada categoria de gelo
+          ! média ponderada pela área de cada categoria de gelo
           ptr_avsdr(ii,jj) = sum(real(is%ice%part_size(ii,jj,k_lo+1:k_hi), ESMF_KIND_R8) * &
                                   real(is%ice%albedo_vis_dir(ii,jj,k_lo+1:k_hi), ESMF_KIND_R8)) / ice_frac_ij
           ptr_avsdf(ii,jj) = sum(real(is%ice%part_size(ii,jj,k_lo+1:k_hi), ESMF_KIND_R8) * &
@@ -367,7 +369,7 @@ contains
           ptr_anidr(ii,jj) = ALBEDO_ICE_FALLBACK
           ptr_anidf(ii,jj) = ALBEDO_ICE_FALLBACK
         end if
-        ! blindagem: albedo fisico esta sempre em [0,1]
+        ! blindagem: albedo físico está sempre em [0,1]
         ptr_avsdr(ii,jj) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ptr_avsdr(ii,jj)))
         ptr_avsdf(ii,jj) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ptr_avsdf(ii,jj)))
         ptr_anidr(ii,jj) = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ptr_anidr(ii,jj)))
@@ -377,15 +379,19 @@ contains
 
   end subroutine export_si_albedo
 
-  !! exporta a temperatura de pele real do
-  !! gelo, media ponderada por area de categoria (mesmo padrao de
-  !! export_si_albedo). Usada pelo mediador para calcular um segundo
-  !! conjunto de fluxos turbulentos (Fioi_*) especifico para a fracao de
-  !! gelo, em vez de reusar o Foxx_* calculado com SST (ver
-  !! POINT_ICE em sis_cap_MONAN.F90).
+  !> @brief Exporta a temperatura de pele real do gelo (Si_t_sis2).
   !!
-  !! Ice%t_surf e' preenchido pela MESMA rotina (set_ice_surface_state) que
+  !! Média ponderada pela área de cada categoria (mesmo padrão de
+  !! export_si_albedo). O mediador a usa para calcular um segundo conjunto
+  !! de fluxos turbulentos (Fioi_*), próprio da fração de gelo, em vez de
+  !! reusar os Foxx_* calculados com a SST (ver POINT_ICE em
+  !! sis_cap_MONAN.F90).
+  !!
+  !! Ice%t_surf é preenchido pela MESMA rotina (set_ice_surface_state) que
   !! Ice%part_size/Ice%albedo_*.
+  !! @param[in]    is     estado interno do componente de gelo
+  !! @param[in]    gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine export_si_tskin(is, gcomp, rc)
     type(ice_internal_state_type), pointer, intent(in) :: is
     type(ESMF_GridComp),                   intent(in) :: gcomp
@@ -396,8 +402,8 @@ contains
     real(ESMF_KIND_R8), pointer :: ptr_tice(:,:) => null()
     real(ESMF_KIND_R8) :: ice_frac_ij
     integer :: ii, jj, k_lo, k_hi
-    ! Fallback: ponto de congelamento tipico da agua do mar (~-1,8 C),
-    ! usado so' onde a fracao de gelo e desprezivel ou o campo nao esta
+    ! Fallback: ponto de congelamento típico da água do mar (~-1,8 C),
+    ! usado só onde a fração de gelo é desprezível ou o campo não está
     ! associado — o peso do termo de gelo no blend a jusante torna esse
     ! valor quase irrelevante nesses casos.
 
@@ -429,8 +435,8 @@ contains
         else
           ptr_tice(ii,jj) = TICE_FALLBACK
         end if
-        ! blindagem fisica: temperatura de gelo/neve nunca abaixo de ~180 K
-        ! (recorde antartico ~184 K) nem acima de 0 °C
+        ! blindagem física: temperatura de gelo/neve nunca abaixo de ~180 K
+        ! (recorde antártico ~184 K) nem acima de 0 °C
         ptr_tice(ii,jj) = max(T_ICE_MIN, min(T0_KELVIN, ptr_tice(ii,jj)))
       end do
     end do

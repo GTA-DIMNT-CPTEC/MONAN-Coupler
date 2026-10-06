@@ -7,10 +7,7 @@
 !! diagnósticos no log e copy_to_local_grid. É o algoritmo da troca 'cap'
 !! de ATM@mpas para ATM@atm_cap do mapa de acoplamento; quem o chama é o
 !! adaptador do MPAS (mpas_adapter.F90, state_set_field_1d).
-!!
-!! Separado de mpas_cap_methods.F90 sem mudar instruções (R-FASE8-15). Desde
-!! a R-FASE11-24, find_local_field e state_set_field_1d, que acessam o
-!! ESMF_State, estão no adaptador, e aqui fica só o algoritmo.
+!! O acesso ao ESMF_State fica no adaptador, e aqui fica só o algoritmo.
 
 module mpas_cell_binning_mod
 
@@ -69,7 +66,7 @@ contains
     call mpas_mpi_comm(subname, vm_local, mpi_comm_use, rc)
     if (rc /= ESMF_SUCCESS) return
 
-    ! 3. Reducao das somas e contagens (tiles Voronoi disjuntos por PET)
+    ! 3. Redução das somas e contagens (tiles Voronoi disjuntos por PET)
     call ordered_sum_bcast(sum_local, count_local, sum_global, count_global, &
                            mpi_comm_use)
 
@@ -98,7 +95,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine map_cells_to_regular_grid
 
-  !> Soma e contagem, por caixa de 1 grau da grade regular em [0°,360°),
+  !> @brief Soma e contagem, por caixa de 1 grau da grade regular em [0°,360°),
   !! das células MPAS locais deste PET.
   subroutine bin_cells_local(n, lon_rad, lat_rad, data, sum_local, count_local)
     real(ESMF_KIND_R8), parameter :: DLON = 1.0_ESMF_KIND_R8
@@ -128,7 +125,7 @@ contains
     end do
   end subroutine bin_cells_local
 
-  !> Comunicador MPI do componente em execução (o do MPAS-A).
+  !> @brief Comunicador MPI do componente em execução (o do MPAS-A).
   !!
   !! Não cair para MPI_COMM_WORLD. No modo concurrent o MPAS roda em
   !! subconjunto próprio de PETs, e as coletivas de ordered_sum_bcast
@@ -156,43 +153,36 @@ contains
     end if
   end subroutine mpas_mpi_comm
 
-  !> Soma entre PETs, reprodutível, das somas e contagens locais.
+  !> @brief Soma entre PETs, reprodutível, das somas e contagens locais.
   !!
   !! Gather em ordem de rank mais soma local, em lugar de
   !! MPI_Allreduce(MPI_SUM).
   !!
-  !! O PROBLEMA. Com avg_dup = 1,35 e max_dup = 2 (ver o diagnostico
-  !! MPAS-DIAG em log_dup_diag), e' comum que duas celulas Voronoi caiam na
-  !! mesma caixa de 1 grau da grade regular. Quando as duas estao em PETs
-  !! diferentes, a soma daquela caixa e' feita PELA coletiva. Soma de ponto
-  !! flutuante nao e' associativa, e o padrao MPI nao exige que a arvore de
-  !! reducao seja identica entre execucoes: o MPICH pode escolher arvores
-  !! diferentes conforme o momento. O resultado varia no ultimo bit de uma
-  !! execucao para outra.
+  !! Por quê: com avg_dup = 1,35 e max_dup = 2 (linha "DIAG cell_binning
+  !! coverage" de log_dup_diag), é comum que duas células Voronoi caiam na
+  !! mesma caixa de 1 grau da grade regular. Quando as duas estão em PETs
+  !! diferentes, a soma daquela caixa é feita PELA coletiva. Soma de ponto
+  !! flutuante não é associativa, e o padrão MPI não exige que a árvore de
+  !! redução seja idêntica entre execuções: o MPICH pode escolher árvores
+  !! diferentes conforme o momento, e o resultado varia no último bit de uma
+  !! execução para outra. As variáveis do MPICH que desligam a soma parcial
+  !! por nó (MPICH_ALLREDUCE_NO_SMP=1) e a coletiva em memória compartilhada
+  !! (MPICH_SHARED_MEM_COLL_OPT=0) não garantem reprodutibilidade bit a bit,
+  !! porque o padrão MPI não a exige.
   !!
-  !! POR QUE O REPRO_MPI NAO RESOLVEU. MPICH_ALLREDUCE_NO_SMP=1 desliga a
-  !! soma parcial por no, e MPICH_SHARED_MEM_COLL_OPT=0 desliga a coletiva
-  !! otimizada em memoria compartilhada, mas nenhuma das duas promete
-  !! reprodutibilidade bit a bit entre execucoes, porque o padrao MPI nao a
-  !! exige. O teste com REPRO_MPI=1 foi executado e verificado (despejo do
-  !! MPICH_ENV_DISPLAY em logs/esmApp_run.log) e a divergencia persistiu:
-  !! isso e' consistente com este mecanismo, nao contra ele.
+  !! Como: MPI_Gather traz os arranjos locais de TODOS os PETs a um único
+  !! PET, que soma em ordem CRESCENTE DE RANK, ordem fixa e independente de
+  !! topologia e de tempo de chegada. O MPI_Bcast devolve o resultado, de
+  !! modo que todos os PETs ficam com o MESMO valor, a mesma garantia do
+  !! Allreduce. MPI_Reduce mais MPI_Bcast gastaria menos memória, mas o
+  !! MPI_Reduce tem o mesmo problema: a ordem da soma fica a cargo da
+  !! implementação.
   !!
-  !! A SOLUCAO. MPI_Gather traz os arranjos locais de TODOS os PETs a um
-  !! unico PET, que soma em ordem CRESCENTE DE RANK, ordem fixa e
-  !! independente de topologia e de tempo de chegada. O MPI_Bcast devolve o
-  !! resultado, de modo que todos os PETs ficam com o MESMO valor, a mesma
-  !! garantia do Allreduce.
-  !!
-  !! CUSTO. Os arranjos sao NX_G*NY_G = 64800 dobros, cerca de 520 kB cada.
+  !! Custo: os arranjos são NX_G*NY_G = 64800 dobros, cerca de 520 kB cada.
   !! Com 64 PETs o buffer do gather chega a 33 MB por arranjo no PET raiz,
-  !! alocado e liberado a cada chamada. A soma no raiz e' O(nPets * 64800).
-  !! Tudo isso acontece uma vez por campo por janela de acoplamento, nao por
+  !! alocado e liberado a cada chamada. A soma no raiz é O(nPets * 64800).
+  !! Tudo isso acontece uma vez por campo por janela de acoplamento, não por
   !! passo de tempo do modelo.
-  !!
-  !! ALTERNATIVA DESCARTADA. MPI_Reduce mais MPI_Bcast seria mais economico
-  !! em memoria, mas o MPI_Reduce tem exatamente o mesmo problema: a ordem
-  !! da soma fica a cargo da implementacao.
   subroutine ordered_sum_bcast(sum_local, count_local, sum_global, count_global, &
                                mpi_comm_use)
     real(ESMF_KIND_R8), intent(in)  :: sum_local(ATM_NX, ATM_NY)
@@ -214,8 +204,8 @@ contains
       allocate(sum_gath(ATM_NX, ATM_NY, nPets_red))
       allocate(cnt_gath(ATM_NX, ATM_NY, nPets_red))
     else
-      ! Alocacao minima: o buffer de recepcao so' e' lido no raiz, mas
-      ! precisa existir como argumento valido em todos os ranks.
+      ! Alocação mínima: o buffer de recepção só é lido no raiz, mas
+      ! precisa existir como argumento válido em todos os ranks.
       allocate(sum_gath(1,1,1), cnt_gath(1,1,1))
     end if
 
@@ -227,7 +217,7 @@ contains
                     0, mpi_comm_use, ierr_red)
 
     if (myRank_red == 0) then
-      ! Soma em ordem crescente de rank: ordem fixa, reprodutivel.
+      ! Soma em ordem crescente de rank: ordem fixa, reprodutível.
       sum_global   = 0.0_ESMF_KIND_R8
       count_global = 0.0_ESMF_KIND_R8
       do iPet_red = 1, nPets_red
@@ -244,7 +234,7 @@ contains
     deallocate(sum_gath, cnt_gath)
   end subroutine ordered_sum_bcast
 
-  !> Preenche as caixas sem célula Voronoi (count_global < 0,5) com a média
+  !> @brief Preenche as caixas sem célula Voronoi (count_global < 0,5) com a média
   !! dos vizinhos preenchidos, em n_iter passadas.
   !!
   !! Quando a malha MPAS é mais esparsa que 1°×1°, alguns bins da grade
@@ -300,7 +290,7 @@ contains
     n_holes_post = count(count_global < 0.5_ESMF_KIND_R8)
   end subroutine fill_empty_bins
 
-  !> Caixas vazias da grade regular antes e depois do preenchimento
+  !> @brief Caixas vazias da grade regular antes e depois do preenchimento
   !! (PET 0, campo Sa_u10m_mpas), linha "DIAG cell_binning fill" de
   !! depuração.
   subroutine log_fill_marker(fldname, n_iter, n_holes_pre, n_holes_post, rc)
@@ -329,7 +319,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine log_fill_marker
 
-  !> Cobertura e duplicação das células na grade regular (PET 0, campo
+  !> @brief Cobertura e duplicação das células na grade regular (PET 0, campo
   !! Sa_pslv_mpas), linha "DIAG cell_binning coverage" de depuração.
   !! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 (Fortran é estrito).
   subroutine log_dup_diag(vm_local, fldname, n, count_global, rc)
@@ -359,7 +349,7 @@ contains
     end if
   end subroutine log_dup_diag
 
-  !> Copia do buffer global (convenção [0°,360°)) para a porção LOCAL de
+  !> @brief Copia do buffer global (convenção [0°,360°)) para a porção LOCAL de
   !! fptr2d, cuja grade (mpas_create_grid) usa a convenção [-180°,180°):
   !! coordX(ii) = -180+(ii-0.5)°. No buffer, o bin ig corresponde à faixa
   !! [(ig-1)°, ig°), centro ≈ ig-0.5°. A cópia direta fptr2d(ii)=buf_global(ii)

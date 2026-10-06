@@ -34,7 +34,7 @@ module med_init_mod
 
 contains
 
-  !> Malha de fluxo do mediador (atm_med): grade regular nx_atm x ny_atm,
+  !> @brief Malha de fluxo do mediador (atm_med): grade regular nx_atm x ny_atm,
   !! longitude a partir de 0 grau, com cantos para o método conservativo,
   !! construída por cpl_latlon_grid (cpl_grids).
   subroutine create_atm_grid(petCount, nx_atm, ny_atm, atm_grid, rc)
@@ -50,7 +50,7 @@ contains
     call log_info(COMP_MED, 'stagger CORNER da grade ATM preenchido')
   end subroutine create_atm_grid
 
-  !> Oceano no mediador (ocn_med), construído por cpl_grids: com o MOM6, a
+  !> @brief Oceano no mediador (ocn_med), construído por cpl_grids: com o MOM6, a
   !! grade tripolar lida do supergrid (cfg_mom6_mesh_ocn), com centros e
   !! cantos reais (cpl_tripolar_grid); com o DOCN, a grade regular do OISST
   !! (cpl_latlon_grid, ORIGIN_EAST0_CORNER). Os dois com a decomposição
@@ -187,7 +187,7 @@ contains
     end if
   end subroutine check_corner_coordinates
 
-  !> Realiza os campos anunciados em InitializeAdvertise, nas listas do mapa
+  !> @brief Realiza os campos anunciados em InitializeAdvertise, nas listas do mapa
   !! de acoplamento (cpl_arrivals, chaves MED_KEYS) e na mesma ordem de
   !! antes: a importação da malha de fluxo na grade ATM; a importação da
   !! grade do oceano (So_t, So_u, So_v, So_omask e, com o SIS2, os campos
@@ -221,7 +221,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine realize_component_fields
 
-  !> Cria e realiza no State os campos nomes, real(8) no centro da grade,
+  !> @brief Cria e realiza no State os campos nomes, real(8) no centro da grade,
   !! na ordem da lista. Para no primeiro erro.
   subroutine realize_on_grid(state, grid, names, rc)
     type(ESMF_State), intent(inout) :: state

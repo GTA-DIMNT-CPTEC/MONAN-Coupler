@@ -5,8 +5,8 @@
 !! sete membros de atm_ocean_boundary_type numa grade regular lat/lon, com
 !! as células de terra mascaradas pela máscara do MOM6 (Sx_omask).
 !!
-!! Separado de mpas_cap_netcdf.F90 sem mudar instruções (R-FASE8-12); o
-!! gravador da forçante exportada (monan_export_*.nc) continua lá.
+!! O gravador da forçante exportada (monan_export_*.nc) fica em
+!! mpas_cap_netcdf.F90.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -41,15 +41,15 @@ module mpas_import_diag_mod
   end type mpas_import_diag_clock_t
 
   ! Colunas do buffer de campos reunidos em write_mpas_import_diag: uma por
-  ! membro de atm_ocean_boundary_type, na ordem em que sao reunidos.
+  ! membro de atm_ocean_boundary_type, na ordem em que são reunidos.
   integer, parameter :: IMP_SOT = 1, IMP_IFRAC = 2, IMP_ZORL = 3, IMP_OMASK = 4
   integer, parameter :: IMP_UOCN = 5, IMP_VOCN = 6, IMP_ALB = 7
   integer, parameter :: N_IMP_DIAG = 7
 
-  ! Limiar de corte da mascara ja' binada. 0,5 e' o mesmo criterio usado
-  ! no MED e o mesmo ocean_frac_min do binning dos campos: os tres
-  ! precisam concordar, senao a linha de costa do diagnostico do MPAS nao
-  ! bate com a do diagnostico do MED.
+  ! Limiar de corte da máscara já binada. 0,5 é o mesmo critério usado
+  ! no MED e o mesmo ocean_frac_min do binning dos campos: os três
+  ! precisam concordar, senão a linha de costa do diagnóstico do MPAS não
+  ! bate com a do diagnóstico do MED.
   real(ESMF_KIND_R8), parameter :: OMASK_MIN = 0.5_ESMF_KIND_R8
 
 contains
@@ -60,13 +60,13 @@ contains
   !! write_mpas_import_diag nomeie o arquivo com o carimbo de tempo correto:
   !!   monan2_import_YYYYMMDD_HHMMSS.nc
   !!
-  !! @param[in] yr  Ano   (ESMF_TimeGet yy)
-  !! @param[in] mo  Mês   (ESMF_TimeGet mm)
-  !! @param[in] dy  Dia   (ESMF_TimeGet dd)
-  !! @param[in] hr  Hora  (ESMF_TimeGet h)
-  !! @param[in] mn  Minuto (ESMF_TimeGet m)
   !! @param[inout] clk  relógio do diagnóstico, guardado pelo cap
-  !! @param[in] sc  Segundo (ESMF_TimeGet s)
+  !! @param[in]    yr   ano     (ESMF_TimeGet yy)
+  !! @param[in]    mo   mês     (ESMF_TimeGet mm)
+  !! @param[in]    dy   dia     (ESMF_TimeGet dd)
+  !! @param[in]    hr   hora    (ESMF_TimeGet h)
+  !! @param[in]    mn   minuto  (ESMF_TimeGet m)
+  !! @param[in]    sc   segundo (ESMF_TimeGet s)
   subroutine set_mpas_diag_clock(clk, yr, mo, dy, hr, mn, sc)
     type(mpas_import_diag_clock_t), intent(inout) :: clk
     integer, intent(in) :: yr, mo, dy, hr, mn, sc
@@ -89,38 +89,27 @@ contains
   !!   Sf_albedo  — albedo de superfície     — atm_bnd%alb
   !!   Sx_omask   — máscara oceano/terra     — atm_bnd%omask
   !!
-  !! acrescentados So_u, So_v e
-  !!   Sf_albedo. Até aqui a rotina gravava 4 dos 7 campos importados, e a
-  !!   ausência era silenciosa: nada no código nem no arquivo indicava que
-  !!   três campos ficavam de fora. A consequência prática foi grave. A
-  !!   bateria de reprodutibilidade comparava monan2_import_*.nc para decidir
-  !!   se o MPAS recebia entrada idêntica entre duas rodadas; como as
-  !!   correntes e o albedo não estavam no arquivo, "entrada idêntica em t=0"
-  !!   nunca cobriu esses três, e a conclusão de que o MPAS era a fonte da
-  !!   não reprodutibilidade foi tirada de uma comparação cega em 3 de 7
-  !!   campos. O MPAS-A autônomo, testado fora do acoplador, é bit a bit
-  !!   reprodutível — logo a divergência entra por um campo importado.
-  !!
   !! INVARIANTE A PRESERVAR: uma variável NetCDF por membro de
   !!   atm_ocean_boundary_type. Ao acrescentar um membro ao tipo (em
   !!   mpas_atm_types.F90) e ao mapa de acoplamento (ponto ATM@atm_cap),
   !!   acrescente aqui também. Não há verificação automática: a rotina
   !!   recebe atm_bnd, não o importState, e por isso não pode iterar sobre
-  !!   os campos anunciados. A conferência é visual, contando membros.
+  !!   os campos anunciados. A conferência é visual, contando membros. Um
+  !!   campo ausente do arquivo fica fora de qualquer comparação de
+  !!   reprodutibilidade feita sobre estes arquivos, sem nenhum aviso.
   !!
-  !! NOTA SOBRE O RÓTULO So_t (ver): a variável se chama
-  !!   So_t por compatibilidade com o pós-processamento e as animações, mas o
-  !!   campo importado é Sx_tsfc, a temperatura de pele composta (ver
-  !!   o ponto ATM@atm_cap do mapa de acoplamento). O nome NÃO foi alterado aqui para
-  !!   não quebrar postproc_monan2_import.py e anim_monan2_import.py; a
-  !!   renomeação, se feita, tem de ser coordenada com essas ferramentas.
+  !! Rótulo So_t: a variável se chama So_t por compatibilidade com o
+  !!   pós-processamento e as animações, mas o campo importado é Sx_tsfc, a
+  !!   temperatura de pele composta (ver o ponto ATM@atm_cap do mapa de
+  !!   acoplamento). Renomeá-la exige mudar junto postproc_monan2_import.py
+  !!   e anim_monan2_import.py.
   !!
-  !! continentes mascarados com a máscara REAL
-  !!   do MOM6 (ocean_grid%mask2dT → So_omask → Sx_omask → atm_bnd%omask).
-  !!   Antes havia apenas o filtro ocean_frac_min do binning, que mede
-  !!   cobertura de célula Voronoi por bin e nada diz sobre terra/oceano.
-  !!   A máscara é binada pela mesma rotina dos campos e gravada como
-  !!   Sx_omask (1=oceano, 0=terra); célula de terra sai como _FillValue.
+  !! Continentes: mascarados com a máscara REAL do MOM6
+  !!   (ocean_grid%mask2dT → So_omask → Sx_omask → atm_bnd%omask), e não só
+  !!   pelo filtro ocean_frac_min do binning, que mede cobertura de célula
+  !!   Voronoi por bin e nada diz sobre terra/oceano. A máscara é binada
+  !!   pela mesma rotina dos campos e gravada como Sx_omask (1=oceano,
+  !!   0=terra); célula de terra sai como _FillValue.
   !!
   !! Etapas: gather_boundary_member (um membro de atm_bnd por chamada, em
   !!   todos os PETs); no PET 0, define_import_diag_file e
@@ -146,7 +135,7 @@ contains
     type(ESMF_VM) :: vm
     integer :: localPet, petCount, mpiComm, mpi_ierr
     integer, allocatable  :: allCounts(:), displs(:)
-    ! Valores reunidos no PET 0, um campo por coluna (indices IMP_*)
+    ! Valores reunidos no PET 0, um campo por coluna (índices IMP_*)
     real(ESMF_KIND_R8), allocatable :: recvBuf(:,:)
     real(ESMF_KIND_R8), allocatable :: lon_global(:), lat_global(:)
     integer :: nGlobal, nLocal
@@ -164,7 +153,7 @@ contains
 
     nLocal = nCells
 
-    ! ── 1. Gather das coordenadas ─────────────────────────────────────────
+    ! 1. Gather das coordenadas
     allocate(allCounts(petCount), displs(petCount))
     call MPI_Allgather(nLocal, 1, MPI_INTEGER, &
                        allCounts, 1, MPI_INTEGER, mpiComm, mpi_ierr)
@@ -185,13 +174,13 @@ contains
     call gather_cell_coords(nLocal, allCounts, displs, mpiComm, lon_global, lat_global, &
                             lonCell, latCell)
 
-    ! ── 2. Gather dos campos ──────────────────────────────────────────────
-    ! Valor usado quando o membro de atm_bnd nao esta alocado:
-    ! - mascara: 1,0 (tudo oceano), que nao mascara nada;
+    ! 2. Gather dos campos
+    ! Valor usado quando o membro de atm_bnd não está alocado:
+    ! - máscara: 1,0 (tudo oceano), que não mascara nada;
     ! - correntes: 0,0, o oceano parado que o MPAS assume sem o MOM6;
-    ! - albedo: 0,0, que NAO e' um valor fisico plausivel (oceano aberto
-    !   fica em torno de 0,06): e' um marcador deliberado. Um mapa de
-    !   Sf_albedo todo em zero indica que o campo nao chegou ao atm_bnd.
+    ! - albedo: 0,0, que NÃO é um valor físico plausível (oceano aberto
+    !   fica em torno de 0,06): é um marcador deliberado. Um mapa de
+    !   Sf_albedo todo em zero indica que o campo não chegou ao atm_bnd.
     call gather_boundary_member(atm_bnd%sst,          0.0_ESMF_KIND_R8, nLocal, &
                                 allCounts, displs, mpiComm, recvBuf(:, IMP_SOT))
     call gather_boundary_member(atm_bnd%ice_fraction, 0.0_ESMF_KIND_R8, nLocal, &
@@ -209,7 +198,7 @@ contains
 
     deallocate(allCounts, displs)
 
-    ! ── 3. Escrita NetCDF (somente PET 0) ─────────────────────────────────
+    ! 3. Escrita NetCDF (somente PET 0)
     if (localPet /= 0) then
       deallocate(lon_global, lat_global, recvBuf)
       return
@@ -221,7 +210,7 @@ contains
 
   end subroutine write_mpas_import_diag
 
-  !> Reúne no PET 0 as coordenadas (em graus) das células MPAS de todos os
+  !> @brief Reúne no PET 0 as coordenadas (em graus) das células MPAS de todos os
   !! PETs, na ordem de allCounts/displs. Sem lonCell e latCell, nada é
   !! reunido e lon_global/lat_global ficam como estão. Coletiva quando as
   !! coordenadas estão presentes: todos os PETs chamam.
@@ -250,7 +239,7 @@ contains
     end if
   end subroutine gather_cell_coords
 
-  !> Grava, no PET 0, o arquivo monan2_import_*.nc do passo: nome pela data
+  !> @brief Grava, no PET 0, o arquivo monan2_import_*.nc do passo: nome pela data
   !! do relógio do diagnóstico (ou pelo contador, sem relógio), eixos da
   !! grade lat/lon centrada em células e campos já reunidos em recvBuf.
   !! Incrementa o contador clk%step.
@@ -277,11 +266,11 @@ contains
     dlon    = res_deg
     dlat    = res_deg
     nlon    = nint(360.0_ESMF_KIND_R8 / dlon)
-    ! A grade e' CENTRADA em celulas: lat_axis(i) = -90 + (i-0.5)*dlat.
-    ! Para dlat=1 isso da' 180 celulas cobrindo -89,5..+89,5, exatamente
-    ! como o lado do MOM6. O ponto em lat=+90 e' levado ao bin 180 (89,5)
+    ! A grade é CENTRADA em células: lat_axis(i) = -90 + (i-0.5)*dlat.
+    ! Para dlat=1 isso dá 180 células cobrindo -89,5..+89,5, exatamente
+    ! como o lado do MOM6. O ponto em lat=+90 é levado ao bin 180 (89,5)
     ! pelo min(...,nlat) em voronoi_to_grid, e as duas grades de
-    ! diagnostico (MED->MPAS e MED->OCN) coincidem.
+    ! diagnóstico (MED->MPAS e MED->OCN) coincidem.
     nlat    = nint(180.0_ESMF_KIND_R8 / dlat)
 
     clk%step = clk%step + 1
@@ -409,8 +398,8 @@ contains
            long_name='Albedo de superficie importado pelo MPAS', &
            units='1', standard_name='surface_albedo', fill_r8=FILL_VALUE_R8)
 
-    ! a propria mascara vira variavel do arquivo, para que o
-    ! pos-processamento nao precise readivinha-la a partir de _FillValue.
+    ! a própria máscara vira variável do arquivo, para que o
+    ! pós-processamento não precise readivinhá-la a partir de _FillValue.
     okf = nc_def_field2d(ncid, 'Sx_omask', dimid_lon, dimid_lat, varids(IMP_OMASK), 'write_mpas_import_diag', &
            long_name='Mascara oceano/terra do MOM6 (1=oceano, 0=terra)', &
            units='1', standard_name='sea_binary_mask', fill_r8=FILL_VALUE_R8)
@@ -423,8 +412,8 @@ contains
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'code_version', &
       'v3.1-2026-09 (B-DIAG-IMPORT-INCOMPLETO-01: 7 de 7 campos importados; '// &
       'antes 4 de 7 — So_u, So_v e Sf_albedo ficavam de fora em silencio)')
-    ! Rotulo explicito da cobertura, para que uma comparacao de
-    ! reprodutibilidade feita sobre estes arquivos possa verificar, no proprio
+    ! Rótulo explícito da cobertura, para que uma comparação de
+    ! reprodutibilidade feita sobre estes arquivos possa verificar, no próprio
     ! arquivo, se ela cobre todos os campos que o MPAS importa.
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'import_fields_written', 7)
     ios = nf90_put_att(ncid, NF90_GLOBAL, 'import_fields_total',  7)
@@ -484,19 +473,19 @@ contains
     call bin_masked_field(ncid, varids(IMP_ZORL), recvBuf(:, IMP_ZORL), lon_global, lat_global, &
                           nGlobal, mask_2d, nlon, nlat, dlon, dlat, &
                           1.0e-5_ESMF_KIND_R8, 0.1_ESMF_KIND_R8)
-    ! Os limites [-5, +5] m/s nas correntes sao os MESMOS do clamp fisico
-    ! aplicado na importacao (mpas_adapter.F90: |u|>5 -> 0). Se os dois
-    ! divergirem, o diagnostico passa a descartar valor que a fisica aceitou,
-    ! ou a aceitar valor que a fisica zerou. Mantenha-os iguais.
+    ! Os limites [-5, +5] m/s nas correntes são os MESMOS do clamp físico
+    ! aplicado na importação (mpas_adapter.F90: |u|>5 -> 0). Se os dois
+    ! divergirem, o diagnóstico passa a descartar valor que a física aceitou,
+    ! ou a aceitar valor que a física zerou. Mantenha-os iguais.
     call bin_masked_field(ncid, varids(IMP_UOCN), recvBuf(:, IMP_UOCN), lon_global, lat_global, &
                           nGlobal, mask_2d, nlon, nlat, dlon, dlat, &
                           -5.0_ESMF_KIND_R8, 5.0_ESMF_KIND_R8)
     call bin_masked_field(ncid, varids(IMP_VOCN), recvBuf(:, IMP_VOCN), lon_global, lat_global, &
                           nGlobal, mask_2d, nlon, nlat, dlon, dlat, &
                           -5.0_ESMF_KIND_R8, 5.0_ESMF_KIND_R8)
-    ! Albedo em [0, 1]: faixa de definicao da grandeza, nao faixa esperada.
+    ! Albedo em [0, 1]: faixa de definição da grandeza, não faixa esperada.
     ! Oceano aberto fica por volta de 0,06 e gelo novo passa de 0,8; apertar
-    ! o intervalo aqui descartaria o contraste agua/gelo, que e' exatamente
+    ! o intervalo aqui descartaria o contraste água/gelo, que é exatamente
     ! o que se quer ver neste campo.
     call bin_masked_field(ncid, varids(IMP_ALB), recvBuf(:, IMP_ALB), lon_global, lat_global, &
                           nGlobal, mask_2d, nlon, nlat, dlon, dlat, &

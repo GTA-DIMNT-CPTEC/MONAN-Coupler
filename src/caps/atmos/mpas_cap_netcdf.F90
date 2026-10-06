@@ -3,10 +3,9 @@
 !!
 !! Grava a forçante exportada pelo MONAN-A (monan_export_*.nc) numa grade
 !! regular lat/lon. O diagnóstico dos campos importados do mediador
-!! (monan2_import_*.nc) fica em mpas_import_diag.F90. Os campos já chegam de mpas_atm_model.F90 em
-!! unidades instantâneas (médias do intervalo de acoplamento para os
-!! acumulados). O histórico das versões 2.5 a 3.0 deste módulo está em
-!! docs/CHANGELOG.md.
+!! (monan2_import_*.nc) fica em mpas_import_diag.F90. Os campos já chegam
+!! de mpas_atm_model.F90 em unidades instantâneas (médias do intervalo de
+!! acoplamento para os acumulados).
 !!
 !! ESTRUTURA DO ARQUIVO NetCDF GERADO (grade regular 1°×1°):
 !!   dimensions  : lat(181), lon(360)
@@ -55,13 +54,13 @@ module mpas_cap_netcdf_mod
   implicit none
   private
 
-  ! ── Interface pública ──────────────────────────────────────────────────────
+  ! Interface pública
   public :: netcdf_init_coords      ! coleta coordenadas locais de todos os PETs
   public :: export_write_netcdf     ! interpola e escreve NetCDF com grade lat/lon
   public :: netcdf_config_set       ! configura grade e diretório a partir do namelist
   public :: netcdf_push_raw_field
 
-  ! ── Grade de saída, coordenadas e campos guardados do gravador ──────────
+  ! Grade de saída, coordenadas e campos guardados do gravador
   integer, parameter :: MAX_RAW = 15   !< máximo de campos MPAS guardados
 
   !> Estado do gravador monan_export_*.nc. O cap cria um objeto deste tipo,
@@ -129,15 +128,14 @@ contains
     end if
   end subroutine netcdf_config_set
 
-  ! ============================================================================
-  !> Coleta coordenadas locais de todos os PETs via MPI_Gatherv e armazena no PET0.
+  !> @brief Coleta coordenadas locais de todos os PETs via MPI_Gatherv e armazena no PET0.
   !!
   !! Deve ser chamada UMA VEZ em InitializeRealize do cap, após a malha ESMF
   !! estar disponível e ANTES da primeira chamada a export_write_netcdf.
   !!
   !! A decomposição MPI_Gatherv usada aqui é idêntica à de export_write_netcdf
   !! para os campos, garantindo que lon_global(i)/lat_global(i) corresponde
-  !! exatamente ao dado(i) em recvBuf — eliminando o padrão de xadrez.
+  !! exatamente ao dado(i) em recvBuf (sem isso, o mapa sairia em xadrez).
   !!
   !! Chamada idempotente (retorna imediatamente se já executada).
   !!
@@ -162,7 +160,7 @@ contains
                     mpiCommunicator=mpiComm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── Reunir tamanhos locais de cada PET ────────────────────────────────
+    ! Reunir tamanhos locais de cada PET
     allocate(allCounts(petCount))
     call MPI_Allgather(nLocal, 1, MPI_INTEGER, &
                        allCounts, 1, MPI_INTEGER, mpiComm, mpi_ierr)
@@ -179,7 +177,7 @@ contains
       displs(i) = displs(i-1) + allCounts(i-1)
     end do
 
-    ! ── Alocar buffers (PETs >0 recebem array mínimo — argumento inativo) ─
+    ! Alocar buffers (PETs >0 recebem array mínimo — argumento inativo)
     if (localPet == 0) then
       allocate(diag%lon_global(nGlobal))
       allocate(diag%lat_global(nGlobal))
@@ -188,7 +186,7 @@ contains
       allocate(diag%lat_global(1))
     end if
 
-    ! ── Gather de lon e lat ────────────────────────────────────────────────
+    ! Gather de lon e lat
     call MPI_Gatherv(lon_local, nLocal, MPI_DOUBLE_PRECISION, &
                      diag%lon_global, allCounts, displs, MPI_DOUBLE_PRECISION, &
                      0, mpiComm, mpi_ierr)
@@ -201,7 +199,7 @@ contains
     if (mpi_ierr /= MPI_SUCCESS .and. localPet == 0) &
       call log_warning(COMP_ATM, subname//': MPI_Gatherv de lat_local falhou')
 
-    ! Salvar a decomposicao MPI para reuso em export_write_netcdf.
+    ! Salvar a decomposição MPI para reuso em export_write_netcdf.
     ! Garante que recvBuf(i) corresponde a lon_global/lat_global(i).
     diag%nlocal  = nLocal
     diag%nglobal = nGlobal
@@ -216,7 +214,7 @@ contains
     diag%lon_local = lon_local(1:nLocal)
     diag%lat_local = lat_local(1:nLocal)
 
-    ! diag%raw_local e' alocado aqui, onde diag%nlocal ja' e' conhecido; em
+    ! diag%raw_local é alocado aqui, onde diag%nlocal já é conhecido; em
     ! netcdf_push_raw_field, diag%nlocal ainda poderia ser 0.
     if (allocated(diag%raw_local)) deallocate(diag%raw_local)
     allocate(diag%raw_local(nLocal, MAX_RAW))
@@ -232,8 +230,7 @@ contains
 
   end subroutine netcdf_init_coords
 
-  ! ============================================================================
-  !> Guarda o dado MPAS LOCAL deste PET, sem MPI.
+  !> @brief Guarda o dado MPAS LOCAL deste PET, sem MPI.
   !! Todos os PETs têm diag%raw_local(nLocal, MAX_RAW) com seus próprios dados.
   subroutine netcdf_push_raw_field(diag, fname, data1d, nLocal, vm, rc)
     type(mpas_diag_export_t), intent(inout) :: diag
@@ -264,7 +261,7 @@ contains
     end if
   end subroutine netcdf_push_raw_field
 
-  !> Escreve no NetCDF os campos do exportState na grade lat/lon.
+  !> @brief Escreve no NetCDF os campos do exportState na grade lat/lon.
   !!
   !! Todos os PETs participam das chamadas MPI coletivas; os campos chegam
   !! em unidades instantâneas de mpas_atm_model.F90 (sem conversão aqui).
@@ -310,14 +307,14 @@ contains
       return
     end if
 
-    ! ── 0. Data/hora do passo ─────────────────────────────────────────────
+    ! 0. Data/hora do passo
     ! s_yr..s_sc = currTime (ESMF_ClockGet em ModelRun) → nome do arquivo.
     ! elapsed_s  = step_count * dt_coupling_s (calculado pelo chamador)
     !            → variável CF time: "elapsed_s seconds since startTime".
     c_yr = s_yr; c_mo = s_mo; c_dy = s_dy
     c_hr = s_hr; c_mn = s_mn; c_sc = s_sc
 
-    ! ── 1. Inventário do exportState ──────────────────────────────────────
+    ! 1. Inventário do exportState
     call ESMF_StateGet(exportState, itemCount=itemCount, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     if (itemCount == 0) return
@@ -326,7 +323,7 @@ contains
     call ESMF_StateGet(exportState, itemNameList=fldnames, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 2. Decomposição MPI reutilizada de netcdf_init_coords
+    ! 2. Decomposição MPI reutilizada de netcdf_init_coords
     ! nLocal = size(fptr) [localCells_ESMF] pode diferir do nLocal usado em
     ! netcdf_init_coords [min(localCells_ESMF, nCells_MPAS)]; com contagens
     ! distintas, o mapeamento geográfico no NetCDF sairia errado. Usar o
@@ -335,7 +332,7 @@ contains
     nLocal  = diag%nlocal
     nGlobal = diag%nglobal
 
-    ! ── 3. PET0: criar e definir estrutura do arquivo NetCDF ──────────────
+    ! 3. PET0: criar e definir estrutura do arquivo NetCDF
     if (localPet == 0) then
       call define_export_file(diag, itemCount, fldnames, elapsed_s,      &
                               s_yr, s_mo, s_dy, s_hr, s_mn, s_sc,        &
@@ -345,11 +342,11 @@ contains
       if (rc /= ESMF_SUCCESS) return
     end if   ! localPet == 0
 
-    ! ── 4. Loop por campo: per-PET voronoi + MPI_Allreduce ───────────
+    ! 4. Loop por campo: per-PET voronoi + MPI_Allreduce
     call write_export_fields(diag, exportState, itemCount, fldnames, nLocal, mpiComm, localPet, &
         ncid, rc)
 
-    ! ── 5. PET0: fechar arquivo ───────────────────────────────────────────
+    ! 5. PET0: fechar arquivo
     if (localPet == 0) then
       ncstat = nf90_close(ncid)
       if (ncstat == NF90_NOERR) then
@@ -362,7 +359,7 @@ contains
     deallocate(fldnames)
   end subroutine export_write_netcdf
 
-  !> Cria o arquivo monan_export_*.nc do passo e define a sua estrutura
+  !> @brief Cria o arquivo monan_export_*.nc do passo e define a sua estrutura
   !! (atributos globais CF-1.8, lat, lon, time e uma variável por campo do
   !! exportState), escrevendo os eixos e o tempo. Só o PET 0 chama.
   !!
@@ -413,7 +410,7 @@ contains
 
       call execute_command_line('mkdir -p '//trim(diag%output_dir), exitstat=cmd_stat)
 
-      ! ── Atributos globais CF-1.8 ────────────────────────────────────────
+      ! Atributos globais CF-1.8
       if (.not. nc_create(fname, ncid, subname)) then
         call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': nf90_create falhou', &
              line=__LINE__, file=u_FILE_u, rcToReturn=rc)
@@ -439,9 +436,9 @@ contains
                'Faxa_taux/tauy: rho*ust^2*(u,v)/|V10|, outliers |v|>10 N/m2 descartados. ' // &
                'time: seconds since startTime (CF-1.8).')
 
-      ! ── Dimensões ────────────────────────────────────────────────────────
+      ! Dimensões
       ! lat e lon — sem dimensão time (1 arquivo por passo)
-      ! ── Variáveis de coordenada ──────────────────────────────────────────
+      ! Variáveis de coordenada
       if (.not. nc_def_latlon(ncid, diag%nlon, diag%nlat, dimid_lon, dimid_lat, &
                               varid_lon, varid_lat, subname)) then
         ncstat = nf90_close(ncid)
@@ -458,7 +455,7 @@ contains
       ncstat = nf90_put_att(ncid, varid_t, 'calendar',  'gregorian')
       ncstat = nf90_put_att(ncid, varid_t, 'valid_time',trim(valid_time_iso))
 
-      ! ── Variáveis dos campos (lon, lat) em Fortran column-major ──────────
+      ! Variáveis dos campos (lon, lat) em Fortran column-major
       ! Python: nc['campo'][:] → shape (diag%nlat, diag%nlon) = (181, 360)  ✓
       do i = 1, itemCount
         if (.not. nc_def_field2d(ncid, fldnames(i), dimid_lon, dimid_lat, varid, subname, &
@@ -477,7 +474,7 @@ contains
         ncstat = nf90_close(ncid); return
       end if
 
-      ! ── Escrever eixos e time ────────────────────────────────────────────
+      ! Escrever eixos e time
       do i = 1, diag%nlat
         lat_axis(i) = -90.0_ESMF_KIND_R8 + real(i-1, ESMF_KIND_R8) * diag%dlat
       end do
@@ -490,7 +487,7 @@ contains
 
   end subroutine define_export_file
 
-  !> Interpola cada campo do exportState para a grade lat/lon e, no PET 0,
+  !> @brief Interpola cada campo do exportState para a grade lat/lon e, no PET 0,
   !! grava-o no arquivo aberto por define_export_file. Todos os PETs chamam
   !! (duas reduções MPI por campo).
   !!
@@ -532,8 +529,8 @@ contains
 
       if (raw_idx > 0 .and. allocated(diag%raw_local) .and. diag%nlocal > 0 .and. &
           allocated(diag%lon_local)) then
-        ! v2: diag%raw_local(1:nLocal, idx) — dados LOCAIS deste PET em MPAS ordering
-        ! diag%lon_local — coordenadas LOCAL em MPAS ordering → sem OOB, sem mismatch
+        ! diag%raw_local(1:nLocal, idx): dados LOCAIS deste PET, na ordem do
+        ! MPAS, como diag%lon_local, sem acesso fora dos limites.
         call voronoi_accum_local(diag, &
           diag%raw_local(1:diag%nlocal, raw_idx), &
           diag%lon_local(1:diag%nlocal),    &
@@ -566,7 +563,7 @@ contains
     deallocate(sendBuf)
   end subroutine write_export_fields
 
-  !> Copia para sendBuf(1:nLocal) os valores locais de um campo do
+  !> @brief Copia para sendBuf(1:nLocal) os valores locais de um campo do
   !! exportState (de posto 1 ou 2, este lido em ordem de coluna); sem campo,
   !! ou com menos de nLocal valores, sendBuf fica com zeros. Falhas de
   !! leitura não interrompem a escrita: rc volta sempre com ESMF_SUCCESS.
@@ -606,8 +603,7 @@ contains
         rc = ESMF_SUCCESS
   end subroutine read_export_field_local
 
-  ! ============================================================================
-  !> Acumulação per-PET, por vizinho mais próximo, das células Voronoi na
+  !> @brief Acumulação per-PET, por vizinho mais próximo, das células Voronoi na
   !! grade regular diag%nlon×diag%nlat. Não normaliza: usar com MPI_Allreduce(SUM) e
   !! dividir a soma pela contagem.
   !!
@@ -647,28 +643,21 @@ contains
     end do
   end subroutine voronoi_accum_local
 
-  ! ============================================================================
   ! Funções auxiliares de metadados de campo
-  ! ============================================================================
 
-  !> Limiar de outlier por campo.
-  !! Faxa_taux/tauy: máximo físico realista de stress superficial ≈ 3–5 N/m²
-  !!   (furacão Cat.5: ~3 N/m²); limiar = 10 N/m² com margem.
-  !!   Com cálculo correto via ust, não há mais lixo de memória — apenas
-  !!   células com wind-shear extremo podem ultrapassar 5 N/m².
-  !! Demais campos: 1e30 (captura apenas fill value -9.99e33).
-  !> Limiar de outlier por campo (filtra lixo de memória e fill values).
+  !> @brief Limiar de outlier por campo (filtra lixo de memória e fill values).
   !!
   !! Faxa_taux/tauy: stress superficial máximo físico ≈ 3–5 N/m² (furacão Cat.5);
   !!   limiar = 10 N/m² com margem de segurança.
   !!
   !! Sa_u10m_mpas / Sa_v10m_mpas: vento 10 m. Valores > 10 m/s são NORMAIS
-  !!   (jatos de baixos níveis, alísios fortes, ciclones extratropicais);
-  !!   usar 10 m/s cortava 2.6% dos bins — justamente os de vento forte —
-  !! reduzindo σ_cap em 7% vs σ_standalone (Bug).
-  !!   Limiar correto: 150 m/s (fisicamente impossível → só filtra garbage).
+  !!   (jatos de baixos níveis, alísios fortes, ciclones extratropicais), e um
+  !!   limiar de 10 m/s cortaria 2.6% das caixas, justamente as de vento
+  !!   forte, reduzindo o desvio-padrão do campo em 7%. O limiar é 150 m/s
+  !!   (fisicamente impossível; só filtra lixo).
   !!
-  !! Demais campos: 1e30 (captura apenas fill value -9.99e33).
+  !! Demais campos: ver os limiares abaixo; o padrão (1e20) só filtra fill
+  !! values (-9.99e20/e33).
   pure real(ESMF_KIND_R8) function field_outlier_threshold(fname)
     character(len=*), intent(in) :: fname
     select case (trim(fname))
@@ -695,7 +684,7 @@ contains
         field_outlier_threshold = 700.0_ESMF_KIND_R8
       case ('Faxa_rain_mpas', 'Faxa_rain')
         ! Precipitação líquida: máx físico ~0.05 kg/m²/s = 180 mm/h (tufão)
-        ! Limiar = 0.1 kg/m²/s para incluir extremos; acima = bug rainnc/dt
+        ! Limiar = 0.1 kg/m²/s para incluir extremos; acima = erro em rainnc/dt
         field_outlier_threshold = 0.1_ESMF_KIND_R8
       case ('Faxa_snow_mpas', 'Faxa_snow')
         ! Precipitação sólida: máx físico ~0.01 kg/m²/s; limiar = 0.05
@@ -706,19 +695,19 @@ contains
     end select
   end function field_outlier_threshold
 
-  !> Unidades dos campos após conversão (corrige metadados do MPAS).
+  !> @brief Unidades dos campos após conversão (corrige metadados do MPAS).
   function field_units(fname) result(units)
     character(len=*), intent(in) :: fname
     character(len=32) :: units
     select case (trim(fname))
-      ! Nomes _mpas (cap NUOPC v3+, sufixo identifica fonte MPAS vs DATM)
+      ! Nomes _mpas (o sufixo identifica a fonte MPAS)
       case ('Sa_pslv_mpas')                          ; units = 'Pa'
       case ('Sa_tbot_mpas')                          ; units = 'K'
       case ('Sa_u10m_mpas', 'Sa_v10m_mpas')          ; units = 'm s-1'
       case ('Sa_shum_mpas')                          ; units = 'kg kg-1'
       case ('Faxa_swdn_mpas', 'Faxa_lwdn_mpas')      ; units = 'W m-2'
       case ('Faxa_rain_mpas', 'Faxa_snow_mpas')      ; units = 'kg m-2 s-1'
-      ! Nomes legado (sem _mpas) para compatibilidade retroativa
+      ! Nomes sem o sufixo _mpas
       case ('Sa_pslv')                               ; units = 'Pa'
       case ('Sa_tbot')                               ; units = 'K'
       case ('Sa_ubot', 'Sa_vbot')                    ; units = 'm s-1'
@@ -730,7 +719,7 @@ contains
     end select
   end function field_units
 
-  !> Long name descritivo para cada campo CMEPS.
+  !> @brief Long name descritivo para cada campo CMEPS.
   function field_long_name(fname) result(lname)
     character(len=*), intent(in) :: fname
     character(len=96) :: lname
@@ -745,7 +734,7 @@ contains
       case ('Faxa_lwdn_mpas')  ; lname = 'Radiacao LW descendente media no intervalo'
       case ('Faxa_rain_mpas')  ; lname = 'Precipitacao liquida media no intervalo'
       case ('Faxa_snow_mpas')  ; lname = 'Precipitacao solida (neve) media no intervalo'
-      ! Nomes legado
+      ! Nomes sem o sufixo _mpas
       case ('Sa_pslv')    ; lname = 'Pressao ao nivel do mar'
       case ('Sa_tbot')    ; lname = 'Temperatura do ar a 2 m'
       case ('Sa_ubot')    ; lname = 'Vento zonal a 10 m'
@@ -761,7 +750,7 @@ contains
     end select
   end function field_long_name
 
-  !> CF standard_name para campos CMEPS.
+  !> @brief CF standard_name para campos CMEPS.
   function field_stdname(fname) result(sname)
     character(len=*), intent(in) :: fname
     character(len=80) :: sname
@@ -776,7 +765,7 @@ contains
       case ('Faxa_lwdn_mpas')  ; sname = 'surface_downwelling_longwave_flux_in_air'
       case ('Faxa_rain_mpas')  ; sname = 'rainfall_flux'
       case ('Faxa_snow_mpas')  ; sname = 'snowfall_flux'
-      ! Nomes legado
+      ! Nomes sem o sufixo _mpas
       case ('Sa_pslv')    ; sname = 'air_pressure_at_mean_sea_level'
       case ('Sa_tbot')    ; sname = 'air_temperature'
       case ('Sa_ubot')    ; sname = 'eastward_wind'
@@ -792,10 +781,9 @@ contains
     end select
   end function field_stdname
 
-  !> Instante inicial = instante atual menos 'elapsed' segundos, pelo
-  !! calendário gregoriano do ESMF. Substitui a conta manual de datas, que
-  !! não tratava o recuo para o mês anterior (dia 0 ou negativo quando o
-  !! intervalo cruzava o início do mês).
+  !> @brief Instante inicial = instante atual menos 'elapsed' segundos, pelo
+  !! calendário gregoriano do ESMF, que trata o recuo para o mês anterior
+  !! quando o intervalo cruza o início do mês.
   subroutine start_time_from_elapsed(yr, mo, dy, hr, mn, sc, elapsed, &
                                      yr_o, mo_o, dy_o, hr_o, mn_o, sc_o, rc)
     integer, intent(in)  :: yr, mo, dy, hr, mn, sc, elapsed
@@ -814,19 +802,22 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
   end subroutine start_time_from_elapsed
 
-  ! ── Formatadores de data/hora ─────────────────────────────────────────────
+  ! Formatadores de data/hora
 
+  !> @brief Nome do arquivo do passo: monan_export_AAAAMMDD_hhmmss.nc.
   function datetime_to_fname(yr,mo,dy,hr,mn,sc) result(s)
     integer, intent(in) :: yr,mo,dy,hr,mn,sc; character(len=36) :: s
     write(s,'(A,I4.4,2I2.2,A,3I2.2,A)') 'monan_export_',yr,mo,dy,'_',hr,mn,sc,'.nc'
   end function datetime_to_fname
 
+  !> @brief Instante no formato ISO 8601 (AAAA-MM-DDThh:mm:ss).
   function datetime_to_iso(yr,mo,dy,hr,mn,sc) result(s)
     integer, intent(in) :: yr,mo,dy,hr,mn,sc; character(len=19) :: s
     write(s,'(I4.4,A,I2.2,A,I2.2,A,I2.2,A,I2.2,A,I2.2)') &
       yr,'-',mo,'-',dy,'T',hr,':',mn,':',sc
   end function datetime_to_iso
 
+  !> @brief Instante no formato da unidade de tempo CF (AAAA-MM-DD hh:mm:ss).
   function datetime_to_cf_base(yr,mo,dy,hr,mn,sc) result(s)
     integer, intent(in) :: yr,mo,dy,hr,mn,sc; character(len=19) :: s
     write(s,'(I4.4,A,I2.2,A,I2.2,A,I2.2,A,I2.2,A,I2.2)') &

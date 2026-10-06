@@ -9,8 +9,7 @@
 !!                           com persistência do valor anterior.
 !! A memória entre passos (si_ifrac_memory_t) fica no estado interno do cap.
 !!
-!! Separado de mom_cap_MONAN.F90 sem mudar instruções (R-FASE8-13); como
-!! o cap, é compilado com as opções do MOM6 (lista MOM6_SRCS do Makefile).
+!! Como o cap, é compilado com as opções do MOM6 (lista MOM6_SRCS do Makefile).
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
@@ -38,7 +37,7 @@ module mom_si_ifrac_mod
   public :: set_si_ifrac_from_file
   public :: compute_si_ifrac_proxy
 
-  ! ── Persistência de Si_ifrac entre passos de acoplamento ─────────────────
+  ! Persistência de Si_ifrac entre passos de acoplamento
   !
   ! compute_si_ifrac_proxy calcula Si_ifrac do zero a cada passo; sem
   ! memória, o gelo lido do OISST em t=0 sumiria no passo seguinte. Por
@@ -65,7 +64,6 @@ module mom_si_ifrac_mod
 
 contains
 
-  ! ============================================================================
   !> @brief Preenche Si_ifrac a partir do arquivo OISST (use_docn_ice).
   !!
   !! O campo Si_ifrac usa ESMF_GEOMTYPE_GRID (2D), definido pela chamada
@@ -110,13 +108,13 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── 1. Relógio corrente ─────────────────────────────────────────────────
+    ! 1. Relógio corrente
     call ESMF_GridCompGet(gcomp, clock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_ClockGet(clock, currTime=currTime, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! ── 2. Ler OISST globalmente via ReadOcnFieldInterp ─────────────────────
+    ! 2. Ler OISST globalmente via ReadOcnFieldInterp
     nx = cfg_docn_nx
     ny = cfg_docn_ny
     dx = 360.0_ESMF_KIND_R8 / real(nx, ESMF_KIND_R8)
@@ -138,12 +136,12 @@ contains
     if (cfg_docn_ice_pct) ice_global = ice_global / 100.0_ESMF_KIND_R8
     ice_global = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ice_global))
 
-    ! ── 3. Verificar grade MOM6 ─────────────────────────────────────────────
+    ! 3. Verificar grade MOM6
     if (.not. associated(ocean_grid)) then
       deallocate(ice_global); return
     end if
 
-    ! ── 4. Obter ponteiro do campo Si_ifrac (2D, GRID) ──────────────────────
+    ! 4. Obter ponteiro do campo Si_ifrac (2D, GRID)
     call ESMF_StateGet(exportState, itemName='Si_ifrac', field=f_ifrac, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(ice_global); return
@@ -164,13 +162,13 @@ contains
     ! Inicializar com zero (terra e oceano sem cobertura)
     ptr_ifrac = 0.0_ESMF_KIND_R8
 
-    ! ── 5. Domínio computacional MOM6 e bounds do campo ESMF ────────────────
+    ! 5. Domínio computacional MOM6 e bounds do campo ESMF
     call mpp_get_compute_domain(ocean_grid%Domain%mpp_domain, &
                                 isc, iec, jsc, jec)
     lb1 = lbound(ptr_ifrac, 1);  ub1 = ubound(ptr_ifrac, 1)
     lb2 = lbound(ptr_ifrac, 2);  ub2 = ubound(ptr_ifrac, 2)
 
-    ! ── 6. Mapeamento nearest-neighbor MOM6 → OISST ─────────────────────────
+    ! 6. Mapeamento nearest-neighbor MOM6 → OISST
     ! Usa ocean_grid%geolonT e ocean_grid%geolatT (graus, já definidos no MOM6).
     ! Grade OISST regular: lon ∈ [0°,360°), lat ∈ [-90°,+90°].
     do j = jsc, jec
@@ -199,7 +197,7 @@ contains
 
     deallocate(ice_global)
 
-    ! ── Salvar o campo OISST em ifrac_mem%field (persistência) ──────────────
+    ! Salvar o campo OISST em ifrac_mem%field (persistência)
     ! O salvamento fica APÓS o preenchimento do campo e fora de qualquer
     ! guarda de PET: todos os PETs com DE local chegam aqui.
     if (.not. allocated(ifrac_mem%field)) then
@@ -216,7 +214,6 @@ contains
 
   end subroutine set_si_ifrac_from_file
 
-  ! ============================================================================
   !> @brief Fração de gelo derivada da SST e do frazil do MOM6 (sigmoide).
   !!
   !! ocean_public_type NÃO expõe fração de gelo, então o cap a deriva de
@@ -239,7 +236,6 @@ contains
   !!
   !! A transição contínua na zona marginal de gelo evita artefatos de
   !! "tudo ou nada" no regrid OCN→ATM e captura gelo estável onde frazil = 0.
-  !============================================================================
   subroutine compute_si_ifrac_proxy(ocean_public, ocean_grid, exportState, ifrac_mem, rc)
     type(ocean_public_type),       intent(in)    :: ocean_public
     type(ocean_grid_type), pointer, intent(in)   :: ocean_grid
@@ -261,8 +257,8 @@ contains
     !
     ! DT_TRANS = 2.0 K: Si_ifrac > 0.01 para SST < 271.35 + 2.0·ln(99) ≈ 280.6 K.
     ! Com 0.5 K, Si_ifrac > 0.01 só para SST < 273.7 K, e a SST polar, que
-    ! sobe para 278–282 K logo após o primeiro passo de acoplamento, zerava o
-    ! proxy em quase todo o oceano polar. A sigmoide continua monotônica e
+    ! sobe para 278–282 K logo após o primeiro passo de acoplamento, zeraria
+    ! o proxy em quase todo o oceano polar. A sigmoide continua monotônica e
     ! contínua.
     !
     ! EXP_CLAMP : limite para o argumento do exponencial (evita overflow)
@@ -327,7 +323,7 @@ contains
         mask_val = ocean_grid%mask2dT(ig, jg)
         if (mask_val <= 0.0_ESMF_KIND_R8) cycle
 
-        ! ── Contribuição termodinâmica: sigmoide na SST ──────────────────
+        ! Contribuição termodinâmica: sigmoide na SST
         ! f_temp = 1 / (1 + exp((SST - T_FREEZE) / DT_TRANS))
         ! Clampa o expoente para evitar overflow em SST tropical.
         f_temp = 0.0_ESMF_KIND_R8
@@ -343,7 +339,7 @@ contains
           end if
         end if
 
-        ! ── Contribuição dinâmica: frazil ────────────────────────────────
+        ! Contribuição dinâmica: frazil
         ! Escala contínua: f_frazil = min(1, frazil / FRAZIL_SCALE).
         ! A escala contínua respeita a magnitude do fluxo de formação de gelo.
         f_frazil = 0.0_ESMF_KIND_R8
@@ -363,11 +359,11 @@ contains
     where (ptr_ifrac < 0.0_ESMF_KIND_R8) ptr_ifrac = 0.0_ESMF_KIND_R8
     where (ptr_ifrac > 1.0_ESMF_KIND_R8) ptr_ifrac = 1.0_ESMF_KIND_R8
 
-    ! ── Persistência: combinar proxy com o estado anterior ───────────
+    ! Persistência: combinar proxy com o estado anterior
     !
-    ! O log ESMF registra se ifrac_mem%valid chegou .true. neste PET:
-    !   'OCN(proxy): si_ifrac_mem_valid=T' → persistência ativa
-    !   'OCN(proxy): si_ifrac_mem_valid=F' → sem campo anterior salvo
+    ! O log ESMF registra (depuração) se ifrac_mem%valid chegou .true.
+    ! neste PET: 'si_ifrac_mem_valid=T' (persistência ativa) ou, como aviso,
+    ! 'si_ifrac_mem_valid=F' (sem campo anterior salvo).
     if (ifrac_mem%valid) then
       call log_debug(COMP_OCN, 'si_ifrac_mem_valid=T: aplicando persistencia')
       do jj = lb2, ub2

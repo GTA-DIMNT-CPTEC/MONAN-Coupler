@@ -25,9 +25,9 @@
 !!   Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac, So_duu10n
 !!
 !! Protocolo IPDv03 via NUOPC_CompDerive.
-!! Depende de: mom_cap_mod, mom_cap_methods_mod, mom_cap_time_mod,
-!!             MOM_ocean_model_nuopc, MOM_surface_forcing_nuopc,
-!!             MOM_grid, MOM_domains, FMS (mpp_domains_mod).
+!! Depende de: MOM_cap_methods, MOM_ocean_model_nuopc,
+!!             MOM_surface_forcing_nuopc, time_utils_mod, MOM_grid,
+!!             MOM_domains, FMS (mpp_domains_mod).
 !!
 !! Fração de gelo exportada (Si_ifrac), conforme nuopc.input (&nuopc_mode):
 !!   use_docn_ice=T, init_only=F: lida do arquivo OISST a cada passo
@@ -39,12 +39,11 @@
 !!   Si_ifrac(t) = max(proxy(t), Si_ifrac(t-1) × SI_IFRAC_DECAY).
 !! As duas formas de obter Si_ifrac ficam em mom_si_ifrac.F90.
 !! Com o SIS2 dinâmico, o mediador usa a fração do cap do gelo
-!! (Si_ifrac_sis2), e não esta. O histórico das versões 2.0 a 2.6 deste
-!! cap está em docs/CHANGELOG.md.
+!! (Si_ifrac_sis2), e não esta.
 
 module MOM_cap_MONAN_mod
 
-  ! ── Infraestrutura ESMF/NUOPC ─────────────────────────────────────────────
+  ! Infraestrutura ESMF/NUOPC
   use ESMF
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
@@ -59,7 +58,7 @@ module MOM_cap_MONAN_mod
                            model_label_SetRunClock    => label_SetRunClock,    &
                            NUOPC_ModelGet,             SetVM
 
-  ! ── Interface de produção MOM6 ────────────────────────────────────────────
+  ! Interface de produção MOM6
   ! MOM_cap_mod não é importado: este cap define seu PRÓPRIO SetServices, e o
   ! use forçaria a dependência de mom_cap.F90 -> ocn_comp_NUOPC.F90, que
   ! exigem o módulo shr_is_restart_fh_mod (infraestrutura CMEPS/CESM),
@@ -77,8 +76,8 @@ module MOM_cap_MONAN_mod
   use cpl_map_mod,    only : cpl_arrivals, cpl_exports, cpl_current_config
   use cpl_grids_mod,  only : cpl_block_grid
 
-  ! esmf2fms_time/fms2esmf_time nao existem em MOM_cap_time.
-  ! Conversao ESMF->FMS via ESMF_TimeGet(yy,mm,...) + set_date.
+  ! esmf2fms_time vem de time_utils_mod (MOM_cap_time não a tem); os
+  ! instantes são convertidos de ESMF para FMS com ESMF_TimeGet + set_date.
   use time_utils_mod,          only : esmf2fms_time
 
   ! Escolha da fonte de Si_ifrac (use_docn_ice); a leitura do OISST e o
@@ -122,7 +121,7 @@ module MOM_cap_MONAN_mod
   public :: SetServices
   public :: SetVM
 
-  ! ── Nomes dos campos NUOPC ────────────────────────────────────────────────
+  ! Nomes dos campos NUOPC
   ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
   ! OCN@ocn_mom6: a importação são os 14 fluxos e estados que chegam do
   ! mediador (cpl_arrivals); a exportação, os 7 campos de EXPORTS
@@ -134,7 +133,7 @@ module MOM_cap_MONAN_mod
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
-  ! ── Estado interno do componente oceânico ─────────────────────────────────
+  ! Estado interno do componente oceânico
   !> Agrega os três tipos MOM6 que precisam sobreviver entre chamadas NUOPC.
   type :: ocn_internal_state_type
     type(ocean_public_type), pointer :: ocean_public => null()
@@ -150,7 +149,6 @@ module MOM_cap_MONAN_mod
 
 contains
 
-  ! ============================================================================
   !> @brief Registra fases NUOPC e especializa o componente oceânico.
   !!
   !! Protocolo IPDv03 com CheckImport tolerante (janela ±dt_coupling) para
@@ -206,7 +204,6 @@ contains
 
   end subroutine SetServices
 
-  ! ============================================================================
   !> @brief Anuncia os campos importados e exportados do componente oceânico.
   !!
   !! Os campos exportados usam "will provide" (o OCN fornece a grade).
@@ -244,7 +241,6 @@ contains
 
   end subroutine InitializeAdvertise
 
-  ! ============================================================================
   !> @brief Inicializa o MOM6+SIS2 e realiza os campos ESMF na grade tripolar.
   !!
   !! Sequência:
@@ -273,27 +269,27 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── 0 a 2. Comunicador MPI, FMS, calendário e instante inicial ───────
+    ! 0 a 2. Comunicador MPI, FMS, calendário e instante inicial
     call init_fms_time(gcomp, clock, fms_start, fms_init, rc)
     if (rc /= ESMF_SUCCESS) return
 
-    ! ── 3. Alocar estado interno ──────────────────────────────────────────
+    ! 3. Alocar estado interno
     allocate(wrap%ptr)
     is => wrap%ptr
     allocate(is%ocean_public)
-    ! NOTA: is%ocean_state NAO deve ser pre-alocado.
+    ! NOTA: is%ocean_state NÃO deve ser pré-alocado.
     ! ocean_model_init verifica: if (associated(OS)) e aborta.
     ! ocean_model_init faz 'allocate(OS)' internamente.
     is%ocean_state => null()  ! ponteiro null antes de ocean_model_init
     allocate(is%ice_ocn_bnd)  ! aloca o tipo; arrays internos alocados abaixo
 
-    ! ── 4. Inicializar MOM6 (lê MOM_input, grid, restart) ────────────────
+    ! 4. Inicializar MOM6 (lê MOM_input, grid, restart)
     call ocean_model_init(is%ocean_public, is%ocean_state, fms_start, fms_init)
     call log_info(COMP_OCN, 'ocean_model_init concluido')
 
     call get_ocean_domain(is, ocean_grid, isc, iec, jsc, jec, ni, nj)
 
-    ! ── 5b. Alocar arrays internos de ice_ocean_boundary ─────────────────
+    ! 5b. Alocar arrays internos de ice_ocean_boundary
     ! Apenas em PETs oceânicos (isc<=iec). PETs land-only não alocam
     ! porque não têm domínio — mom_import/mom_export não os acessam.
     if (is%ocean_public%is_ocean_pe) then
@@ -304,7 +300,7 @@ contains
       isc, iec, jsc, jec
     call log_info(COMP_OCN, trim(logmsg))
 
-    ! ── 6–8. Criar ESMF_Grid e realizar campos do OCN ────────────────────
+    ! 6–8. Criar ESMF_Grid e realizar campos do OCN
     ! Grade 2D com deBlockList igual à decomposição do MOM6 (mesma solução
     ! do ramo GEOMTYPE_GRID do mom_cap.F90 oficial). ESMF_Mesh e DistGrid
     ! com arbSeqIndexList não servem aqui: o ESMF 8.9.1 exige ids de nó
@@ -318,7 +314,7 @@ contains
     call realize_ocean_fields(ocn_grid, importState, exportState, rc)
     if (rc /= ESMF_SUCCESS) return
 
-    ! ── 9. Persistir estado interno no componente ESMF ────────────────────
+    ! 9. Persistir estado interno no componente ESMF
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha SetInternalState', &
       line=__LINE__, file=__FILE__)) return
@@ -327,7 +323,6 @@ contains
 
   end subroutine InitializeRealize
 
-  ! ============================================================================
   !> @brief Comunicador MPI para o FMS, calendário e instante inicial em FMS.
   !!
   !! @param[in]  gcomp      componente oceânico
@@ -344,15 +339,15 @@ contains
     type(ESMF_VM)           :: vm                ! VM ESMF (para obter MPI comm)
     type(ESMF_Time)         :: startTime
     type(ESMF_TimeInterval) :: timeStep
-    integer :: yr, mo, dy, hr, mn, sc            ! conversao ESMF->FMS
+    integer :: yr, mo, dy, hr, mn, sc            ! conversão ESMF->FMS
     integer :: mpi_comm_mom                      ! comunicador MPI do ESMF
 
     rc = ESMF_SUCCESS
 
-    ! ── 0. Obter VM ESMF e comunicador MPI ───────────────────────────────
+    ! 0. Obter VM ESMF e comunicador MPI
     ! MOM_infra_init DEVE receber o comunicador MPI do ESMF.
     ! Sem isso, o FMS chama MPI_Init internamente, conflitando com a
-    ! inicializacao MPI ja feita pelo ESMF → SIGABRT em mpp_error_basic.
+    ! inicialização MPI já feita pelo ESMF → SIGABRT em mpp_error_basic.
     call ESMF_GridCompGet(gcomp, vm=vm, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha GridCompGet vm', &
       line=__LINE__, file=__FILE__)) return
@@ -360,13 +355,13 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha VMGet mpiCommunicator', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── 1. Obter tempo de início do relógio ESMF ──────────────────────────
+    ! 1. Obter tempo de início do relógio ESMF
     call ESMF_ClockGet(clock, startTime=startTime, timeStep=timeStep, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha ClockGet', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── 2. Inicializar infraestrutura FMS com o comunicador MPI do ESMF ──
-    ! Passa mpi_comm_mom para que o FMS/mpp reutilize o MPI ja
+    ! 2. Inicializar infraestrutura FMS com o comunicador MPI do ESMF
+    ! Passa mpi_comm_mom para que o FMS/mpp reutilize o MPI já
     ! inicializado pelo ESMF, evitando double-init e SIGABRT.
     call MOM_infra_init(mpi_comm_mom)
     call set_calendar_type(GREGORIAN)
@@ -378,7 +373,6 @@ contains
     fms_init  = fms_start   ! init e start coincidem no primeiro passo
   end subroutine init_fms_time
 
-  ! ============================================================================
   !> @brief Grade MOM6 e limites do domínio computacional deste PET.
   !!
   !! @param[in]    is          estado interno (ocean_public, ocean_state)
@@ -390,7 +384,7 @@ contains
     type(ocean_grid_type), pointer, intent(inout) :: ocean_grid
     integer, intent(out) :: isc, iec, jsc, jec, ni, nj
 
-    ! ── 5. Obter grade MOM6 e limites do domínio computacional ───────────
+    ! 5. Obter grade MOM6 e limites do domínio computacional
     ! NÃO retornar prematuramente em PETs land-only.
     ! O NUOPC exige que TODOS os PETs participem das fases IPDv de forma
     ! coletiva — PETs que pulam NUOPC_Realize causam deadlock nos conectores.
@@ -414,7 +408,6 @@ contains
     call mpp_max(nj)
   end subroutine get_ocean_domain
 
-  ! ============================================================================
   !> @brief Aloca e zera os arrays de ice_ocean_boundary no domínio local.
   !!
   !! @param[inout] bnd  fronteira gelo-oceano do MOM6
@@ -475,7 +468,6 @@ contains
     bnd%ice_ncat        = 0
   end subroutine alloc_ice_ocean_boundary
 
-  ! ============================================================================
   !> @brief Cria a ESMF_Grid do oceano com a decomposição do MOM6.
   !!
   !! Passos:
@@ -516,7 +508,7 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── 1. Verificar que temos exatamente 1 tile por PET ─────────────────
+    ! 1. Verificar que temos exatamente 1 tile por PET
     ntiles = mpp_get_ntile_count(is%ocean_public%domain)
     if (ntiles /= 1) then
       call log_error(COMP_OCN, 'ntiles /= 1 nao suportado em ESMF_Grid')
@@ -524,7 +516,7 @@ contains
       return
     end if
 
-    ! ── 2. Obter limites de domínio de TODOS os PETs oceânicos ───────────
+    ! 2. Obter limites de domínio de TODOS os PETs oceânicos
     ! mpp_get_domain_npes: número de PETs no comunicador MOM6.
     ! mpp_get_compute_domains (plural): preenche xb/xe/yb/ye para todos.
     ! mpp_get_pelist: mapeia PETs MOM6 → PETs ESMF.
@@ -540,7 +532,7 @@ contains
       ni, nj, isc, jsc
     call log_info(COMP_OCN, trim(logmsg))
 
-    ! ── 3. Limites de cada bloco e PET de cada bloco ──────────────────────
+    ! 3. Limites de cada bloco e PET de cada bloco
     ! limites(:, n) = (is, ie, js, je) globais do bloco do PET MOM6 n;
     ! petMap(n): PET ESMF responsável (zero-based, relativo ao pe(1)).
     allocate(bounds(4, npes_ocn))
@@ -551,14 +543,14 @@ contains
     end do
     deallocate(xb, xe, yb, ye, pe)
 
-    ! ── 4. Grade nos blocos do MOM6, com o stagger dos centros ────────────
+    ! 4. Grade nos blocos do MOM6, com o stagger dos centros
     ! Malha ocn_mom6 (cpl_grids): DistGrid [1..ni] x [1..nj] com a lista de
     ! blocos, sem halo, sem periodicidade declarada, índices locais por DE.
     call cpl_block_grid('ocn_mom6', ni, nj, bounds, petMap, ocn_grid, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     deallocate(bounds, petMap)
 
-    ! ── 5. Coordenadas lon/lat nos centróides, as do MOM6 ─────────────────
+    ! 5. Coordenadas lon/lat nos centróides, as do MOM6
     ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
     ! não necessariamente coincidentes com (isc..iec, jsc..jec).
     ! Usar lbound() para calcular o offset correto, exatamente como faz
@@ -592,14 +584,13 @@ contains
     end if
     nullify(lon_ptr, lat_ptr)
 
-    ! ── 6. Máscara oceânica ───────────────────────────────────────────────
+    ! 6. Máscara oceânica
     call ESMF_GridAddItem(ocn_grid, itemFlag=ESMF_GRIDITEM_MASK,     &
          itemTypeKind=ESMF_TYPEKIND_I4,                               &
          staggerLoc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (rc /= ESMF_SUCCESS) rc = ESMF_SUCCESS   ! não-fatal
   end subroutine create_ocean_grid
 
-  ! ============================================================================
   !> @brief Cria e realiza os campos de importação e exportação na grade do oceano.
   !!
   !! @param[in]    ocn_grid     grade ESMF do oceano
@@ -614,7 +605,7 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── 8. Realizar campos de importação e exportação ─────────────────────
+    ! 8. Realizar campos de importação e exportação
     call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
     call cap_realize_fields(importState, ocn_grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -624,7 +615,6 @@ contains
     call log_info(COMP_OCN, 'Grid+Fields realizados')
   end subroutine realize_ocean_fields
 
-  ! ============================================================================
   !> @brief Exporta o estado oceânico inicial (t=0) após ocean_model_init.
   !!
   !! Esta fase é chamada pelo NUOPC após InitializeRealize. Ela garante que
@@ -658,7 +648,7 @@ contains
     ! Obtém grade para mom_export
     call get_ocean_grid(is%ocean_state, ocean_grid)
 
-    ! ── SST inicial em ocean_public%t_surf ─────────────────────────────
+    ! SST inicial em ocean_public%t_surf
     ! ocean_model_init NÃO preenche ocean_public%t_surf. O array é apenas
     ! ALOCADO (mom_ocean_model_nuopc.F90:865); quem o escreve é
     ! convert_state_to_ocean_type, e dentro de ocean_model_init essa chamada
@@ -724,7 +714,6 @@ contains
 
   end subroutine InitializeDataComplete
 
-  ! ============================================================================
   !> @brief Avança o MOM6+SIS2 por um intervalo de acoplamento.
   !!
   !! Sequência dentro de cada passo de acoplamento:
@@ -754,7 +743,7 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── Recuperar contexto NUOPC e estado interno ─────────────────────────
+    ! Recuperar contexto NUOPC e estado interno
     call NUOPC_ModelGet(gcomp, importState=importState, &
          exportState=exportState, modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -764,13 +753,12 @@ contains
       line=__LINE__, file=__FILE__)) return
     is => wrap%ptr
 
-    ! ── Obter instante atual e passo de tempo ─────────────────────────────
+    ! Obter instante atual e passo de tempo
     call ESMF_ClockGet(clock, currTime=currTime, timeStep=timeStep, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     nextTime = currTime + timeStep
 
-    ! Converter ESMF → FMS para update_ocean_model
-    ! Converter ESMF_Time -> FMS via ESMF_TimeGet + set_date
+    ! Converter ESMF_Time -> FMS para update_ocean_model, via ESMF_TimeGet + set_date
     call ESMF_TimeGet(currTime, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
     fms_curr = set_date(yr, mo, dy, hr, mn, sc)
     ! fms_dt via esmf2fms_time(timeStep) — sem operador '-' de time_type
@@ -780,13 +768,13 @@ contains
     call ESMF_TimeGet(currTime, timestring=timestr, rc=rc)
     call log_info(COMP_OCN, 'ModelAdvance currTime='//trim(timestr))
 
-    ! ── Obter grade MOM6 para mom_import e mom_export ─────────────────────
-    ! PETs nao oceanicas nao executam o advance
+    ! Obter grade MOM6 para mom_import e mom_export
+    ! PETs não oceânicas não executam o advance
     if (.not. is%ocean_public%is_ocean_pe) return
 
     call get_ocean_grid(is%ocean_state, ocean_grid)
 
-    ! ── Passo 1: Importar fluxos do mediador → ice_ocean_boundary ─────────
+    ! Passo 1: Importar fluxos do mediador → ice_ocean_boundary
     ! mom_import também aplica a rotação de vetores (taux,tauy) de lat-lon
     ! para a grade tripolar interna do MOM6.
     call mom_import(is%ocean_public, ocean_grid, importState, &
@@ -794,7 +782,7 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha mom_import', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 2: Avançar MOM6+SIS2 por dt_coupling ────────────────────────
+    ! Passo 2: Avançar MOM6+SIS2 por dt_coupling
     ! update_ocean_model é o ponto de entrada principal do MOM6.
     ! Internamente sub-cicla a dinâmica barotrópica e baroclínica conforme
     ! DT_BAROCLINIC e DTBT_RESET_PERIOD definidos em MOM_input.
@@ -803,7 +791,7 @@ contains
                             cesm_coupled=.false.)
     call log_debug(COMP_OCN, 'update_ocean_model concluido')
 
-    ! ── Passo 3: Exportar estado oceânico real → exportState ──────────────
+    ! Passo 3: Exportar estado oceânico real → exportState
     ! mom_export lê ocean_public%t_surf (SST), u_surf, v_surf (correntes),
     ! s_surf (salinidade), frazil, melt_potential e preenche o exportState.
     ! As correntes são rotacionadas de tripolar → lat-lon.
@@ -813,7 +801,7 @@ contains
     if (ESMF_LogFoundError(rcToCheck=rc, msg='OCN: falha mom_export', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3b: Si_ifrac conforme cfg_use_docn_ice ─────────────────────
+    ! Passo 3b: Si_ifrac conforme cfg_use_docn_ice
     !
     ! Modos (nuopc.input &nuopc_mode):
     !   use_docn_ice=T  init_only=F  → lê OISST a cada passo (campo
@@ -837,7 +825,7 @@ contains
         line=__LINE__, file=__FILE__)) return
     end if
 
-    ! ── Passo 4: Atualizar timestamps NUOPC de todos os campos exportados ──
+    ! Passo 4: Atualizar timestamps NUOPC de todos os campos exportados
     call cap_stamp_export(exportState, nextTime, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -845,7 +833,6 @@ contains
 
   end subroutine ModelAdvance
 
-  ! ============================================================================
   !> @brief Encerra o MOM6+SIS2 e libera toda a memória alocada.
   !!
   !! Chama ocean_model_end (escreve restart final MOM6 se configurado),
@@ -896,7 +883,6 @@ contains
 
   end subroutine ModelFinalize
 
-  ! ============================================================================
   !> @brief CheckImport tolerante: aceita campos com timestamp em ±dt_coupling.
   !!
   !! O NUOPC_ModelBase padrão rejeita campos cujo timestamp não seja
@@ -930,11 +916,11 @@ contains
            field=field, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle   ! campo opcional: ignorar
 
-      ! ESMF_FieldGet sem status= (invalido em ESMF 8.9.1)
+      ! ESMF_FieldGet sem status= (inválido em ESMF 8.9.1)
       call ESMF_FieldGet(field, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle   ! campo não realizado: ignorar
 
-      ! NUOPC_GetTimestamp sem isValid= (nao existe em NUOPC 8.9.1)
+      ! NUOPC_GetTimestamp sem isValid= (não existe em NUOPC 8.9.1)
       call NUOPC_GetTimestamp(field, time=fldTime, rc=localrc)
       if (localrc /= ESMF_SUCCESS) cycle
 

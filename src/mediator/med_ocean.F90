@@ -103,7 +103,7 @@ contains
     end if
   end subroutine update_ocean_fields_on_atm_grid
 
-  !> Soma os pontos da SST completados pela rota em cont, para o relatório
+  !> @brief Soma os pontos da SST completados pela rota em cont, para o relatório
   !! de acoplamento, e os registra no log. O preenchimento (coluna fill
   !! da rota ocn2atm_sst, em ROUTES): média dos vizinhos válidos, em até 40
   !! passadas; o que sobrar recebe 271,35 K; valores acima de 310 K recebem
@@ -127,7 +127,7 @@ contains
 
 
 
-  !> Correntes oceânicas So_u/So_v para a grade ATM (rota ocn2atm).
+  !> @brief Correntes oceânicas So_u/So_v para a grade ATM (rota ocn2atm).
   !! Com zero_on_error, a componente cuja interpolação falhar é zerada.
   subroutine regrid_ocean_currents(is, importState, zero_on_error)
     type(MED_InternalState), intent(inout) :: is
@@ -412,7 +412,7 @@ contains
 
   end subroutine fill_ifrac_from_oisst
 
-  !> Número de instantes (dimensão time ou Time) do arquivo de gelo do
+  !> @brief Número de instantes (dimensão time ou Time) do arquivo de gelo do
   !! OISST, lido pelo PET 0 e difundido a todos os PETs da VM. Sem arquivo
   !! ou sem a dimensão, e se a difusão falhar, vale 365.
   subroutine oisst_ntime(vm, localPet, ntime)
@@ -445,7 +445,7 @@ contains
     ntime = buf_n(1)
   end subroutine oisst_ntime
 
-  !> Le do arquivo de gelo do OISST os instantes tidx0 e tidx1, interpola
+  !> @brief Le do arquivo de gelo do OISST os instantes tidx0 e tidx1, interpola
   !! linearmente com peso alpha, converte de porcentagem se preciso e limita
   !! a [0,1]; o resultado fica em f0. Chamada só pelo PET 0. Sem arquivo ou
   !! sem a variável, f0 fica como estava.
@@ -472,7 +472,7 @@ contains
     end if
   end subroutine read_oisst_ifrac
 
-  !> Leva a fração de gelo do OISST (f0, grade nx_o x ny_o) a porção local
+  !> @brief Leva a fração de gelo do OISST (f0, grade nx_o x ny_o) a porção local
   !! fptr da grade ATM interna, pelo ponto mais próximo, limitada a [0,1].
   subroutine oisst_to_atm_nearest(f0, nx_o, ny_o, dx_o, dy_o, dx_a, dy_a, fptr)
     integer,            intent(in) :: nx_o, ny_o

@@ -53,7 +53,6 @@ module docn_cap_netcdf_mod
 
 contains
 
-  !=============================================================================
   !> @brief Lê um snapshot NetCDF global (chamado apenas em PET0).
   !!
   !! Abre o arquivo, localiza a variável e lê um único snapshot (tidx).
@@ -65,7 +64,6 @@ contains
   !! @param[in]  nx, ny    Dimensões horizontais esperadas
   !! @param[out] array     Array de saída (nx, ny)
   !! @param[out] rc        Código de retorno ESMF
-  !=============================================================================
   subroutine ReadGlobalField(filename, varname, tidx, nx, ny, array, rc)
     character(len=*),    intent(in)  :: filename
     character(len=*),    intent(in)  :: varname
@@ -130,7 +128,6 @@ contains
 
   end subroutine ReadGlobalField
 
-  !=============================================================================
   !> @brief Interpolação temporal linear entre snapshots diários.
   !!
   !! Idêntica em estrutura a ReadJRAFieldInterp do DATM_cap.F90.
@@ -150,7 +147,6 @@ contains
   !! @param[in]  nx, ny    Dimensões da grade global
   !! @param[out] array     Campo interpolado no subdomínio local (pointer)
   !! @param[out] rc        Código de retorno ESMF
-  !=============================================================================
   subroutine ReadOcnFieldInterp(gcomp, filename, varname, currTime, &
                                  nx, ny, array, rc)
     type(ESMF_GridComp),  intent(in)    :: gcomp
@@ -278,7 +274,7 @@ contains
 
     deallocate(buf_global)
 
-    ! formato corrigido — 5 strings antes do primeiro I5
+    ! Formato: 5 strings antes do primeiro I5.
     write(msg,'(A,A,A,A,A,I5,A,I5,A,F6.4)') &
       'interp ', trim(varname), ' [', trim(filename), &
       '] tidx0=', tidx0, ' tidx1=', tidx1, ' alpha=', alpha
@@ -286,7 +282,6 @@ contains
 
   end subroutine ReadOcnFieldInterp
 
-  !=============================================================================
   !> @brief Escrita diagnóstica dos campos oceânicos por passo de acoplamento.
   !!
   !! Gera docn_import_YYYYMMDD_HHMMSS.nc com SST, gelo e correntes interpolados,
@@ -306,7 +301,6 @@ contains
   !! @param[in]  currTime  Tempo corrente da simulação
   !! @param[in]  nx, ny    Dimensões da grade DOCN
   !! @param[out] rc        Código de retorno ESMF
-  !=============================================================================
   subroutine WriteDOCNDiag(gcomp, currTime, nx, ny, rc)
     type(ESMF_GridComp),  intent(in)  :: gcomp
     type(ESMF_Time),      intent(in)  :: currTime
@@ -361,9 +355,7 @@ contains
                               fill_val, fout, iceout, uout, vout)
   end subroutine WriteDOCNDiag
 
-  !=============================================================================
   !> @brief Segundos desde a época dos dados e intervalo entre instantes (s).
-  !=============================================================================
   subroutine docn_epoch_seconds(currTime, sec_since_epoch, dt_data_i8, rc)
     type(ESMF_Time),       intent(in)  :: currTime
     integer(ESMF_KIND_I8), intent(out) :: sec_since_epoch, dt_data_i8
@@ -380,12 +372,10 @@ contains
     dt_data_i8 = int(cfg_docn_dt_data, ESMF_KIND_I8)
   end subroutine docn_epoch_seconds
 
-  !=============================================================================
   !> @brief Tamanho da dimensão de tempo de um arquivo aberto.
   !!
   !! Procura a dimensão pelos nomes 'time' e 'Time' e, se all_caps, também
   !! 'TIME'. Sem a dimensão, devolve n_default.
-  !=============================================================================
   integer function docn_time_len(ncid_r, n_default, all_caps) result(ntime)
     integer, intent(in) :: ncid_r, n_default
     logical, intent(in) :: all_caps
@@ -401,12 +391,10 @@ contains
     end if
   end function docn_time_len
 
-  !=============================================================================
   !> @brief Instantes dos dados antes (tidx0) e depois (tidx1) do tempo atual.
   !!
   !! Os dados se repetem em ciclo de ntime instantes: depois do último vem o
   !! primeiro.
-  !=============================================================================
   pure subroutine docn_time_indices(sec_since_epoch, dt_data_i8, ntime, tidx0, tidx1)
     integer(ESMF_KIND_I8), intent(in)  :: sec_since_epoch, dt_data_i8
     integer,               intent(in)  :: ntime
@@ -416,14 +404,12 @@ contains
     tidx1 = mod(tidx0, ntime) + 1
   end subroutine docn_time_indices
 
-  !=============================================================================
   !> @brief SST interpolada no tempo, em K, do arquivo cfg_docn_sst_file.
   !!
   !! Pontos com valor ausente (|valor| > 1e10) em algum dos dois instantes
   !! recebem fill_val; sem a variável, o campo inteiro recebe fill_val. Se o
   !! arquivo não abre, registra um aviso e devolve opened = .false.
   !! ntime (número de instantes do arquivo) serve de padrão para o gelo.
-  !=============================================================================
   subroutine interp_docn_sst(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
                              f0, f1, fout, ntime, tidx0, tidx1, opened)
     integer,               intent(in)    :: nx, ny
@@ -460,14 +446,12 @@ contains
     ncstat = nf90_close(ncid_r)
   end subroutine interp_docn_sst
 
-  !=============================================================================
   !> @brief Fração de gelo interpolada no tempo, do arquivo cfg_docn_ice_file.
   !!
   !! Com cfg_docn_ice_pct, os dados estão em % e são divididos por 100. O
   !! resultado é limitado a [0,1]; valores ausentes recebem fill_val. Sem o
   !! arquivo ou sem a variável, o campo inteiro recebe fill_val. Sem a
   !! dimensão de tempo, usa o número de instantes da SST (ntime_sst).
-  !=============================================================================
   subroutine interp_docn_ice(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
                              ntime_sst, ice0, ice1, iceout)
     integer,               intent(in)    :: nx, ny
@@ -500,7 +484,6 @@ contains
     end if
   end subroutine interp_docn_ice
 
-  !=============================================================================
   !> @brief Correntes superficiais interpoladas no tempo (opcional).
   !!
   !! Lidas de cfg_docn_cur_file, com os mesmos pesos da SST e com os
@@ -508,7 +491,6 @@ contains
   !! não houver dimensão de tempo). Valores com módulo >= 10 m/s, no
   !! resultado ou em algum dos instantes, recebem fill_val. Sem o arquivo
   !! ou sem a variável, a componente é zero. f0 e f1 são áreas de trabalho.
-  !=============================================================================
   subroutine interp_docn_currents(nx, ny, sec_since_epoch, dt_data_i8, alpha, fill_val, &
                                   f0, f1, uout, vout)
     integer,               intent(in)    :: nx, ny
@@ -557,12 +539,10 @@ contains
     end if
   end subroutine interp_docn_currents
 
-  !=============================================================================
   !> @brief Grava o arquivo docn_import_AAAAMMDD_HHMMSS.nc em cfg_import_diag_dir.
   !!
   !! Eixos na grade nativa do DOCN: longitude de 0 a 360 - 360/nx graus
   !! (o postproc_mom6_import.py faz o deslocamento) e latitude de -90 a 90.
-  !=============================================================================
   subroutine write_docn_diag_file(nx, ny, yy, mm, dd, hh, mn, ss, tidx0, tidx1, alpha, &
                                   fill_val, fout, iceout, uout, vout)
     integer,            intent(in) :: nx, ny, yy, mm, dd, hh, mn, ss, tidx0, tidx1

@@ -1,42 +1,38 @@
-!==============================================================================!
-! DOCN_cap.F90 — Data Ocean NUOPC Component (MOM6 forçado por dados)        !
-!                                                                              !
-! Analogia exata com DATM_cap.F90 (Data Atmosphere / JRA55) porém para o      !
-! componente oceânico: lê campos de SST e gelo marinho de arquivos NetCDF      !
-! (ex: OISST v2.1 diário, OSTIA) e os exporta para o mediador MED_cap e para  !
-! o cap atmosférico MPAS (condições de contorno de superfície).                !
-!                                                                              !
-! Campos exportados (para MED e para OCN→MPAS):                               !
-!   So_t      temperatura da superfície do mar (SST)    [K]                   !
-!   Si_ifrac  fração de gelo marinho                    [0–1]                 !
-!   Sf_zorl   comprimento de rugosidade oceânica        [m]                   !
-!   So_s      salinidade superficial do mar (opcional)  [psu]                 !
-!   So_u      corrente superficial zonal                [m/s]                 !
-!   So_v      corrente superficial meridional           [m/s]                 !
-!                                                                              !
-! Campos importados (do mediador MED→OCN — recebidos mas não processados):    !
-!   Foxx_taux, Foxx_tauy, Foxx_sen, Foxx_evap, Foxx_lwnet,                   !
-!   Foxx_swnet_vdr, Foxx_swnet_vdf, Foxx_swnet_idr, Foxx_swnet_idf,          !
-!   Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac, So_duu10n                       !
-!                                                                              !
-! Modo de operação único (nuopc.input &nuopc_docn):                           !
-!   docn_mode = 'netcdf'   — lê SST/gelo/correntes de arquivo NetCDF          !
-!                             com interpolação temporal linear entre snapshots  !
-!                                                                              !
-! Estratégia de leitura paralela:                                              !
-!   PET0 lê o campo global inteiro do NetCDF e faz broadcast via              !
-!   ESMF_VMBroadcast. Cada PET copia o seu subdomínio local.                  !
-!   Adequado para grids até ~1440×1080 (OISST 0.25°): ~12 MB/campo/snapshot. !
-!                                                                              !
-! Arquivo NetCDF esperado (OISST v2.1 compatível, CF-1.8):                   !
-!   dims  : lon(1440), lat(720), time(N)                                      !
-!   vars  : sst(lon,lat,time) [°C], aice(lon,lat,time) [0–1]                  !
-!   Nota  : SST é convertida de °C → K internamente (+273.15).                !
-!           Se o arquivo já estiver em K, ajuste SST_CELSIUS_TO_K = 0.0.      !
-!                                                                              !
-! Referência de design: DATM_cap.F90 (JRA55), AtmOcnMedPetListProto/ESMF.    !
-! GT Acoplamento de Modelos / INPE/CGCT/DIMNT.                                 !
-!==============================================================================!
+!> @file DOCN_cap.F90
+!! @brief Oceano de dados (DOCN): SST, gelo e correntes lidos de arquivos NetCDF.
+!!
+!! Equivalente ao DATM_cap.F90 (atmosfera de dados, JRA55) para o
+!! componente oceânico: lê SST e gelo marinho de arquivos NetCDF (por
+!! exemplo, OISST v2.1 diário ou OSTIA), com interpolação temporal linear
+!! entre registros, e os exporta ao mediador e ao cap atmosférico (contorno
+!! de superfície). Baseado em DATM_cap.F90 e no exemplo
+!! AtmOcnMedPetListProto do ESMF.
+!!
+!! | Campo exportado | Grandeza                               | Unidade |
+!! | --------------- | -------------------------------------- | ------- |
+!! | So_t            | temperatura da superfície do mar (SST) | K       |
+!! | Si_ifrac        | fração de gelo marinho                 | 0 a 1   |
+!! | Sf_zorl         | comprimento de rugosidade oceânica     | m       |
+!! | So_s            | salinidade superficial (opcional)      | psu     |
+!! | So_u            | corrente superficial zonal             | m/s     |
+!! | So_v            | corrente superficial meridional        | m/s     |
+!!
+!! Os campos importados do mediador (Foxx_taux, Foxx_tauy, Foxx_sen,
+!! Foxx_evap, Foxx_lwnet, Foxx_swnet_vdr/vdf/idr/idf, Faxa_rain, Faxa_snow,
+!! Sa_pslv, Si_ifrac e So_duu10n) são recebidos, mas não processados.
+!!
+!! Modo de operação único (nuopc.input, &nuopc_docn): docn_mode = 'netcdf'.
+!!
+!! Leitura paralela: o PET 0 lê o campo global inteiro do NetCDF e o
+!! difunde com ESMF_VMBroadcast; cada PET copia o seu subdomínio. Serve
+!! para grades até ~1440×1080 (OISST 0.25°: ~12 MB por campo e registro).
+!!
+!! Arquivo NetCDF esperado (compatível com OISST v2.1, CF-1.8): dimensões
+!! lon(1440), lat(720), time(N); variáveis sst(lon,lat,time) [°C] e
+!! aice(lon,lat,time) [0–1]. A SST é convertida de °C para K (+273.15); se
+!! o arquivo já estiver em K, ajuste SST_CELSIUS_TO_K = 0.0.
+!!
+!! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
 
 module DOCN_cap_mod
 
@@ -108,13 +104,13 @@ module DOCN_cap_mod
   public :: SetServices
   public :: SetVM
 
-  ! ── Conversão de unidades ──────────────────────────────────────────────────
+  ! Conversão de unidades
   ! OISST v2.1 armazena SST em °C. Ajuste para 0.0 se o arquivo já for em K.
 
-  ! ── Rugosidade oceânica padrão ─────────────────────────────────────────────
+  ! Rugosidade oceânica padrão
   real(ESMF_KIND_R8), parameter :: ZORL_DEFAULT = 0.001_ESMF_KIND_R8  ! [m]
 
-  ! ── Campos trocados ───────────────────────────────────────────────────────
+  ! Campos trocados
   ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
   ! OCN@docn: a importação são os 14 fluxos e estados que chegam do mediador
   ! (cpl_arrivals: Foxx_*, Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac e
@@ -124,9 +120,7 @@ module DOCN_cap_mod
   ! O valor inicial de cada campo exportado está em initial_export_value.
   character(len=*), parameter :: POINT_OCN = 'OCN@docn'
 
-  !----------------------------------------------------------------------------
   ! Estado interno do DOCN
-  !----------------------------------------------------------------------------
   type :: DOCN_InternalState
     type(ESMF_Grid) :: grid
     ! Campos oceânicos interpolados (subdomínio local do PET)
@@ -144,9 +138,9 @@ module DOCN_cap_mod
 
 contains
 
-  !=============================================================================
-  ! SetServices — registra fases IPDv03 e especializa ModelAdvance
-  !=============================================================================
+  !> @brief Registra as fases de inicialização (IPDv03) e as especializações do DOCN.
+  !! @param[inout] gcomp  componente DOCN
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer,              intent(out)   :: rc
@@ -182,16 +176,17 @@ contains
 
   end subroutine SetServices
 
-  !=============================================================================
-  ! InitializeAdvertise — anuncia campos de SST/gelo/corrente para o MED e MPAS
-  !
-  ! Todos os campos importados (fluxos do mediador MED→OCN) são anunciados.
-  ! O conector NUOPC MED→OCN cria RouteHandles bilineares na grade OISST nativa
-  ! (1440×720 com decomposição 2D via sqrt(petCount) tiles por dimensão,
-  ! garantindo colunas ≥2 e evitando o erro "DE width 1" em qualquer petCount).
-  !
-  ! As listas saem do mapa de acoplamento (ponto POINT_OCN, acima).
-  !=============================================================================
+  !> @brief Anuncia os campos importados do mediador e os exportados ao MED e ao MPAS.
+  !!
+  !! Todos os campos importados (fluxos do mediador MED→OCN) são
+  !! anunciados; o conector MED→OCN cria RouteHandles bilineares na grade
+  !! do DOCN (ver InitializeRealize para a decomposição). As listas saem do
+  !! mapa de acoplamento (ponto POINT_OCN, acima).
+  !! @param[inout] gcomp        componente DOCN
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -224,14 +219,18 @@ contains
 
   end subroutine InitializeAdvertise
 
-  !=============================================================================
-  ! InitializeRealize — cria grade regular lat/lon e realiza campos
-  !
-  ! Grade configurável via nuopc.input (&nuopc_docn):
-  !   docn_nx = 1440  (OISST 0.25°)   ou  360 (1.0°)
-  !   docn_ny =  720  (OISST 0.25°)   ou  180 (1.0°)
-  ! Coordenadas: lon=[0.125..359.875], lat=[-89.875..89.875] (centros de célula).
-  !=============================================================================
+  !> @brief Cria a grade regular lat/lon do DOCN e realiza os campos.
+  !!
+  !! Grade configurável no nuopc.input (&nuopc_docn):
+  !!   docn_nx = 1440  (OISST 0.25°)   ou  360 (1.0°)
+  !!   docn_ny =  720  (OISST 0.25°)   ou  180 (1.0°)
+  !! Coordenadas nos centros das células, por exemplo
+  !! lon=[0.125..359.875] e lat=[-89.875..89.875] a 0.25°.
+  !! @param[inout] gcomp        componente DOCN
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -263,37 +262,28 @@ contains
     dx = 360.0_ESMF_KIND_R8 / real(nx, ESMF_KIND_R8)
     dy = 180.0_ESMF_KIND_R8 / real(ny, ESMF_KIND_R8)
 
-    ! obter petCount para definir decomposicao explicitamente.
-    ! ESMF_GridCreate1PeriDim sem regDecomp usa decomposicao default que,
-    ! em ESMF 8.9.1, pode gerar DEs de largura 1 na dimensao latitudinal
-    ! quando petCount > ny/2. Isso causa falha no regridding bilinear
-    ! do conector MED->OCN com o erro:
-    !   "not supported on Grids that contain a DE of width 1"
-    ! Fix: forcar decomposicao 1D exclusivamente na dimensao longitudinal
-    ! (dim 1 = periodica): cada PET recebe nx/petCount colunas e TODAS
-    ! as ny linhas de latitude. Com nx=1440 e petCount=128:
-    !   1440/128 = 11.25 -> min 11 colunas/PET >> 1 → OK para bilinear.
+    ! A decomposição é explícita. Sem regDecomp, ESMF_GridCreate1PeriDim
+    ! (ESMF 8.9.1) pode gerar DEs de largura 1 na latitude quando
+    ! petCount > ny/2, e o regrid bilinear do conector MED->OCN falha com
+    ! "not supported on Grids that contain a DE of width 1". Decompor só em
+    ! latitude deixa PETs vazios quando petCount > ny/2; decompor só em
+    ! longitude dá blocos muito estreitos (1440×720 a 512 PETs: 2 a 3
+    ! colunas × 720 linhas, aspecto 256:1), e o MOAB trava em
+    ! ESMF_FieldBundleRegridStore.
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call ESMF_VMGet(vm, petCount=petCount, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! ): regDecomp 2D com tiles quadradas — evita strips extremos.
+    ! Os blocos são quase quadrados, com sqrt(petCount) por
+    ! dimensão:
+    !   nx_tiles_target = nint(sqrt(N)) → aspecto ≈ 1;
+    !   nx_max = min(target, nx/2) → ao menos 2 colunas por bloco.
     !
-    ! PROBLEMA com (regDecomp=(/1, min(petCount,ny/2)/)):
-    !   Decompõe em latitude → PETs vazios com petCount>ny/2.
-    ! PROBLEMA com (nx_max=nx/2):
-    !   netcdf 1440×720 a 512 PETs → regDecomp=(/512,1/) → 2-3 cols×720 rows
-    !   → aspecto 256:1 → MOAB trava em ESMF_FieldBundleRegridStore.
-    !
-    ! SOLUCAO sqrt(petCount) tiles por dimensão.
-    !   nx_tiles_target = nint(sqrt(N)) → aspecto ≈ 1.
-    !   nx_max = min(target, nx/2) → garante col ≥ 2.
-    !
-    !   N=4:   sqrt=2  → nx_max=2   regDecomp=(/2,2/)=4    aspecto 0.5:1 ✓
-    !   N=128: sqrt=11 → nx_max=11  regDecomp=(/11,12/)=132 aspecto 0.5:1 ✓
-    !   N=512: netcdf(360×180) → regDecomp=(/23,23/)=529  15col× 7row ✓
-    !   N=512: netcdf(1440×720)→ regDecomp=(/23,23/)=529  62col×31row ✓
+    !   N=4:   sqrt=2  → nx_max=2   regDecomp=(/2,2/)=4    aspecto 0.5:1
+    !   N=128: sqrt=11 → nx_max=11  regDecomp=(/11,12/)=132 aspecto 0.5:1
+    !   N=512: netcdf(360×180) → regDecomp=(/23,23/)=529  15col× 7row
+    !   N=512: netcdf(1440×720)→ regDecomp=(/23,23/)=529  62col×31row
 
       nx_tiles_target = max(1, nint(sqrt(real(petCount))))
       nx_max          = min(nx_tiles_target, nx / 2)
@@ -362,9 +352,9 @@ contains
 
   end subroutine InitializeRealize
 
-  !=============================================================================
-  ! InitializeDataComplete — IPDv03p7: popula exportState e sinaliza conclusao
-  !=============================================================================
+  !> @brief Fase IPDv03p7: preenche o exportState com os valores iniciais e sinaliza a conclusão.
+  !! @param[inout] gcomp  componente DOCN
+  !! @param[out]   rc     código de retorno
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer,              intent(out)   :: rc
@@ -396,7 +386,7 @@ contains
     ! Sem NUOPC_SetTimestamp os campos ficam em t=0 e o MPAS rejeita.
     call ESMF_GridCompGet(gcomp, clock=clock_idc, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
-    ! NUOPC_SetTimestamp recebe ESMF_Time, nao ESMF_Clock
+    ! NUOPC_SetTimestamp recebe ESMF_Time, não ESMF_Clock
     call ESMF_ClockGet(clock_idc, startTime=startTime_idc, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -410,13 +400,13 @@ contains
 
   end subroutine InitializeDataComplete
 
-  !=============================================================================
-  ! initial_export_value: valor de um campo exportado antes da primeira
-  ! leitura: SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fracao
-  ! de gelo padrao, rugosidade ZORL_DEFAULT e salinidade media global de
-  ! 35 psu; as correntes (So_u, So_v) e os demais campos comecam em zero
-  ! (repouso).
-  !=============================================================================
+  !> @brief Valor de um campo exportado antes da primeira leitura.
+  !!
+  !! SST inicial do namelist &nuopc_atm_bnd (cfg_sst_default), fração de
+  !! gelo padrão, rugosidade ZORL_DEFAULT e salinidade média global de 35
+  !! psu; as correntes (So_u, So_v) e os demais campos começam em zero
+  !! (repouso).
+  !! @param[in] name  nome do campo
   function initial_export_value(name) result(init_val)
     character(len=*), intent(in) :: name
     real(ESMF_KIND_R8)           :: init_val
@@ -435,16 +425,15 @@ contains
     end select
   end function initial_export_value
 
-  !=============================================================================
-  ! ModelAdvance — lê campos oceânicos do NetCDF e popula exportState
-  !
-  ! Lê SST e gelo do arquivo com interpolação temporal linear entre snapshots.
-  !
-  ! Dados esperados (OISST v2.1 ou equivalente CF-1.8):
-  !   sst_file: sst(lon,lat,time) em °C, dt=24h (diário)
-  !   ice_file: aice(lon,lat,time) em [0-1], dt=24h (diário)
-  !   cur_file: uo(lon,lat,time) e vo(lon,lat,time) em m/s (opcional)
-  !=============================================================================
+  !> @brief Lê os campos oceânicos do NetCDF no instante corrente e preenche o exportState.
+  !!
+  !! SST e gelo vêm do arquivo com interpolação temporal linear entre
+  !! registros. Dados esperados (OISST v2.1 ou equivalente CF-1.8):
+  !!   sst_file: sst(lon,lat,time) em °C, dt=24h (diário)
+  !!   ice_file: aice(lon,lat,time) em [0-1], dt=24h (diário)
+  !!   cur_file: uo(lon,lat,time) e vo(lon,lat,time) em m/s (opcional)
+  !! @param[inout] gcomp  componente DOCN
+  !! @param[out]   rc     código de retorno
   subroutine ModelAdvance(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer,              intent(out)   :: rc
@@ -523,7 +512,7 @@ contains
       end if
     end if
 
-    ! Sf_zorl: rugosidade constante (funcao de amplitude de onda nao modelada aqui)
+    ! Sf_zorl: rugosidade constante (função de amplitude de onda não modelada aqui)
     call FillFieldConst(exportState, "Sf_zorl", ZORL_DEFAULT, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -535,10 +524,12 @@ contains
 
   end subroutine ModelAdvance
 
-  !=============================================================================
-  ! read_docn_fields — lê SST e gelo com interpolação temporal, as correntes
-  ! (opcionais) e define a salinidade constante, nos buffers do estado interno
-  !=============================================================================
+  !> @brief Lê SST e gelo com interpolação temporal, as correntes (opcionais)
+  !! e define a salinidade constante, nos buffers do estado interno.
+  !! @param[inout] gcomp     componente DOCN
+  !! @param[inout] is        estado interno (buffers dos campos)
+  !! @param[in]    currTime  instante corrente
+  !! @param[out]   rc        código de retorno
   subroutine read_docn_fields(gcomp, is, currTime, rc)
     type(ESMF_GridComp),      intent(inout) :: gcomp
     type(DOCN_InternalState), intent(inout) :: is
@@ -547,7 +538,7 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! ── Leitura dos campos oceânicos com interpolação temporal ────────────────
+    ! Leitura dos campos oceânicos com interpolação temporal
     ! nomes de variável configuráveis via nuopc.input (docn_*_varname).
     ! OISST v2.1: sst_varname='sst'  ice_varname='icec'
     call ReadOcnFieldInterp(gcomp, trim(cfg_docn_sst_file), &
@@ -576,10 +567,12 @@ contains
 
   end subroutine read_docn_fields
 
-  !=============================================================================
-  ! read_docn_currents — correntes superficiais do arquivo opcional; sem
-  ! arquivo, ou se a leitura falhar, a componente fica zero
-  !=============================================================================
+  !> @brief Correntes superficiais do arquivo opcional; sem arquivo, ou se a
+  !! leitura falhar, a componente fica zero.
+  !! @param[inout] gcomp     componente DOCN
+  !! @param[inout] is        estado interno (buffers dos campos)
+  !! @param[in]    currTime  instante corrente
+  !! @param[out]   rc        código de retorno
   subroutine read_docn_currents(gcomp, is, currTime, rc)
     type(ESMF_GridComp),      intent(inout) :: gcomp
     type(DOCN_InternalState), intent(inout) :: is
@@ -618,9 +611,11 @@ contains
   end subroutine read_docn_currents
 
 
-  !=============================================================================
-  ! FillFieldConst — preenche campo do State com valor escalar constante
-  !=============================================================================
+  !> @brief Preenche um campo do State com um valor constante.
+  !! @param[inout] state  State que contém o campo
+  !! @param[in]    name   nome do campo
+  !! @param[in]    value  valor atribuído a todos os pontos
+  !! @param[out]   rc     código de retorno
   subroutine FillFieldConst(state, name, value, rc)
     type(ESMF_State),    intent(inout) :: state
     character(len=*),    intent(in)    :: name

@@ -1,7 +1,8 @@
 !> @file mpas_atm_model.F90
 !! @brief Interface com o modelo atmosférico MPAS-A 8.3 / MONAN-A 2.0.
 !!
-!! Interface MONAN-A 2.0: init/run/final + buffers de acoplamento.
+!! Rotinas de inicialização, avanço e finalização chamadas pelo cap, e os
+!! buffers de acoplamento.
 !!
 !! As etapas ficam em módulos próprios:
 !!   mpas_atm_setup.F90   etapas da inicialização (domínio, streams, ponteiros,
@@ -16,14 +17,14 @@
 !! mpas_advance_stop_time controla o relógio INTERNO do MONAN-A (atm_state%%domain%%clock),
 !! independente do relógio ESMF do driver. Ambos são necessários.
 !!
-!! Sequência de inicialização do MONAN-A (confirmada via probe no Jaci):
+!! Sequência de inicialização do MONAN-A:
 !!   phase1(external_comm) → atm_setup_core → atm_setup_domain → setup_log →
 !!   setup_namelist → phase2 → streamInfo → define_packages → setup_packages →
 !!   setup_decompositions → setup_clock → bootstrap_phase1 → stream_mgr_init →
 !!   add_stream_attributes → setup_immutable_streams → xml_stream_parser →
 !!   bootstrap_phase2 → core_init → extração de ponteiros zero-copy.
 !!
-!! Assinaturas confirmadas (probe_block_type.bash, Jaci):
+!! Assinaturas das funções do núcleo:
 !!   core_init     : function(domain, startTimeStamp) result(ierr)  [integer]
 !!   core_run      : function(domain) result(ierr)                   [integer]
 !!   core_finalize : function(domain) result(ierr)                   [integer]
@@ -37,8 +38,8 @@ module mpas_atm_model_mod
                                   atm_ocean_boundary_type
 
   use mpas_kind_types,    only : StrKIND
-  ! field1DReal (de mpas_field_types.inc, incluido em
-  ! mpas_derived_types) e mpas_dmpar_exch_halo_field sao necessarios para
+  ! field1DReal (de mpas_field_types.inc, incluído em
+  ! mpas_derived_types) e mpas_dmpar_exch_halo_field são necessários para
   ! propagar aos halos os campos de contorno injetados pelo acoplador.
   use mpas_dmpar,         only : mpas_dmpar_exch_halo_field
   use mpas_derived_types, only : field1DReal
@@ -51,7 +52,7 @@ module mpas_atm_model_mod
                                   mpas_pool_get_config,       &
                                   mpas_pool_get_field
 
-  ! mpas_log_write confirmado (probe mpas_log.F linha 480)
+  ! mpas_log_write: mpas_log.F, linha 480
   use mpas_log,           only : mpas_log_write, mpas_log_info
   use coupler_log_mod,    only : COMP_ATM, log_error, log_warning, log_info
 
@@ -81,17 +82,16 @@ module mpas_atm_model_mod
 
 contains
 
-  ! ============================================================================
   !> @brief Inicializa o MONAN-A 2.0.
   !!
-  !! Sequência baseada no probe e em mpas_subdriver.F linhas 202/257:
+  !! Sequência de mpas_subdriver.F (linhas 202 a 257):
   !!
   !!   1. mpas_framework_init_phase1(dminfo, external_comm=mpi_comm)
   !!      Inicializa dmpar (MPI wrapper) com o comunicador da VM ESMF.
   !!
   !!   2. atm_setup_core(domain%core)
   !!      Registra os procedure pointers core_init/core_run/core_finalize.
-  !!      (Deve ser chamado entre phase1 e phase2 — confirmado pelo probe seção 8)
+  !!      Deve ser chamado entre phase1 e phase2.
   !!
   !!   3. mpas_framework_init_phase2(domain, calendar=...)
   !!      Lê namelist.atmosphere, decompõe malha, aloca blocklist e pools,
@@ -110,8 +110,7 @@ contains
   !! 12), core_init, bind_mesh_fields, bind_diag_fields, setup_wind_fallback,
   !! init_flux_buffers e init_boundary_arrays.
   !!
-  !! @param mpi_comm  Comunicador MPI inteiro (extraído pelo cap da VM ESMF).
-  ! ============================================================================
+  !! @param[in] mpi_comm  comunicador MPI inteiro (extraído pelo cap da VM ESMF)
   subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
                             dt_seconds, config_dir, mpi_comm, rc)
 
@@ -124,21 +123,21 @@ contains
     integer,          intent(out) :: rc
 
     integer          :: n, nSolve, ierr
-    ! StrKIND (=512), nao 64.
+    ! StrKIND (=512), não 64.
     !
-    ! Esta variavel e' passada a core_init, cujo dummy e' character(len=*),
+    ! Esta variável é passada a core_init, cujo dummy é character(len=*),
     ! logo o comprimento do ATUAL se propaga intacto. Dentro de atm_core_init
-    ! ela chega a mpas_get_time, cujo dummy dateTimeString e' declarado com
-    ! StrKIND. Com -fcheck=bounds no FFLAGS_OPT de producao, o gfortran
-    ! verifica comprimento de caractere em tempo de execucao e aborta:
+    ! ela chega a mpas_get_time, cujo dummy dateTimeString é declarado com
+    ! StrKIND. Com -fcheck=bounds no FFLAGS_OPT de produção, o gfortran
+    ! verifica comprimento de caractere em tempo de execução e aborta:
     !   "Actual string length is shorter than the declared one for dummy
     !    argument 'datetimestring' (64/512)"
     ! Os 64 PETs da atmosfera terminam em Error termination dentro do
     ! mpas_atm_init, antes do primeiro ModelAdvance.
     !
-    ! Sem -fcheck=bounds isto nao aborta, mas tambem nao e' inocuo: o
-    ! mpas_get_time escreveria ate 512 caracteres sobre um buffer de 64.
-    ! Nao ha custo em usar StrKIND: a variavel e' local e usada com trim.
+    ! Sem -fcheck=bounds isto não aborta, mas também não é inócuo: o
+    ! mpas_get_time escreveria até 512 caracteres sobre um buffer de 64.
+    ! Não há custo em usar StrKIND: a variável é local e usada com trim.
     character(len=StrKIND) :: startTimeStamp
     character(len=256) :: msg
 
@@ -147,7 +146,7 @@ contains
     atm_state%dt_seconds = dt_seconds
     atm_state%config_dir = trim(config_dir)
 
-    ! Passos 1 a 9: dominio, framework, namelist, pacotes e relogio
+    ! Passos 1 a 9: domínio, framework, namelist, pacotes e relógio
     call setup_mpas_domain(atm_state, rc)
     if (rc /= 0) return
 
@@ -155,9 +154,7 @@ contains
     call setup_mpas_streams(atm_state, rc)
     if (rc /= 0) return
 
-    ! ------------------------------------------------------------------
     ! 13. Inicializa o núcleo atmosférico (core_init).
-    ! ------------------------------------------------------------------
     startTimeStamp = ''
     ierr = atm_state%domain%core%core_init(atm_state%domain, startTimeStamp)
     if (ierr /= 0) then
@@ -184,7 +181,13 @@ contains
 
   end subroutine mpas_atm_init
 
-  ! ============================================================================
+  !> @brief Confere que o MONAN-A foi inicializado; os campos de t=0 já estão nos ponteiros.
+  !!
+  !! core_init preenche o subpool diag com os dados do init.nc, e os
+  !! ponteiros de atm_public apontam para eles; não há cópia a fazer.
+  !! @param[inout] atm_public  estruturas de exportação do MONAN-A
+  !! @param[inout] atm_state   estado do modelo
+  !! @param[out]   rc          0, ou 1 se o modelo não foi inicializado
   subroutine mpas_atm_init_sfc(atm_public, atm_state, rc)
     type(mpas_atm_public_type), intent(inout) :: atm_public
     type(mpas_atm_state_type),  intent(inout) :: atm_state
@@ -199,16 +202,14 @@ contains
     call mpas_log_write('mpas_atm_init_sfc: campos t=0 prontos (zero-copy)')
   end subroutine mpas_atm_init_sfc
 
-  ! ============================================================================
   !> @brief Avança o MONAN-A por um intervalo de acoplamento.
   !!
-  !! Probe seção 4 / mpas_atm_core.F linha 605:
+  !! mpas_atm_core.F, linha 605:
   !!   function atm_core_run(domain) result(ierr)
   !! core_run é INTEGER FUNCTION — retorna código de erro MPAS.
   !!
   !! I/O (history/restart) via SMIOL/smiolf ocorre automaticamente
   !! conforme alarmes definidos em streams.atmosphere.
-  ! ============================================================================
   subroutine mpas_atm_run(atm_public, atm_state, atm_bnd, dt_coupling, rc)
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
@@ -223,34 +224,33 @@ contains
     real(MPAS_RKIND), dimension(:), pointer :: sst_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: ice_field  => null()
     real(MPAS_RKIND), dimension(:), pointer :: zorl_field => null()
-    ! sfc_albedo real (Sf_albedo do
-    ! mediador) -> physica do MONAN-A, substituindo a climatologia mensal
-    ! (config_sfc_albedo=.false. necessario no namelist p/ nao ser
-    ! sobrescrito pelo NOAH LSM).
+    ! sfc_albedo real (Sf_albedo do mediador) vai à física do MONAN-A, no
+    ! lugar da climatologia mensal (config_sfc_albedo=.false. é necessário
+    ! no namelist para não ser sobrescrito pelo NOAH LSM).
     real(MPAS_RKIND), dimension(:), pointer :: albedo_field => null()
     integer :: n, ierr
-    ! limite do laco de injecao. nCellsSolve vive em
-    ! atm_public (mpas_atm_types.F90), nao em atm_state.
+    ! limite do laço de injeção. nCellsSolve vive em
+    ! atm_public (mpas_atm_types.F90), não em atm_state.
     integer :: nSolve_inj
     character(len=256) :: msg
-    ! na runSeq "OCN -> MED" acontece ANTES de "OCN" avancar
+    ! na runSeq "OCN -> MED" acontece ANTES de "OCN" avançar
     ! (lag de 1 passo, ver driver/esm.F90). Na 1a chamada de acoplamento de
-    ! um COLD START o MOM6 ainda nao rodou nenhum passo dinamico: atm_bnd%sst
-    ! chega com o fallback do mediador (bootstrap/T_FILL), nao com dado real.
-    ! Em RESTART, porem, o MOM6 ja parte de um estado real (arquivo de
-    ! restart) - a atm_bnd%sst da 1a chamada ja e valida, entao NAO se deve
-    ! pular a atribuicao nesse caso. Usamos config_do_restart (namelist do
-    ! MONAN-A) pra distinguir os dois casos.
+    ! um COLD START o MOM6 ainda não rodou nenhum passo dinâmico: atm_bnd%sst
+    ! chega com o fallback do mediador (bootstrap/T_FILL), não com dado real.
+    ! Em RESTART, porém, o MOM6 já parte de um estado real (arquivo de
+    ! restart): a atm_bnd%sst da 1a chamada já é válida, então NÃO se deve
+    ! pular a atribuição nesse caso. config_do_restart (namelist do
+    ! MONAN-A) distingue os dois casos.
     logical, pointer :: config_do_restart => null()
     logical :: is_cold_start
 
     rc = 0
     n  = atm_state%nCells
 
-    ! a injecao escreve SO nas celulas proprias. Se
-    ! nCellsSolve nao tiver sido preenchido em mpas_atm_init, cair para nCells
-    ! e' o comportamento antigo (escreve nos halos); isso e' um defeito, nao um
-    ! default aceitavel, entao registra em nivel de erro em vez de seguir calado.
+    ! A injeção escreve SÓ nas células próprias. Se nCellsSolve não foi
+    ! preenchido em mpas_atm_init, o laço cai para nCells e escreve nos
+    ! halos; isso é um defeito, não um valor padrão aceitável, então vai ao
+    ! log como erro em vez de seguir calado.
     nSolve_inj = atm_public%nCellsSolve
     if (nSolve_inj <= 0 .or. nSolve_inj > n) then
       write(msg,'(A,I0,A,I0,A)') 'mpas_atm_run: ' // &
@@ -266,11 +266,9 @@ contains
       rc = 1; return
     end if
 
-    ! ------------------------------------------------------------------
     ! Injeta condições de fronteira no subpool 'sfc_input'
-    ! Probe seção 7 / mpas_atm_core.F linha 553:
+    ! mpas_atm_core.F, linha 553.
     ! Nomes Registry.xml: sst, iceAreaCell, znt
-    ! ------------------------------------------------------------------
     call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'sfc_input', sfcInputPool)
     call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', diag_physicsPool)
 
@@ -278,8 +276,8 @@ contains
     if (associated(config_do_restart)) then
       is_cold_start = .not. config_do_restart
     else
-      ! config nao encontrado - assume cold start (mais seguro: no pior caso
-      ! so atrasa 1 passo de acoplamento em vez de aplicar um fallback ruim)
+      ! config não encontrado - assume cold start (mais seguro: no pior caso
+      ! só atrasa 1 passo de acoplamento em vez de aplicar um fallback ruim)
       is_cold_start = .true.
     end if
 
@@ -291,9 +289,9 @@ contains
       call mpas_pool_get_array(sfcInputPool, 'xice',        ice_field)
       call mpas_pool_get_array(sfcInputPool, 'znt',         zorl_field)
       call mpas_pool_get_array(diag_physicsPool,'z0'        ,zorl_field)
-      ! sfc_albedo vive em diag_physics (confirmado no Registry.xml
-      ! real do MONAN-Model — mpas_atmphys_driver_lsm.F le/escreve de la,
-      ! nao de sfc_input).
+      ! sfc_albedo vive em diag_physics, conforme o Registry.xml do
+      ! MONAN-Model (mpas_atmphys_driver_lsm.F lê e escreve lá, não em
+      ! sfc_input).
       call mpas_pool_get_array(diag_physicsPool, 'sfc_albedo', albedo_field)
 
       if (associated(xland_field)  .and. allocated(atm_bnd%sst))then
@@ -305,9 +303,9 @@ contains
               'aplicando atm_bnd)')
          end if
          if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
-           ! so entre se nao utilizar dados de sst preescritos 
-            ! o laco vai ate nCellsSolve (celulas PROPRIAS),
-            ! nao ate nCells (que inclui os halos). O motivo esta em
+           ! só quando não há SST prescrita (DOCN/DATM).
+            ! O laço vai até nCellsSolve (células PRÓPRIAS),
+            ! não até nCells (que inclui os halos). O motivo está em
             ! exchange_surface_halos.
             call inject_ocean_cells(nSolve_inj,                              &
               atm_state%first_coupling_call .and. is_cold_start, atm_bnd,    &
@@ -333,18 +331,14 @@ contains
     ! internos (dt_atm) core_run integra por chamada a mpas_atm_run.
     call mpas_advance_stop_time(atm_state%domain%clock, dt_coupling)
 
-    ! ------------------------------------------------------------------
     ! Ativa mpas_log_info → domain%logInfo antes de core_run.
     ! mpas_subdriver.F linha 414:
     ! Sem isso, mpas_log_write dentro de core_run derreferencia null → SIGSEGV.
-    ! ------------------------------------------------------------------
     if (associated(atm_state%domain%logInfo)) mpas_log_info => atm_state%domain%logInfo
 
-    ! ------------------------------------------------------------------
     ! Avança o núcleo: integra passos internos de dt_atm, escreve I/O
     ! via SMIOL conforme streams.atmosphere.
     ! core_run é INTEGER FUNCTION.
-    ! ------------------------------------------------------------------
     ierr = atm_state%domain%core%core_run(atm_state%domain)
     if (ierr /= 0) then
       write(msg,'(A,I0)') 'mpas_atm_run: core_run retornou ierr=', ierr
@@ -355,7 +349,6 @@ contains
 
     call mpas_log_write('mpas_atm_run: core_run concluido')
 
-    ! ------------------------------------------------------------------
     ! Pós-processamento dos campos acumulados e stress superficial.
     !
     ! Os arrays do pool (atm_state%pool_*) foram atualizados por core_run.
@@ -366,7 +359,6 @@ contains
     !
     ! IMPORTANTE: usar real(dt_coupling, MPAS_RKIND) para evitar perda de
     ! precisão quando MPAS_RKIND = kind(1.0) (single precision).
-    ! ------------------------------------------------------------------
     call compute_instantaneous_fluxes(dt_coupling, n, atm_public, atm_state, atm_bnd)
 
     atm_state%running = .true.
@@ -374,14 +366,12 @@ contains
     nullify(sfcInputPool, sst_field, ice_field, zorl_field)
   end subroutine mpas_atm_run
 
-  ! ============================================================================
   !> @brief Copia os campos de contorno do oceano (atm_bnd) para as células
   !! próprias de oceano (xland > 1.5) dos pools do MONAN-A.
   !!
   !! Percorre só as nSolve primeiras células (as próprias); os halos são
   !! trocados depois por exchange_surface_halos. Com skip_first (primeira
   !! chamada de um cold start) nada é copiado.
-  ! ============================================================================
   subroutine inject_ocean_cells(nSolve_inj, skip_first, atm_bnd,          &
                                 xland_field, sst_field, skintemp_field,  &
                                 ice_field, zorl_field, albedo_field)
@@ -411,7 +401,7 @@ contains
                      endif
                      ! mesma guarda de
                      ! xland>1.5 (oceano) e atm_state%first_coupling_call/cold-start
-                     ! ja usada para sst/ice/zorl acima.
+                     ! já usada para sst/ice/zorl acima.
                      if (associated(albedo_field) .and. allocated(atm_bnd%alb)) then
                        albedo_field(iCell) = atm_bnd%alb(iCell)
                      endif
@@ -420,51 +410,30 @@ contains
             end do
   end subroutine inject_ocean_cells
 
-  ! ============================================================================
   !> @brief Troca de halo dos campos de contorno injetados pelo acoplador.
   !!
-  !! Propaga aos halos os campos de
-  !! contorno que acabaram de ser injetados.
+  !! Propaga aos halos os campos de contorno que acabaram de ser
+  !! injetados.
   !!
-  !! O PROBLEMA. Antes desta correcao o laco de injecao percorria
-  !! 1..nCells, que INCLUI as celulas de halo, e escrevia nelas
-  !! valores de atm_bnd. Nao havia troca de halo em seguida (a busca
-  !! por exch_halo em todo o src/caps nao retornava nada). Cada PET
-  !! ficava com uma copia de halo de sst/skintemp/xice/znt/sfc_albedo
-  !! inconsistente com o PET dono da celula, e o core_run integrava
-  !! sobre contorno inconsistente. No MPAS-A autonomo isso nao
-  !! ocorre, porque sst e xice chegam pelo stream manager, que faz a
-  !! troca de halo; a injecao do acoplador contornava esse caminho.
+  !! A injeção escreve só nas células próprias (nCellsSolve, ver
+  !! inject_ocean_cells), e esta rotina chama a troca de halo do framework,
+  !! a mesma que o stream manager usa. Assim a cópia de halo de cada PET é,
+  !! por construção, igual ao valor do PET dono da célula. Sem a troca, cada
+  !! PET ficaria com halos de sst/skintemp/xice/znt/sfc_albedo diferentes
+  !! dos do dono, core_run integraria sobre um contorno inconsistente, e a
+  !! rodada deixaria de ser reprodutível a partir do primeiro passo com
+  !! injeção. No MPAS-A autônomo, sst e xice chegam pelo stream manager, que
+  !! já faz a troca de halo; a injeção do acoplador não passa por ele.
   !!
-  !! A EVIDENCIA. Numa medicao com dt_coupling=43200, ou
-  !! seja, duas janelas de acoplamento, das quais apenas a segunda
-  !! injeta (a primeira e' pulada pela guarda):
-  !! quatro execucoes identicas, seis pares comparados, SEIS
-  !! divergentes, TODOS a partir do registro 73 do reprodiag, que e'
-  !! exatamente 12:00, o instante da injecao. Os 72 registros
-  !! anteriores, doze horas de integracao, sao bit a bit identicos.
-  !! Com zero injecoes (dt_coupling=86400) foram seis pares sem
-  !! nenhuma diferenca. Uma unica injecao basta para quebrar a
-  !! reprodutibilidade, e a quebra aparece no passo em que ela
-  !! ocorre, nao antes.
+  !! Custo: uma troca de halo por campo por janela de acoplamento, sobre
+  !! campos 1D de nCells; desprezível ao lado de um passo de física, e pago
+  !! uma vez por dt_coupling, não por dt_atm.
   !!
-  !! O CONSERTO. Escrever apenas nas celulas proprias (nCellsSolve,
-  !! ver inject_ocean_cells) e chamar a troca de halo, que e' a mesma
-  !! rotina do framework que o stream manager usa. Assim a copia de
-  !! halo de cada PET passa a ser, por construcao, igual ao valor do
-  !! dono.
-  !!
-  !! CUSTO. Uma troca de halo por campo por janela de acoplamento,
-  !! sobre campos 1D de nCells. Desprezivel ao lado de um passo de
-  !! fisica, e paga uma vez por dt_coupling, nao por dt_atm.
-  !!
-  !! LIMITE CONHECIDO. Isto NAO trata a duplicacao de celulas na
-  !! malha ESMF da atmosfera (max_dup=2, avg_dup=1.35 no diagnostico
-  !! do mpas_cell_binning), em que a mesma celula fisica recebe
-  !! contribuicao do regrid em mais de um PET. Se a divergencia
-  !! persistir, esse e' o alvo seguinte, e o conserto e' no cap
+  !! Limite: isto não trata a duplicação de células na malha ESMF da
+  !! atmosfera (max_dup=2, avg_dup=1.35 no diagnóstico de
+  !! mpas_cell_binning), em que a mesma célula física recebe contribuição
+  !! do regrid em mais de um PET; isso é assunto do cap
   !! (mpas_cap_MONAN.F90 e mpas_cell_binning.F90).
-  ! ============================================================================
   subroutine exchange_surface_halos(sfcInputPool, diag_physicsPool)
     type(mpas_pool_type), pointer :: sfcInputPool
     type(mpas_pool_type), pointer :: diag_physicsPool
@@ -505,19 +474,17 @@ contains
       'dos campos de contorno injetados trocados')
   end subroutine exchange_surface_halos
 
-  ! ============================================================================
   !> @brief Finaliza o MONAN-A.
   !!
-  !! Probe seção 5 / mpas_atm_core.F linha 1027:
+  !! mpas_atm_core.F (linha 1027):
   !!   function atm_core_finalize(domain) result(ierr)
-  !! Probe mpas_framework.F linha 165:
+  !! mpas_framework.F (linha 165):
   !!   subroutine mpas_framework_finalize(dminfo, domain, io_system)
-  !!   io_system é OPCIONAL (mpas_subdriver linha 474 omite).
+  !!   io_system é OPCIONAL (mpas_subdriver omite, linha 474).
   !!
   !! Sequência obrigatória com SMIOL:
   !!   nullify(ponteiros zero-copy) → core_finalize → mpas_framework_finalize
   !!   → deallocate(domain)
-  ! ============================================================================
   subroutine mpas_atm_final(atm_public, atm_state, atm_bnd, rc)
 
     type(mpas_atm_public_type),    intent(inout) :: atm_public
@@ -535,19 +502,19 @@ contains
 
     if (associated(atm_state%domain)) then
 
-      ! IMPORTANTE: core_finalize e mpas_framework_finalize sao OMITIDAS.
+      ! IMPORTANTE: core_finalize e mpas_framework_finalize são OMITIDAS.
       !
-      ! core_finalize do MPAS-A (compilado com -DMPAS_EXTERNAL_ESMF_LIB) destroi
+      ! core_finalize do MPAS-A (compilado com -DMPAS_EXTERNAL_ESMF_LIB) destrói
       ! internamente objetos ESMF_Time e ESMF_Calendar que o framework NUOPC
-      ! ainda precisa para cleanup dos conectores (RouteHandles) apos ModelFinalize.
+      ! ainda precisa para cleanup dos conectores (RouteHandles) após ModelFinalize.
       ! Chamar core_finalize dentro de ESMF_GridCompFinalize -> SIGSEGV.
       !
-      ! Os streams SMIOL ja foram fechados automaticamente no ultimo core_run
+      ! Os streams SMIOL já foram fechados automaticamente no último core_run
       ! (streams.atmosphere define alarm de output/restart). O restart final
       ! pode ser obtido configurando output_alarm no streams.atmosphere.
       !
-      ! mpas_framework_finalize tambem omitida pelos mesmos motivos.
-      ! A memoria e liberada pelo SO no termino do processo MPI.
+      ! mpas_framework_finalize também omitida pelos mesmos motivos.
+      ! A memória é liberada só no término do processo MPI.
       !
       ! Apenas nulifica ponteiros para evitar dangling references:
       nullify(atm_public%latCell,    atm_public%lonCell,  atm_public%areaCell)

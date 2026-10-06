@@ -3,7 +3,7 @@
 !!
 !! mpas_atm_public_type: campos que o MONAN-A exporta ao mediador, entre
 !!   eles q2m (-> Sa_shum_mpas), prec_rain (-> Faxa_rain_mpas) e prec_snow
-!!   (-> Faxa_snow_mpas). prec_total continua no tipo, mas nao e' exportado:
+!!   (-> Faxa_snow_mpas). prec_total continua no tipo, mas não é exportado:
 !!   o mediador espera chuva e neve separadas.
 !! atm_ocean_boundary_type: contorno inferior vindo do mediador, com as
 !!   correntes superficiais uocn/vocn do MOM6 para o vento relativo ao
@@ -21,10 +21,10 @@ module mpas_atm_types_mod
   implicit none
   private
 
-  ! ── Parâmetro de kind ──────────────────────────────────────────────────────
+  ! Parâmetro de kind
   integer, parameter, public :: MPAS_RKIND = RKIND
 
-  ! ── Campos diagnósticos exportados pelo MPAS-A para o mediador ────────────
+  ! Campos diagnósticos exportados pelo MPAS-A para o mediador
   !
   ! Mapeamento cap → mediador (nomes NUOPC com sufixo _mpas):
   !   u10       → Sa_u10m_mpas    vento zonal      10 m [m/s]
@@ -42,38 +42,38 @@ module mpas_atm_types_mod
     integer :: nCellsSolve = 0  ! < células próprias sem halos (para NetCDF/export)
     integer :: nVertLevels = 0
 
-    ! ── Geometria (ponteiros zero-copy → pool 'mesh') ─────────────────────
+    ! Geometria (ponteiros zero-copy → pool 'mesh')
     real(MPAS_RKIND), pointer :: latCell(:)    => null()  !< lat [rad]
     real(MPAS_RKIND), pointer :: lonCell(:)    => null()  !< lon [rad]
     real(MPAS_RKIND), pointer :: areaCell(:)   => null()  !< área [m²]
 
-    ! ── Vento e temperatura em baixa atmosfera ────────────────────────────
+    ! Vento e temperatura em baixa atmosfera
     real(MPAS_RKIND), pointer :: t2m(:)        => null()  !< T a 2 m [K]
     real(MPAS_RKIND), pointer :: q2m(:)        => null()  !< Hum. específica 2 m [kg/kg]
     real(MPAS_RKIND), pointer :: u10(:)        => null()  !< U a 10 m [m/s]
     real(MPAS_RKIND), pointer :: v10(:)        => null()  !< V a 10 m [m/s]
 
-    ! ── Pressão ───────────────────────────────────────────────────────────
+    ! Pressão
     real(MPAS_RKIND), pointer :: pslv(:)       => null()  !< PSLV [Pa]
 
-    ! ── Radiação (médias do intervalo de acoplamento) ─────────────────────
+    ! Radiação (médias do intervalo de acoplamento)
     real(MPAS_RKIND), pointer :: swdn_sfc(:)   => null()  !< SWdn [W/m²]
     real(MPAS_RKIND), pointer :: lwdn_sfc(:)   => null()  !< LWdn [W/m²]
 
-    ! ── Precipitação (separada em líquida e sólida) ───────────────────────
+    ! Precipitação (separada em líquida e sólida)
     real(MPAS_RKIND), pointer :: prec_rain(:)  => null()  !< Prec. líquida [kg/m²/s]
     real(MPAS_RKIND), pointer :: prec_snow(:)  => null()  !< Prec. sólida  [kg/m²/s]
-    !> Campo legado: prec_rain + prec_snow. Mantido para compatibilidade interna.
+    !> Soma prec_rain + prec_snow, de uso interno (não é exportada).
     real(MPAS_RKIND), pointer :: prec_total(:) => null()  !< Prec. total [kg/m²/s]
 
-    ! ── Fluxos turbulentos de superfície ─────────────────────────────────
+    ! Fluxos turbulentos de superfície
     real(MPAS_RKIND), pointer :: taux_sfc(:)   => null()  !< τx [N/m²]
     real(MPAS_RKIND), pointer :: tauy_sfc(:)   => null()  !< τy [N/m²]
     real(MPAS_RKIND), pointer :: lhflx(:)      => null()  !< LH [W/m²]
     real(MPAS_RKIND), pointer :: shflx(:)      => null()  !< SH [W/m²]
   end type mpas_atm_public_type
 
-  ! ── Estado interno do cap (sem tipos ESMF) ─────────────────────────────────
+  ! Estado interno do cap (sem tipos ESMF)
   type, public :: mpas_atm_state_type
     logical            :: initialized    = .false.
     logical            :: running        = .false.
@@ -87,7 +87,7 @@ module mpas_atm_types_mod
     !! passo de acoplamento trata a superfície de forma especial.
     logical            :: first_coupling_call = .true.
 
-    ! ── Estado do modelo, preenchido por mpas_atm_init ────────────────────
+    ! Estado do modelo, preenchido por mpas_atm_init
     type(domain_type), pointer :: domain => null()   !< domínio MPAS
 
     !> Ponteiros para arrays dos pools do MPAS (lidos em mpas_atm_run), para
@@ -130,7 +130,7 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), allocatable :: v10_buf(:)         !< m/s
   end type mpas_atm_state_type
 
-  ! ── Condições de contorno vindas do oceano (via mediador) ─────────────────
+  ! Condições de contorno vindas do oceano (via mediador)
   !
   ! Campos importados do mediador (conector MED→MPAS) e membro que cada um
   ! preenche (mpas_import, em mpas_adapter):
@@ -151,11 +151,11 @@ module mpas_atm_types_mod
     real(MPAS_RKIND), allocatable :: vocn(:)         !< corrente meridional 0 m  [m/s]
     real(MPAS_RKIND), allocatable :: zorl(:)         !< rugosidade               [m]
     real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície [0–1]
-    ! > máscara terra/oceano REAL do MOM6
+    !> Máscara terra/oceano REAL do MOM6
     !! (ocean_grid%mask2dT), recebida do mediador como Sx_omask. Chega
     !! fracionária, porque atravessou dois regrids (OCN→ATM no MED e
     !! ATM→Voronoi no conector); o corte binário fica no consumidor final.
-    !! Usada hoje apenas para mascarar continentes em monan2_import_*.nc —
+    !! Usada apenas para mascarar continentes em monan2_import_*.nc;
     !! NÃO alimenta a física do MONAN-A, que tem a própria landmask.
     real(MPAS_RKIND), allocatable :: omask(:)        !< 1=oceano, 0=terra       [0–1]
   end type atm_ocean_boundary_type

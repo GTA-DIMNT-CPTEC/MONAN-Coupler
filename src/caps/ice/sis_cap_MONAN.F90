@@ -84,7 +84,7 @@ module sis_cap_MONAN_mod
     type(ice_internal_state_type), pointer :: ptr => null()
   end type ice_internal_state_wrapper
 
-  ! ── Nomes de campo trocados com o mediador ────────────────────────────────
+  ! Nomes de campo trocados com o mediador
   ! Saem do mapa de acoplamento (src/coupling/cpl_map.F90), no ponto
   ! ICE@ice_sis2: a importação são os 16 campos que chegam do mediador
   ! (cpl_arrivals), 13 da forçante atmosférica (os Fioi_*, Faxa_rain,
@@ -102,7 +102,10 @@ module sis_cap_MONAN_mod
 
 contains
 
-  ! ============================================================================
+  !> @brief Registra o cap no NUOPC: fases de inicialização (IPDv03) e
+  !! especializações (DataInitialize, Advance, CheckImport e Finalize).
+  !! @param[inout] gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -143,10 +146,10 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! CheckImport tolerante: aceita campos com timestamp em ±dt_coupling, em
-    ! vez do padrao estrito do NUOPC_ModelBase, que exige igualdade exata e
+    ! vez do padrão estrito do NUOPC_ModelBase, que exige igualdade exata e
     ! falha ("NUOPC INCOMPATIBILITY: Import Fields not at current time")
-    ! porque o SIS2/FMS usa seu proprio gerenciador de tempo, divergindo
-    ! ligeiramente do relogio do driver ESMF. Mesma solução de
+    ! porque o SIS2/FMS usa seu próprio gerenciador de tempo, divergindo
+    ! ligeiramente do relógio do driver ESMF. Mesma solução de
     ! mom_cap_MONAN.F90 para o mesmo problema entre MED e OCN.
     call ESMF_MethodRemove(gcomp, label=model_label_CheckImport, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -160,7 +163,12 @@ contains
 
   end subroutine SetServices
 
-  ! ============================================================================
+  !> @brief Anuncia os campos importados e exportados, lidos do mapa de acoplamento (POINT_ICE).
+  !! @param[inout] gcomp        componente do gelo
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -185,10 +193,10 @@ contains
       ! se o export também usasse, nenhum lado ofereceria geometria e o conector
       ! travaria na inicialização ("Neither side able to provide geom object",
       ! fase IPDv05p3).
-      ! Sem SharePolicyField="share" nesta EXPORTACAO, como no cap do OCN
-      ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTACOES. Com share
-      ! aqui, Si_ifrac saia correto (max=0.997) mas chegava zerado no mediador
-      ! (min=max=0): o conector nao fazia a transferencia real.
+      ! Sem SharePolicyField="share" nesta EXPORTAÇÃO, como no cap do OCN
+      ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTAÇÕES. Com share
+      ! aqui, Si_ifrac sai correto do cap (max=0.997) mas chega zerado ao
+      ! mediador (min=max=0): o conector não faz a transferência real.
       call NUOPC_Advertise(exportState, StandardName=trim(names(n)), &
         TransferOfferGeomObject="will provide", rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -198,7 +206,6 @@ contains
 
   end subroutine InitializeAdvertise
 
-  ! ============================================================================
   !> @brief Inicializa o SIS2, cria a grade ESMF do gelo e realiza os campos.
   !!
   !! Etapas: init_sis2 (FMS, calendário, tempos e ice_model_init),
@@ -243,7 +250,6 @@ contains
 
   end subroutine InitializeRealize
 
-  ! ============================================================================
   !> @brief Inicializa o FMS e o SIS2 neste componente.
   !!
   !! A ordem importa:
@@ -252,7 +258,7 @@ contains
   !!      de 0 a petCount-1 dentro do componente, como ice_model_init e
   !!      share_ice_domains esperam. Um set_date antes disso inicializaria o
   !!      FMS implicitamente, numa operação coletiva fora de sincronia
-  !!      (terminava em abort no mpp_init).
+  !!      (termina em abort no mpp_init).
   !!   2. set_calendar_type(GREGORIAN) antes de qualquer set_date; sem
   !!      calendário, set_date para com erro fatal.
   !!   3. Listas de PETs e fast_ice_pe = slow_ice_pe = .true.: com
@@ -261,10 +267,9 @@ contains
   !!   4. ice_model_init com passos rápido e lento iguais ao de acoplamento e
   !!      Concurrent_ice=.false. (o componente tem PETs próprios).
   !!   5. diag_manager_set_time_end_infra depois de ice_model_init, que
-  !!      reinicializa o diag_manager; antes dele, a chamada se perdia e os
-  !!      icebergs do SIS2 paravam com erro fatal ao gravar diagnósticos.
+  !!      reinicializa o diag_manager; antes dele, a chamada se perderia e os
+  !!      icebergs do SIS2 parariam com erro fatal ao gravar diagnósticos.
   !!   6. share_ice_domains.
-  ! ============================================================================
   subroutine init_sis2(is, vm, clock, localPet, petCount, rc)
     type(ice_internal_state_type), intent(inout) :: is
     type(ESMF_VM),                 intent(in)    :: vm
@@ -326,7 +331,6 @@ contains
     call log_info(COMP_ICE, 'ice_model_init concluido')
   end subroutine init_sis2
 
-  ! ============================================================================
   !> @brief Grade ESMF do gelo, com a decomposição escolhida pelo próprio SIS2.
   !!
   !! Cada PET pega os limites globais do seu bloco no domínio do SIS2, os PETs
@@ -341,7 +345,6 @@ contains
   !! na direção leste-oeste, sem declarar polo, como a do mediador, com as
   !! coordenadas T do ocean_hgrid.nc, sem cantos. No
   !! fim, cada PET confere que o seu bloco ESMF é exatamente o bloco do SIS2.
-  ! ============================================================================
   subroutine create_ice_grid(is, vm, localPet, petCount, rc)
     type(ice_internal_state_type), intent(inout) :: is
     type(ESMF_VM),                 intent(in)    :: vm
@@ -407,11 +410,9 @@ contains
     call log_info(COMP_ICE, 'grade ESMF criada (mesma grade tripolar do OCN)')
   end subroutine create_ice_grid
 
-  ! ============================================================================
   !> @brief Número de categorias de espessura do gelo (Ice%part_size, depois
   !! de ice_model_init). Se part_size não estiver associado, avisa no log e
   !! devolve 1.
-  ! ============================================================================
   integer function ice_category_count(is) result(ncat)
     type(ice_internal_state_type), intent(in) :: is
 
@@ -424,10 +425,8 @@ contains
     end if
   end function ice_category_count
 
-  ! ============================================================================
   !> @brief Cria sobre a grade do gelo e realiza os campos de importação
   !! (forçantes da atmosfera e do oceano) e de exportação.
-  ! ============================================================================
   subroutine realize_ice_fields(ice_grid, importState, exportState, rc)
     type(ESMF_Grid),  intent(in)    :: ice_grid
     type(ESMF_State), intent(inout) :: importState, exportState
@@ -459,7 +458,6 @@ contains
     end do
   end subroutine realize_ice_fields
 
-  ! ============================================================================
   !> @brief Aloca e preenche com valores iniciais as estruturas de troca com
   !! o SIS2: is%oib (oceano -> gelo, 2D) e is%aib (atmosfera -> gelo, 3D, com
   !! a dimensão de categoria).
@@ -468,7 +466,6 @@ contains
   !! co-localizados, sem defasagem. Com o padrão do tipo (BGRID_NE),
   !! unpack_ocean_ice_boundary interpretaria as correntes com a geometria
   !! errada. calving e calving_hflx não são usados e ficam sem alocar.
-  ! ============================================================================
   subroutine alloc_ice_boundaries(is, ncat)
     type(ice_internal_state_type), intent(inout) :: is
     integer,                       intent(in)    :: ncat
@@ -481,7 +478,7 @@ contains
     allocate(is%oib%t(ni_loc,nj_loc),  is%oib%s(ni_loc,nj_loc))
     allocate(is%oib%frazil(ni_loc,nj_loc), is%oib%sea_level(ni_loc,nj_loc))
     is%oib%u = 0.0_ESMF_KIND_R8; is%oib%v = 0.0_ESMF_KIND_R8
-    is%oib%t = T0_KELVIN; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de seguranca
+    is%oib%t = T0_KELVIN; is%oib%s = 34.7_ESMF_KIND_R8  ! defaults de segurança
     is%oib%frazil = 0.0_ESMF_KIND_R8; is%oib%sea_level = 0.0_ESMF_KIND_R8
     is%oib%stagger = AGRID
 
@@ -498,7 +495,7 @@ contains
     allocate(is%aib%drdt(ni_loc,nj_loc,ncat),  is%aib%coszen(ni_loc,nj_loc,ncat))
     allocate(is%aib%p(ni_loc,nj_loc,ncat))
     is%aib%u_flux = 0.0_ESMF_KIND_R8; is%aib%v_flux = 0.0_ESMF_KIND_R8
-    is%aib%u_star = 0.0_ESMF_KIND_R8   ! nao vem do mediador (decisao em
+    is%aib%u_star = 0.0_ESMF_KIND_R8   ! não vem do mediador (decisão em
                                         ! aberto, ver docs/estado-do-projeto.md)
     is%aib%t_flux = 0.0_ESMF_KIND_R8; is%aib%q_flux = 0.0_ESMF_KIND_R8
     is%aib%lw_flux = 0.0_ESMF_KIND_R8
@@ -509,12 +506,15 @@ contains
     is%aib%lprec = 0.0_ESMF_KIND_R8; is%aib%fprec = 0.0_ESMF_KIND_R8
     is%aib%dhdt = 0.0_ESMF_KIND_R8; is%aib%dedt = 0.0_ESMF_KIND_R8
     is%aib%drdt = 0.0_ESMF_KIND_R8; is%aib%coszen = 0.0_ESMF_KIND_R8
-    is%aib%p = 101325.0_ESMF_KIND_R8  ! 1 atm, default de seguranca
+    is%aib%p = 101325.0_ESMF_KIND_R8  ! 1 atm, default de segurança
 
     call log_info(COMP_ICE, 'campos ESMF realizados, oib/aib alocados')
   end subroutine alloc_ice_boundaries
 
-  ! ============================================================================
+  !> @brief DataInitialize: sincroniza o estado rápido do gelo com o lento e
+  !! exporta os campos de t=0.
+  !! @param[inout] gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -527,12 +527,12 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
-    ! sincroniza fCS%IST <- sCS%IST logo apos
-    ! ice_model_init, para que o primeiro update_ice_model_fast (inicio do
-    ! primeiro ModelAdvance) ja opere sobre a condicao inicial real do gelo
+    ! sincroniza fCS%IST <- sCS%IST logo após
+    ! ice_model_init, para que o primeiro update_ice_model_fast (início do
+    ! primeiro ModelAdvance) já opere sobre a condição inicial real do gelo
     ! (restart ou default de ice_model_init em sCS%IST), em vez do estado
-    ! "vazio" com que fCS%IST e alocado por padrao. Mesmo espirito do guard
-    ! de first_coupling_call ja usado noutros caps para o passo inicial.
+    ! "vazio" com que fCS%IST é alocado por padrão. Mesmo espírito da guarda
+    ! de first_coupling_call usada noutros caps para o passo inicial.
     call exchange_slow_to_fast_ice(is%ice)
     call log_info(COMP_ICE, 'exchange_slow_to_fast_ice inicial concluido ' // &
       '(InitializeDataComplete)')
@@ -560,7 +560,6 @@ contains
     call log_info(COMP_ICE, 'InitializeDataComplete concluido')
   end subroutine InitializeDataComplete
 
-  ! ============================================================================
   !> @brief Avanço por passo de acoplamento: importa forçante, atualiza o
   !! SIS2 (termodinâmica + dinâmica), exporta Si_ifrac real.
   subroutine ModelAdvance(gcomp, rc)
@@ -576,121 +575,86 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
     is => wrap%ptr
 
-    ! ── Passo 1: popular is%aib/is%oib a partir do importState ───────────
+    ! Passo 1: popular is%aib/is%oib a partir do importState
     call import_forcing(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha import_forcing', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 1b: desempacotar is%oib (SST/correntes do OCN, ja populado
-    ! acima) para dentro de Ice%sCS%OSS, a estrutura interna que a fisica do
-    ! SIS2 realmente le (ver update_ice_slow_thermo -> slow_thermodynamics(...,
-    ! Ice%sCS%OSS, ...)). Sem esta chamada, as correntes oceanicas (e
-    ! SST/salinidade/frazil/nivel do mar) importadas do mediador nunca chegariam
+    ! Passo 1b: desempacotar is%oib (SST/correntes do OCN, já populado
+    ! acima) para dentro de Ice%sCS%OSS, a estrutura interna que a física do
+    ! SIS2 realmente lê (ver update_ice_slow_thermo -> slow_thermodynamics(...,
+    ! Ice%sCS%OSS, ...)). Sem esta chamada, as correntes oceânicas (e
+    ! SST/salinidade/frazil/nível do mar) importadas do mediador nunca chegariam
     ! ao SIS2, que rodaria sobre os valores de Ice%sCS%OSS inicializados em
-    ! ice_model_init. unpack_ocean_ice_boundary e' a rotina nativa do SIS2 para
-    ! essa conversao (ice_model.F90) e faz tambem translate_OSS_to_sOSS,
-    ! alimentando a termodinamica rapida. Requer is%oib%stagger=AGRID (ver
+    ! ice_model_init. unpack_ocean_ice_boundary é a rotina nativa do SIS2 para
+    ! essa conversão (ice_model.F90) e faz também translate_OSS_to_sOSS,
+    ! alimentando a termodinâmica rápida. Requer is%oib%stagger=AGRID (ver
     ! InitializeRealize).
     call unpack_ocean_ice_boundary(is%oib, is%ice)
 
-    ! ── Passo 1c: registrar a forcante atmosferica (is%aib, ja populada
+    ! Passo 1c: registrar a forçante atmosférica (is%aib, já populada
     ! acima) em Ice: grava fluxos e calcula a temperatura do gelo no passo
-    ! rapido (ver ice_model.F90::update_ice_model_fast). Sem esta chamada,
-    ! is%aib nunca chegaria ao SIS2. Padrao de chamada do driver de referencia
-    ! coupler_main.F90: la e' condicionada a Ice%fast_ice_pe (que este cap
-    ! forca .true., ver ice_model_init) e feita uma vez por avanco do
-    ! acoplamento atmosfera-superficie, sem subciclo proprio, a mesma
-    ! granularidade do nosso dt_coupling. Vem ANTES da fisica lenta porque
+    ! rápido (ver ice_model.F90::update_ice_model_fast). Sem esta chamada,
+    ! is%aib nunca chegaria ao SIS2. Padrão de chamada do driver de referência
+    ! coupler_main.F90: lá é condicionada a Ice%fast_ice_pe (que este cap
+    ! força .true., ver ice_model_init) e feita uma vez por avanço do
+    ! acoplamento atmosfera-superfície, sem subciclo próprio, a mesma
+    ! granularidade do nosso dt_coupling. Vem ANTES da física lenta porque
     ! esta consome os campos que update_ice_model_fast grava em Ice.
     call update_ice_model_fast(is%aib, is%ice)
 
-    ! ── Passo 2: avançar o SIS2 ───────────────────────────────────────────
-    !
-    ! advance_ice_slow separa as duas sub-rotinas do passo lento, que e' onde
-    ! a nao reprodutibilidade nasce.
-    !
-    ! O QUE JA SE SABE. Numa bateria de quatro execucoes (seis pares),
-    ! os checksums de IST%part_size que o proprio SIS2 emite (chaves
-    ! DEBUG_CHKSUMS/DEBUG_SLOW_ICE/DEBUG_FAST_ICE) mostram, na PRIMEIRA troca
-    ! de acoplamento:
-    !   Start set_ice_surface_state      334285  identico
-    !   End   set_ice_surface_state      334285  identico
-    !   Start do_update_ice_model_fast   334285  identico
-    !   End   do_update_ice_model_fast   334285  identico
-    !   Start update_ice_model_slow      334285  identico
-    !   End   ice_state_cleanup          348735 vs 348744   DIVERGE
-    ! O estado entra no passo lento identico e sai diferente, e a diferenca e'
-    ! de nove unidades no checksum inteiro, ou seja, varias celulas, nao uma.
-    ! O unico codigo entre esses dois pontos sao as duas chamadas abaixo.
-    !
-    ! O QUE ESTE DIAGNOSTICO RESPONDE. Se o checksum ja divergir depois de
-    ! update_ice_slow_thermo, o alvo e' slow_thermodynamics. Se so divergir
-    ! depois de update_ice_dynamics_trans, o alvo e' SIS_transport, que e'
-    ! justamente a rotina que abortou com GLOBAL_INDEXING=True reclamando de
-    ! "non-zero snow mass rests atop no ice". Os dois
-    ! indicios apontando para o mesmo lugar seria forte.
-    !
-    ! LIMITE DO INSTRUMENTO, E COMO ELE SE DENUNCIA. Aqui so' ha acesso a
-    ! FACHADA is%ice%part_size, nao ao sCS%IST%part_size que o SIS2 usa por
-    ! Ja se viu que essa fachada pode ficar
-    ! DEFASADA em relacao ao estado interno. Por isso o diagnostico mede TRES
-    ! pontos, inclusive ANTES da primeira chamada: se os tres saírem iguais,
-    ! a fachada nao esta sendo atualizada por estas rotinas e o instrumento e'
-    ! CEGO — o que fica visivel na saida em vez de virar um falso "nao
-    ! diverge". Nesse caso a medicao precisa ir para dentro do SIS2.
-    !
-    ! CUSTO. Tres somas e tres reducoes sobre um arranjo 3D local, uma vez por
-    ! troca de acoplamento. O checksum e' inteiro, imune a arredondamento de
-    ! impressao, que ja enganou esta investigacao duas vezes.
+    ! Passo 2: avançar o SIS2 no passo lento (termodinâmica lenta e
+    ! dinâmica). As duas sub-rotinas ficam em advance_ice_slow, ponto único
+    ! para instrumentar o passo lento.
     call advance_ice_slow(is)
 
     call log_debug(COMP_ICE, 'update_ice_slow_thermo + update_ice_dynamics_trans concluido')
 
-    ! ── Passo 2b: sincronizar fCS%IST <- sCS%IST ──
-    ! Sem esta chamada, Ice%fCS%IST (a copia "rapida" do estado do gelo,
-    ! usada por update_ice_model_fast para popular os campos publicos de
+    ! Passo 2b: sincronizar fCS%IST <- sCS%IST
+    ! Sem esta chamada, Ice%fCS%IST (a cópia "rápida" do estado do gelo,
+    ! usada por update_ice_model_fast para popular os campos públicos de
     ! fachada Ice%part_size/Ice%albedo*) fica congelada no estado inicial
-    ! de ice_model_init para sempre, enquanto Ice%sCS%IST (a copia "lenta",
+    ! de ice_model_init para sempre, enquanto Ice%sCS%IST (a cópia "lenta",
     ! atualizada acima por update_ice_slow_thermo/update_ice_dynamics_trans)
-    ! evolui com gelo real. E exatamente a mesma causa raiz documentada em
-    ! export_si_ifrac para Ice%part_size — so que ali contornada lendo
-    ! sCS%IST diretamente; aqui corrigimos na fonte, pois nao ha equivalente
-    ! de sCS%IST%albedo para "furar" da mesma forma (albedo e calculado
-    ! transientemente dentro do proprio update_ice_model_fast, a partir de
-    ! fCS%IST — precisa de fCS%IST atualizado para existir).
+    ! evolui com gelo real. É a mesma causa raiz descrita em export_si_ifrac
+    ! para Ice%part_size, que ali é contornada lendo sCS%IST diretamente;
+    ! aqui o estado é sincronizado na fonte, porque não há um
+    ! sCS%IST%albedo para ler da mesma forma (o albedo é calculado dentro de
+    ! update_ice_model_fast, a partir de fCS%IST, que precisa estar
+    ! atualizado).
     !
-    ! Chamada aqui (fim do passo lento) para que o PROXIMO
-    ! update_ice_model_fast (inicio do proximo ModelAdvance) opere sobre
-    ! estado sincronizado. Mesma defasagem de um passo do driver nativo do
-    ! SIS2 (coupler_main.F90) -- nao e uma inconsistencia nova.
+    ! Chamada aqui (fim do passo lento) para que o PRÓXIMO
+    ! update_ice_model_fast (início do próximo ModelAdvance) opere sobre
+    ! estado sincronizado. É a mesma defasagem de um passo do driver nativo
+    ! do SIS2 (coupler_main.F90).
     call exchange_slow_to_fast_ice(is%ice)
     call log_debug(COMP_ICE, 'exchange_slow_to_fast_ice concluido ' // &
       '(fCS%IST sincronizado com sCS%IST)')
 
-    ! ── Passo 2c: popular Ice%part_size/Ice%albedo* ──
-    ! exchange_slow_to_fast_ice (acima) so ATUALIZA fCS%IST; quem de fato
-    ! PREENCHE os campos publicos de fachada (Ice%part_size, Ice%albedo_*)
-    ! a partir de fCS%IST e set_ice_surface_fields (-> set_ice_surface_state
+    ! Passo 2c: popular Ice%part_size/Ice%albedo*
+    ! exchange_slow_to_fast_ice (acima) só ATUALIZA fCS%IST; quem de fato
+    ! PREENCHE os campos públicos de fachada (Ice%part_size, Ice%albedo_*)
+    ! a partir de fCS%IST é set_ice_surface_fields (-> set_ice_surface_state
     ! internamente). No driver nativo do SIS2 (coupler_main.F90 do FMS) essa
-    ! chamada e feita pelo driver externo, nunca pelo proprio SIS2 -- por
-    ! isso esta ausencia nao aparece como erro de compilacao nem de link,
-    ! so como campo permanentemente zerado. Sem esta chamada, o estado fica
-    ! sincronizado mas ninguem o "publica".
+    ! chamada é feita pelo driver externo, nunca pelo próprio SIS2; por isso
+    ! a sua falta não aparece como erro de compilação nem de link, só como
+    ! campo permanentemente zerado. Sem esta chamada, o estado fica
+    ! sincronizado mas ninguém o "publica".
     call set_ice_surface_fields(is%ice)
     call log_debug(COMP_ICE, 'set_ice_surface_fields concluido ' // &
       '(Ice%part_size/albedo* publicados a partir de fCS%IST)')
 
-    ! ── Passo 3: exportar Si_ifrac real ───────────────────────────────────
+    ! Passo 3: exportar Si_ifrac real
     call export_si_ifrac(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_ifrac', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3b: exportar albedo real por banda ──────────────────────────
+    ! Passo 3b: exportar albedo real por banda
     call export_si_albedo(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_albedo', &
       line=__LINE__, file=__FILE__)) return
 
-    ! ── Passo 3c: exportar temperatura de pele real do gelo ───────────────
+    ! Passo 3c: exportar temperatura de pele real do gelo
     call export_si_tskin(is, gcomp, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg='ICE(SIS2): falha export_si_tskin', &
       line=__LINE__, file=__FILE__)) return
@@ -698,7 +662,7 @@ contains
     call log_info(COMP_ICE, 'ModelAdvance concluido')
   end subroutine ModelAdvance
 
-  !> Termodinâmica lenta e dinâmica do SIS2.
+  !> @brief Termodinâmica lenta e dinâmica do SIS2.
   subroutine advance_ice_slow(is)
     type(ice_internal_state_type), pointer, intent(in) :: is
 
@@ -706,7 +670,6 @@ contains
     call update_ice_dynamics_trans(is%ice)
   end subroutine advance_ice_slow
 
-  ! ============================================================================
   !> @brief CheckImport sem validação de carimbo de tempo.
   !!
   !! O NUOPC padrão exige carimbo igual a currTime; o MED carimba com o
@@ -728,7 +691,9 @@ contains
     wrap%ptr%check_import_logged = .true.
   end subroutine CheckImportTolerant
 
-  ! ============================================================================
+  !> @brief Grava o restart do SIS2 e o finaliza.
+  !! @param[inout] gcomp  componente do gelo
+  !! @param[out]   rc     código de retorno
   subroutine ModelFinalize(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc

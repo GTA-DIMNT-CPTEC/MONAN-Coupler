@@ -1,18 +1,16 @@
 !> @file mpas_cap_MONAN.F90
-!! @brief Cap NUOPC/ESMF para o modelo atmosferico MPAS-A 8.3 / MONAN-A 2.0.
+!! @brief Cap NUOPC/ESMF para o modelo atmosférico MPAS-A 8.3 / MONAN-A 2.0.
 !!
 !! Protocolo NUOPC completo via NUOPC_CompDerive (InitializeAdvertise,
 !! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
-!! cap exporta a forcante atmosferica do MONAN-A ao mediador e importa dele
-!! a superficie do oceano e do gelo (POINT_ATM, abaixo). A traducao entre
+!! cap exporta a forçante atmosférica do MONAN-A ao mediador e importa dele
+!! a superfície do oceano e do gelo (POINT_ATM, abaixo). A tradução entre
 !! o MPAS-A e o ESMF fica no adaptador (mpas_adapter.F90), e os
-!! diagnosticos NetCDF em
-!! mpas_cap_netcdf.F90 e mpas_import_diag.F90.
+!! diagnósticos NetCDF em mpas_cap_netcdf.F90 e mpas_import_diag.F90.
 !!
-!! As coordenadas para o NetCDF vem de lonCell(1:n_local), com
-!! n_local = min(localCells_ESMF, nCells_MPAS), e nao de ownedElemCoords,
-!! que causa double-free no ESMF 8.9.1 em Cray/gfortran. O historico das
-!! versoes 7.0 a 9.2 deste cap esta em docs/CHANGELOG.md.
+!! As coordenadas para o NetCDF vêm de lonCell(1:n_local), com
+!! n_local = min(localCells_ESMF, nCells_MPAS), e não de ownedElemCoords,
+!! que causa double-free no ESMF 8.9.1 em Cray/gfortran.
 
 module mpas_cap_MONAN_mod
 
@@ -90,41 +88,45 @@ module mpas_cap_MONAN_mod
     type(mpas_cap_state_t), pointer :: ptr => null()
   end type mpas_cap_state_wrapper_t
 
-  ! ── Campos importados do mediador (MED→MPAS) ───────────────────────────────
+  ! Campos importados do mediador (MED→MPAS)
   !
   ! O NUOPC só cria RouteHandle para campos MUTUAMENTE anunciados: o MED
   ! anuncia estes campos no exportState, e o MPAS os anuncia espelhadamente
   ! no importState (este array).
   !
-  ! Sx_tsfc (e nao So_t) alimenta atm_bnd%sst: So_t e' a SST pura do MOM6,
-  ! que o SIS2 tambem importa e precisa pura para o fluxo de calor basal do
-  ! gelo (ICE_KMELT); Sx_tsfc e' o composto (1-Si_ifrac)*So_t +
+  ! Sx_tsfc (e não So_t) alimenta atm_bnd%sst: So_t é a SST pura do MOM6,
+  ! que o SIS2 também importa e precisa pura para o fluxo de calor basal do
+  ! gelo (ICE_KMELT); Sx_tsfc é o composto (1-Si_ifrac)*So_t +
   ! Si_ifrac*Si_t_sis2, calculado no MED (med_export.F90) para a atmosfera, que
-  ! enxerga uma unica celula mista agua+gelo.
+  ! enxerga uma única célula mista água+gelo.
   !
-  ! Sf_zorl e' a rugosidade calculada no MED por Charnock + Smith a partir de
+  ! Sf_zorl é a rugosidade calculada no MED por Charnock + Smith a partir de
   ! Foxx_taux/tauy, no lugar do valor fixo cfg_zorl_default = 0.01 m
-  ! (realimentacao vento <-> rugosidade, importante em tempestades).
+  ! (realimentação vento <-> rugosidade, importante em tempestades).
   !
-  ! Sx_omask e' a mascara terra/oceano REAL do MOM6 (ocean_grid%mask2dT).
-  ! Nao alimenta a fisica do MONAN-A, que tem a propria landmask; serve para
-  ! mascarar continentes no diagnostico monan2_import_*.nc, em vez de contar
-  ! so' com o filtro ocean_frac_min do binning Voronoi, um criterio de
-  ! COBERTURA de celula Voronoi por bin, sem relacao com terra/oceano.
+  ! Sx_omask é a máscara terra/oceano REAL do MOM6 (ocean_grid%mask2dT).
+  ! Não alimenta a física do MONAN-A, que tem a própria landmask; serve para
+  ! mascarar continentes no diagnóstico monan2_import_*.nc, em vez de contar
+  ! só com o filtro ocean_frac_min do binning Voronoi, um critério de
+  ! COBERTURA de célula Voronoi por bin, sem relação com terra/oceano.
   !
   ! Os campos saem do mapa de acoplamento (src/coupling/cpl_map.F90), no
-  ! ponto ATM@atm_cap: a importacao sao os 7 campos que chegam por conector
+  ! ponto ATM@atm_cap: a importação são os 7 campos que chegam por conector
   ! (cpl_arrivals: Sx_tsfc, Si_ifrac, So_u, So_v, Sf_zorl, Sf_albedo e
-  ! Sx_omask), e a exportacao, os 13 campos *_mpas de EXPORTS
-  ! (cpl_exports), a forcante nativa do MONAN-A. O cap anuncia sempre as
-  ! mesmas listas: nao consulta chaves de &nuopc_mode. O valor inicial de
-  ! cada campo importado esta em initial_import_value.
+  ! Sx_omask), e a exportação, os 13 campos *_mpas de EXPORTS
+  ! (cpl_exports), a forçante nativa do MONAN-A. O cap anuncia sempre as
+  ! mesmas listas: não consulta chaves de &nuopc_mode. O valor inicial de
+  ! cada campo importado está em initial_import_value.
   character(len=*), parameter :: POINT_ATM = 'ATM@atm_cap'
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 contains
 
+  !> @brief Registra o cap no NUOPC: fases de inicialização e especializações
+  !! (DataInitialize, Advance, Finalize e CheckImport).
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer, intent(out) :: rc
@@ -152,7 +154,7 @@ contains
          specLabel=model_label_Finalize, &
          specRoutine=ModelFinalize, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    ! Suprimir validacao de timestamp de import (lag OCN->MPAS: t-1 != currTime)
+    ! Suprimir validação de timestamp de import (lag OCN->MPAS: t-1 != currTime)
     call NUOPC_CompSpecialize(gcomp, &
          specLabel=model_label_CheckImport, &
          specRoutine=CheckImportAlwaysOK, rc=rc)
@@ -160,6 +162,12 @@ contains
     call log_info(COMP_ATM, 'SetServices concluido')
   end subroutine SetServices
 
+  !> @brief Fase 0: mapa de fases do cap (cap_initialize_p0) e registro do instante inicial no log.
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
@@ -181,6 +189,12 @@ contains
     call log_info(COMP_ATM, 'InitializeP0 concluido')
   end subroutine InitializeP0
 
+  !> @brief Anuncia os campos importados e exportados, lidos do mapa de acoplamento (POINT_ATM).
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
@@ -204,6 +218,15 @@ contains
          int_to_str(size(exp))//' exp')
   end subroutine InitializeAdvertise
 
+  !> @brief Cria a grade e os campos do cap, inicializa o MONAN-A e prepara o gravador NetCDF.
+  !!
+  !! A grade e os campos ESMF são criados antes de mpas_atm_init, que inicia
+  !! o SMIOL; as coordenadas do gravador são reunidas depois.
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
@@ -221,7 +244,7 @@ contains
     character(len=CPL_NAME_LEN), allocatable :: names(:)
     rc = ESMF_SUCCESS
 
-    ! ── 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada ─
+    ! 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, localPet=localPet, mpiCommunicator=localMpiComm, rc=rc)
@@ -233,15 +256,15 @@ contains
     call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 1. ESMF_Grid 360x180 (ANTES de mpas_atm_init) ────────────────────
-    ! SOLUCAO DEFINITIVA: ESMF_Grid nao usa MOAB. Zero deadlocks possiveis.
-    ! Criado ANTES do SMIOL (mpas_atm_init) para MPI completamente limpo.
+    ! 1. ESMF_Grid 360x180 (ANTES de mpas_atm_init)
+    ! ESMF_Grid não usa MOAB (ver mpas_create_grid) e é criada antes do
+    ! SMIOL (mpas_atm_init), com o MPI ainda limpo.
     call mpas_create_grid(st%grid, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
+    ! 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init)
     ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
-    ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
+    ! ESMF_Grid distribui automaticamente -> todos os PETs têm células locais.
     call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', names)
     call cap_realize_fields(importState, st%grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
@@ -249,7 +272,7 @@ contains
     call cap_realize_fields(exportState, st%grid, names, size(names), rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 3. Inicializar MPAS-A (SMIOL começa aqui) ────────────────────────
+    ! 3. Inicializar MPAS-A (SMIOL começa aqui)
     allocate(st%atm_public)
     allocate(st%atm_state)
     allocate(st%atm_bnd)
@@ -261,7 +284,7 @@ contains
       return
     end if
 
-    ! ── 4. Coordenadas NetCDF (MPI_Allgather apos SMIOL — seguro) ────────
+    ! 4. Coordenadas NetCDF (MPI_Allgather após SMIOL — seguro)
       ! usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
       n_local = st%atm_public%nCellsSolve
@@ -281,6 +304,10 @@ contains
     call log_info(COMP_ATM, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
+  !> @brief DataInitialize: confere a conexão dos importados, aplica os valores
+  !! iniciais e exporta os campos de t=0.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
@@ -297,7 +324,7 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     ! barreira antes de qualquer leitura do
-    ! importState. Ver o cabecalho de verify_import_connected para o motivo.
+    ! importState. Ver o cabeçalho de verify_import_connected para o motivo.
     call verify_import_connected(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
@@ -320,6 +347,9 @@ contains
     call log_info(COMP_ATM, 'DataInitialize SATISFIED')
   end subroutine InitializeDataComplete
 
+  !> @brief Avança um intervalo de acoplamento: importa o contorno, roda o MONAN-A e exporta a forçante.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine ModelAdvance(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
@@ -339,7 +369,7 @@ contains
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     st%step_count = st%step_count + 1
 
-    ! ── Timestamp para o diagnóstico de importação ────────────────────────────
+    ! Timestamp para o diagnóstico de importação
     ! Lê o tempo corrente do clock ANTES de mpas_import para que
     ! write_mpas_import_diag (acionado dentro de mpas_import quando
     ! cfg_write_import_diag=.true.) nomeie o arquivo como:
@@ -391,7 +421,7 @@ contains
     call log_info(COMP_ATM, 'ModelAdvance concluido')
   end subroutine ModelAdvance
 
-  !> Recupera o estado interno do cap, criado em InitializeRealize.
+  !> @brief Recupera o estado interno do cap, criado em InitializeRealize.
   !! @param[inout] gcomp  componente do cap
   !! @param[out]   st     estado interno
   !! @param[out]   rc     código de retorno ESMF
@@ -408,6 +438,9 @@ contains
     st => wrap%ptr
   end subroutine get_cap_state
 
+  !> @brief Finaliza o MONAN-A (mpas_atm_final); a grade fica para o ESMF_Finalize.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine ModelFinalize(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
@@ -423,7 +456,7 @@ contains
       return
     end if
     ! Sem ESMF_GridDestroy: os campos do importState/exportState
-    ! ainda referenciam st%grid quando ModelFinalize e chamado.
+    ! ainda referenciam st%grid quando ModelFinalize é chamado.
     ! Destruir o grid aqui causa SIGSEGV no cleanup posterior do framework.
     ! O ESMF finaliza o grid automaticamente em ESMF_Finalize.
     deallocate(st%atm_public, st%atm_state, st%atm_bnd)
@@ -433,36 +466,30 @@ contains
     call log_info(COMP_ATM, 'ModelFinalize concluido')
   end subroutine ModelFinalize
 
-  !> @brief Aborta se algum campo importado nao estiver conectado.
+  !> @brief Aborta se algum campo importado não estiver conectado.
   !!
-  !!
-  !! O PROBLEMA. Quando o componente OCN nao oferece todos os campos que este
-  !! cap anuncia, o NUOPC registra no log de PET
+  !! Quando o componente OCN não oferece todos os campos que este cap
+  !! anuncia, o NUOPC registra no log do PET
   !!     MPAS: Import Field not connected: <nome>
   !!     ERROR ... NUOPC INCOMPATIBILITY DETECTED: Import Fields not all connected
-  !! e mesmo assim DEVOLVE ESMF_SUCCESS. O esmApp.F90 ja' confere o rc de
-  !! ESMF_GridCompInitialize com ChkErr e abortaria se ele viesse com erro;
-  !! como nao vem, a execucao segue. No primeiro passo o mpas_import le os
-  !! campos importados assim mesmo, inclusive os que nunca foram realizados, e o
-  !! ponteiro do farrayPtr de um campo nao conectado leva a SIGSEGV dentro do
-  !! libesmf.so, com backtrace irresoluvel. Foi o que aconteceu no perfil
-  !! MPAS+DOCN: tres campos faltando, morte sete
-  !! segundos depois, sem nenhuma pista no esmApp_run.log.
+  !! e mesmo assim DEVOLVE ESMF_SUCCESS, e a execução segue. No primeiro
+  !! passo, mpas_import leria os campos importados, inclusive os nunca
+  !! realizados, e o farrayPtr de um campo não conectado levaria a SIGSEGV
+  !! dentro do libesmf.so, sem pista no esmApp_run.log. Por isso esta rotina
+  !! confere a conexão antes de tocar no importState e aborta nomeando os
+  !! campos ausentes. Custo: uma chamada a NUOPC_IsConnected por campo
+  !! importado, uma vez por execução.
   !!
-  !! O CONSERTO. Verificar explicitamente, antes de tocar no importState, e
-  !! abortar nomeando os campos ausentes. Custo: uma chamada a
-  !! NUOPC_IsConnected por campo importado, uma vez por execucao.
+  !! A conferência fica no cap, e não no driver, porque precisa dos campos
+  !! que este cap importa (do mapa, no ponto POINT_ATM); no esm.F90 seria
+  !! preciso percorrer os cplLists de cada conector e reconstruir a mesma
+  !! informação de segunda mão.
   !!
-  !! POR QUE AQUI E NAO NO DRIVER. A checagem precisa dos campos que este cap
-  !! importa (do mapa, no ponto POINT_ATM). Um guarda equivalente no esm.F90
-  !! teria de percorrer os cplLists de cada conector e reconstruir a mesma
-  !! informacao de segunda mao.
-  !!
-  !! ATENCAO: nao confundir com CheckImportAlwaysOK, logo abaixo. Aquela
-  !! suprime a validacao de TIMESTAMP, que e' legitima porque o conector
-  !! OCN->MPAS entrega com lag de um passo. Esta aqui verifica CONECTIVIDADE,
-  !! que e' outra coisa: um campo desconectado nunca fica correto, em nenhum
-  !! passo. Suprimir a primeira nao pode implicar em suprimir a segunda.
+  !! Não confundir com CheckImportAlwaysOK, logo abaixo. Aquela suprime a
+  !! validação de TIMESTAMP, que é legítima porque o conector OCN->MPAS
+  !! entrega com atraso de um passo. Esta verifica CONECTIVIDADE: um campo
+  !! desconectado nunca fica correto, em nenhum passo, e suprimir a
+  !! primeira não implica suprimir a segunda.
   subroutine verify_import_connected(importState, rc)
     type(ESMF_State), intent(in)  :: importState
     integer,          intent(out) :: rc
@@ -520,13 +547,13 @@ contains
 
   end subroutine verify_import_connected
 
-  !> @brief Suprime validacao de timestamp dos campos de importacao.
+  !> @brief Suprime validação de timestamp dos campos de importação.
   !!
   !! O conector OCN->MPAS fornece SST com lag de 1 passo (t-1), portanto
-  !! os campos de importacao nunca tem timestamp = currTime. A validacao
-  !! padrao NUOPC (label_CheckImport) geraria "INCOMPATIBILITY: Import Fields
+  !! os campos de importação nunca têm timestamp = currTime. A validação
+  !! padrão NUOPC (label_CheckImport) geraria "INCOMPATIBILITY: Import Fields
   !! not at current time" em todos os 48 passos. Esta rotina substitui o
-  !! CheckImport padrao com sucesso incondicional.
+  !! CheckImport padrão com sucesso incondicional.
   subroutine CheckImportAlwaysOK(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer, intent(out) :: rc
@@ -539,7 +566,7 @@ contains
   !! do MED ter executado. Sem isso, o importState chega ao mpas_import com
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
   !! O valor de cada campo vem de initial_import_value; um campo do mapa
-  !! sem valor previsto la' interrompe a inicializacao.
+  !! sem valor previsto lá interrompe a inicialização.
   !!
   !! Após o primeiro ciclo MED→MPAS, todos serão sobrescritos pelos campos
   !! reais do MOM6+SIS2.
@@ -593,13 +620,13 @@ contains
 
   !> @brief Valor inicial de um campo importado, antes do primeiro passo.
   !!
-  !! conhecido = .false. se o campo nao tem valor previsto aqui.
+  !! conhecido = .false. se o campo não tem valor previsto aqui.
   !!   Sx_tsfc   temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
   !!   Si_ifrac  fração de gelo (cfg_ice_fraction_default = 0.0)
   !!   So_u      corrente zonal (0.0 m/s, oceano em repouso)
   !!   So_v      corrente meridional (0.0 m/s, oceano em repouso)
   !!   Sf_zorl   rugosidade (cfg_zorl_default) [m]
-  !!   Sf_albedo o mesmo valor de agua aberta usado em mpas_adapter.F90 e
+  !!   Sf_albedo o mesmo valor de água aberta usado em mpas_adapter.F90 e
   !!             mpas_atm_setup.F90 (ALB_OCEAN_DEFAULT)
   !!   Sx_omask  1, tudo oceano
   subroutine initial_import_value(name, init_val, known)

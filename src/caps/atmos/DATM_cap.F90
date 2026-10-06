@@ -1,24 +1,25 @@
-!==============================================================================!
-! DATM_cap.F90 - Data Atmosphere NUOPC Component (JRA55 fallback para MED)    !
-!                                                                              !
-! Baseado no exemplo AtmOcnMedPetListProto do ESMF.                          !
-! O DATM exporta os campos BRUTOS do JRA55 para o MEDIADOR; o calculo dos     !
-! fluxos bulk NCAR fica no mediador (med_bulk_ncar.F90).                      !
-!                                                                              !
-! Campos exportados para o MED (importState do mediador):                      !
-!   Sa_u10m     - vento zonal 10m       [m s-1]                               !
-!   Sa_v10m     - vento meridional 10m  [m s-1]                               !
-!   Sa_tbot     - temperatura do ar 2m  [K]                                   !
-!   Sa_shum     - umidade especifica    [kg kg-1]                              !
-!   Sa_pslv     - pressao niv. mar      [Pa]                                  !
-!   Faxa_swdn   - rad. solar desc.      [W m-2]                               !
-!   Faxa_lwdn   - rad. LW desc.         [W m-2]                               !
-!   Faxa_rain   - precipitacao liquida  [kg m-2 s-1]                          !
-!   Faxa_snow   - precipitacao solida   [kg m-2 s-1]                          !
-!                                                                              !
-! Epoca dos arquivos JRA55: 2016-01-01 01:30:00 (ver a nota antes de           !
-! ReadJRAFieldInterp). O DATM nao depende de MOM_io.                          !
-!==============================================================================!
+!> @file DATM_cap.F90
+!! @brief Atmosfera de dados (DATM): campos brutos do JRA55 para o mediador.
+!!
+!! Componente NUOPC baseado no exemplo AtmOcnMedPetListProto do ESMF. Lê os
+!! arquivos do JRA55 (passo de 3 h), interpola no tempo e exporta os campos
+!! brutos ao mediador, que calcula os fluxos bulk NCAR (med_bulk_ncar.F90).
+!!
+!! | Campo     | Grandeza                    | Unidade    | Variável JRA55 |
+!! | --------- | --------------------------- | ---------- | -------------- |
+!! | Sa_u10m   | vento zonal a 10 m          | m s-1      | uas            |
+!! | Sa_v10m   | vento meridional a 10 m     | m s-1      | vas            |
+!! | Sa_tbot   | temperatura do ar a 2 m     | K          | tas            |
+!! | Sa_shum   | umidade específica          | kg kg-1    | huss           |
+!! | Sa_pslv   | pressão ao nível do mar     | Pa         | psl            |
+!! | Faxa_swdn | radiação solar descendente  | W m-2      | rsds           |
+!! | Faxa_lwdn | radiação de onda longa desc.| W m-2      | rlds           |
+!! | Faxa_rain | precipitação líquida        | kg m-2 s-1 | prra           |
+!! | Faxa_snow | precipitação sólida         | kg m-2 s-1 | prsn           |
+!!
+!! A época dos arquivos JRA55 é 2016-01-01 01:30:00 (ver a nota antes de
+!! ReadJRAFieldInterp). O DATM não depende de MOM_io.
+
 module DATM_cap_mod
   use ESMF
   use ESMF, only: ESMF_GridComp, ESMF_GridCompGet, ESMF_GridCompSetEntryPoint
@@ -48,7 +49,7 @@ module DATM_cap_mod
     model_label_DataInitialize => label_DataInitialize, &
     model_label_Advance        => label_Advance
   use NUOPC_Model, only: NUOPC_ModelGet
-  ! Sem dependencia de MOM_io: o DATM nao usa stdout nem io_infra_end e nao
+  ! Sem dependência de MOM_io: o DATM não usa stdout nem io_infra_end e não
   ! precisa ser acoplado ao MOM6.
   use coupler_utils_mod, only : ChkErr
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field, &
@@ -70,21 +71,19 @@ module DATM_cap_mod
 
   public :: SetServices
 
-  !----------------------------------------------------------------------------
   ! Estado interno do DATM
-  !----------------------------------------------------------------------------
   type :: DATM_InternalState
     type(ESMF_Grid) :: grid
     ! Campos JRA55 lidos do NetCDF
     real(ESMF_KIND_R8), pointer :: uas(:,:)  => null()  ! vento zonal 10m
     real(ESMF_KIND_R8), pointer :: vas(:,:)  => null()  ! vento merid. 10m
     real(ESMF_KIND_R8), pointer :: tas(:,:)  => null()  ! temperatura ar 2m
-    real(ESMF_KIND_R8), pointer :: huss(:,:) => null()  ! umidade especifica
-    real(ESMF_KIND_R8), pointer :: psl(:,:)  => null()  ! pressao niv. mar
+    real(ESMF_KIND_R8), pointer :: huss(:,:) => null()  ! umidade específica
+    real(ESMF_KIND_R8), pointer :: psl(:,:)  => null()  ! pressão niv. mar
     real(ESMF_KIND_R8), pointer :: rsds(:,:) => null()  ! rad. sol. desc.
     real(ESMF_KIND_R8), pointer :: rlds(:,:) => null()  ! rad. LW desc.
-    real(ESMF_KIND_R8), pointer :: prra(:,:) => null()  ! precip. liquida
-    real(ESMF_KIND_R8), pointer :: prsn(:,:) => null()  ! precip. solida
+    real(ESMF_KIND_R8), pointer :: prra(:,:) => null()  ! precip. líquida
+    real(ESMF_KIND_R8), pointer :: prsn(:,:) => null()  ! precip. sólida
     logical :: initialized = .false.
   end type DATM_InternalState
 
@@ -94,9 +93,9 @@ module DATM_cap_mod
 
 contains
 
-  !============================================================================
-  ! SetServices
-  !============================================================================
+  !> @brief Registra as fases de inicialização e a especialização do avanço.
+  !! @param[inout] gcomp  componente DATM
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -130,12 +129,10 @@ contains
 
   end subroutine SetServices
 
-  !============================================================================
-  ! InitializeAdvertise - anuncia apenas campos BRUTOS para o MED
-  !
-  ! O DATM nao anuncia fluxos (Foxx_*): exporta somente o que vem
-  ! diretamente do JRA55.
-  !============================================================================
+  !> @brief Anuncia os campos brutos do JRA55 exportados ao mediador.
+  !!
+  !! O DATM não anuncia fluxos (Foxx_*): exporta somente o que vem
+  !! diretamente do JRA55.
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -146,9 +143,9 @@ contains
 
     rc = ESMF_SUCCESS
 
-    ! Campos de estado atmosferico bruto (JRA55): vento a 10 m, temperatura,
-    ! umidade e pressao; radiacao descendente (sem decomposicao em bandas, o
-    ! MED faz isso) e precipitacao.
+    ! Campos de estado atmosférico bruto (JRA55): vento a 10 m, temperatura,
+    ! umidade e pressão; radiação descendente (sem decomposição em bandas, o
+    ! MED faz isso) e precipitação.
     call cpl_exports(POINT_DATM, cpl_current_config(), '', names)
     do i = 1, size(names)
       call NUOPC_Advertise(exportState, StandardName=trim(names(i)), rc=rc)
@@ -158,12 +155,10 @@ contains
     call log_info(COMP_DATM, 'InitializeAdvertise concluido (campos brutos JRA55)')
   end subroutine InitializeAdvertise
 
-  !============================================================================
-  ! InitializeRealize - grade 640x320 (JRA55)
-  !
-  ! Centros das celulas: coordX = (i-1)*dx + dx/2 e coordY = (j-1)*dy + dy/2,
-  ! com i e j indices globais (INDEX_GLOBAL).
-  !============================================================================
+  !> @brief Cria a grade 640x320 do JRA55 e realiza os campos exportados.
+  !!
+  !! Centros das células: coordX = (i-1)*dx + dx/2 e coordY = (j-1)*dy + dy/2,
+  !! com i e j índices globais (INDEX_GLOBAL).
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp)  :: gcomp
     type(ESMF_State)     :: importState, exportState
@@ -196,17 +191,14 @@ contains
     call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Longitude: com ESMF_INDEX_GLOBAL, i eh o indice global (1..640)
-    ! lon_centro_i = (i-1)*dx + dx/2  => [0.28125, 0.84375, ..., 359.71875]
-    ! Com ESMF_INDEX_GLOBAL, lbound(coordX,1) no PET0 eh 1, no PET1 pode ser
-    ! p.ex. 161, etc. O indice i ja eh o indice GLOBAL da coluna.
-    ! Formula: lon_centro_i = (i-1)*dx + dx/2   [0.28125, 0.84375, ..., 359.71875]
+    ! Longitude: com ESMF_INDEX_GLOBAL, i é o índice global da coluna
+    ! (1..640; lbound(coordX,1) é 1 no PET 0 e, por exemplo, 161 no PET 1), e
+    ! lon_centro_i = (i-1)*dx + dx/2, de 0.28125 a 359.71875.
     call ESMF_GridGetCoord(grid, coordDim=1, &
       staggerloc=ESMF_STAGGERLOC_CENTER, farrayPtr=coordX, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     do j = lbound(coordX,2), ubound(coordX,2)
       do i = lbound(coordX,1), ubound(coordX,1)
-        ! Com ESMF_INDEX_GLOBAL, i eh indice global (1..640); lon=(i-1)*dx+dx/2
         coordX(i,j) = (i - 1) * (360.0_ESMF_KIND_R8/nx_global) &
           + (360.0_ESMF_KIND_R8/nx_global) * 0.5_ESMF_KIND_R8
       end do
@@ -238,9 +230,7 @@ contains
     call log_info(COMP_DATM, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
-  !============================================================================
-  ! InitializeDataComplete - IPDv03p7: componente de dados puro
-  !============================================================================
+  !> @brief Fase IPDv03p7: valores de partida do exportState (componente de dados).
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -252,9 +242,9 @@ contains
     call ESMF_GridCompGet(gcomp, exportState=exportState, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Valores de partida, substituidos pelos campos do JRA55 no primeiro
-    ! ModelAdvance: pressao padrao e Sa_tbot de 290 K (ativo APENAS quando
-    ! use_datm=.true.); os demais campos comecam em zero.
+    ! Valores de partida, substituídos pelos campos do JRA55 no primeiro
+    ! ModelAdvance: pressão padrão e Sa_tbot de 290 K (ativo APENAS quando
+    ! use_datm=.true.); os demais campos começam em zero.
     call cap_fill_export_initial(exportState, [character(len=7) :: 'Sa_pslv', 'Sa_tbot'], &
       [101325.0_ESMF_KIND_R8, 290.0_ESMF_KIND_R8], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -265,14 +255,12 @@ contains
     call log_info(COMP_DATM, 'InitializeDataComplete SATISFIED')
   end subroutine InitializeDataComplete
 
-  !============================================================================
-  ! ModelAdvance - le JRA55 e popula exportState com campos BRUTOS
-  !
-  ! Nao calcula fluxos: apenas le o NetCDF e escreve:
-  !   Sa_u10m = uas, Sa_v10m = vas, Sa_tbot = tas, Sa_shum = huss,
-  !   Sa_pslv = psl, Faxa_swdn = rsds, Faxa_lwdn = rlds,
-  !   Faxa_rain = prra, Faxa_snow = prsn
-  !============================================================================
+  !> @brief Lê o JRA55 no instante corrente e preenche o exportState.
+  !!
+  !! Não calcula fluxos: copia as variáveis do JRA55 para os campos da
+  !! tabela do cabeçalho do arquivo.
+  !! @param[inout] gcomp  componente DATM
+  !! @param[out]   rc     código de retorno
   subroutine ModelAdvance(gcomp, rc)
     type(ESMF_GridComp)  :: gcomp
     integer, intent(out) :: rc
@@ -311,7 +299,7 @@ contains
       month, '-', day, ' ', hour, ':', minute, ':', sec
     call log_info(COMP_DATM, trim(msg))
 
-    ! Obtem limites locais a partir do primeiro campo
+    ! Obtém limites locais a partir do primeiro campo
     call ESMF_StateGet(exportState, itemName="Sa_u10m", field=field, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
@@ -321,7 +309,7 @@ contains
     i1 = lbound(fptr,1); i2 = ubound(fptr,1)
     j1 = lbound(fptr,2); j2 = ubound(fptr,2)
 
-    ! Aloca arrays temporarios se necessario
+    ! Aloca arrays temporários se necessário
     if (.not. associated(is%uas)) then
       allocate(is%uas(i1:i2,  j1:j2))
       allocate(is%vas(i1:i2,  j1:j2))
@@ -334,7 +322,7 @@ contains
       allocate(is%prsn(i1:i2, j1:j2))
     end if
 
-    ! Le campos JRA55 com interpolacao temporal linear (3h -> dt_driver)
+    ! Lê os campos do JRA55 com interpolação temporal linear (3h -> dt_driver)
     call ReadJRAFieldInterp(gcomp, "INPUT/JRA_uas.nc",  "uas",  currTime, is%uas,  rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg="Falha uas",  line=__LINE__, file=__FILE__)) return
     call ReadJRAFieldInterp(gcomp, "INPUT/JRA_vas.nc",  "vas",  currTime, is%vas,  rc)
@@ -372,23 +360,25 @@ contains
     call log_info(COMP_DATM, 'ModelAdvance concluido (campos brutos)')
   end subroutine ModelAdvance
 
-  !============================================================================
-  ! ReadJRAFieldInterp - interpolacao temporal linear entre snapshots 3h
-  !
-  ! Estrategia paralela: PET0 le campo global inteiro do NetCDF e faz
-  ! broadcast via ESMF_VMBroadcast. Cada PET copia apenas o seu subdominio.
-  !
-  ! Epoca do arquivo: epochTime (em ReadJRAFieldInterp) marca o primeiro
-  !   snapshot do JRA55, de passo 3 h. O codigo usa 2016-01-01 01:30:00, o
-  !   centro do primeiro intervalo; se o arquivo comecar em 00:00, a epoca
-  !   deve ser 00:00, senao sec_since_epoch fica < 0 para t=0 do experimento
-  !   (2016-01-01 00:00:00). Documente o offset no cabecalho do arquivo.
-  !
-  !   Isso e correto porque os arquivos JRA55 nao sao particionados; a
-  !   leitura paralela real exigiria PIO ou NetCDF-4 paralelo, o que
-  !   adicionaria dependencias. Para os tamanhos JRA55 (640x320 x 2 snapshots
-  !   x 8 bytes ~ 3 MB por variavel) o broadcast e perfeitamente aceitavel.
-  !============================================================================
+  !> @brief Campo do JRA55 no instante currTime, por interpolação linear entre registros de 3 h.
+  !!
+  !! O PET 0 lê o campo global inteiro do NetCDF e o difunde com
+  !! ESMF_VMBroadcast; cada PET copia só o seu subdomínio. Os arquivos do
+  !! JRA55 não são particionados, e a leitura paralela exigiria PIO ou
+  !! NetCDF-4 paralelo; para 640x320 pontos, 2 registros de 8 bytes (cerca
+  !! de 3 MB por variável), a difusão custa pouco.
+  !!
+  !! Época do arquivo: epochTime marca o primeiro registro do JRA55. O
+  !! código usa 2016-01-01 01:30:00, o centro do primeiro intervalo; se o
+  !! arquivo começar em 00:00, a época deve ser 00:00, senão
+  !! sec_since_epoch fica < 0 no instante inicial do experimento
+  !! (2016-01-01 00:00:00).
+  !! @param[in]    gcomp     componente DATM (fornece a VM)
+  !! @param[in]    filename  arquivo NetCDF do JRA55
+  !! @param[in]    varname   variável a ler
+  !! @param[in]    currTime  instante corrente
+  !! @param[inout] array     subdomínio local do campo, com índices globais
+  !! @param[out]   rc        código de retorno
   subroutine ReadJRAFieldInterp(gcomp, filename, varname, currTime, array, rc)
     type(ESMF_GridComp),  intent(in)    :: gcomp
     character(len=*),    intent(in)  :: filename
@@ -404,13 +394,13 @@ contains
     integer                 :: tidx0, tidx1
     real(ESMF_KIND_R8)      :: alpha
 
-    ! Arrays globais (usados apenas em PET0 para leitura, depois broadcast).
-    ! A interpolacao temporal e feita em f0_global antes do broadcast.
+    ! Arrays globais (usados apenas no PET 0 para leitura, depois difundidos).
+    ! A interpolação temporal é feita em f0_global antes do broadcast.
     integer, parameter :: NX = 640, NY = 320
     real(ESMF_KIND_R8), target    :: f0_global(NX,NY), f1_global(NX,NY)
     real(ESMF_KIND_R8), allocatable :: buf_global(:)
 
-    ! Limites locais do subdominio deste PET
+    ! Limites locais do subdomínio deste PET
     integer :: i1, i2, j1, j2, i, j, localPet
     integer :: ni, nj!local
     character(len=256) :: msg
@@ -430,12 +420,10 @@ contains
 
     f0_global = 0.0_ESMF_KIND_R8
     f1_global = 0.0_ESMF_KIND_R8
-    ! Calcula indices de interpolacao temporal
-    !--------------------------------------------------------------------------
+    ! Calcula índices de interpolação temporal
     ! epochTime = 2016-01-01 01:30:00 (centro do primeiro intervalo JRA55).
-    ! Para currTime anterior a epoca, sec_since_epoch < 0 (ver o aviso abaixo);
-    ! com arquivo iniciado em 00:00, a epoca correta e' 00:00.
-    !--------------------------------------------------------------------------
+    ! Para currTime anterior a época, sec_since_epoch < 0 (ver o aviso abaixo);
+    ! com arquivo iniciado em 00:00, a época correta é 00:00.
     call ESMF_TimeSet(epochTime, yy=2016, mm=1, dd=1, h=1, m=30, s=0, &
       calkindflag=ESMF_CALKIND_GREGORIAN, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -448,29 +436,28 @@ contains
     call ESMF_TimeIntervalGet(dt_since_epoch, s_i8=sec_since_epoch, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Garantir sec_since_epoch >= 0 (currTime nao pode ser anterior ao epoch)
+    ! Garantir sec_since_epoch >= 0 (currTime não pode ser anterior ao epoch)
     if (sec_since_epoch < 0_ESMF_KIND_I8) then
       call log_warning(COMP_DATM, 'ReadJRAFieldInterp: currTime anterior ao epochTime')
       rc = ESMF_FAILURE
-      !PK return
+      ! Sem return: a execução segue, e o rc é refeito pelas chamadas abaixo.
     end if
 
-    ! tidx0 e base-1 (primeiro snapshot = indice 1)
+    ! tidx0 é base-1 (primeiro snapshot = índice 1)
     tidx0 = int(sec_since_epoch / 10800.0_ESMF_KIND_R8) + 1
     tidx1 = tidx0 + 1
     alpha = real(mod(sec_since_epoch, 10800_ESMF_KIND_I8), ESMF_KIND_R8) / &
             10800.0_ESMF_KIND_R8
     alpha = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, alpha))
 
-    ! Leitura: apenas PET0 acessa o disco
-    ! --- Leitura: apenas PET0 acessa o disco ---
+    ! Leitura: apenas o PET 0 acessa o disco
     if (localPet == 0) then
       call ReadGlobalField(filename, varname, tidx0, NX, NY, f0_global, rc)
       if (rc /= ESMF_SUCCESS) return
       call ReadGlobalField(filename, varname, tidx1, NX, NY, f1_global, rc)
       if (rc /= ESMF_SUCCESS) return
 
-      ! Interpolacao temporal in-place
+      ! Interpolação temporal in-place
       f0_global = f0_global + alpha * (f1_global - f0_global)
       buf_global = reshape(f0_global, [NX*NY])
     end if
@@ -480,9 +467,9 @@ contains
     call ESMF_VMBroadcast(vm, bcstData=buf_global, count=NX*NY, rootPet=0, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
-    ! Cada PET copia apenas o seu subdominio local
-    ! array tem indices globais (ESMF_INDEX_GLOBAL): lbound/ubound dao i1,i2,j1,j2 globais
-    ! Copia apenas o subdom\ufffdnio local (layout Fortran: i varia mais r\ufffdpido)
+    ! Cada PET copia apenas o seu subdomínio local
+    ! array tem índices globais (ESMF_INDEX_GLOBAL): lbound/ubound dão i1,i2,j1,j2 globais
+    ! Layout Fortran: i varia mais rápido.
     i1 = lbound(array,1); i2 = ubound(array,1)
     j1 = lbound(array,2); j2 = ubound(array,2)
 
@@ -500,9 +487,14 @@ contains
     call log_debug(COMP_DATM, trim(msg))
   end subroutine ReadJRAFieldInterp
 
-  !============================================================================
-  ! ReadGlobalField - le campo global (NX x NY) do NetCDF (chamado so em PET0)
-  !============================================================================
+  !> @brief Lê um registro do campo global (nx x ny) do NetCDF; chamada só no PET 0.
+  !! @param[in]  filename  arquivo NetCDF
+  !! @param[in]  varname   variável a ler
+  !! @param[in]  tidx      registro de tempo (base 1)
+  !! @param[in]  nx        pontos em longitude
+  !! @param[in]  ny        pontos em latitude
+  !! @param[out] array     campo lido
+  !! @param[out] rc        código de retorno
   subroutine ReadGlobalField(filename, varname, tidx, nx, ny, array, rc)
     character(len=*),    intent(in)  :: filename
     character(len=*),    intent(in)  :: varname
@@ -528,7 +520,7 @@ contains
       rc = ESMF_FAILURE; nc_rc = nf90_close(ncid); return
     end if
 
-    ! Le o campo global inteiro: [1:nx, 1:ny, tidx]
+    ! Lê o campo global inteiro: [1:nx, 1:ny, tidx]
     start = [1, 1, tidx]; count = [nx, ny, 1]
     nc_rc = nf90_get_var(ncid, varid, array, start=start, count=count)
     if (nc_rc /= NF90_NOERR) then

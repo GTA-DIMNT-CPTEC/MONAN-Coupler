@@ -63,7 +63,7 @@ contains
 
   ! Fase de inicialização
 
-  !> Fase de inicialização (InitializeDataComplete do mediador). Pode ser
+  !> @brief Fase de inicialização (InitializeDataComplete do mediador). Pode ser
   !! chamada MAIS DE UMA VEZ: o laço de resolução de dependência de dados do
   !! driver NUOPC percorre a RunSequence repetidamente, executando o Run dos
   !! conectores e o label_DataInitialize dos componentes, até que todos
@@ -134,7 +134,7 @@ contains
     call log_info(COMP_MED, 'InitializeDataComplete SATISFIED (So_t em t=0)')
   end subroutine initialize_data
 
-  !> Cria, na ordem de ROUTES, as rotas com create='inicio', cada uma com o
+  !> @brief Cria, na ordem de ROUTES, as rotas com create='inicio', cada uma com o
   !! seu par de campos: atm2ocn de is%ocn_flx%taux (malha de fluxo) para
   !! exp_field (Foxx_taux, grade OCN), se ainda não existe; ocn2atm de So_t
   !! (grade OCN) para is%ocn%sst (malha de fluxo). Uma rota 'inicio' sem par
@@ -175,7 +175,7 @@ contains
     end do
   end subroutine create_start_routes
 
-  !> Fase A da inicialização: cria as rotas da coluna create='inicio' de
+  !> @brief Fase A da inicialização: cria as rotas da coluna create='inicio' de
   !! ROUTES (create_start_routes), interpola as correntes e preenche o
   !! exportState com valores iniciais. Roda uma única vez (enquanto a rota
   !! 'ocn2atm' não existe).
@@ -202,7 +202,7 @@ contains
     call log_info(COMP_MED, 'IDC fase A: rotas de interpolacao criadas')
   end subroutine prepare_start
 
-  !> Espera da primeira SST (portão de dados da inicialização): So_t já foi
+  !> @brief Espera da primeira SST (portão de dados da inicialização): So_t já foi
   !! escrito pelo oceano?
   !!
   !! O mom_cap (e o DOCN) carimbam TODOS os campos exportados com startTime em
@@ -257,7 +257,7 @@ contains
     ready = .true.
   end subroutine wait_first_sst
 
-  !> Confere que o campo de referência da grade ATM existe no importState:
+  !> @brief Confere que o campo de referência da grade ATM existe no importState:
   !! Sa_u10m_mpas no modo MPAS, Sa_u10m no modo DATM (is%use_mpas_atm, lido
   !! em InitializeRealize). rc de falha quando o campo não existe.
   subroutine idc_check_atm_field(is, importState, rc)
@@ -281,7 +281,7 @@ contains
     end if
   end subroutine idc_check_atm_field
 
-  !> CARIMBO NÃO É DADO: com So_t carimbado (sst_ready), exige também VALOR
+  !> @brief CARIMBO NÃO É DADO: com So_t carimbado (sst_ready), exige também VALOR
   !! fisicamente plausível, em [270,310] K, em alguma célula, contado
   !! GLOBALMENTE (um DE pode legitimamente conter só terra e gelo). Sem
   !! nenhuma, sst_ready passa a .false.
@@ -334,7 +334,7 @@ contains
     end if
   end subroutine sst_has_physical_values
 
-  !> So_t ainda sem dado: pede ao driver mais uma iteração do laco de
+  !> @brief So_t ainda sem dado: pede ao driver mais uma iteração do laco de
   !! dependência de dados (Progress=true, Complete=false). Depois de
   !! MAX_GATE_TRIES tentativas, avisa e declara Complete=true.
   !!
@@ -373,7 +373,7 @@ contains
       'nova iteracao do laco de dependencia de dados')
   end subroutine idc_wait_for_sst
 
-  !> Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
+  !> @brief Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
   !!
   !! Primeiro regrid de So_u e So_v para is%ocn%u/is%ocn%v, pela rota
   !! 'ocn2atm' (bilinear, criada na fase A): So_u/So_v compartilham a grade
@@ -402,7 +402,7 @@ contains
     end if
   end subroutine idc_publish_initial_sst
 
-  !> Carimba os campos exportados com startTime: é o que permite ao MPAS
+  !> @brief Carimba os campos exportados com startTime: é o que permite ao MPAS
   !! (e a qualquer consumidor futuro) aplicar o mesmo gate NUOPC_IsAtTime.
   subroutine idc_stamp_export(exportState, startTime, rc)
     type(ESMF_State), intent(inout) :: exportState
@@ -428,7 +428,7 @@ contains
     end if
   end subroutine idc_stamp_export
 
-  !> Inicializa o exportState com valores fisicamente razoáveis: Sa_pslv
+  !> @brief Inicializa o exportState com valores fisicamente razoáveis: Sa_pslv
   !! com 101325 Pa e os demais campos com zero. PETs sem DE local não tem o
   !! que inicializar (ESMF_FieldGet com farrayPtr falharia neles).
   subroutine idc_init_export_fields(exportState)
@@ -465,7 +465,7 @@ contains
 
   ! Fases de cada passo
 
-  !> Fase go_to_flux_grid: os campos do oceano e do gelo na malha de
+  !> @brief Fase go_to_flux_grid: os campos do oceano e do gelo na malha de
   !! fluxo, antes da física, nesta ordem:
   !!
   !!   1. SST, correntes e, com o SIS2, a fração, os albedos e a temperatura
@@ -507,7 +507,7 @@ contains
     call update_ice_fraction_from_docn(is, clock, ifrac_ptr, rc)
   end subroutine go_to_flux_grid
 
-  !> Rotas da ida para a malha de fluxo criadas durante o passo, conforme a
+  !> @brief Rotas da ida para a malha de fluxo criadas durante o passo, conforme a
   !! coluna create de ROUTES, nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_sst  'mascara_mista': set_ocean_mask_for_sst grava a máscara
@@ -539,7 +539,7 @@ contains
     end if
   end subroutine ensure_flux_grid_routes
 
-  !> Prepara e cria a rota 'ocn2atm_sst' (coluna create 'mascara_mista' de
+  !> @brief Prepara e cria a rota 'ocn2atm_sst' (coluna create 'mascara_mista' de
   !! ROUTES): grava na grade do oceano a máscara de So_omask (ou, sem ela, a
   !! de um limiar de SST) e cria a rota no primeiro passo em que a máscara
   !! tem terra e mar no conjunto dos PETs.
@@ -632,7 +632,7 @@ contains
     call create_route(is%regrid, 'ocn2atm_ice', f_ifrac_src, is%ice%ifrac, rc_store)
   end subroutine add_ice_route
 
-  !> Fase deliver: exportação dos campos da malha de fluxo e carimbo de
+  !> @brief Fase deliver: exportação dos campos da malha de fluxo e carimbo de
   !! tempo, nesta ordem:
   !!   1. export_to_components (med_export);
   !!   2. stampTime em cada campo do exportState (stamp_export_fields);
@@ -669,7 +669,7 @@ contains
     end if
   end subroutine deliver
 
-  !> Fase da física bulk: associa os arrays de med_flux_t aos campos
+  !> @brief Fase da física bulk: associa os arrays de med_flux_t aos campos
   !! internos da malha de fluxo (associate_fluxes) e chama calc_bulk_ncar com
   !! eles e com os forçantes atmosféricos reunidos na grade global.
   !!
@@ -695,7 +695,7 @@ contains
                         i1, i2, j1, j2, clock, rc)
   end subroutine compute_fluxes
 
-  !> Associa cada array de med_flux_t aos valores do campo interno
+  !> @brief Associa cada array de med_flux_t aos valores do campo interno
   !! correspondente, no DE local; um campo que o ESMF não entrega deixa o
   !! array nulo, que a física trata como indisponível.
   !!
@@ -743,6 +743,7 @@ contains
 
   contains
 
+    !> Aponta p para os dados do campo; p fica nulo se o campo não tem dados locais.
     subroutine point_to(field, p)
       type(ESMF_Field),            intent(in)  :: field
       real(ESMF_KIND_R8), pointer, intent(out) :: p(:,:)
@@ -754,7 +755,7 @@ contains
 
   end subroutine associate_fluxes
 
-  !> Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
+  !> @brief Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de
   !! gelo na malha de fluxo (legacy_ice_fraction, em med_ocean). A física
   !! deste passo já usou a fração que estava em is%ice%ifrac; a nova vai
   !! para a exportação (Si_ifrac) e para o passo seguinte.
@@ -777,7 +778,7 @@ contains
     call legacy_ice_fraction(is, importState, fptr, sst, j1, j2, i1, i2)
   end subroutine ice_fraction_without_sis2
 
-  !> Rotas da exportação criadas durante o passo, conforme a coluna create
+  !> @brief Rotas da exportação criadas durante o passo, conforme a coluna create
   !! de ROUTES ('primeiro_uso'), nesta ordem (a ordem das linhas "rota" no
   !! relatório de acoplamento):
   !!   ocn2atm_landmask  na primeira exportação (is%ocn%omask_done ainda
@@ -810,7 +811,7 @@ contains
     end if
   end subroutine ensure_export_routes
 
-  !> Carimba stampTime em cada campo do exportState. field é só a variável
+  !> @brief Carimba stampTime em cada campo do exportState. field é só a variável
   !! de trabalho do laço.
   subroutine stamp_export_fields(exportState, field, stampTime, rc)
     type(ESMF_State), intent(inout) :: exportState
@@ -831,7 +832,7 @@ contains
     deallocate(fieldNameList)
   end subroutine stamp_export_fields
 
-  !> Carimba o exportState inteiro com o tempo atual do relógio. Só depois que a rota
+  !> @brief Carimba o exportState inteiro com o tempo atual do relógio. Só depois que a rota
   !! ocn2atm existe; antes disso, avisa no log e não carimba.
   !!
   !! @param[inout] exportState  estado de exportação do mediador

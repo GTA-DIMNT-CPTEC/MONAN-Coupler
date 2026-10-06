@@ -237,7 +237,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine calc_bulk_ncar
 
-  !> Hora UTC decimal e declinação solar do instante corrente do relógio.
+  !> @brief Hora UTC decimal e declinação solar do instante corrente do relógio.
   !!
   !! O dia do ano e a hora são os mesmos para toda a grade neste instante de
   !! acoplamento; o ângulo zenital, que muda por célula, é calculado em
@@ -286,7 +286,7 @@ contains
          - 0.002697_ESMF_KIND_R8 * cos(3.0_ESMF_KIND_R8*gamma_doy) + 0.001480_ESMF_KIND_R8 * sin(3.0_ESMF_KIND_R8*gamma_doy)
   end subroutine solar_time_and_declination
 
-  !> Fluxos sobre água aberta pelas formulas bulk NCAR, com coeficientes
+  !> @brief Fluxos sobre água aberta pelas formulas bulk NCAR, com coeficientes
   !! neutros: tensão do vento (taux, tauy), calor sensível, evaporação e
   !! balanco de onda longa, escritos em fluxo. A SST é a da grade ATM
   !! interna; fora de (271, 308) K, ou sem SST, usa SST_BULK_FALLBACK.
@@ -381,7 +381,7 @@ contains
     end do; end do
   end subroutine compute_ocean_fluxes
 
-  !> SST usada nos fluxos sobre água aberta: sst(i,j) dentro de (271, 308) K;
+  !> @brief SST usada nos fluxos sobre água aberta: sst(i,j) dentro de (271, 308) K;
   !! fora da faixa, ou sem SST (ponteiro nulo), SST_BULK_FALLBACK. Os testes
   !! ficam em if separados porque o Fortran não garante o curto-circuito do
   !! .and.: com o ponteiro nulo, sst(i,j) não pode ser lido.
@@ -777,7 +777,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine blend_albedo_with_ice
 
-  !> Uma banda de onda curta com o gelo real: Foxx_swnet (água aberta),
+  !> @brief Uma banda de onda curta com o gelo real: Foxx_swnet (água aberta),
   !! Fioi_swnet (gelo) e a contribuição da banda ao albedo de banda larga.
   !!
   !! Nas bandas diretas (direct), o albedo da água aberta depende do zênite
@@ -845,7 +845,7 @@ contains
     rc = ESMF_SUCCESS
   end subroutine sw_band
 
-  !> Cosseno do zênite solar e albedo da água aberta para feixe direto na
+  !> @brief Cosseno do zênite solar e albedo da água aberta para feixe direto na
   !! célula (i,j) da grade ATM 360x180.
   !!
   !! lat/lon analíticos da grade ATM (mesma formula da criação da grade em
@@ -879,7 +879,7 @@ contains
     alb_ocn_dir = max(0.03_ESMF_KIND_R8, min(0.99_ESMF_KIND_R8, alb_ocn_dir))
   end subroutine ocean_direct_albedo
 
-  !> Uma banda de onda curta sem dado de gelo: albedo_ocn constante em
+  !> @brief Uma banda de onda curta sem dado de gelo: albedo_ocn constante em
   !! Foxx_swnet, e o mesmo valor copiado em Fioi_swnet.
   subroutine sw_band_fallback(f_sw, f_sw_ice, j1, j2, i1, i2, swdn, frac)
     real(ESMF_KIND_R8), pointer, intent(in) :: f_sw(:,:)
