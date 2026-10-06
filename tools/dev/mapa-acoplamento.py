@@ -232,27 +232,60 @@ def parametros_inteiros(instrs):
     return p
 
 
+def vetores_texto(instrs):
+    """Vetores de texto constantes (grupos de campos do mapa):
+    'character(len=...), parameter :: NOME(*) = [character(len=...) :: itens]',
+    em que cada item é um texto entre aspas ou um vetor declarado antes."""
+    v = {}
+    for s in instrs:
+        m = re.match(r'character\s*\([^)]*\)\s*,\s*parameter\s*::\s*(\w+)\s*\(\s*\*\s*\)\s*=\s*'
+                     r'\[\s*(?:character\s*\([^)]*\)\s*::)?(.*)\]\s*$', s, re.I)
+        if not m:
+            continue
+        itens = []
+        for item in divide(m.group(2)):
+            if item in v:
+                itens += v[item]
+            else:
+                itens.append(texto(item))
+        v[m.group(1)] = itens
+    return v
+
+
 def tabela_fortran(instrs, tipo, nome, params, arquivo, consts=None):
-    """Linhas da tabela 'type(tipo), parameter[, public] :: nome(*) = [...]'."""
+    """Linhas da tabela 'type(tipo), parameter[, public] :: nome(*) = [...]'.
+
+    Uma passagem '(tipo(GRUPO(i), ...), i = 1, size(GRUPO))', em que GRUPO é
+    um vetor de texto do fonte (vetores_texto), vira uma linha por elemento
+    do grupo, na ordem do grupo, como o compilador a expande."""
     comps = componentes(instrs, tipo, params)
+    grupos = vetores_texto(instrs)
     for s in instrs:
         if re.match(r'type\s*\(\s*' + tipo + r'\s*\)\s*,\s*parameter\s*(,\s*public\s*)?::\s*'
                     + nome + r'\b', s, re.I):
             linhas = []
             for args in chamadas(s, tipo):
-                linha = collections.OrderedDict((c, d) for c, _, d in comps)
-                for k, a in enumerate(divide(args)):
-                    m = re.match(r'(\w+)\s*=(?!=)\s*(.*)$', a, re.S)
-                    if m and m.group(1) in linha:
-                        chave, valor = m.group(1), m.group(2)
-                    else:
-                        chave, valor = comps[k][0], a
-                    linha[chave] = texto(valor, consts)
-                for c, comp, _ in comps:
-                    if comp is not None and len(linha[c].encode('utf-8')) > comp:
-                        raise ErroMapa('{}: {}: "{}" tem mais de {} caracteres'.format(
-                            arquivo, c, linha[c], comp))
-                linhas.append(linha)
+                partes = divide(args)
+                valores = [None]
+                mg = re.match(r'(\w+)\s*\(\s*\w+\s*\)$', partes[0]) if partes else None
+                if mg and mg.group(1) in grupos:
+                    valores = grupos[mg.group(1)]
+                for valor0 in valores:
+                    linha = collections.OrderedDict((c, d) for c, _, d in comps)
+                    for k, a in enumerate(partes):
+                        m = re.match(r'(\w+)\s*=(?!=)\s*(.*)$', a, re.S)
+                        if m and m.group(1) in linha:
+                            chave, valor = m.group(1), texto(m.group(2), consts)
+                        elif k == 0 and valor0 is not None:
+                            chave, valor = comps[0][0], valor0
+                        else:
+                            chave, valor = comps[k][0], texto(a, consts)
+                        linha[chave] = valor
+                    for c, comp, _ in comps:
+                        if comp is not None and len(linha[c].encode('utf-8')) > comp:
+                            raise ErroMapa('{}: {}: "{}" tem mais de {} caracteres'.format(
+                                arquivo, c, linha[c], comp))
+                    linhas.append(linha)
             return linhas
     raise ErroMapa('{}: tabela {} não encontrada'.format(arquivo, nome))
 

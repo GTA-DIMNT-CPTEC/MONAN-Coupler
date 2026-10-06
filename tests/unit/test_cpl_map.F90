@@ -4,6 +4,9 @@
 !! Confere, sem MPI e sem ESMF inicializado, que as tabelas FIELDS, GRIDS,
 !! EXCHANGES e ROUTES formam uma descrição coerente do acoplamento de hoje:
 !!
+!!   congelada   EXCHANGES, escrita por grupos de campos e passagens desde a
+!!               R-FASE13-23, reproduz linha a linha e na mesma ordem a
+!!               tabela de antes (exchanges_frozen.inc), em todas as colunas
 !!   estrutura   nomes únicos; todo campo de EXCHANGES e de EXPORTS está
 !!               em FIELDS e todo campo de FIELDS é usado; pontos 'COMPONENTE@malha' com
 !!               malha conhecida e componente certo; condições válidas;
@@ -81,6 +84,7 @@ program test_cpl_map
 
   include 'listas_mediador.inc'
   include 'listas_caps.inc'
+  include 'exchanges_frozen.inc'
 
   integer, parameter :: NCFG = 5
   character(len=16), parameter :: CFG_NAME(NCFG) = [character(len=16) :: &
@@ -102,6 +106,7 @@ program test_cpl_map
 
   nfailures = 0
 
+  call check_frozen_exchanges()
   call check_fields()
   call check_field_attributes()
   call check_modes()
@@ -609,6 +614,32 @@ contains
     call outcome(trim(CFG_NAME(k))//': cadeia completa, exceto as lacunas conhecidas', &
                    nerr == 0 .and. nmissing == nexpected)
   end subroutine check_chain
+
+  !> EXCHANGES expandida das passagens igual, linha a linha, à cópia congelada.
+  subroutine check_frozen_exchanges()
+    integer :: t, ndiff
+
+    ndiff = 0
+    if (size(EXCHANGES) /= size(FROZEN_EXCHANGES)) then
+      ndiff = 1
+    else
+      do t = 1, size(EXCHANGES)
+        if (EXCHANGES(t)%field  /= FROZEN_EXCHANGES(t)%field  .or. &
+            EXCHANGES(t)%src    /= FROZEN_EXCHANGES(t)%src    .or. &
+            EXCHANGES(t)%dst    /= FROZEN_EXCHANGES(t)%dst    .or. &
+            EXCHANGES(t)%via    /= FROZEN_EXCHANGES(t)%via    .or. &
+            EXCHANGES(t)%when   /= FROZEN_EXCHANGES(t)%when   .or. &
+            EXCHANGES(t)%method /= FROZEN_EXCHANGES(t)%method) then
+          write(*,'(A,I0,6(1X,A))') '  linha ', t, trim(EXCHANGES(t)%field), trim(EXCHANGES(t)%src), &
+            trim(EXCHANGES(t)%dst), trim(EXCHANGES(t)%via), trim(EXCHANGES(t)%when), &
+            trim(EXCHANGES(t)%method)
+          ndiff = ndiff + 1
+        end if
+      end do
+    end if
+    call outcome('congelada: EXCHANGES igual, linha a linha, as 151 de antes', &
+                 ndiff == 0 .and. size(FROZEN_EXCHANGES) == 151)
+  end subroutine check_frozen_exchanges
 
   !> Campos por conector na produção, como no Apêndice A.
   subroutine check_counts()

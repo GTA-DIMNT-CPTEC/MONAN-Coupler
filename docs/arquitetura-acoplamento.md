@@ -8,7 +8,7 @@ Na versão original, a descrição do acoplamento estava espalhada: nomes de cam
 
 | Tarefa | Antes | Agora |
 | --- | --- | --- |
-| incluir um campo | editar as listas do componente de origem, do mediador e do destino | uma linha em `FIELDS` e uma por passagem em `EXCHANGES` |
+| incluir um campo | editar as listas do componente de origem, do mediador e do destino | uma linha em `FIELDS` e o nome no grupo de cada caminho em `EXCHANGES` |
 | saber por onde um campo passa | ler os caps, o mediador e o driver | ler o mapa ou `docs/acoplamento.md` |
 | trocar o método de um conector | não havia escolha explícita | coluna `method` da troca |
 | mudar uma rota do mediador | editar a chamada no mediador | linha em `ROUTES`, ou `&nuopc_regrid` no `nuopc.input` |
@@ -36,24 +36,29 @@ Um **ponto** é um componente numa malha, `COMPONENTE@malha` (ex.: `OCN@ocn_mom6
 | Tabela | Uma linha para cada | Colunas |
 | --- | --- | --- |
 | `GRIDS` | malha citada no mapa | `name`, `component`, `grid_type`, `description` |
-| `EXCHANGES` | passagem de um campo de um ponto a outro | `field`, `src`, `dst`, `via` (`'conector'`, `'cap'` ou nome de rota), `when`, `method` (só nos conectores) |
+| `EXCHANGES` | passagem de um campo de um ponto a outro, escrita por grupo de campos (`GROUP_*`: uma passagem leva um grupo inteiro) ou, para um campo só, numa linha | `field`, `src`, `dst`, `via` (`'conector'`, `'cap'` ou nome de rota), `when`, `method` (só nos conectores) |
 | `EXPORTS` | campo que um modelo exporta, na ordem do anúncio | `field`, `point`, `when` |
 | `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` |
 | `GAPS` | lacuna conhecida, que não interrompe a rodada | `field`, `point`, `when`, `reason` |
 
-Exemplo, o caminho da SST até a malha de fluxo:
+Exemplo, o caminho da SST até a malha de fluxo. O MOM6 envia ao mediador o grupo `GROUP_OCN_STATE` (So_t, So_u e So_v) por conector, e a SST segue sozinha pela rota `ocn2atm_sst`:
 
 ```fortran
-cpl_exchange_t('So_t', 'OCN@ocn_mom6', 'MED@ocn_med', 'conector',    'mom6', 'bilinear'), &
-cpl_exchange_t('So_t', 'MED@ocn_med',  'MED@atm_med', 'ocn2atm_sst', '',     ''),         &
+character(len=CPL_NAME_LEN), parameter :: GROUP_OCN_STATE(*) = [character(len=CPL_NAME_LEN) :: 'So_t', 'So_u', 'So_v']
+
+(cpl_exchange_t(GROUP_OCN_STATE(i_group), 'OCN@ocn_mom6', 'MED@ocn_med', 'conector', 'mom6', 'bilinear'), &
+  i_group = 1, size(GROUP_OCN_STATE)),                                                                    &
+cpl_exchange_t('So_t', 'MED@ocn_med', 'MED@atm_med', 'ocn2atm_sst', '', ''),                               &
 ```
+
+A passagem é um laço implícito que o compilador expande numa linha por campo do grupo, na ordem do grupo: `EXCHANGES` continua sendo uma tabela constante com uma linha por campo e passagem, e as consultas a percorrem assim. Um grupo pode incluir outro (`GROUP_OCN_EXPORT` começa por `GROUP_OCEAN_FLUXES`). A ordem das linhas expandidas define a ordem do anúncio dos campos; `tests/unit/test_cpl_map.F90` a confere contra uma cópia congelada das 151 linhas escritas uma a uma até a R-FASE13-22 (`tests/unit/exchanges_frozen.inc`).
 
 Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de importação e `cpl_exports(ponto, ...)` a de exportação, na ordem das tabelas e só com as linhas da configuração pedida, que chega como argumento (`cfg`, um `cpl_config_t`); o mapa não lê o `nuopc.input`, e quem chama passa a configuração da rodada (`cpl_current_config`, de `coupler_config`). O driver registra os conectores que têm troca válida (`cpl_driver_connectors`, entre os pares de `CONNECTOR_SRC`/`CONNECTOR_DST`) e escreve o método de cada campo na `CplList` (`cpl_write_methods`). `tools/dev/mapa-acoplamento.py` gera [`acoplamento.md`](acoplamento.md), a versão em tabelas por componente e por conector.
 
 ## 4. Como incluir um campo
 
 1. Uma linha em `FIELDS` (sem ela, o anúncio do campo para a rodada).
-2. Uma linha por passagem em `EXCHANGES`. A linha por conector faz o destino anunciar o campo e o driver escrever o método; a linha por rota registra a passagem para a conferência, e a chamada que aplica a rota fica numa fase do mediador.
+2. Em `EXCHANGES`, o nome no grupo (`GROUP_*`) de cada caminho que o campo segue, na posição em que deve ser anunciado; um caminho novo é uma passagem nova (um grupo novo ou uma linha). A passagem por conector faz o destino anunciar o campo e o driver escrever o método; a passagem por rota registra o caminho para a conferência, e a chamada que aplica a rota fica numa fase do mediador. Mudar um grupo muda a tabela congelada do teste do mapa: atualizar `tests/unit/exchanges_frozen.inc` é uma decisão do GT, registrada no CHANGELOG.
 3. Se o campo sai de um modelo, uma linha em `EXPORTS`. O cap (ou o adaptador) preenche os valores.
 4. `tools/dev/mapa-acoplamento.py` e `tools/dev/confere-tudo.bash HEAD`. Na rodada, uma linha faltando ou sobrando aparece como `CPL-REL: DIFERENCA:` e interrompe a inicialização; uma diferença esperada vai para `GAPS`, com o motivo.
 

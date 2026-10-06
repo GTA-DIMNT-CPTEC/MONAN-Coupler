@@ -210,179 +210,118 @@ module cpl_map_mod
     character(len=16)            :: create     = 'inicio'
   end type cpl_route_t
 
-  ! EXCHANGES
-  type(cpl_exchange_t), parameter :: EXCHANGES(*) = [                                                                            &
-    !           field             src             dst             via                 when                      method
+  ! Grupos de campos: listas de nomes que seguem juntos um mesmo caminho. Um
+  ! grupo pode incluir outro. Um campo novo que segue um caminho existente é
+  ! um nome a mais no grupo.
+
+  !> Do MONAN-A: das células para a grade do cap e dela para o mediador.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_MPAS_ATM(*) = [character(len=CPL_NAME_LEN) ::            &
+    'Sa_u10m_mpas', 'Sa_v10m_mpas', 'Sa_tbot_mpas', 'Sa_pslv_mpas', 'Faxa_swdn_mpas',  &
+    'Faxa_lwdn_mpas', 'Faxa_rain_mpas', 'Sa_shum_mpas', 'Faxa_snow_mpas',               &
+    'Faxa_sen_mpas', 'Faxa_lat_mpas', 'Faxa_taux_mpas', 'Faxa_tauy_mpas']
+  !> Do DATM para o mediador.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_DATM_ATM(*) = [character(len=CPL_NAME_LEN) ::            &
+    'Sa_u10m', 'Sa_v10m', 'Sa_tbot', 'Sa_shum', 'Sa_pslv', 'Faxa_swdn', 'Faxa_lwdn',  &
+    'Faxa_rain', 'Faxa_snow']
+  !> Estado do oceano: temperatura e corrente na superfície.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_OCN_STATE(*) = [character(len=CPL_NAME_LEN) :: 'So_t', 'So_u', 'So_v']
+  !> Do SIS2 para o mediador: fração, albedos e temperatura do gelo.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_ICE_SIS2(*) = [character(len=CPL_NAME_LEN) ::            &
+    'Si_ifrac_sis2', 'Si_avsdr_sis2', 'Si_avsdf_sis2', 'Si_anidr_sis2', 'Si_anidf_sis2', &
+    'Si_t_sis2']
+  !> Fluxos sobre o oceano e forçantes calculados na malha de fluxo.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_OCEAN_FLUXES(*) = [character(len=CPL_NAME_LEN) ::        &
+    'Foxx_taux', 'Foxx_tauy', 'Foxx_sen', 'Foxx_evap', 'Foxx_lwnet', 'Foxx_swnet_vdr', &
+    'Foxx_swnet_vdf', 'Foxx_swnet_idr', 'Foxx_swnet_idf', 'Faxa_rain', 'Faxa_snow',     &
+    'Sa_pslv']
+  !> Fluxos sobre o gelo calculados na malha de fluxo.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_ICE_FLUXES(*) = [character(len=CPL_NAME_LEN) ::          &
+    'Fioi_taux', 'Fioi_tauy', 'Fioi_sen', 'Fioi_evap', 'Fioi_lwnet', 'Fioi_swnet_vdr', &
+    'Fioi_swnet_vdf', 'Fioi_swnet_idr', 'Fioi_swnet_idf']
+  !> Demais campos que a rota atm2ocn leva da malha de fluxo para a grade do
+  !! oceano, para o oceano, o gelo e o contorno do MONAN-A.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_ATM2OCN_OTHER(*) = [character(len=CPL_NAME_LEN) ::       &
+    'So_duu10n', GROUP_OCN_STATE, 'Sf_zorl', 'Faxa_coszen', 'Sf_albedo',                &
+    GROUP_ICE_FLUXES, 'Sx_tsfc', 'Sx_omask']
+  !> Do mediador para o oceano (MOM6 ou DOCN).
+  character(len=CPL_NAME_LEN), parameter :: GROUP_OCN_EXPORT(*) = [character(len=CPL_NAME_LEN) ::          &
+    GROUP_OCEAN_FLUXES, 'Si_ifrac', 'So_duu10n']
+  !> Do mediador para o SIS2.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_ICE_EXPORT(*) = [character(len=CPL_NAME_LEN) ::          &
+    GROUP_ICE_FLUXES, 'Faxa_rain', 'Faxa_snow', 'Sa_pslv', 'Faxa_coszen', GROUP_OCN_STATE]
+  !> Contorno da superfície para o MONAN-A, pelo mediador.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_ATM_SURFACE(*) = [character(len=CPL_NAME_LEN) ::         &
+    'Sx_tsfc', 'Si_ifrac', 'So_u', 'So_v', 'Sf_zorl', 'Sf_albedo', 'Sx_omask']
+  !> Contorno da superfície para o MONAN-A, direto do DOCN.
+  character(len=CPL_NAME_LEN), parameter :: GROUP_DOCN_ATM(*) = [character(len=CPL_NAME_LEN) :: 'Si_ifrac', 'So_u', 'So_v', 'Sf_zorl']
+
+  !> Índice dos laços implícitos das passagens em EXCHANGES.
+  integer :: i_group
+
+  ! EXCHANGES: as passagens, na ordem do anúncio dos campos. Uma passagem leva
+  ! um grupo de um ponto a outro, por um meio, numa condição e com um método:
+  ! (cpl_exchange_t(GRUPO(i_group), origem, destino, meio, condição, método),
+  ! i_group = 1, size(GRUPO)) vira uma linha por campo do grupo, na ordem do
+  ! grupo. Uma troca de um campo só fica numa linha cpl_exchange_t comum.
+  ! tests/unit/test_cpl_map.F90 confere a tabela expandida contra uma cópia
+  ! congelada das linhas de antes (tests/unit/exchanges_frozen.inc).
+  type(cpl_exchange_t), parameter :: EXCHANGES(*) = [                                                                                         &
+    !    field / grupo               src             dst             via                 when                      method
     ! 1. MONAN-A: das células para a grade do cap (mpas_cell_binning) e ao mediador
-    cpl_exchange_t('Sa_u10m_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sa_v10m_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sa_tbot_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sa_pslv_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_swdn_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_lwdn_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_rain_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sa_shum_mpas',   'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_snow_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_sen_mpas',  'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_lat_mpas',  'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_taux_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Faxa_tauy_mpas', 'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sa_u10m_mpas',   'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Sa_v10m_mpas',   'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Sa_tbot_mpas',   'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Sa_pslv_mpas',   'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_swdn_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_lwdn_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_rain_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Sa_shum_mpas',   'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_snow_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_sen_mpas',  'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_lat_mpas',  'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_taux_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
-    cpl_exchange_t('Faxa_tauy_mpas', 'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_MPAS_ATM(i_group),      'ATM@mpas',     'ATM@atm_cap',  'cap',              'mpas',                   ''),          &
+      i_group = 1, size(GROUP_MPAS_ATM)),                                                                                                     &
+    (cpl_exchange_t(GROUP_MPAS_ATM(i_group),      'ATM@atm_cap',  'MED@atm_med',  'conector',         'mpas',                   'bilinear'),  &
+      i_group = 1, size(GROUP_MPAS_ATM)),                                                                                                     &
     ! 2. DATM para o mediador (o driver não registra o DATM; ver o cabeçalho)
-    cpl_exchange_t('Sa_u10m',        'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Sa_v10m',        'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Sa_tbot',        'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Sa_shum',        'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Sa_pslv',        'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Faxa_swdn',      'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Faxa_lwdn',      'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Faxa_rain',      'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
-    cpl_exchange_t('Faxa_snow',      'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_DATM_ATM(i_group),      'ATM@datm',     'MED@atm_med',  'conector',         'datm',                   'bilinear'),  &
+      i_group = 1, size(GROUP_DATM_ATM)),                                                                                                     &
     ! 3. Oceano para o mediador. O DOCN não exporta So_omask: nesse modo o
     !    campo do mediador fica sem origem e mantém o valor inicial.
-    cpl_exchange_t('So_t',           'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('So_u',           'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('So_v',           'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('So_omask',       'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('So_t',           'OCN@docn',     'MED@ocn_med',  'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('So_u',           'OCN@docn',     'MED@ocn_med',  'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('So_v',           'OCN@docn',     'MED@ocn_med',  'conector',         'docn',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_OCN_STATE(i_group),     'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'),  &
+      i_group = 1, size(GROUP_OCN_STATE)),                                                                                                    &
+    cpl_exchange_t('So_omask',                    'OCN@ocn_mom6', 'MED@ocn_med',  'conector',         'mom6',                   'bilinear'),  &
+    (cpl_exchange_t(GROUP_OCN_STATE(i_group),     'OCN@docn',     'MED@ocn_med',  'conector',         'docn',                   'bilinear'),  &
+      i_group = 1, size(GROUP_OCN_STATE)),                                                                                                    &
     ! 4. Gelo para o mediador, na grade do oceano do mediador
-    cpl_exchange_t('Si_ifrac_sis2',  'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Si_avsdr_sis2',  'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Si_avsdf_sis2',  'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Si_anidr_sis2',  'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Si_anidf_sis2',  'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Si_t_sis2',      'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_ICE_SIS2(i_group),      'ICE@ice_sis2', 'MED@ocn_med',  'conector',         'sis2',                   'bilinear'),  &
+      i_group = 1, size(GROUP_ICE_SIS2)),                                                                                                     &
     ! 5. Mediador: da grade do oceano para a malha de fluxo
-    cpl_exchange_t('So_t',           'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst',      '',                       ''),         &
-    cpl_exchange_t('So_u',           'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),         &
-    cpl_exchange_t('So_v',           'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),         &
-    cpl_exchange_t('So_omask',       'MED@ocn_med',  'MED@atm_med',  'ocn2atm_landmask', '',                       ''),         &
-    cpl_exchange_t('Si_ifrac_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
-    cpl_exchange_t('Si_avsdr_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
-    cpl_exchange_t('Si_avsdf_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
-    cpl_exchange_t('Si_anidr_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
-    cpl_exchange_t('Si_anidf_sis2',  'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
-    cpl_exchange_t('Si_t_sis2',      'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),         &
+    cpl_exchange_t('So_t',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst',      '',                       ''),          &
+    cpl_exchange_t('So_u',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),          &
+    cpl_exchange_t('So_v',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),          &
+    cpl_exchange_t('So_omask',                    'MED@ocn_med',  'MED@atm_med',  'ocn2atm_landmask', '',                       ''),          &
+    (cpl_exchange_t(GROUP_ICE_SIS2(i_group),      'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),          &
+      i_group = 1, size(GROUP_ICE_SIS2)),                                                                                                     &
     ! 6. Mediador: da malha de fluxo para a grade do oceano (exportState),
     !    na ordem em que o mediador anuncia e realiza a exportação
-    cpl_exchange_t('Foxx_taux',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_tauy',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_sen',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_evap',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_lwnet',     'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_swnet_vdr', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_swnet_vdf', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_swnet_idr', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Foxx_swnet_idf', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Faxa_rain',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Faxa_snow',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Sa_pslv',        'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Si_ifrac',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn_ice',      '',                       ''),         &
-    cpl_exchange_t('So_duu10n',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('So_t',           'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('So_u',           'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('So_v',           'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Sf_zorl',        'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Faxa_coszen',    'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Sf_albedo',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_taux',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_tauy',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_sen',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_evap',      'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_lwnet',     'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_swnet_vdr', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_swnet_vdf', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_swnet_idr', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Fioi_swnet_idf', 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Sx_tsfc',        'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
-    cpl_exchange_t('Sx_omask',       'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),         &
+    (cpl_exchange_t(GROUP_OCEAN_FLUXES(i_group),  'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),          &
+      i_group = 1, size(GROUP_OCEAN_FLUXES)),                                                                                                 &
+    cpl_exchange_t('Si_ifrac',                    'MED@atm_med',  'MED@ocn_med',  'atm2ocn_ice',      '',                       ''),          &
+    (cpl_exchange_t(GROUP_ATM2OCN_OTHER(i_group), 'MED@atm_med',  'MED@ocn_med',  'atm2ocn',          '',                       ''),          &
+      i_group = 1, size(GROUP_ATM2OCN_OTHER)),                                                                                                &
     ! 7. Mediador para o oceano: os 14 campos que o MOM6 e o DOCN importam
-    cpl_exchange_t('Foxx_taux',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_tauy',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_sen',       'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_evap',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_lwnet',     'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_vdr', 'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_vdf', 'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_idr', 'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_idf', 'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Faxa_rain',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Faxa_snow',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Sa_pslv',        'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Si_ifrac',       'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('So_duu10n',      'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'), &
-    cpl_exchange_t('Foxx_taux',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_tauy',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_sen',       'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_evap',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_lwnet',     'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_vdr', 'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_vdf', 'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_idr', 'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Foxx_swnet_idf', 'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Faxa_rain',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Faxa_snow',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Sa_pslv',        'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('Si_ifrac',       'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
-    cpl_exchange_t('So_duu10n',      'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_OCN_EXPORT(i_group),    'MED@ocn_med',  'OCN@ocn_mom6', 'conector',         'mom6',                   'bilinear'),  &
+      i_group = 1, size(GROUP_OCN_EXPORT)),                                                                                                   &
+    (cpl_exchange_t(GROUP_OCN_EXPORT(i_group),    'MED@ocn_med',  'OCN@docn',     'conector',         'docn',                   'bilinear'),  &
+      i_group = 1, size(GROUP_OCN_EXPORT)),                                                                                                   &
     ! 8. Mediador para o gelo: forçante atmosférica e depois So_t, So_u e
     !    So_v, na ordem do anúncio do SIS2
-    cpl_exchange_t('Fioi_taux',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_tauy',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_sen',       'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_evap',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_lwnet',     'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_swnet_vdr', 'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_swnet_vdf', 'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_swnet_idr', 'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Fioi_swnet_idf', 'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Faxa_rain',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Faxa_snow',      'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Sa_pslv',        'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('Faxa_coszen',    'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('So_t',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('So_u',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
-    cpl_exchange_t('So_v',           'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'), &
+    (cpl_exchange_t(GROUP_ICE_EXPORT(i_group),    'MED@ocn_med',  'ICE@ice_sis2', 'conector',         'sis2',                   'bilinear'),  &
+      i_group = 1, size(GROUP_ICE_EXPORT)),                                                                                                   &
     ! 9. Contorno oceânico da atmosfera pelo mediador, na ordem do anúncio do
     !    MONAN-A
-    cpl_exchange_t('Sx_tsfc',        'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('Si_ifrac',       'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('So_u',           'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('So_v',           'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('Sf_zorl',        'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('Sf_albedo',      'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
-    cpl_exchange_t('Sx_omask',       'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'), &
+    (cpl_exchange_t(GROUP_ATM_SURFACE(i_group),   'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'),  &
+      i_group = 1, size(GROUP_ATM_SURFACE)),                                                                                                  &
     ! 10. Contorno oceânico direto do DOCN (use_med_to_mpas=.false.): só
     !     os nomes que o DOCN exporta e o MONAN-A importa. Sx_tsfc,
     !     Sf_albedo e Sx_omask ficam sem origem, e o cap atmosférico
     !     interrompe a rodada (verify_import_connected). Com o MOM6, o
     !     contorno direto é recusado na leitura (COUPLER_MODES).
-    cpl_exchange_t('Si_ifrac',       'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('So_u',           'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('So_v',           'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
-    cpl_exchange_t('Sf_zorl',        'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'), &
+    (cpl_exchange_t(GROUP_DOCN_ATM(i_group),      'OCN@docn',     'ATM@atm_cap',  'conector',         'mpas,docn,ocn_to_mpas',  'bilinear'),  &
+      i_group = 1, size(GROUP_DOCN_ATM)),                                                                                                     &
     ! 11. MONAN-A: da grade do cap para as células (caixa do centro, mpas_adapter)
-    cpl_exchange_t('Sx_tsfc',        'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Si_ifrac',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('So_u',           'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('So_v',           'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sf_zorl',        'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sf_albedo',      'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),         &
-    cpl_exchange_t('Sx_omask',       'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   '') ]
+    (cpl_exchange_t(GROUP_ATM_SURFACE(i_group),   'ATM@atm_cap',  'ATM@mpas',     'cap',              'mpas',                   ''),          &
+      i_group = 1, size(GROUP_ATM_SURFACE)) ]
 
   ! EXPORTS
   type(cpl_export_t), parameter :: EXPORTS(*) = [                               &
