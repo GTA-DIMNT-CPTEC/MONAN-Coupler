@@ -196,6 +196,14 @@ def main():
             caminhos += fontes_em(raiz, d)
         if acao == 'objetos':
             caminhos += [os.path.relpath(p, raiz) for p in programas]
+        # o mesmo arquivo pode vir de -i e da lista de programas
+        unicos, vistos = [], set()
+        for c in caminhos:
+            r = os.path.realpath(os.path.join(raiz, c))
+            if r not in vistos:
+                vistos.add(r)
+                unicos.append(c)
+        caminhos = unicos
         deps, caminho_de = grafo(raiz, caminhos)
         if acao == 'ordem':
             print('\n'.join(em_ordem(deps, list(deps), caminho_de)))

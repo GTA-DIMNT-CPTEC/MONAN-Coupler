@@ -200,7 +200,7 @@ Uma etapa só é entregue quando:
 ## 6. Riscos e cuidados
 
 - **Mover estado muda o tempo de vida das variáveis.** Uma variável com `save`, ou um ponteiro inicializado na declaração, conserva o valor entre chamadas. Ao levá-la para o estado interno, a inicialização precisa acontecer no mesmo momento de antes, ou o resultado muda.
-- **Dividir arquivos muda a ordem de compilação.** O Makefile, `compila-local.bash` e as interfaces mínimas precisam acompanhar cada novo módulo.
+- **Dividir arquivos muda a ordem de compilação.** Desde a R-FASE13-07, a lista e a ordem saem dos `use` (`tools/dev/dependencias.py gera`); só as interfaces mínimas de `tests/interfaces/` precisam acompanhar um módulo novo dos modelos.
 - **O teste bit a bit não cobre tudo.** A linha de base não roda DOCN nem DATM e lê um único supergrid, sempre sem erro; mudanças nesses caminhos dependem dos testes locais (gravadores, supergrid e DOCN).
 - **Etapas pequenas.** Uma etapa que toca muitos arquivos é difícil de revisar e, se falhar na Jaci, difícil de diagnosticar. Na dúvida, dividir.
 

@@ -131,8 +131,8 @@ compara_avisos() {
   # compara o número de avisos por fonte
   local ref="${SAIDA}/rev"
   rm -rf "${ref}" && mkdir -p "${ref}/fonte" || return 2
-  git archive "${REV}" src | tar -x -C "${ref}/fonte" || return 2
-  tools/dev/compila-local.bash -a -s "${ref}/fonte" -o "${ref}/build" > "${ref}/compilacao.txt" 2>&1
+  git archive "${REV}" src Makefile | tar -x -C "${ref}/fonte" || return 2
+  tools/dev/compila-local.bash -s "${ref}/fonte" -o "${ref}/build" > "${ref}/compilacao.txt" 2>&1
   local piorou=0 nome res avisos antes
   while read -r nome res avisos; do
     [[ "${res}" == OK ]] || continue

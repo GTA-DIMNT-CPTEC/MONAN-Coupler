@@ -39,16 +39,13 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-OBJS="coupler_utils.o coupler_constants.o coupler_config.o nc_writer.o mpas_stubs.o
-      mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mom6_supergrid.o cpl_grids.o mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_cap_methods.o mpas_adaptador.o mpas_adapter.o"
-# A versão de referência pode não ter algum objeto da lista (fonte criado
-# depois dela): liga só os que existem no diretório de compilação.
-objs_presentes() { local o; for o in ${OBJS}; do [[ -f ${o} ]] && printf '%s ' "${o}"; done; }
+# Objetos de que um programa de teste depende, tirados dos 'use' da árvore
+# dada (a de trabalho ou a cópia de REV): objetos RAIZ_DA_VERSAO PROGRAMA.F90
+objetos() { python3 "${RAIZ}/tools/dev/dependencias.py" objetos -s "$1" -i "${RAIZ}/tests/interfaces" "$2"; }
 
 # Fontes da versão de referência, extraídos do git
 rm -rf "${SAIDA}/fonte_antiga"; mkdir -p "${SAIDA}/fonte_antiga"
-git -C "${RAIZ}" archive "${REV}" src tests/interfaces tests/atmgrid/test_mpas_export.F90 \
+git -C "${RAIZ}" archive "${REV}" src Makefile tests/interfaces tests/atmgrid/test_mpas_export.F90 \
   tools/dev/compila-local.bash \
   | tar -x -C "${SAIDA}/fonte_antiga" \
   || { echo "ERRO: não foi possível extrair ${REV}" >&2; exit 2; }
@@ -57,17 +54,16 @@ for versao in antiga nova; do
   if [[ ${versao} == antiga ]]; then src="${SAIDA}/fonte_antiga"; else src="${RAIZ}"; fi
   dir="${SAIDA}/${versao}"
   # A versão de referência pode não ter todos os fontes da lista atual.
-  ausente=""; [[ ${versao} == antiga ]] && ausente="-a"
   echo "--- versão ${versao}: compilando"
   # shellcheck disable=SC2086
-  bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" ${ausente} > "${SAIDA}/compila_${versao}.txt" \
+  bash "${RAIZ}/tools/dev/compila-local.bash" -s "${src}" -o "${dir}" > "${SAIDA}/compila_${versao}.txt" \
     || { cat "${SAIDA}/compila_${versao}.txt"; echo "ERRO: compilação da versão ${versao}" >&2; exit 2; }
   ( cd "${dir}" || exit 2
     # shellcheck disable=SC2086
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${src}/tests/atmgrid/test_mpas_export.F90" -o test_mpas_export.o &&
     # shellcheck disable=SC2086
-    ${FC} -o test_mpas_export test_mpas_export.o $(objs_presentes) ${ELIB} $(nf-config --flibs) -fopenmp
+    ${FC} -o test_mpas_export test_mpas_export.o $(objetos "${src}" "${src}/tests/atmgrid/test_mpas_export.F90") ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${versao}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${versao}.txt"; echo "ERRO: ligação da versão ${versao}" >&2; exit 2; }
   echo "--- versão ${versao}: executando com ${NP} processos"

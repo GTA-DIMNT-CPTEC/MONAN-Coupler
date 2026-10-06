@@ -9,14 +9,16 @@
 #   make clean      remove build/ e bin/
 #   make distclean  clean + scripts PBS e bibliotecas instaladas (lib/ mod/)
 #   make rebuild    clean + all
-#   make check      verifica se os fontes existem
+#   make check      confere se src/dependencies.mk está em dia com os 'use'
 #   make test       compila e executa os testes de tests/regrid
 #   make printenv   mostra as variáveis de compilação
 #   make help       lista os alvos
 #
-# Para acrescentar um fonte: incluí-lo em SRCS e gerar de novo as
-# dependências entre módulos (src/dependencies.mk) com
+# Para acrescentar um fonte: criá-lo num diretório de SRC_SUBDIRS (todo .F90
+# desses diretórios é compilado) e gerar de novo as dependências entre
+# módulos (src/dependencies.mk) com
 #   tools/dev/dependencias.py gera
+# Se o fonte usa real de 8 bytes do MOM6, incluí-lo também em MOM6_SRCS.
 # =============================================================================
 
 VERSION := 16.2
@@ -146,25 +148,10 @@ endif
 LDLIBS := $(MPAS_LIBS) $(ESMF_LIBS) $(MOM6_LIBS) -lz -ldl -lm -lgomp
 
 # -----------------------------------------------------------------------------
-# Objetos (a ordem de compilação vem das dependências abaixo)
+# Objetos: um por fonte .F90 dos diretórios de SRC_SUBDIRS (a ordem de
+# compilação vem das dependências, abaixo)
 # -----------------------------------------------------------------------------
-SRCS := coupler_utils coupler_constants coupler_config diag_bitsum        \
-        mom6_supergrid nc_writer cap_common                               \
-        regrid_base regrid_esmf regrid_weights regrid_mpassit             \
-        regrid_weights_base regrid_idw regrid_schemes                     \
-        regrid_registry regrid_manager                                    \
-        cpl_grids cpl_fields cpl_map cpl_check                            \
-        mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers          \
-        mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model      \
-        mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adapter \
-        mpas_cap_MONAN DATM_cap                                           \
-        docn_cap_netcdf DOCN_cap                                          \
-        mom_surface_forcing_nuopc mom_ocean_model_nuopc mom_cap_methods   \
-        time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
-        med_cap_types med_cap_netcdf med_cap_methods                      \
-        med_bulk_ncar med_diag med_ice med_ocean med_init med_flux        \
-        med_export med_exchange MED_cap                                   \
-        esm esmApp
+SRCS := $(basename $(notdir $(foreach d,$(SRC_SUBDIRS),$(wildcard $(SRCDIR)/$(d)/*.F90))))
 OBJS := $(SRCS:%=$(OBJDIR)/%.o)
 
 dirs:
@@ -200,10 +187,7 @@ test:
 	$(MAKE) -C tests/regrid run NP=$${NP:-2}
 
 check:
-	@miss=0; for s in $(SRCS); do \
-	  f=$$(find $(SRCDIR) -name "$$s.F90" | head -1); \
-	  if [ -n "$$f" ]; then echo "  OK    $$f"; else echo "  FALTA $$s.F90"; miss=$$((miss+1)); fi; \
-	done; [ $$miss -eq 0 ] || { echo "  ERRO: $$miss fonte(s) ausente(s)"; exit 1; }
+	@python3 tools/dev/dependencias.py gera -c
 
 clean:
 	rm -rf build $(BINDIR)

@@ -13,16 +13,14 @@ FLAGS := $(ESMF_F90COMPILEOPTS) $(ESMF_F90COMPILEPATHS) -I. -J. \
 LIBS := $(ESMF_F90LINKOPTS) $(ESMF_F90LINKPATHS) $(ESMF_F90LINKRPATHS) $(ESMF_F90ESMFLINKLIBS)
 NP ?= 1
 
-REGRID := coupler_utils.o coupler_constants.o coupler_config.o regrid_base.o regrid_esmf.o regrid_weights.o \
-          regrid_mpassit.o regrid_weights_base.o regrid_idw.o regrid_schemes.o regrid_registry.o \
-          regrid_manager.o
-OBJS := $(REGRID) identity_scheme.o test_regrid.o
+# Objetos de que cada programa depende, tirados dos 'use' (dependencias.py)
+OBJETOS = $(shell python3 ../../tools/dev/dependencias.py objetos -s ../.. -i tests/regrid $(1))
 vpath %.F90 $(SRC)/shared $(SRC)/regrid .
 
-test_regrid: $(OBJS)
+test_regrid: $(call OBJETOS,test_regrid.F90) test_regrid.o
 	$(FC) -o $@ $^ $(LIBS)
 
-test_scheme: $(REGRID) test_scheme.o
+test_scheme: $(call OBJETOS,test_scheme.F90) test_scheme.o
 	$(FC) -o $@ $^ $(LIBS)
 
 %.o: %.F90

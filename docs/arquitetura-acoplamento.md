@@ -64,7 +64,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 3. **Chave e condições** (componente opcional): chave em `&nuopc_mode` e `coupler_config`; campo em `cpl_config_t` e em `cpl_current_config`; condições em `CONDITIONS` e `condition_holds`; combinação aceita, não validada ou recusada na tabela `COUPLER_MODES` (`coupler_config`), que `config_read`, `cpl_config_is_valid` e `mapa-acoplamento.py` consultam; configurações conferidas em `mapa-acoplamento.py` e no teste do mapa.
 4. **Cap**: como o do DOCN. Constante `POINT_<COMP>`, listas por `cpl_arrivals` e `cpl_exports`, rotinas de `cap_common` (`cap_realize_fields`, `cap_put_field`, `cap_stamp_export`); o que é do modelo fica num adaptador.
 5. **Driver** (`esm.F90`): `add_model` e a divisão de PETs; os pares de conectores em `CONNECTOR_SRC`/`CONNECTOR_DST` (um conector do mapa fora da lista para a inicialização); as linhas em `SetRunSequence`.
-6. **Compilação**: `SRCS` no `Makefile` e `tools/dev/dependencias.py gera` (dependências em `src/dependencies.mk`); `compila-local.bash`, se compilar fora da Jaci.
+6. **Compilação**: basta o arquivo estar num diretório de `SRC_SUBDIRS` e rodar `tools/dev/dependencias.py gera` (dependências em `src/dependencies.mk`); o `Makefile`, o `compila-local.bash` e os testes tiram dali a lista e a ordem. Com real de 8 bytes, incluir o fonte em `MOM6_SRCS`.
 
 ## 6. Como incluir um esquema de interpolação
 

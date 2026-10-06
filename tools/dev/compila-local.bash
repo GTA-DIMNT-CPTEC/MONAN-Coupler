@@ -3,19 +3,20 @@
 # compila-local.bash: compila, fora da Jaci, os fontes do acoplador.
 # INPE / CGCT / DIMNT, GT para Acoplamento de Modelos
 #
-# Compila os fontes na ordem do Makefile, com as mesmas opções de aviso e
-# de ponto flutuante, contra um ESMF instalado localmente. Os fontes que
-# dependem do MPAS, do MOM6 ou do FMS são compilados contra as interfaces
-# mínimas de tests/interfaces/, que só garantem tipos e assinaturas. O
-# driver (esm.F90) entra desde a R-FASE11-03, que o fez chamar a conferência
-# do mapa de acoplamento; só o programa principal fica de fora.
+# Compila todos os fontes de src/, menos os que só compilam na Jaci (os do
+# MOM6 em caps/ocean/upstream/ e o programa principal, em main/), com as
+# mesmas opções de aviso e de ponto flutuante do Makefile, contra um ESMF
+# instalado localmente. A ordem vem dos 'use' (tools/dev/dependencias.py).
+# Os fontes que dependem do MPAS, do MOM6 ou do FMS são compilados contra as
+# interfaces mínimas de tests/interfaces/, que só garantem tipos e
+# assinaturas. Os objetos ficam em SAIDA; os testes ligam os de que precisam
+# (tools/dev/dependencias.py objetos).
 #
 # Uso:
-#   ESMFMKFILE=/caminho/esmf.mk tools/dev/compila-local.bash [-s RAIZ] [-o SAIDA] [-a]
-#     -s RAIZ    raiz do repositório a compilar (padrão: a deste script)
+#   ESMFMKFILE=/caminho/esmf.mk tools/dev/compila-local.bash [-s RAIZ] [-o SAIDA]
+#     -s RAIZ    raiz do repositório a compilar (padrão: a deste script); pode
+#                ser a cópia de um commit anterior
 #     -o SAIDA   diretório dos objetos e logs (padrão: RAIZ/build-local)
-#     -a         fonte ausente não conta como falha; para compilar uma versão
-#                anterior à criação de algum fonte da lista
 #
 # Saída: uma linha por fonte (OK ou FALHOU, e o número de avisos); o log de
 # cada fonte fica em SAIDA/<fonte>.log. Código de saída 1 se algum falhou.
@@ -27,13 +28,11 @@ set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=""
-ACEITA_AUSENTE=0
-while getopts ":s:o:ah" opt; do
+while getopts ":s:o:h" opt; do
   case "${opt}" in
     s) RAIZ=$(cd "${OPTARG}" && pwd) ;;
     o) SAIDA="${OPTARG}" ;;
-    a) ACEITA_AUSENTE=1 ;;
-    h) sed -n '2,24p' "$0"; exit 0 ;;
+    h) sed -n '2,26p' "$0"; exit 0 ;;
     *) echo "ERRO: opção inválida" >&2; exit 2 ;;
   esac
 done
@@ -45,6 +44,7 @@ command -v nf-config >/dev/null || { echo "ERRO: nf-config (NetCDF-Fortran) não
 FC=${FC:-mpif90}
 EINC=$(grep '^ESMF_F90COMPILEPATHS=' "${ESMFMKFILE}" | cut -d= -f2-)
 INTERF=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../tests/interfaces" && pwd)
+DEPS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dependencias.py"
 
 mkdir -p "${SAIDA}" && cd "${SAIDA}" || exit 2
 # Objetos e módulos de uma compilação anterior saem: um fonte renomeado ou
@@ -62,33 +62,22 @@ for s in mpas_stubs mom_stubs sis_stubs; do
     || { echo "ERRO: interfaces mínimas não compilam; ver ${SAIDA}/${s}.log" >&2; exit 2; }
 done
 
+# Fontes e ordem: todos os .F90 de src/ que não dependem das bibliotecas dos
+# modelos (sem caps/ocean/upstream/ e main/), na ordem dada pelos 'use'
+# (tools/dev/dependencias.py, aplicado à árvore RAIZ). Com real de 8 bytes,
+# os de MOM6_SRCS do Makefile da mesma árvore, como na compilação da Jaci.
+ORDEM=$(python3 "${DEPS}" ordem -s "${RAIZ}") \
+  || { echo "ERRO: ordem de compilação (dependencias.py)" >&2; exit 2; }
+REAL8=" $(awk '/^MOM6_SRCS[[:space:]]*:=/ {on=1; sub(/^[^=]*=/, "")}
+               on {c = /\\[[:space:]]*$/; sub(/\\[[:space:]]*$/, ""); printf "%s ", $0; if (!c) exit}' \
+         "${RAIZ}/Makefile") "
+[[ -n "${REAL8// /}" ]] || { echo "ERRO: MOM6_SRCS não encontrado em ${RAIZ}/Makefile" >&2; exit 2; }
+
 falhas=0
-for s in coupler_utils coupler_constants coupler_config diag_bitsum mom6_supergrid nc_writer cap_common \
-         regrid_base regrid_esmf regrid_weights regrid_mpassit regrid_weights_base regrid_idw regrid_schemes \
-         regrid_registry regrid_manager \
-         cpl_grids cpl_fields cpl_map cpl_check \
-         mpi_allreduce_r8 mpi_allreduce_i4 mpi_allreduce_wrappers \
-         mpas_atm_types mpas_atm_setup mpas_atm_fluxes mpas_atm_model mpas_cap_netcdf mpas_import_diag mpas_cell_binning mpas_adapter:mpas_adaptador:mpas_cap_methods mpas_cap_MONAN DATM_cap \
-         docn_cap_netcdf DOCN_cap time_utils mom_si_ifrac mom_cap_MONAN sis_cap_fields sis_cap_MONAN \
-         med_cap_types med_cap_netcdf med_cap_methods med_bulk_ncar \
-         med_diag med_ice med_ocean med_init med_flux med_export med_exchange MED_cap esm; do
-  # 'novo:antigo': fonte renomeado; compila o que a versão tiver (o
-  # adaptador do MPAS era mpas_cap_methods até a R-FASE11-23 e
-  # mpas_adaptador até a R-FASE12-03)
-  f=""
-  for nome in ${s//:/ }; do
-    f=$(find "${RAIZ}/src" -name "${nome}.F90" -not -path '*/upstream/*' | head -1)
-    [[ -n "${f}" ]] && { s=${nome}; break; }
-  done
-  s=${s%%:*}
-  if [[ -z "${f}" ]]; then
-    printf '%-24s %s\n' "${s}" "AUSENTE"
-    [[ ${ACEITA_AUSENTE} -eq 1 ]] || falhas=$((falhas + 1))
-    continue
-  fi
+for s in ${ORDEM}; do
+  f=$(find "${RAIZ}/src" -name "${s}.F90" -not -path '*/upstream/*' | head -1)
   extra=""
-  # Como no Makefile: os fontes ligados ao MOM6 usam real de 8 bytes.
-  case "${s}" in mom_si_ifrac|mom_cap_MONAN|sis_cap_fields|sis_cap_MONAN|time_utils) extra="-fdefault-real-8" ;; esac
+  case "${REAL8}" in *" ${s} "*) extra="-fdefault-real-8" ;; esac
   # shellcheck disable=SC2086
   if ${FC} ${FL} ${extra} -c "${f}" -o "${s}.o" > "${s}.log" 2>&1; then r=OK; else r=FALHOU; falhas=$((falhas + 1)); fi
   printf '%-24s %-7s avisos=%s\n' "${s}" "${r}" "$(grep -c 'Warning' "${s}.log")"

@@ -29,16 +29,9 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-# Objetos de que os testes dependem: med_bulk_ncar, med_cap_methods, mpas_cell_binning e o mapa
-# de acoplamento (cpl_grids, cpl_fields, cpl_map, cpl_check), com o que eles usam (mpas_stubs.o são
-# as interfaces mínimas do MPAS).
-OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o nc_writer.o
-      regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o regrid_weights_base.o regrid_idw.o regrid_schemes.o
-      regrid_registry.o regrid_manager.o
-      mom6_supergrid.o cpl_grids.o cpl_fields.o cpl_map.o cpl_check.o
-      med_cap_types.o med_cap_methods.o med_bulk_ncar.o med_diag.o
-      mpas_stubs.o mpi_allreduce_r8.o mpi_allreduce_i4.o mpi_allreduce_wrappers.o
-      mpas_atm_types.o mpas_cap_netcdf.o mpas_import_diag.o mpas_cell_binning.o mpas_adapter.o"
+# Objetos de que um programa de teste depende, tirados dos 'use' da árvore
+# dada (a de trabalho ou a cópia de REV): objetos RAIZ_DA_VERSAO PROGRAMA.F90
+objetos() { python3 "${RAIZ}/tools/dev/dependencias.py" objetos -s "$1" -i "${RAIZ}/tests/interfaces" "$2"; }
 
 echo "--- compilando a árvore de trabalho"
 bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compila.txt" \
@@ -53,7 +46,7 @@ for fonte in "${RAIZ}"/tests/unit/test_*.F90; do
     ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch \
       -O2 -ffp-contract=off -c "${fonte}" -o "${nome}.o" &&
     # shellcheck disable=SC2086
-    ${FC} -o "${nome}" "${nome}.o" ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
+    ${FC} -o "${nome}" "${nome}.o" $(objetos "${RAIZ}" "${fonte}") ${ELIB} $(nf-config --flibs) -fopenmp
   ) > "${SAIDA}/liga_${nome}.txt" 2>&1 \
     || { cat "${SAIDA}/liga_${nome}.txt"; echo "ERRO: ligação de ${nome}" >&2; exit 2; }
   if (cd "${SAIDA}" && "${SAIDA}/obj/${nome}"); then

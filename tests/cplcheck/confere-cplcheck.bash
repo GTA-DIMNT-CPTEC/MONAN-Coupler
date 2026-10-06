@@ -49,12 +49,9 @@ FC=${FC:-mpif90}
 mk() { grep "^$1=" "${ESMFMKFILE}" | cut -d= -f2-; }
 EINC=$(mk ESMF_F90COMPILEPATHS)
 ELIB="$(mk ESMF_F90LINKPATHS) $(mk ESMF_F90LINKRPATHS) $(mk ESMF_F90ESMFLINKLIBS)"
-OBJS="coupler_utils.o coupler_constants.o coupler_config.o diag_bitsum.o mom6_supergrid.o
-      nc_writer.o cap_common.o regrid_base.o regrid_esmf.o regrid_weights.o regrid_mpassit.o
-      regrid_weights_base.o regrid_idw.o regrid_schemes.o
-      regrid_registry.o regrid_manager.o cpl_grids.o cpl_fields.o cpl_map.o cpl_check.o
-      med_cap_types.o med_cap_netcdf.o med_cap_methods.o med_bulk_ncar.o med_diag.o
-      med_ice.o med_ocean.o med_init.o med_flux.o med_export.o med_exchange.o MED_cap.o"
+# Objetos de que um programa de teste depende, tirados dos 'use' da árvore
+# dada (a de trabalho ou a cópia de REV): objetos RAIZ_DA_VERSAO PROGRAMA.F90
+objetos() { python3 "${RAIZ}/tools/dev/dependencias.py" objetos -s "$1" -i "${RAIZ}/tests/interfaces" "$2"; }
 
 echo "--- compilando a árvore de trabalho"
 bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compila.txt" \
@@ -64,7 +61,7 @@ bash "${RAIZ}/tools/dev/compila-local.bash" -o "${SAIDA}/obj" > "${SAIDA}/compil
   ${FC} ${EINC} -I. -ffree-line-length-none -fallow-argument-mismatch -O2 -g -fcheck=all \
     -c "${RAIZ}/tests/cplcheck/test_cplcheck_driver.F90" -o test_cplcheck_driver.o &&
   # shellcheck disable=SC2086
-  ${FC} -o test_cplcheck_driver test_cplcheck_driver.o ${OBJS} ${ELIB} $(nf-config --flibs) -fopenmp
+  ${FC} -o test_cplcheck_driver test_cplcheck_driver.o $(objetos "${RAIZ}" "${RAIZ}/tests/cplcheck/test_cplcheck_driver.F90") ${ELIB} $(nf-config --flibs) -fopenmp
 ) > "${SAIDA}/liga.txt" 2>&1 || { cat "${SAIDA}/liga.txt"; echo "ERRO: ligação" >&2; exit 2; }
 
 # Configuração de produção: MONAN-A, MOM6, SIS2, contorno pelo mediador
