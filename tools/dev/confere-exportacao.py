@@ -3,16 +3,25 @@
 
 A conferência do mapa (cpl_check) compara o que os componentes anunciam com o
 mapa, mas não verifica se o mediador de fato preenche cada campo que exporta.
-Um campo novo incluído no mapa e esquecido em src/mediator/med_export.F90
-seria entregue com o valor inicial, sem erro.
+Um campo que o mediador exporta sem ter de onde tirar o valor seria
+entregue com o valor inicial, sem erro.
+
+A exportação (med_export) percorre os campos que chegam a MED@ocn_med pela
+rota 'atm2ocn' no mapa e tira cada um do registro de campos internos
+(tabela MED_FIELDS, em src/mediator/med_cap_types.F90); os demais são
+preenchidos explicitamente, pelo nome.
 
 Este script lê o mapa de acoplamento (EXCHANGES, pelo leitor de
-tools/dev/mapa-acoplamento.py) e os fontes de src/mediator/, e confere, nos
-dois sentidos, que:
-  - todo campo que sai do mediador por conector, em alguma configuração, é
-    o destino de uma chamada RegridOrCopy(<campo interno>, exportState,
-    "<nome>", ...) em src/mediator/;
-  - todo nome preenchido assim sai do mediador por conector no mapa.
+tools/dev/mapa-acoplamento.py), a tabela MED_FIELDS e os fontes de
+src/mediator/, e confere, nos dois sentidos, que:
+  - todo campo que sai do mediador por conector, em alguma configuração,
+    chega a MED@ocn_med pela rota 'atm2ocn' e está em MED_FIELDS, ou é
+    preenchido explicitamente em src/mediator/ por
+    RegridOrCopy(<campo interno>, exportState, "<nome>", ...) ou por
+    ESMF_StateGet(exportState, itemName="<nome>", ...);
+  - todo campo coberto assim sai do mediador por conector no mapa;
+  - todo campo que chega a MED@ocn_med pela rota 'atm2ocn' está em
+    MED_FIELDS (sem isso, a exportação para com erro).
 
 Uso (na raiz do repositório):
   tools/dev/confere-exportacao.py [-s RAIZ]
@@ -28,6 +37,8 @@ import re
 import sys
 
 PREENCHE = re.compile(r'\bRegridOrCopy\s*\(\s*[^,]+,\s*exportState\s*,\s*["\'](\w+)["\']', re.I)
+PEGA = re.compile(r'\bESMF_StateGet\s*\(\s*exportState\s*,\s*itemName\s*=\s*["\'](\w+)["\']', re.I)
+TABELA = re.compile(r"\bmed_field_spec_t\s*\(\s*'(\w+)'", re.I)
 
 
 def saida_utf8():
@@ -54,9 +65,16 @@ def preenchidos(raiz):
         # junta as continuações e tira os comentários de linha inteira
         linhas = [l for l in texto.split('\n') if not l.lstrip().startswith('!')]
         texto = re.sub(r'&\s*\n\s*&?', ' ', '\n'.join(linhas))
-        for m in PREENCHE.finditer(texto):
-            nomes.setdefault(m.group(1), os.path.relpath(arq, raiz))
+        for padrao in (PREENCHE, PEGA):
+            for m in padrao.finditer(texto):
+                nomes.setdefault(m.group(1), os.path.relpath(arq, raiz))
     return nomes
+
+
+def campos_internos(raiz):
+    """Nomes de acoplamento da tabela MED_FIELDS (med_cap_types.F90)."""
+    with io.open(os.path.join(raiz, 'src', 'mediator', 'med_cap_types.F90'), encoding='utf-8') as f:
+        return set(TABELA.findall(f.read()))
 
 
 def main():
@@ -79,18 +97,28 @@ def main():
         return 2
     exportados = sorted({x['field'] for x in trocas
                          if x['via'] == 'conector' and mapa.comp(x['src']) == 'MED'})
-    feitos = preenchidos(raiz)
+    internos = campos_internos(raiz)
+    pela_rota = {x['field'] for x in trocas
+                 if x['via'] == 'atm2ocn' and x['dst'] == 'MED@ocn_med'}
+    feitos = dict(preenchidos(raiz))
+    for n in sorted(pela_rota & internos):
+        feitos.setdefault(n, 'laço de exportação (rota atm2ocn, MED_FIELDS)')
+    sem_registro = sorted(pela_rota - internos)
     sem_preenchimento = [n for n in exportados if n not in feitos]
     fora_do_mapa = sorted(n for n in feitos if n not in exportados)
+    for n in sem_registro:
+        print('SEM REGISTRO       {}: chega a MED@ocn_med pela rota atm2ocn, mas não está '
+              'em MED_FIELDS (med_cap_types.F90)'.format(n))
     for n in sem_preenchimento:
-        print('SEM PREENCHIMENTO  {}: sai do mediador por conector no mapa, mas nenhum '
-              'RegridOrCopy(..., exportState, "{}", ...) em src/mediator/'.format(n, n))
+        print('SEM PREENCHIMENTO  {}: sai do mediador por conector no mapa, mas não é '
+              'exportado pelo laço nem preenchido pelo nome em src/mediator/'.format(n))
     for n in fora_do_mapa:
-        print('FORA DO MAPA       {}: preenchido em {}, mas não sai do mediador por '
+        print('FORA DO MAPA       {}: preenchido por {}, mas não sai do mediador por '
               'conector no mapa'.format(n, feitos[n]))
-    if sem_preenchimento or fora_do_mapa:
+    if sem_registro or sem_preenchimento or fora_do_mapa:
         return 1
-    print('{} campos exportados pelo mediador, todos preenchidos'.format(len(exportados)))
+    print('{} campos exportados pelo mediador, todos preenchidos ({} pelo laço da rota '
+          'atm2ocn)'.format(len(exportados), len(pela_rota & internos)))
     return 0
 
 

@@ -121,7 +121,7 @@ module cpl_map_mod
   public :: cpl_exchange_applies, cpl_valid_conditions
   public :: cpl_route_index, cpl_grid_index
   public :: cpl_point_component, cpl_point_grid
-  public :: cpl_current_config, cpl_config_is_valid, cpl_arrivals
+  public :: cpl_current_config, cpl_config_is_valid, cpl_arrivals, cpl_route_fields
   public :: cpl_connector_applies, cpl_unlisted_connector, cpl_driver_connectors
   public :: N_CONNECTORS, CONNECTOR_SRC, CONNECTOR_DST
   public :: cpl_export_t, EXPORTS, cpl_exports
@@ -552,6 +552,34 @@ contains
         names = [character(len=CPL_NAME_LEN) :: names, EXCHANGES(t)%field]
     end do
   end subroutine cpl_arrivals
+
+  !> @brief Campos que chegam a um ponto por uma rota do mediador, na ordem de
+  !! EXCHANGES e sem repetição, com a mesma regra de chaves de cpl_arrivals.
+  !!
+  !! É a lista que o mediador percorre para exportar os campos que voltam da
+  !! malha de fluxo pela rota 'atm2ocn' (med_export).
+  !! @param[in]  route  nome da rota (coluna via)
+  !! @param[in]  point  'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
+  !! @param[in]  cfg    configuração atual
+  !! @param[in]  keys   chaves de cfg que o componente consulta
+  !! @param[out] names  campos, na ordem de EXCHANGES
+  subroutine cpl_route_fields(route, point, cfg, keys, names)
+    character(len=*),                         intent(in)  :: route, point
+    type(cpl_config_t),                       intent(in)  :: cfg
+    character(len=*),                         intent(in)  :: keys
+    character(len=CPL_NAME_LEN), allocatable, intent(out) :: names(:)
+
+    integer :: t
+
+    allocate(names(0))
+    do t = 1, size(EXCHANGES)
+      if (EXCHANGES(t)%via /= route) cycle
+      if (.not. point_matches(EXCHANGES(t)%dst, point)) cycle
+      if (any(names == EXCHANGES(t)%field)) cycle
+      if (applies_in_some(EXCHANGES(t)%when, cfg, keys)) &
+        names = [character(len=CPL_NAME_LEN) :: names, EXCHANGES(t)%field]
+    end do
+  end subroutine cpl_route_fields
 
   !> @brief Campos que um modelo exporta num ponto, na ordem de EXPORTS e sem
   !! repetição, com a mesma regra de chaves de cpl_arrivals.

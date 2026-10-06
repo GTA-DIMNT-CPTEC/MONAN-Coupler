@@ -71,12 +71,12 @@ program test_cpl_map
   use cpl_map_mod,       only : GRIDS, EXCHANGES, ROUTES, cpl_config_t, cpl_exchange_applies, &
                                 cpl_valid_conditions, cpl_route_index, cpl_grid_index, &
                                 cpl_point_component, cpl_point_grid, cpl_exchange_t
-  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_current_config
+  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_current_config, cpl_route_fields
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
   use cpl_map_mod,       only : GAPS, cpl_is_gap, cpl_config_is_valid
   use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index
   use cpl_fields_mod,    only : CPL_NAME_LEN
-  use med_cap_types_mod, only : MED_KEYS
+  use med_cap_types_mod, only : MED_KEYS, MED_FIELDS
   implicit none
 
   include 'listas_mediador.inc'
@@ -123,6 +123,9 @@ program test_cpl_map
     call check_export_connector(k)
   end do
   call check_cap_lists()
+  do k = 1, NCFG
+    call check_export_loop(k)
+  end do
 
   if (nfailures == 0) then
     write(*, '(A)') 'TODOS OS TESTES PASSARAM'
@@ -132,6 +135,36 @@ program test_cpl_map
   end if
 
 contains
+
+  !> Exportação do mediador pelo mapa, na configuração k: os campos da rota
+  !! 'atm2ocn' (cpl_route_fields) são as chegadas a MED@ocn_med por rota
+  !! menos as da rota 'atm2ocn_ice', na mesma ordem, e todos estão em
+  !! MED_FIELDS, de onde o laço de med_export os tira.
+  subroutine check_export_loop(k)
+    integer, intent(in) :: k
+    character(len=CPL_NAME_LEN), allocatable :: by_route(:), arrivals(:), expected(:)
+    integer :: i, nmiss
+
+    call cpl_route_fields('atm2ocn', 'MED@ocn_med', CFG(k), '', by_route)
+    call cpl_arrivals('MED@ocn_med', .false., CFG(k), '', arrivals)
+    allocate(expected(0))
+    do i = 1, size(arrivals)
+      if (any(EXCHANGES%field == arrivals(i) .and. EXCHANGES%via == 'atm2ocn' .and. &
+              EXCHANGES%dst == 'MED@ocn_med')) &
+        expected = [character(len=CPL_NAME_LEN) :: expected, arrivals(i)]
+    end do
+    nmiss = 0
+    do i = 1, size(by_route)
+      if (.not. any(MED_FIELDS%name == by_route(i))) then
+        nmiss = nmiss + 1
+        call fail_at('exportado pela rota atm2ocn e fora de MED_FIELDS: '//trim(by_route(i)))
+      end if
+    end do
+    call outcome('exportacao pela rota atm2ocn ('//trim(CFG_NAME(k))//'): lista e ordem', &
+                 size(by_route) == size(expected) .and. all(by_route == expected))
+    call outcome('exportacao pela rota atm2ocn ('//trim(CFG_NAME(k))//'): campos em MED_FIELDS', &
+                 nmiss == 0)
+  end subroutine check_export_loop
 
   !> Nomes de FIELDS únicos e preenchidos; todo campo usado em EXCHANGES ou
   !! em EXPORTS.
