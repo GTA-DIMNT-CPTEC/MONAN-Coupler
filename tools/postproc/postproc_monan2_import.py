@@ -3,92 +3,9 @@
 postproc_monan2_import.py — Diagnóstico dos campos importados pelo MONAN-A 2.0
                            via conector MED→MPAS (So_t, Si_ifrac, Sf_zorl)
 
-INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v2.5 (Set 2026)
+INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 
-CORREÇÕES v2.5 (diagnóstico ponderado por área)
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-AREA-WEIGHT: numa grade lat/lon, a fração de gelo por CONTAGEM de células
-    super-representa os polos (muitas células pequenas) e infla a "cobertura de
-    gelo" (dava ~14–16% das células). A verificação física agora reporta também,
-    com peso cos(lat): a cobertura de gelo em % de ÁREA do oceano (>50%), a
-    concentração média onde há gelo (≥0,15) e a SST média ponderada por área
-    (comparável com a climatologia, ~288–292 K), ao lado dos valores por célula.
-
-CORREÇÕES v2.4 (revisão dos scripts de diagnóstico/animação)
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-GEO-OFFLINE (mapas abortavam em nó HPC sem internet)
-    cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth de forma
-    PREGUIÇOSA (só no desenho), então --plot ABORTAVA com URLError em nós de
-    computação sem acesso à rede (o caso do Jaci). Agora a disponibilidade é
-    testada uma vez; se indisponível, os mapas saem SEM contornos, sem abortar.
-
-  BUG-SCALE-PERSTEP (animação com escala de cor incoerente)
-    O reajuste robusto de vmin/vmax de So_t usava os percentis DE CADA PASSO —
-    cada quadro do GIF tinha uma escala de cor diferente e a evolução ficava
-    incomparável. Agora a decisão e os percentis são calculados UMA vez, sobre
-    todos os passos, e reutilizados em todos os quadros.
-
-  BUG-PERSIST-DEFAULT (diagnóstico fabricava o campo de gelo)
-    A "persistência simulada" de Si_ifrac (max com decaimento entre passos)
-    era aplicada POR PADRÃO e plotada como se fosse o campo importado, com
-    apenas um discreto "[acc]" na anotação. Um diagnóstico não deve fabricar
-    dado: agora o padrão mostra o Si_ifrac REALMENTE importado; a persistência
-    simulada passou a ser opt-in via --simulate-persistence.
-
-  BUG-LABEL-FONTE1 (provenância errada no título)
-    O rótulo da FONTE 1 dizia sempre "mpas_import_stepNNNN.nc", mesmo quando os
-    dados vinham dos arquivos novos monan2_import_YYYYMMDD_HHMMSS.nc. Agora o
-    rótulo reflete o nome real dos arquivos lidos.
-
-  BUG-FRAME-SIZE (quadros de tamanhos diferentes)
-    savefig(bbox_inches='tight') gerava PNGs de tamanhos ligeiramente distintos
-    entre passos, fazendo a animação "tremer". Removido: com figsize fixo os
-    quadros saem idênticos.
-
-CORREÇÕES v2.3
-═══════════════════════════════════════════════════════════════════════════════
-  BUG-11 (mapas Si_ifrac em branco — células esparsas invisíveis em pcolormesh)
-    pcolormesh renderiza células de 1°×1° como pixels de ~1-2 px na escala
-    do mapa global.  Com apenas 38–107 células de gelo ativas, os mapas
-    Si_ifrac aparecem essencialmente em branco mesmo com dados presentes.
-    Solução: quando n < ICE_SCATTER_THRESHOLD (2000 células), um scatter
-    overlay com marcadores de tamanho fixo (ICE_SCATTER_SIZE=18 pt²) é
-    desenhado sobre o pcolormesh, garantindo legibilidade independente da
-    esparsidade do campo.  O pcolormesh é mantido para consistência visual.
-
-
-    Quando SST é bootstrap (uniforme ≈ 271.35 K), o Si_ifrac do mesmo passo
-    contém o estado de restart do SIS2 — não dado de acoplamento real.
-    coverage_fraction() retornava (1.0, 0.0) pois Si_ifrac do restart NÃO é
-    uniforme (tem distribuição espacial real do arquivo de restart). Porém
-    "100% dinâmico" é enganoso: os 7918 fragmentos de gelo visíveis refletem
-    a condição inicial do SIS2, que desaparece na primeira troca NUOPC.
-    Solução: _is_bootstrap_step() detecta se So_t é uniforme no passo i;
-    quando verdadeiro, Si_ifrac recebe anotação "restart SIS2 (t=0)" em laranja
-    no canto inferior esquerdo.
-
-  BUG-10 (escala de cores Si_ifrac inconsistente entre passos)
-    BUG-02 (v2.2) usava escala adaptativa POR PASSO: passo 01:00 com gelo do
-    restart (max=1.0) ficava com vmax=1.0, enquanto passos 02:00–05:00 com
-    poucos fragmentos de gelo reais adaptavam para vmax≈0.12.  Impossível
-    comparar visualmente a evolução temporal do campo.
-    Solução: vmax_si_global pré-calculado excluindo passos de bootstrap; usado
-    de forma consistente em todos os passos. Si_ifrac do restart aparece mais
-    saturada que os passos reais — comportamento fisicamente correto.
-
-  ADIÇÃO: anotação "n=xxxx cél > ICE_THR | max=x.xxx" no canto inferior
-    direito do painel Si_ifrac. Informa quantas células oceânicas excedem
-    o limiar definido por IFRAC_ICE_ANN_THR = 0.01, e o valor máximo do
-    campo. Complementa a anotação de cobertura no canto esquerdo.
-
-CORREÇÕES v2.1 (BUG-LAND-FONTE2):
-  • So_t  — fill de terra (271.35 K, marcador Sprint A.5) agora mascarado
-             antes de plotar: patches dark-blue nos trópicos eliminados.
-  • Sf_zorl — máscara de terra do So_t propagada para a inferência
-              Charnock+Smith: patches dark-red (z₀ inflacionado por
-              Foxx_taux/tauy anômalos sobre terra) eliminados.
-  • _load_fonte2 — retorno prematuro corrigido (3→4 valores); lat/lon
-              extraídos dos arquivos MED (coords antes sempre None).
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Contexto
@@ -99,12 +16,12 @@ O MONAN-A recebe 5 campos do mediador a cada passo de acoplamento:
   Si_ifrac  fração de gelo [0-1] — SIS2 / proxy sigmoide do mom_cap
   So_u      corrente zonal       — inspecionável via log ESMF
   So_v      corrente meridional  — inspecionável via log ESMF
-  Sf_zorl   rugosidade [m]       — Charnock+Smith calculado no MED (Sprint C)
+  Sf_zorl   rugosidade [m]       — Charnock+Smith calculado no mediador
 
 Este script suporta duas fontes de dados, usadas automaticamente conforme
 a disponibilidade:
 
-  FONTE 1 — mpas_import_step????.nc  (escrita direta em mpas_cap_methods.F90)
+  FONTE 1 — mpas_import_step????.nc  (escrita direta em mpas_adapter.F90)
     Ativa quando write_import_diag=.true. em &nuopc_docn do nuopc.input
     e o executável foi compilado com o módulo de diagnóstico de importação.
     Contém So_t, Si_ifrac e Sf_zorl lidos diretamente do importState MPAS.
@@ -115,7 +32,7 @@ a disponibilidade:
     via fórmula Charnock+Smith: u*=√(|τ|/ρ), z₀=α·u*²/g + β·ν/u*
 
   FONTE 3 — logs/PET0.esmApp.log  (evidências qualitativas)
-    Confirma que Sprint C (Sf_zorl dinâmico) e mpas_import estão ativos.
+    Confirma que o Sf_zorl dinâmico e o mpas_import estão ativos.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Uso
@@ -194,8 +111,8 @@ FIELD_META = {
         'scale':       1.0,
         'cmap':        'RdBu_r',
         # Faixa de PLOT estreitada à banda onde a SST tem gradiente real
-        # (água do mar congelando ~271,4 K até trópicos ~303 K). A faixa
-        # anterior (271–305) coincidia com os extremos físicos e saturava
+        # (água do mar congelando ~271,4 K até trópicos ~303 K). Uma faixa
+        # como 271–305 coincidiria com os extremos físicos e saturaria
         # quase todo o oceano nos limites da colorbar, escondendo estruturas
         # (Kuroshio, Gulf Stream, ressurgências). vmin/vmax_phys (validação)
         # permanecem largos; só a escala visual foi ajustada.
@@ -229,7 +146,7 @@ FIELD_META = {
         'vmax_plot':   1e-2,
         'vmin_phys':   1e-5,    # Z0_MIN — clamp em mpas_import
         'vmax_phys':   0.1,     # Z0_MAX — clamp em mpas_import
-        'stub_value':  0.01,    # zorl_default anterior ao Sprint C
+        'stub_value':  0.01,    # zorl_default fixo (sem Charnock)
         'stub_tol':    1e-5,
         'calm_max':    5e-4,    # mar calmo: z0 < 5e-4 m (vento < 10 m/s)
         'storm_min':   1e-3,    # tempestade: z0 > 1e-3 m (vento > 15 m/s)
@@ -331,14 +248,14 @@ def _field_key(label):
 
 # ─── FONTE 1: mpas_import_step????.nc ────────────────────────────────────────
 
-# Nome da variável de máscara gravada pelo acoplador (B-DIAGMASK-01).
+# Nome da variável de máscara gravada pelo acoplador.
 # 'omask' é aceito como alias para arquivos de versões intermediárias.
 OMASK_VARS = ('Sx_omask', 'omask')
 
 
 def ler_omask(nc):
     """
-    Máscara terra/oceano do MOM6 gravada no arquivo (B-DIAGMASK-01).
+    Máscara terra/oceano do MOM6 gravada no arquivo.
 
     Retorna array booleano True=oceano na orientação (nlat, nlon), ou None
     quando a variável não existe — caso dos arquivos anteriores a essa
@@ -358,22 +275,18 @@ def _load_fonte1(diagdir):
     """
     Carrega mpas_import_step????.nc — escrita direta do importState MPAS.
 
-    BUG-01 (corrigido): fonte_label usava o padrão glob '????' literal.
-                        Agora armazena os passos reais para o label.
-    BUG-03 (corrigido): coordenadas lat/lon lidas diretamente do NetCDF
-                        (evita desalinhamento de 0.5° ao recalcular com linspace).
-    BUG-04 (corrigido): fill_value -9.99e+20 mascarado defensivamente;
-                        masked_invalid cobre NaN/Inf, mas não valores grandes
-                        que não estejam registrados no _FillValue do netCDF4.
+    Guarda os passos reais para o rótulo da fonte. Lê lat/lon diretamente do
+    NetCDF (recalcular com linspace desalinharia a grade em 0.5°). Mascara o
+    fill_value -9.99e+20 explicitamente: masked_invalid cobre NaN/Inf, mas não
+    valores grandes que não estejam registrados no _FillValue do netCDF4.
 
     Retorna (steps, data, timestamps, coords) ou (None, None, None, None).
       coords = {'lat': array 1D, 'lon': array 1D}
     """
-    # B-DIAGMASK-01: o cap do MPAS grava monan2_import_YYYYMMDD_HHMMSS.nc
-    # desde a v4.19; o padrão mpas_import_step????.nc é o nome legado, que
-    # continuava sendo o único procurado aqui. Consequência silenciosa: a
-    # FONTE 1 nunca encontrava nada e o script caía sempre na FONTE 2, que
-    # INFERE Sf_zorl por Charnock em vez de ler o valor real. Aceita os dois.
+    # O cap do MPAS grava monan2_import_YYYYMMDD_HHMMSS.nc; o padrão
+    # mpas_import_step????.nc é o nome legado. Aceita os dois: sem o nome
+    # atual, a FONTE 1 nunca encontraria nada e o script cairia sempre na
+    # FONTE 2, que INFERE Sf_zorl por Charnock em vez de ler o valor real.
     files = sorted(glob.glob(os.path.join(diagdir,
                                           'monan2_import_????????_??????.nc')))
     legado = False
@@ -406,7 +319,7 @@ def _load_fonte1(diagdir):
         tss.append(ts)
 
         with Dataset(fpath) as nc:
-            # BUG-03: ler coordenadas do arquivo (lat/lon com half-offset Fortran)
+            # Ler coordenadas do arquivo (lat/lon com half-offset Fortran)
             if coords is None:
                 lat_nc = (nc.variables['lat'][:] if 'lat' in nc.variables
                           else None)
@@ -416,7 +329,7 @@ def _load_fonte1(diagdir):
                     coords = {'lat': np.asarray(lat_nc),
                               'lon': np.asarray(lon_nc)}
 
-            # B-DIAGMASK-01: máscara terra/oceano REAL do MOM6, gravada
+            # Máscara terra/oceano REAL do MOM6, gravada
             # pelo próprio cap. Redundante para os arquivos novos (a terra
             # já sai como _FillValue), necessária apenas se algum campo
             # escapar do mascaramento no Fortran.
@@ -426,13 +339,13 @@ def _load_fonte1(diagdir):
                 if fname in nc.variables:
                     arr = nc.variables[fname][:]
 
-                    # BUG-04: mascaramento defensivo do fill_value Fortran
+                    # Mascaramento defensivo do fill_value Fortran
                     arr = np.ma.masked_where(np.abs(arr) > _FILL_THR, arr)
 
                     if omask is not None and arr.shape == omask.shape:
                         arr = np.ma.masked_where(~omask, arr)
 
-                    # BUG-03: garantir orientação (lat, lon) — (nlat, nlon)
+                    # Garantir orientação (lat, lon) — (nlat, nlon)
                     # O Fortran define var com [dimid_lon, dimid_lat], então
                     # o netCDF4 lê como shape (nlat, nlon) — já correto.
                     # Transposição defensiva: se nlat < nlon (o esperado para
@@ -451,13 +364,9 @@ def _load_fonte1(diagdir):
         valid = [d for d in data[fname] if d is not None]
         result[fname] = np.ma.stack(valid, axis=0) if valid else None
 
-    # BUG-LABEL-FONTE1 (corrigido): devolver também o nome-base do 1º e do
-    # último arquivo e se é o padrão legado, para que load_data rotule a FONTE
-    # com o NOME REAL dos arquivos. Antes o rótulo era sempre
-    # "mpas_import_stepNNNN.nc", mesmo quando os dados vinham dos arquivos novos
-    # monan2_import_YYYYMMDD_HHMMSS.nc — a provenância exibida na figura ficava
-    # errada (dizia "mpas_import_step0001..0024.nc" com timestamps reais nos
-    # painéis).
+    # Devolve também o nome-base do 1º e do último arquivo e se é o padrão
+    # legado, para que load_data rotule a FONTE com o NOME REAL dos arquivos
+    # (a provenância exibida na figura precisa corresponder aos arquivos lidos).
     src_info = {
         'legado': legado,
         'first':  os.path.basename(files[0]),
@@ -469,7 +378,7 @@ def _load_fonte1(diagdir):
 
 # ─── FONTE 2: mom6_import_*.nc (inferência) ──────────────────────────────────
 
-# Marcador de terra inserido pelo Sprint A.5 no MED (T_FILL = 271.35 K).
+# Marcador de terra inserido pelo mediador (T_FILL = 271.35 K).
 # Células com So_t nesse valor são terra e NÃO devem ser plotadas nem usadas
 # para inferir Sf_zorl via Charnock+Smith.
 _LAND_FILL_K   = 271.35   # K  — ponto de congelamento da água do mar, S≈35
@@ -485,9 +394,9 @@ def _load_fonte2(diagdir):
     - Sf_zorl  : INFERIDO de Foxx_taux/Foxx_tauy via Charnock+Smith;
                  máscara de terra do So_t propagada para evitar z₀ inflacionado.
 
-    BUG-LAND-FONTE2 (corrigido):
+    Máscara de terra:
       O diagnóstico mom6_import_*.nc é escrito pelo MED antes da zeragem
-      de terra do Sprint A.5.1 (RouteAtmToOcn). Portanto:
+      de terra feita em RouteAtmToOcn. Portanto:
         • So_t = 271.35 K em células de terra → vmin_plot=273 K → saturam
           no azul mais escuro do RdBu_r, produzindo patches dark-blue.
         • Foxx_taux/tauy têm valores anômalos em células de terra (bulk
@@ -496,21 +405,18 @@ def _load_fonte2(diagdir):
       Correção: mascarar fill de terra no So_t e propagar essa máscara
       para a inferência de z₀.
 
-    BUG-COORDS-FONTE2 (corrigido):
-      coords era sempre None (código nunca extraía lat/lon do arquivo).
-      Agora extrai as variáveis 'lat'/'lon' do primeiro arquivo, igual
+    Coordenadas: extrai as variáveis 'lat'/'lon' do primeiro arquivo, igual
       à FONTE 1, habilitando diagnósticos geográficos em check_physics.
 
-    BUG-RETURN-FONTE2 (corrigido):
-      Retorno prematuro usava 3 valores; agora retorna 4 (consistente
-      com _load_fonte1 e com o unpack em load_data).
+    Todos os retornos têm 4 valores (consistente com _load_fonte1 e com o
+      unpack em load_data).
 
     Retorna (steps, data, timestamps, coords) ou (None, None, None, None).
     """
     pattern = os.path.join(diagdir, 'mom6_import_????????_??????.nc')
     files   = sorted(glob.glob(pattern))
     if not files:
-        return None, None, None, None   # BUG-RETURN-FONTE2: era 3 valores
+        return None, None, None, None   # Era 3 valores
 
     steps  = []
     data   = {f: [] for f in FIELDS}
@@ -529,7 +435,7 @@ def _load_fonte2(diagdir):
 
         with Dataset(fpath) as nc:
 
-            # BUG-COORDS-FONTE2: extrair lat/lon do arquivo (primeira vez).
+            # Extrair lat/lon do arquivo (primeira vez).
             # Os arquivos mom6_import_*.nc gerados pelo MED têm variáveis
             # 'lat' e 'lon' iguais às do mpas_import_step*.nc (grade 360×180).
             if coords is None:
@@ -541,7 +447,7 @@ def _load_fonte2(diagdir):
                     coords = {'lat': np.asarray(lat_nc),
                               'lon': np.asarray(lon_nc)}
 
-            # B-DIAGMASK-01: máscara REAL do MOM6, quando o arquivo a traz.
+            # Máscara REAL do MOM6, quando o arquivo a traz.
             # Ela substitui o marcador de 271,35 K usado abaixo, que sempre
             # foi uma heurística frágil: água aberta genuína no ponto de
             # congelamento — justamente a borda do gelo marinho — cai no
@@ -549,7 +455,7 @@ def _load_fonte2(diagdir):
             omask = ler_omask(nc)
 
             # ── So_t ────────────────────────────────────────────────────────
-            # BUG-LAND-FONTE2: mascarar fill de terra ANTES de armazenar.
+            # Mascarar fill de terra ANTES de armazenar.
             # A máscara gerada aqui é reutilizada para Sf_zorl (mesmo passo).
             so_t_land_mask = None
             if 'So_t' in nc.variables:
@@ -581,7 +487,7 @@ def _load_fonte2(diagdir):
                 data['Si_ifrac'].append(None)
 
             # ── Sf_zorl (inferido) ──────────────────────────────────────────
-            # BUG-LAND-FONTE2: propagar máscara de terra do So_t para z₀.
+            # Propagar máscara de terra do So_t para z₀.
             # O bulk NCAR no MED roda em TODAS as células (terra + oceano).
             # Sobre terra (SST=271.35 K) produz Foxx_taux/tauy anômalos
             # → u* alta → z₀ inflacionado pelo Charnock → patches dark-red.
@@ -614,11 +520,11 @@ def load_data(diagdir):
     """
     Tenta FONTE 1 (mpas_import_step*.nc). Se não encontrar, tenta FONTE 2.
     Retorna (steps, data, timestamps, fonte_label, coords).
-    BUG-01 (corrigido): label com nome real dos passos.
+    O rótulo usa o nome real dos passos.
     """
     steps, data, tss, coords, src_info = _load_fonte1(diagdir)
     if steps is not None:
-        # BUG-LABEL-FONTE1: rotular com o NOME REAL dos arquivos lidos.
+        # Rotular com o NOME REAL dos arquivos lidos.
         if src_info and not src_info.get('legado', True):
             # Padrão novo: monan2_import_YYYYMMDD_HHMMSS.nc
             if src_info['n'] == 1:
@@ -830,7 +736,7 @@ def check_physics(steps, data, fonte_label, coords=None):
                           f"calotas polares (oceano sob gelo).")
 
         if fname == 'So_t' and ok:
-            # BUG-AREA-WEIGHT: média de SST ponderada por área (cos-lat), a
+            # Média de SST ponderada por área (cos-lat), a
             # comparável com a climatologia (~288–292 K). A média por célula é
             # puxada para baixo pelas muitas células polares pequenas.
             layer_last = arr[-1] if arr.ndim == 3 else arr
@@ -849,7 +755,7 @@ def check_physics(steps, data, fonte_label, coords=None):
 
         if fname == 'Si_ifrac' and ok:
             frac_ice = float(np.mean(arr.compressed() * scale > 0.5))
-            # BUG-AREA-WEIGHT: acrescentar cobertura/média ponderadas por ÁREA
+            # Acrescentar cobertura/média ponderadas por ÁREA
             # (cos-lat). Numa grade lat/lon, a fração por CONTAGEM de células
             # super-representa os polos (muitas células pequenas) e infla a
             # "cobertura de gelo"; a fração por área é a comparável com obs.
@@ -914,7 +820,7 @@ def check_physics(steps, data, fonte_label, coords=None):
                       f"{(1-frac_dyn_last)*100:.0f}% das células no default e "
                       f"{frac_dyn_last*100:.0f}% com dado real.")
                 print(f"  │     Assinatura do bug de mapeamento no import — "
-                      f"recompilar mpas_cap_methods.F90 (gather global em "
+                      f"recompilar mpas_adapter.F90 (gather global em "
                       f"state_get_field_1d).")
 
         # ── Localizador de LISTRA vertical (coluna anômala) ───────────────
@@ -955,7 +861,7 @@ def check_physics(steps, data, fonte_label, coords=None):
 
 # ─── Mapas ────────────────────────────────────────────────────────────────────
 
-# BUG-GEO-OFFLINE (correção): em nós HPC sem internet (Jaci), cfeature.LAND/
+# Em nós HPC sem internet (Jaci), cfeature.LAND/
 # COASTLINE baixam os shapefiles Natural Earth de forma preguiçosa (só no
 # desenho/savefig) e o script ABORTAVA com URLError. Testamos a disponibilidade
 # uma única vez; se indisponível, os mapas saem sem os contornos, sem abortar.
@@ -983,8 +889,8 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
 
     simulate_persistence : quando True, o campo Si_ifrac exibido é uma
         PERSISTÊNCIA SIMULADA no pós-processamento (max com decaimento entre
-        passos), usada para pré-visualizar o comportamento esperado APÓS a
-        correção do BUG-MEM no Fortran. Por padrão é False: exibe-se o campo
+        passos), usada para pré-visualizar o comportamento com memória de
+        gelo entre passos. Por padrão é False: exibe-se o campo
         Si_ifrac REALMENTE importado (um diagnóstico não deve fabricar dado)."""
     try:
         import matplotlib
@@ -1032,20 +938,18 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
 
     # ── Pré-cálculo: persistência de Si_ifrac entre passos ────────────────────
     #
-    # Contexto: com docn_ice_init_only=.true. (Sprint B.1), o modelo Fortran
-    # chama compute_si_ifrac_proxy a partir de t=1 — que reinicia ptr_ifrac=0
-    # sem memória do estado OISST de t=0 (7918 células).  Isso produz uma
-    # queda abrupta de 7918→38 células no primeiro passo de acoplamento,
-    # fisicamente impossível (BUG-MEM no Fortran, corrigido em v2.5).
-    #
-    # Enquanto o modelo não for recompilado e re-executado com a correção,
-    # este bloco SIMULA a persistência no pós-processamento:
+    # Contexto: com docn_ice_init_only=.true., o modelo Fortran chama
+    # compute_si_ifrac_proxy a partir de t=1, que reinicia ptr_ifrac=0 sem
+    # memória do estado OISST de t=0. Sem memória, a cobertura de gelo pode
+    # cair abruptamente no primeiro passo de acoplamento, o que é fisicamente
+    # impossível. Quando pedido, este bloco SIMULA a persistência no
+    # pós-processamento:
     #
     #   Si_ifrac_display(t) = max(Si_ifrac_raw(t),
     #                             Si_ifrac_display(t-1) × SI_IFRAC_VIS_DECAY)
     #
     # onde SI_IFRAC_VIS_DECAY = exp(-dt/τ) com τ=86400 s e dt=3600 s
-    # (idêntico ao SI_IFRAC_DECAY do Fortran v2.5).
+    # (idêntico ao SI_IFRAC_DECAY do Fortran).
     # O campo do passo de bootstrap (t=0) inicializa a memória.
     SI_IFRAC_VIS_DECAY = 0.95924    # ≈ exp(-1/24)  — mesmo valor do Fortran
     si_display = None               # lista de arrays acumulados por passo
@@ -1074,11 +978,10 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
                 vmax_si_global = max(vmax_si_global, float(np.max(_flat)), 0.01)
 
     # ── Pré-cálculo: override de escala GLOBAL (consistente entre passos) ─────
-    # BUG-SCALE-PERSTEP (corrigido): o reajuste robusto de vmin/vmax (quando
-    # >20% das células saturam nos limites fixos) era feito COM OS PERCENTIS DE
-    # CADA PASSO — então cada quadro do GIF tinha uma escala de cor diferente e
-    # a animação ficava incomparável. Agora a decisão (e os percentis 2–98) é
-    # tomada UMA vez, sobre todos os passos com dado dinâmico, e reutilizada.
+    # O reajuste robusto de vmin/vmax (quando >20% das células saturam nos
+    # limites fixos) é decidido UMA vez, com os percentis 2–98 de todos os
+    # passos com dado dinâmico, e reutilizado em todos os quadros. Percentis
+    # por passo dariam a cada quadro do GIF uma escala de cor diferente.
     global_override = {}
     for fname in campos_disponiveis:
         if fname in ('Sf_zorl', 'Si_ifrac'):
@@ -1118,8 +1021,7 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
         for ax_idx, fname in enumerate(campos_disponiveis):
             meta  = FIELD_META[fname]
             # Para Si_ifrac, usar o campo com persistência simulada (si_display)
-            # em vez do campo bruto — mostra o comportamento esperado após a
-            # correção Fortran BUG-MEM, mesmo antes da recompilação do modelo.
+            # em vez do campo bruto (ver simulate_persistence).
             if fname == 'Si_ifrac' and si_display is not None:
                 layer = si_display[i] * meta['scale']
             else:
@@ -1140,7 +1042,7 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
                     tol   = COVER_TOL.get(fname, meta.get('stub_tol', 1e-6))
                     layer = np.ma.masked_where(np.abs(layer - stub) <= tol, layer)
 
-            # BUG-03: usar lat/lon do NetCDF; fallback para linspace
+            # Usar lat/lon do NetCDF; fallback para linspace
             if (coords is not None
                     and len(coords['lat']) == nlat
                     and len(coords['lon']) == nlon):
@@ -1154,18 +1056,17 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
             vmin = meta['vmin_plot'] * meta['scale']
             vmax = meta['vmax_plot'] * meta['scale']
 
-            # Escala robusta GLOBAL (BUG-SCALE-PERSTEP): usa o override calculado
+            # Escala robusta GLOBAL: usa o override calculado
             # uma vez sobre todos os passos, garantindo a MESMA escala de cor em
             # todos os quadros da animação. Não altera dados nem limites físicos.
             uniforme = is_uniform(layer, fname)
             if fname in global_override:
                 vmin, vmax = global_override[fname]
 
-            # BUG-10 (corrigido): escala Si_ifrac consistente entre passos.
-            # BUG-02 (v2.2) usava vmax adaptativo por passo; isso tornava
-            # os passos com pouco gelo real (vmax≈0.12) incomparáveis com o
-            # passo de restart do SIS2 (vmax=1.0).  Agora usa vmax_si_global
-            # pré-calculado excluindo passos de bootstrap.
+            # Escala Si_ifrac consistente entre passos: vmax_si_global
+            # pré-calculado excluindo passos de bootstrap. Um vmax por passo
+            # tornaria os passos com pouco gelo real (vmax≈0.12)
+            # incomparáveis com o passo de restart do SIS2 (vmax=1.0).
             if fname == 'Si_ifrac':
                 vmax = vmax_si_global
                 vmin = 0.0
@@ -1178,8 +1079,8 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
                 cf = ax.pcolormesh(lon2d, lat2d, layer, norm=norm,
                                    cmap=meta['cmap'], transform=ccrs.PlateCarree(),
                                    shading='auto', zorder=1)
-                # BUG-PLOT-LAND: terra DESENHADA ACIMA do dado (zorder alto).
-                # BUG-GEO-OFFLINE: resiliente a nó HPC sem internet.
+                # Terra DESENHADA ACIMA do dado (zorder alto).
+                # Resiliente a nó HPC sem internet.
                 if _geo_features_available(cfeature):
                     ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
                     ax.add_feature(cfeature.COASTLINE, linewidth=0.5,
@@ -1191,10 +1092,8 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
                 # na escala global — invisíveis quando n < ICE_SCATTER_THRESHOLD.
                 # Marcadores scatter com tamanho fixo garantem legibilidade.
                 #
-                # BUG-SCATTER-ZORDER (corrigido v2.4):
-                #   zorder=4 colocava o scatter ABAIXO da camada de terra
-                #   (cfeature.LAND, zorder=5), que a sobrepunha completamente.
-                #   Correção: zorder=8, acima de terra (5) e costa (6).
+                # zorder=8 põe o scatter acima de terra (cfeature.LAND,
+                # zorder=5) e costa (6); abaixo, a terra o cobriria.
                 if fname == 'Si_ifrac' and not uniforme:
                     flat_si = (layer.compressed()
                                if hasattr(layer, 'compressed')
@@ -1285,7 +1184,7 @@ def plot_maps(steps, data, tss, outdir, fonte_label, coords=None,
 
         ts_tag = tss[i].strftime('%Y%m%d_%H%M%S') if tss[i] else f'step{step:04d}'
         outfile = os.path.join(outdir, f'monan2_import_{ts_tag}.png')
-        # BUG-FRAME-SIZE: sem bbox_inches='tight' — recorte ajustado produz
+        # Sem bbox_inches='tight' — recorte ajustado produz
         # quadros de tamanhos diferentes e faz a animação "tremer". figsize fixo
         # garante PNGs idênticos, condição para um GIF/MP4 estável.
         fig.savefig(outfile, dpi=120, facecolor='white')
@@ -1414,7 +1313,7 @@ def check_log(logfile):
     }
 
     found   = {k: [] for k in padroes}
-    # BUG-06: buscar também em stdout do mpirun (write(*,...) vai para stdout)
+    # Buscar também em stdout do mpirun (write(*,...) vai para stdout)
     logfiles_busca = [logfile]
     for pat in ('logs/PET*.STDOUT', 'logs/stdout*', 'logs/mpirun*.log'):
         logfiles_busca.extend(glob.glob(pat))
@@ -1456,7 +1355,7 @@ def check_log(logfile):
         print("     sem parametrização Charnock+Smith. Recompilar com MED_cap_MONAN.F90")
         print("     atualizado.")
     if n_import == 0:
-        print("  ⚠  mpas_import não encontrado — verificar se mpas_cap_methods.F90")
+        print("  ⚠  mpas_import não encontrado — verificar se mpas_adapter.F90")
         print("     está compilado com a versão atualizada.")
     if n_diag == 0:
         print("  ⚠  write_mpas_import_diag não localizado por string no log.")

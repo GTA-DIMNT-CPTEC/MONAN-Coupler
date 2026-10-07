@@ -7,632 +7,214 @@ INPE / CGCT / DIMNT — GT Acoplamento de Modelos.
 O formato segue, de modo simplificado, *Keep a Changelog*; as datas são
 aproximadas (iterações de desenvolvimento, Jun a Jul 2026).
 
+Versão condensada: uma entrada curta por etapa. O texto completo de cada
+entrada (arquivos, conferências e validação) está em
+[`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md).
+
 ## [Não lançado]
 
-- **Balanceamento de PETs e reprodutibilidade: regra medida.** Execuções de 24/09/2026 com a atmosfera fixa em 128 PETs estabeleceram o que altera o resultado bit a bit. Redistribuir PETs entre oceano e gelo, mantendo o total (128 + 8 + 8 e 128 + 12 + 4, ambos com 144 PETs), não altera nada, nem na atmosfera nem no estado interno do gelo. Mudar o total (128 + 20 + 4, 152 PETs) altera; a causa mais provável é o mediador, que ocupa todos os PETs. Na prática, cada total de PETs é uma configuração própria, que precisa de sua bateria do `mede-taxa-repro.sh`, e oceano e gelo podem ser redistribuídos livremente dentro dele. As mesmas execuções mediram o oceano como gargalo nesta grade (201 s com 8 PETs, 162 s com 12, 117 s com 20, eficiência de cerca de 83%) e reduziram o job de 24 horas simuladas de 234 s para 158 s. Registrado em `docs/uso-analisa-balanceamento.md` (seção 9 e 9.1), `docs/uso-mede-taxa-repro.md` (seção 9) e `docs/ferramentas.md`.
-
-  Documentado também um efeito colateral do `set-nccmp-jaci.bash`: o `module purge` com que ele começa descarrega o módulo do Python, e o `analisa_balanceamento_pets.py`, que exige Python 3.7 ou mais novo, passa a falhar com `SyntaxError: future feature annotations is not defined`.
-
-- **Documentação das ferramentas de execução e de reprodutibilidade.** Novo catálogo `docs/ferramentas.md`, com todas as ferramentas de `run/` e `tools/`, a pergunta que cada uma responde, o guia correspondente e sequências típicas de uso. Três guias novos cobrem as ferramentas que não tinham documentação: `docs/uso-mede-taxa-repro.md` (baterias de reprodutibilidade, com o stream `reprodiag`, os instrumentos, a leitura do relatório, o checksum exato por PET, o arquivamento e os resultados de referência de 22 e 23/09/2026), `docs/uso-duplas-rodadas-repro.md` (`roda-repro-reprodiag.sh`, `roda_repro_producao.sh`, `roda_repro_datm_mom6.sh`, `roda-repro-mpas-standalone.sh` e `set-nccmp-jaci.bash`) e `docs/uso-gen-metis.md`. O README ganhou a seção de reprodutibilidade binária e a tabela de guias.
-
-  Pontos registrados na documentação que ainda pedem ação: o `roda-repro-reprodiag.sh` tem como padrão de `--runner` um caminho absoluto de uma instalação pessoal; o `coleta-contexto-jaci.sh` e o `stream-reprodiag.xml` são usados, mas não estão no repositório.
-
-- **Grade ESMF do gelo pela decomposição do SIS2 (`B-ICE-DECOMP-01`, commit `a9e6935`).** O cap do SIS2 criava a grade ESMF com uma regra própria (fatoração a partir da raiz quadrada do número de PETs) e supunha, sem conferir, que ela coincidia com o `LAYOUT` escolhido pelo SIS2. Com 4 PETs as duas davam 2 × 2; com 8 PETs o SIS2 escolheu 2 × 4 (blocos 90 × 39) e o cap 4 × 2 (blocos 45 × 78), e o `export_si_ifrac` saiu do array do SIS2 na inicialização (`Index '48' of dimension 2 of array 'is' outside of expected range (1:47)`, em todos os PETs do gelo). Agora cada PET obtém os limites globais do seu bloco com `mpp_get_compute_domain`, os PETs trocam essa informação com `ESMF_VMAllGather`, e a nova rotina `ICE_DecompFromBlocks` monta a grade irregular do `ESMF_GridCreate1PeriDim` (tamanhos por coluna e por linha e mapa bloco → PET), validando cobertura e unicidade; uma conferência final compara, em cada PET, o bloco ESMF com o do SIS2. Mesmo princípio do `FIX-GRID-v5` do cap do oceano.
-
-  Validado na jaci com 144 PETs (128 + 8 + 8): com `#override LAYOUT = 4, 2` (grade idêntica à antiga), resultado idêntico bit a bit à bateria anterior; sem o override (SIS2 em 2 × 4), execução completa e resultado idêntico ao da decomposição 4 × 2, inclusive no estado interno do gelo (5430 checksums inteiros das etapas do ciclo do SIS2). O resultado não depende da divisão do domínio do gelo.
-
+- **Repasse do oceano para a malha de fluxo pelo mapa (R-FASE13-32).** Segunda das etapas adiadas no fechamento da fase 13 (P8d da NTC de análise da arquitetura), depois da R-FASE13-31. (1) `regrid_ocean_currents` (`med_ocean`), que interpolava `So_u` e `So_v` pela rota `ocn2atm` com uma chamada por campo, dá lugar a `regrid_ocn2atm_fields`, que percorre os campos que o mapa leva pela rota `ocn2atm` à malha de fluxo (`cpl_route_fields`) e interpola cada um para o campo interno de mesmo nome (`MED_FIELDS`); um campo do mapa fora de `MED_FIELDS` é registrado como erro (mensagem nova, 'regrid_ocn2atm_fields: <campo> chega pela rota ocn2atm no mapa, mas nao esta em MED_FIELDS', que só aparece por erro de programação; a conferência `literais` acusa essa mensagem e as constantes de `cpl_map` que o grupo deixou de repetir). Os mesmos campos, na mesma ordem, com a mesma rota e o mesmo tratamento de falha nas três chamadas (início da rodada, publicação da SST inicial e cada passo). (2) As duas linhas dessas passagens em `EXCHANGES` viram um grupo, `GROUP_OCN2ATM`; a tabela expandida e `docs/acoplamento.md` não mudam. Efeito: um campo do oceano que só atravessa o mediador rumo à atmosfera não precisa de código no mediador. Escopo menor que o da proposta: o sentido contrário (da atmosfera para o oceano) continua com a leitura em `get_atm_forcing` e a cópia na física, porque os campos do MONAN-A chegam com o sufixo `_mpas` e passam pela reunião dos blocos do MPAS antes da física; e, nos dois sentidos, a saída do mediador para os modelos parte da grade do oceano, o que acrescenta nomes em grupos (contagem em `docs/arquitetura-acoplamento.md`, seção 4). Documentação: `docs/arquitetura-acoplamento.md`, `docs/estado-do-projeto.md`. Nenhum resultado muda.
+- **Física do mediador pela posição em `MED_FIELDS` (R-FASE13-31).** Primeira das duas etapas adiadas no fechamento da fase 13 (P8c da NTC de análise da arquitetura), retomada antes da fase 14. (1) `MED_FIELDS` (`med_cap_types`) ganha a coluna `zero_each_step`, e cada linha ganha uma constante com a sua posição (`F_TAUX = 1`, ..., `F_SWIDF_ICE = 36`). (2) `med_flux_t` passa a ser um vetor de arrays, `p(size(MED_FIELDS))`, do tipo novo `med_array_t`; a física (`med_bulk_ncar`) usa `fluxes%p(F_TAUX)%a` onde usava `fluxes%taux` (52 acessos, a maioria nas atribuições dos ponteiros locais, que mantêm os nomes de antes). (3) `associate_fluxes` (`med_exchange`) passa a ser um laço sobre o registro `is%fields`, sem uma linha por campo. (4) `zero_med_fluxes` (`med_flux`) zera, num laço, os campos marcados na tabela (os doze fluxos para o oceano, `So_duu10n` e as correntes, os mesmos de antes); `ZeroOcnFluxFields` (`med_cap_methods`) sai. A ordem da zeragem muda, mas cada campo é zerado uma vez e nenhum depende de outro. A fração de gelo continua zerada à parte, só nos modos em que é preenchida de novo. (5) Os componentes nomeados do estado interno (`is%ocn_flx`, `is%ocn`, `is%ice`, `is%sfc`) e `bind_internal_fields` (agora público, para os testes) ficam para o código fora da física que usa os campos pelo nome. Efeito: um campo calculado no mediador passa de 9 lugares em 7 arquivos para 5 em 4 (`FIELDS`, o grupo do mapa, a linha em `MED_FIELDS`, a constante e o cálculo). Teste novo `tests/unit/test_med_fields.F90`: cada constante contra o nome do campo, nomes sem repetição e os campos zerados a cada passo. `tests/bulk/test_bulk_ncar.F90` cria os campos no registro e os liga com `bind_internal_fields`, como a inicialização; a conferência `bulk` sai idêntica bit a bit. Documentação: `docs/arquitetura-acoplamento.md` (seção 4), `docs/estado-do-projeto.md`. Nenhum resultado muda.
+- **Fechamento da fase 13 (R-FASE13-34).** Etapa só de documentação, sem mudança em `src/`, scripts ou testes. A fase 13 termina com as etapas 01 a 30, 33 e 34 (e a correção 29-FIX01). As etapas R-FASE13-31 (física do mediador por índice em `MED_FIELDS`) e R-FASE13-32 (ligação automática dos campos internos) ficam adiadas até o primeiro campo novo calculado no mediador: trocariam o acesso por nome (`fluxes%taux`) pelo acesso por índice em cerca de 150 usos e pediriam duas rodadas, sem ganho para o código de hoje. `docs/arquitetura-acoplamento.md`: a seção 4 ganha o procedimento atual para um campo calculado no mediador (9 lugares em 7 arquivos, com `So_duu10n` como exemplo), e a seção 6 deixa de pedir o arquivo novo no `Makefile` (a lista sai de `src/dependencies.mk` desde a R-FASE13-07). `docs/estado-do-projeto.md`: a fase 13 aparece concluída, numa linha curta; a fase 14 (validação do DOCN e do DATM, 14-01 a 14-07, e depois P6c, P6b e P4b) aguarda as decisões do GT, listadas na seção 6, com as etapas adiadas. Nenhum resultado muda.
+- **Limpezas: `EXPORTS` por grupos, textos antigos, importações e travessões (R-FASE13-33).** Segunda das etapas que terminam a fase 13 (NTC v5, seção 10.1.4). (1) `EXPORTS` (`cpl_map`), que tinha 41 linhas, uma por campo, passa a ser escrita por grupos, como `EXCHANGES`: `EXPORT_MPAS`, `EXPORT_MOM6` e `EXPORT_DOCN`, e, para o DATM e o SIS2, os grupos das passagens deles para o mediador (`GROUP_DATM_ATM`, `GROUP_ICE_SIS2`), que têm a mesma ordem; a ordem de anúncio de cada cap é a de antes. A tabela de antes fica congelada em `tests/unit/exports_frozen.inc`, e `test_cpl_map` confere que a expansão a reproduz linha a linha; `docs/acoplamento.md` sai igual. Para o DATM e o SIS2, um campo novo para o mediador passa a ser um nome num grupo só (exportação e passagem); para os outros modelos continuam dois nomes, porque a ordem do anúncio do cap é diferente da ordem da passagem, e mudá-la mudaria o anúncio. (2) Dois textos antigos do registro: o aviso de `internal_field_ptr` (`med_cap_netcdf`) deixa de citar o `select case` que não existe mais ('... fora dos campos internos do mediador (MED_FIELDS); ...'; regra em `tests/log-traduzido.sed` e padrão em `compara-gravadores.bash`), e a mensagem de erro de `stamp_state_clock` deixa de citar `RouteOcnToAtm` ('MED: carimbo do relogio no exportState falhou (NUOPC_SetTimestamp)'). (3) `docn_cap_netcdf` deixa de importar 13 nomes que não usa (do ESMF, `ChkErr`, `log_debug`, `log_error`). (4) O indicador de nomes de campos anunciados à mão (`indicadores.py`) deixa de contar tabelas de tipo derivado, como `MED_FIELDS`, que descrevem os campos e não os anunciam (o indicador volta a 0). (5) Travessões nos comentários de `src/` (139 linhas): faixas de números viram 'a' ('[0 a 1]'), colunas alinhadas viram ':' (e '→' na segunda coluna), pares parentéticos viram vírgulas e os demais, ':' ou ';'. Os que restam estão em constantes de texto (títulos de NetCDF e mensagens) e ficam, porque mudariam metadados ou o registro. Documentação: `README.md` e `docs/arquitetura-acoplamento.md` (como incluir um campo). Nenhum resultado muda. Validada na rodada R-FASE13-33 (73 arquivos idênticos à linha de base; relatório de acoplamento de 85 linhas igual ao da R-FASE13-30). Tag `fase13-33-validada`.
+- **Migração para as chaves por modelo; conferência `chaves` (R-FASE13-30).** Primeira das quatro etapas que terminam a fase 13 (NTC "Análise da arquitetura", v5, seção 10.1); completa a troca de chaves da R-FASE13-29. (1) Novo `tools/coupler/chaves_nuopc.bash`, carregado com `source` pelos scripts que precisam saber qual modelo ocupa cada posição: `nuopc_modelo` (modelo da posição ATM, OCN ou ICE, ou o contorno), `nuopc_usa`, `nuopc_chaves_antigas` e `nuopc_troca_modelo` (gera uma variante com o modelo de uma posição trocado). A regra é a de `config_read`: vale a chave por modelo; sem ela, a antiga traduzida; sem nenhuma, o padrão de produção. As funções sempre terminam com código 0, para que uma chave ausente não pare um script sob `set -euo pipefail` (o que parou o `--check` na primeira tentativa da R-FASE13-29). (2) Passam a usar essas funções: `run/run_esmApp.jaci` (no lugar de `_nuopc_uses`), `tools/coupler/test-concurrent.bash` e `test-sequential-split.bash` (o gelo pedido vai para `ice_model`, em `&nuopc_mode`, e sai `use_sis2_dynamic` do grupo `&nuopc_petlayout` que eles reescrevem), `roda_repro_producao.sh` e `roda_repro_datm_mom6.sh` (a variante do DATM é gerada por `nuopc_troca_modelo`) e `tools/dev/cria-linha-base.bash` (o MANIFEST registra `atm_model`, `ocn_model`, `ice_model` e `atm_boundary` já traduzidos e as chaves antigas presentes, no lugar das quatro chaves lógicas). `plan-layout.py` e `analisa_balanceamento_pets.py` sugerem `ice_model` no lugar de `use_sis2_dynamic`. (3) O `nuopc.input` da raiz passa às chaves por modelo, com os mesmos valores (`mpas`, `mom6`, `sis2`, `med`); o da linha de base, que o `prepara` copia da R-NOFMA-02, continua com as antigas. (4) A leitura da configuração escreve um aviso para cada chave antiga dada: 'AVISO: chave antiga <chave> (&<grupo>) traduzida para <chave nova>=<valor>; use a chave por modelo.'; na rodada de validação, os quatro avisos aparecem na saída padrão (`esmApp_run.log`), o que é esperado. (5) Nova conferência `chaves` (`tests/scripts/confere-chaves-nuopc.bash`; 24 conferências): sintaxe dos scripts, nenhuma leitura direta de chave antiga, as funções em modo estrito com arquivos nas duas formas, mistos, vazio, ausente e em maiúsculas, `nuopc_troca_modelo` e, com o `test_config` da conferência `config`, os mesmos modelos que `config_read` em cada arquivo. A conferência `config` tira os avisos de chave antiga da comparação com a versão anterior e os confere à parte (um por chave antiga dada; nenhum com as chaves por modelo nem no `nuopc.input` da raiz). (6) O cabeçalho do cap modelo passa a citar a linha em `COMPONENTS` e o rótulo tirado dela. Documentação: `README.md`, `docs/conferencias-locais.md` e os guias de uso dos scripts (`uso-smoke-tests`, `uso-plan-layout`, `uso-linha-base`, `uso-duplas-rodadas-repro`, `uso-analisa-balanceamento`, `uso-mede-smt`, `MULTINO-run_esmApp`). Literais: entram os textos do aviso. Nenhum resultado muda. Validada na rodada R-FASE13-30 (73 arquivos idênticos à linha de base; relatório de acoplamento de 85 linhas igual ao da R-FASE13-29). Tag `fase13-30-validada`.
+- **Escolha dos componentes por modelo: tabela `COMPONENTS` e chaves `atm_model`, `ocn_model`, `ice_model` e `atm_boundary` (R-FASE13-29).** Primeira etapa da P4 (bloco D da fase 13); resolve o atrito D1 e completa a correção de C1. Feita antes da validação do DOCN e do DATM, por decisão do Daniel, só como reorganização: as mesmas combinações são aceitas, avisadas e recusadas, e nada do DOCN ou do DATM foi consertado. (1) `coupler_config`: nova tabela `COMPONENTS` (posição, modelo, malha do mapa, rótulo no driver), com `mpas` e `datm` no ATM, `mom6` e `docn` no OCN, `sis2` e `none` no ICE; `cpl_config_t` passa a guardar o modelo de cada posição e o contorno (`atm_boundary`: `med` ou `ocn`), em vez das quatro chaves lógicas; `COUPLER_MODES` é reescrita pelos modelos, com as mesmas 16 linhas, situações e notas; as variáveis `cfg_use_datm`, `cfg_use_docn`, `cfg_use_med_to_mpas` e `cfg_use_sis2_dynamic` dão lugar a `cfg_atm_model`, `cfg_ocn_model`, `cfg_ice_model` e `cfg_atm_boundary`. (2) Leitura: o `&nuopc_mode` aceita as chaves por modelo (valores conferidos contra `COMPONENTS` e `ATM_BOUNDARIES`, em minúsculas); as chaves antigas (`use_datm`, `use_docn`, `use_med_to_mpas` e, no `&nuopc_petlayout`, `use_sis2_dynamic`) continuam aceitas e são traduzidas pela tabela `OLD_KEYS`; uma antiga e a nova podem vir juntas se concordarem, e a leitura para se se contradisserem (para saber se uma chave lógica foi dada, o grupo é lido duas vezes, com valores iniciais diferentes). Diferença em relação à NTC: as chaves antigas não dão aviso, porque o `nuopc.input` da raiz, o da linha de base e os scripts de `tools/coupler` ainda as usam; o aviso fica para quando os scripts forem migrados. (3) Mapa (`cpl_map`): as condições da coluna `when` passam a ser os nomes dos modelos de `COMPONENTS` e as duas de contorno (`BOUNDARY_CONDITIONS`), e `condition_holds` deixa de ter um caso por condição; a constante `CONDITIONS` sai; as consultas que percorrem configurações combinam os modelos de cada posição e os contornos, em vez de contar bits; as chaves que um componente consulta passam a ser as de `CONFIG_KEYS` (`MED_KEYS = 'atm_model,ice_model'`). (4) Driver: `chosen_model` devolve o modelo da chave da posição, e `register_model` tira o rótulo de `COMPONENTS` (o do mediador continua dado na chamada). (5) Mediador e cap do MONAN-A: as condições sobre as chaves lógicas passam a comparar o modelo (`cfg_ice_model == 'sis2'`, por exemplo), com o mesmo efeito. (6) `run/run_esmApp.jaci` lê as duas formas (`_nuopc_uses`). Correção R-FASE13-29-FIX01: sob `set -euo pipefail`, a leitura de uma chave ausente (`ice_model` no `nuopc.input` da linha de base, que usa as chaves antigas) fazia o `grep` devolver 1 e o `--check` do `submete` parar sem mensagem; `_nuopc_uses` e a leitura de `ice_model` passam a tolerar a chave ausente, como as demais leituras do script. (7) `tools/dev/mapa-acoplamento.py` lê `COMPONENTS`, tira dela as condições e escreve as tabelas pelos modelos; em `docs/acoplamento.md` só muda a seção 1 (as contagens e as demais seções saem iguais). Testes: `test_cpl_map` ganha a conferência de `COMPONENTS` (posições, nomes únicos, malha de `GRIDS` do mesmo componente, rótulo, `none` só no gelo) e a de que cada condição vale nas 16 combinações exatamente onde valia pela regra das chaves lógicas (copiada no teste); `test_connectors` e `test_cpl_check` passam a montar as configurações pelos modelos. A conferência `config` passa de 29 para 45 casos comparados com a versão anterior: as combinações com o DOCN e o DATM pelas chaves antigas, e as chaves por modelo comparadas com o mesmo arquivo escrito com as antigas (`NOME.rev.input`), que dão os mesmos valores; e confere 5 erros que só a versão atual conhece. As mensagens que mudaram de propósito estão em `tests/config/mensagens-mudadas.sed`, aplicado à saída da referência. Mensagens: as notas das combinações recusadas, o erro de `ice_pet_count` sem gelo e o aviso de `seq_repro` passam a citar as chaves por modelo, com as antigas entre parênteses; entram os erros de valor inválido e de chave antiga que contradiz a nova, e o de programação `register_model: modelo fora de COMPONENTS`. O texto de configuração do relatório de acoplamento (`describe_config`) é o mesmo. Documentação: `README.md`, `nuopc.input` (comentário do `&nuopc_mode`; os valores continuam com as chaves antigas), `docs/arquitetura-acoplamento.md` (como incluir um componente) e `docs/conferencias-locais.md`. Nenhum resultado muda. Validada na rodada R-FASE13-29, com a correção R-FASE13-29-FIX01 (73 arquivos idênticos à linha de base; relatório de acoplamento de 85 linhas igual ao da R-FASE13-28). Tag `fase13-29-validada`.
+- **Cap modelo (R-FASE13-28).** Segunda e última etapa da P9 (bloco D da fase 13); completa o atrito D5. Novo `src/caps/template/template_cap.F90` (módulo `template_cap_mod`): um componente de dados mínimo, comentado passo a passo como o `regrid_idw.F90` dos esquemas de interpolação, que anuncia o que o mapa manda (`cap_advertise`, com a política explicada), realiza os campos numa grade regular de 1 grau (`cpl_latlon_grid`), exporta valores iniciais constantes (`cap_fill_export_initial`), carimba o tempo e avança só o carimbo a cada passo. O cabeçalho lista os sete passos para um componente novo: copiar o arquivo, acrescentar o ponto, as passagens e as exportações ao mapa, escolher as políticas de anúncio, a grade, os valores e o avanço do modelo, registrar o modelo no driver (`register_model`, `POSITIONS`) e acrescentar o diretório ao `Makefile`, à tabela `CAMADAS` e às dependências. O ponto do exemplo (`'TPL@template'`) não está no mapa, e as listas vêm vazias. O cap modelo não entra no executável (o `Makefile` não compila `src/caps/template/`); ele é compilado pelas conferências locais (conferência `compilacao`, pelo `compila-local.bash`), para que não fique desatualizado. A tabela `CAMADAS` de `confere-camadas.py` ganha a linha do diretório (um componente à parte), e `src/dependencies.mk` ganha a regra dele, que o `Makefile` não usa. Nenhum fonte compilado na Jaci muda. Como o `prepara` recusa um executável mais antigo que o último commit em `src/`, a validação na Jaci apaga `bin/esmApp` antes do `make`, que só o liga de novo a partir dos mesmos objetos. Documentação: `README.md` (estrutura e convenção "Componentes e conectores"), `docs/arquitetura-acoplamento.md` (como incluir um componente) e `docs/conferencias-locais.md`. Literais: só os do arquivo novo. Com esta etapa, a P9 está concluída. Nenhum resultado muda. Validada na rodada R-FASE13-28 (73 arquivos idênticos à linha de base; relatório de acoplamento de 85 linhas igual ao da R-FASE13-27). Tag `fase13-28-validada`.
+- **Anúncio dos campos por uma rotina comum (R-FASE13-27).** Primeira etapa da P9 (bloco D da fase 13); resolve parte do atrito D5. Os seis componentes (os caps do MONAN-A, do DATM, do MOM6, do DOCN e do SIS2, e o mediador) anunciavam os campos com um laço próprio sobre a lista do mapa, com opções diferentes em cada um e o motivo de cada opção só num comentário. O novo `cap_advertise` (`cap_common`) anuncia uma lista com uma política escolhida pelo nome, e o cabeçalho do módulo explica cada uma uma vez: `ADVERTISE_DEFAULT` (sem opções; MONAN-A, DATM e DOCN), `ADVERTISE_SHARED` (importação com `TransferOfferGeomObject="cannot provide"` e `SharePolicyField="share"`; mediador, MOM6 e SIS2) e `ADVERTISE_PROVIDES_GRID` (exportação com `"will provide"`, sem share; mediador, MOM6 e SIS2), com os dois cuidados que levaram a elas (a inicialização que trava quando nenhum lado oferece geometria, e a fração de gelo que chegava zerada ao mediador com share na exportação do SIS2). Cada componente continua pedindo as listas ao mapa e passa a chamar `cap_advertise` com a mesma política de antes: as chamadas a `NUOPC_Advertise` são as mesmas, com os mesmos argumentos e na mesma ordem. Diferença em relação ao esboço da NTC: `cap_advertise` recebe a lista pronta, e não o ponto do mapa, porque `cap_common` está em `src/shared`, abaixo do mapa (conferência `camadas`), e porque o mediador pede listas diferentes das dos caps. Documentação: `README.md` (convenção "Componentes e conectores") e `docs/arquitetura-acoplamento.md`. Literais: os textos das opções (`"cannot provide"`, `"share"`, `"will provide"`) passam a aparecer uma vez, em `cap_common`; entram os nomes das políticas (`'default'`, `'shared'`, `'provides_grid'`) e a mensagem `'cap_advertise: politica de anuncio desconhecida'` (erro de programação). Nenhum resultado muda. Tag `fase13-27-validada`.
+- **Registro dos modelos e divisão de PETs por blocos (R-FASE13-26).** Resto da P5 (decisão do Daniel de fazê-lo antes da P4, que na NTC vinha antes, no bloco D). Registro dos modelos: cada modelo que pode ocupar uma posição é registrado uma vez em `esm.F90` (`register_model`: posição, nome, rótulo no driver, rotina `SetServices` e atributos, como `timeStampValidation=false` para MOM6, DOCN e SIS2 e a mensagem que vai para o registro depois do registro do componente). O driver percorre as posições na ordem de `POSITIONS` (ATM, MED, OCN, ICE, a ordem de registro de antes) e registra em cada uma o modelo escolhido pela configuração (`chosen_model`: hoje, pelas chaves `use_docn` e `use_sis2_dynamic`; a P4 trocará essa função pelas chaves por modelo). Saem os quatro `if` e as constantes `MPAS_LABEL`, `MED_LABEL`, `OCN_LABEL` e `ICE_LABEL`: os rótulos ficam escritos só nas chamadas a `register_model`, e os conectores e a conferência do mapa os tiram de lá (`position_label`). Divisão de PETs: o novo `src/driver/driver_layout.F90` (sem ESMF) tem a tabela `POSITIONS` (nome, bloco próprio no layout split, ordem de quem recebe o resto da divisão automática) e `split_blocks`, que divide os PETs em um bloco por posição ativa, na ordem da tabela, no lugar de `split_pets`, escrita para três blocos fixos. A regra do número automático é a de antes: os PETs que sobram das contagens fixas são divididos entre as posições automáticas, e o resto fica com o gelo, se for automático, senão com o ATM (coluna `rest_order`). As linhas de layout do log (`layout SPLIT`, `layout SHARED` e a dos PETs parados no sequential+split), que ferramentas de `tools/coupler` e `tools/dev` leem, são montadas por `layout_split_line`, `layout_shared_line` e `idle_pets_line` com o mesmo texto. Novo teste `tests/unit/test_driver_layout.F90`: compara `split_blocks` com uma cópia de `split_pets` em 25.600 casos (1 a 200 PETs, contagens zero ou fixas, com e sem gelo): a validade da divisão é a mesma em todos, e os blocos e as linhas de log, nos 10.960 válidos. Nas divisões inválidas (contagens fixas que passam do total), a rodada para com a mesma mensagem, mas os tamanhos que ela mostra podem diferir dos de antes, porque a divisão inteira de um resto negativo arredonda de outro modo. Documentação: `README.md` (convenção "Componentes e conectores") e `docs/arquitetura-acoplamento.md` (como incluir um componente). Literais: as linhas de layout passam a ser montadas por partes (saem os textos inteiros, como `'MPAS, MED, OCN e ICE em todos os PETs'` e `'] MED=todos'`; entram as partes, como `'=PET['`, `' MED=todos'`, `' desativado)'`, `' e '` e `' em todos os PETs'`), com o mesmo resultado; entram as posições, os nomes dos modelos e `'none'`, e a mensagem `'register_model: MAX_MODELS insuficiente'` (erro de programação). Nenhum resultado muda. Tag `fase13-26-validada`; com ela, a P5 está concluída.
+- **Conferências e cuidados de validação (R-FASE13-25).** Etapa fora dos blocos 0 a C, com quatro pendências pequenas aprovadas pelo Daniel. (1) Nova conferência `cabecalhos` (`tools/dev/confere-cabecalhos.py`; 23 conferências): toda rotina de módulo de `src/` tem cabeçalho começando por `!> @brief`, toda rotina interna tem a linha `!>`, e todo nome depois de `@param` é argumento da rotina; é o modelo do README, até aqui conferido à parte em cada etapa de comentários. Passa nos 57 fontes de hoje. (2) `tools/dev/valida_rodada.bash submete` recusa um diretório que já tenha `logs/PET*.esmApp.log`: o ESMF acrescenta ao fim desses logs, e uma segunda execução no mesmo diretório juntaria as duas no relatório de acoplamento, como aconteceu na primeira rodada da R-FASE13-20; para repetir, `prepara` com outro nome. (3) A conferência `config` passa a conferir também que o `nuopc.input` da raiz é lido, na versão de hoje, sem erro, sem chave obsoleta e sem grupo obrigatório ausente (o aviso de `seq_repro` ignorado no modo concorrente continua permitido: o valor é intencional, para os experimentos de reprodutibilidade). (4) Com a chave `run_sequence_file`, a leitura da configuração escreve na saída padrão (no `esmApp_run.log`) o aviso 'sequencia de execucao lida de <arquivo> (run_sequence_file), fora da validacao do acoplador; use so em experimentos.' (decisão do Daniel: manter a chave, como no NUOPC, com o aviso). Documentação: `README.md`, `docs/conferencias-locais.md`, `docs/ferramentas.md` e `docs/validacao-refatoracao.md`. Literais: entram os textos do aviso (`'AVISO: sequencia de execucao lida de '` e `' (run_sequence_file), fora da validacao do acoplador; use so em experimentos.'`) e o formato `'(3A)'`. Nenhum resultado muda (sem a chave, a produção não passa pelo aviso). Tag `fase13-25-validada`.
+- **Coluna `options` em `ROUTES` (R-FASE13-24).** Segunda e última etapa da P6 e última do bloco C da fase 13. `cpl_route_t` (`cpl_map`) ganha a coluna `options`, com as opções do esquema de interpolação da rota no mesmo formato de `regrid_options` do `nuopc.input` (`'chave=valor,...'`, comprimento `OPTIONS_LEN` de `regrid_base`), vazia por padrão. `route_spec` (`med_cap_methods`) a passa a `regrid_spec`; as substituições do `&nuopc_regrid` continuam valendo por cima dela. Assim, as opções de um esquema podem ficar junto da rota, no mapa, e não só no `nuopc.input`. Nenhuma rota tem opções hoje: a configuração de todas as rotas é a mesma de antes, o que `test_routes` confere agora também na coluna nova (campo `options` do `regrid_spec_t`). `test_cpl_map` confere o formato da coluna (vazia, ou itens `chave=valor` separados por vírgula). `docs/acoplamento.md` ganha a coluna "Opções" na tabela das rotas (gerado por `mapa-acoplamento.py`, que passa a ler `OPTIONS_LEN` de `regrid_base`). Documentação: `README.md` (convenção "Interpolação"), `docs/arquitetura-acoplamento.md` e `docs/interpolacao-plugavel.md`, cujo passo 4 de "Como acrescentar um esquema" deixa de pedir a edição do `Makefile` (não vale desde a R-FASE13-07). Literais: entra um `''` (valor padrão da coluna nova) em `cpl_map.F90`; os demais são dos testes. Com esta etapa, o bloco C está concluído (P3, P11, P5 na parte de prioridade média e P6 na parte de prioridade média; ficam para depois o registro dos modelos e a divisão de PETs por blocos da P5, e o ponto genérico da P6, que espera a validação do DOCN). Nenhum resultado muda. Tag `fase13-24-validada`; com ela, os blocos 0 a C da fase 13 estão concluídos.
+- **Mapa escrito por grupos de campos e passagens (R-FASE13-23).** Primeira etapa da P6 (bloco C da fase 13); resolve a maior parte do atrito D3. A tabela `EXCHANGES` (`cpl_map`), que tinha 151 linhas, uma por campo e passagem, repetindo as outras cinco colunas, passa a ser escrita com 11 grupos de campos (`GROUP_MPAS_ATM`, `GROUP_DATM_ATM`, `GROUP_OCN_STATE`, `GROUP_ICE_SIS2`, `GROUP_OCEAN_FLUXES`, `GROUP_ICE_FLUXES`, `GROUP_ATM2OCN_OTHER`, `GROUP_OCN_EXPORT`, `GROUP_ICE_EXPORT`, `GROUP_ATM_SURFACE`, `GROUP_DOCN_ATM`) e 16 passagens, mais 5 linhas para as trocas de um campo só. Um grupo é um vetor constante de nomes e pode incluir outro (`GROUP_OCN_EXPORT` é `GROUP_OCEAN_FLUXES` mais Si_ifrac e So_duu10n). Uma passagem é um laço implícito no construtor da tabela, `(cpl_exchange_t(GRUPO(i_group), origem, destino, meio, condição, método), i_group = 1, size(GRUPO))`, que o compilador expande numa linha por campo, na ordem do grupo. A expansão é feita na compilação, e não numa rotina de inicialização como a NTC esboçava: `EXCHANGES` continua sendo uma constante com a mesma forma, e as consultas do mapa (que são `pure`), a conferência (`cpl_check`) e o driver não mudam. Um campo novo que segue um caminho existente é um nome a mais num grupo. Equivalência: a tabela de antes fica congelada em `tests/unit/exchanges_frozen.inc` (copiada do fonte sem mudança), e `test_cpl_map` confere que a expansão a reproduz linha a linha, nas seis colunas e na mesma ordem (a ordem define a ordem do anúncio dos campos); conferido que o teste acusa a troca de dois campos num grupo. `tools/dev/mapa-acoplamento.py` passa a ler os grupos (vetores de texto constantes do fonte) e a expandir as passagens como o compilador; as sete tabelas que ele lê são iguais às de antes, e `docs/acoplamento.md` não muda (conferência `mapa`). Ficam para depois, como a NTC prevê, o ponto genérico (`'OCN'` sem malha, que tiraria a duplicação entre MOM6 e DOCN e espera a validação do DOCN) e a coluna `options` de `ROUTES` (R-FASE13-24). Documentação: `README.md` (convenção "Campos trocados") e `docs/arquitetura-acoplamento.md` (o mapa e como incluir um campo). Literais: em `cpl_map.F90`, o conjunto de textos distintos é o mesmo; saem só as repetições dos valores das colunas (a conferência `literais`, que conta as ocorrências, acusa a diferença). Nenhum resultado muda. Tag `fase13-23-validada` (o relatório de acoplamento, com a ordem do anúncio dos campos de cada conector, é igual ao da R-FASE13-22).
+- **Sequência de execução como texto (R-FASE13-22).** Etapa da P5 (bloco C da fase 13), a parte de prioridade média; o registro dos modelos e a divisão de PETs por blocos ficam para depois (servem a componentes novos). As sete variantes da sequência de execução de um passo, que eram uma cadeia de `if` em `SetRunSequence` (`esm.F90`) com as linhas escritas no código, passam à tabela `RUN_SEQUENCES` do novo `src/driver/run_sequences.F90`: cada sequência tem um nome (`conc_mom6_ice`, `conc_mom6`, `conc_docn`, `seq_mom6_ice_repro`, `seq_mom6_ice`, `seq_mom6`, `seq_docn`), o título que vai para o registro e o texto, as linhas que o NUOPC executa separadas por `;`. `run_sequence_name` escolhe o nome pela configuração, com as mesmas condições de antes, e `run_sequence_lines` separa o texto em linhas; o driver as entrega ao NUOPC como antes, com a linha `@<dt_coupling>` antes e `@` depois. As linhas e os títulos são os mesmos, caractere a caractere, e a mensagem `RunSequence <título> (dt=... s)` não muda. As explicações da ordem (modo concorrente, `seq_repro`, a linha `MED -> ICE` entre OCN e ICE) passam ao cabeçalho do módulo novo. Funcionalidade nova (P5): a chave opcional `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência no formato do NUOPC, sob o rótulo `runSeq::`, para experimentar outra ordem sem recompilar; vazia (o padrão), a sequência é a da tabela. Um arquivo que não existe é erro fatal na leitura da configuração; um arquivo sem o rótulo para o driver com erro. O `nuopc.input` da raiz traz a descrição da chave e um exemplo (a sequência `seq_mom6_ice`), e o README, a explicação. Novo teste `tests/unit/test_run_sequences.F90` (18 casos): as sete sequências dão as linhas e os títulos de antes (copiados do `esm.F90` da R-FASE13-21), as 16 combinações das chaves escolhem a mesma sequência que a cadeia de `if` antiga, a leitura de arquivo, e a chave nova. Documentação: `README.md`, `nuopc.input`, `docs/arquitetura-acoplamento.md` e `docs/uso-smoke-tests.md`. Literais: saem os nomes das linhas das variantes (`'MED -> MPAS'`, `'MPAS'` e os demais); entram os nomes e os textos das sete sequências, o rótulo `'runSeq::'`, as mensagens novas (`'run_sequence_file="'`, `'" nao encontrado.'`, `'run_sequence_file: nao foi possivel ler a '`, `'sequencia '`, `' de '`), `'do arquivo '`, `';'` e dois `''`; os títulos mudam de arquivo, sem mudar. Nenhum resultado muda. Tag `fase13-22-validada`.
+- **Configuração lida por grupo (R-FASE13-21).** Etapa da P11 (bloco C da fase 13); resolve o atrito D12. `config_read` (`coupler_config`), que tinha cerca de 320 linhas com as chaves de todos os grupos, passa a chamar as rotinas de cada grupo do `nuopc.input`: `read_<grupo>_group` lê o grupo a partir dos valores atuais do módulo (com as normalizações do grupo: minúsculas e, em `&nuopc_petlayout`, o `pet_layout` deduzido de `coupling_mode`), `<grupo>_group_valid` confere as regras do grupo, rotinas de aviso cuidam das chaves obsoletas e dos valores suspeitos, e `publish_<grupo>_group` copia os valores para as variáveis `cfg_*`. Os valores de cada grupo durante a leitura ficam num tipo próprio (`driver_group_t`, `docn_group_t` e os demais), com os nomes das chaves. `config_read` localiza o arquivo, chama as rotinas na mesma ordem de antes, confere as regras que envolvem mais de um grupo (a tabela `COUPLER_MODES`, `use_docn_ice` com `docn_ice_file` e `seq_repro`) e só publica se nada estiver errado, como antes. As chaves, os nomes dos grupos, os valores padrão e as mensagens não mudam, nem a ordem das mensagens. A única diferença: com dois erros fatais no mesmo arquivo, `use_sis2_dynamic=.false.` com `ice_pet_count > 0` e uma combinação de componentes recusada, a mensagem informada passa a ser a de `ice_pet_count` (uma regra de `&nuopc_petlayout`, agora conferida com as do grupo), e não a da combinação; cada erro sozinho tem a mesma mensagem. Nova conferência `config` (`tests/config/compara-config.bash REV`; 22 conferências): compila `coupler_config` da versão de `REV` e da árvore de trabalho com o programa `tests/config/test_config.F90` e compara, em 29 casos, as mensagens, o código de retorno e o valor de todas as variáveis `cfg_*`: o `nuopc.input` da raiz, arquivo vazio e ausente, chave desconhecida, chaves obsoletas, cada uma das 17 mensagens de erro fatal, os avisos, valores em maiúsculas, `&nuopc_regrid` e duas leituras seguidas (uma leitura com erro não muda nenhum valor). README: a convenção "Configuração" diz onde entra uma chave nova. Literais: os mesmos (a conferência `literais` passa; o prefixo da mensagem de erro fatal passa da interna `fatal` à rotina de módulo `config_error`). Nenhum resultado muda. Tag `fase13-21-validada`.
+- **Mapa e framework de interpolação sem variáveis globais; conferência `camadas` (R-FASE13-20).** Segunda e última etapa da P3 (bloco C da fase 13); fecha o defeito D7. O mapa (`cpl_map`) deixa de ler as chaves de `&nuopc_mode`: o tipo `cpl_config_t` e a função `cpl_current_config`, a única que lia as variáveis `cfg_use_*`, passam para `coupler_config`, dono das chaves; toda consulta ao mapa já recebia a configuração como argumento (`cfg`), e quem chama (driver, mediador e caps) tira a da rodada de `coupler_config`. `cpl_map` continua oferecendo `cpl_config_t` às consultas (o tipo é reexportado), e de `coupler_config` usa só o tipo e a tabela `COUPLER_MODES`. `cpl_check_coupling` (`cpl_check`) recebe a configuração do driver como argumento. O gerente de rotas (`regrid_manager`) deixa de ler o `&nuopc_regrid`: `add` ganha o argumento opcional `overrides`, uma lista do novo tipo `regrid_override_t` (rota, esquema, métodos, arquivo de pesos, classe e opções), e a rotina que aplicava as substituições (`apply_overrides`, antes `apply_config`) percorre essa lista do mesmo modo; o mediador monta a lista a partir de `coupler_config` (`nuopc_regrid_overrides`, em `med_cap_methods`) e a passa em `create_route`, o único lugar que cria rotas. Os comprimentos das colunas são os das chaves, e a mensagem 'rota ... configurada por &nuopc_regrid' não muda. Com isso, o mapa e o framework podem ser usados e testados sem o `nuopc.input`: o teste do framework (`tests/regrid`) ganha o caso 2c, a substituição de uma rota passada por argumento. Nova conferência `camadas` (`tools/dev/confere-camadas.py`; 21 conferências): com uma tabela que dá a camada e o componente de cada fonte (`src/shared`, `src/regrid`, `src/coupling`, componentes, `src/driver`, `src/main`; componentes: mediador, MONAN-A, DATM, MOM6, DOCN e SIS2), acusa o `use` de módulo de camada de cima ou de outro componente, a leitura de variáveis `cfg_*` em `src/regrid` e `src/coupling`, e o fonte fora da tabela. Na versão da R-FASE13-18, ela acusa os quatro casos do D7 (`time_utils`, `mom_si_ifrac`, `cpl_map` e `regrid_manager`); na de agora, nenhum. O teste `completar`, que compila o mesmo programa nas duas versões, tira `cpl_current_config` de `coupler_config` quando a versão o tem ali (macro `COM_CONFIG_DO_MAPA`). `src/dependencies.mk` é regenerado (`regrid_manager` não depende mais de `coupler_config`). Documentação: `README.md` (convenção "Camadas"), `docs/arquitetura-acoplamento.md`, `docs/interpolacao-plugavel.md`, `docs/conferencias-locais.md` e `docs/ferramentas.md`. Literais: nenhum sai; entram seis `''`, os valores padrão de `regrid_override_t`, e os textos do caso novo do teste do framework. A conferência `instrucoes` mostra as linhas `use` trocadas, os argumentos novos e as rotinas movidas. Nenhum resultado muda. Tag `fase13-20-validada` (rodada R-FASE13-20b; a primeira, R-FASE13-20, também deu PASS, mas o diretório recebeu três execuções, e o log do PET 0 acumulou três relatórios de acoplamento); com ela, a P3 está concluída.
+- **Leitor dos dados oceânicos num módulo de serviço (R-FASE13-19).** Primeira etapa do bloco C da fase 13 (P3, primeira parte). O cap do MOM6 (`mom_si_ifrac`) usava `ReadOcnFieldInterp` do módulo de diagnóstico do DOCN (`docn_cap_netcdf`), e `time_utils` tirava `ChkErr` do cap do MOM6 (`MOM_cap_methods`): um módulo comum dependia de um cap, e um cap dependia de outro. `ReadGlobalField` e `ReadOcnFieldInterp` passam, sem mudar uma instrução, para o novo módulo `ocn_data_reader_mod` (`src/shared/ocn_data_reader.F90`), que o DOCN e o cap do MOM6 usam; as mensagens continuam com a marca `DOCN` e o mesmo texto. `docn_cap_netcdf` fica só com o gravador do diagnóstico (`WriteDOCNDiag`). `time_utils` passa a usar o `ChkErr` de `coupler_utils`, que faz o mesmo que o do cap do MOM6. `src/dependencies.mk` é regenerado: `time_utils` não depende mais do cap do MOM6, e `mom_si_ifrac` não depende mais do DOCN. As duas rotinas são iguais, texto a texto, às de antes; as conferências `literais` e `instrucoes`, que comparam arquivo por arquivo, acusam a saída delas de `docn_cap_netcdf.F90` e as duas linhas `use` trocadas, e, somados os arquivos, os literais são os mesmos. Nenhum resultado muda. Tag `fase13-19-validada`.
+- **Exportação do mediador pelo mapa (R-FASE13-18).** Terceira e última etapa do bloco B da fase 13 (P8, segunda parte); fecha o defeito C5. `export_to_components` (`med_export`) deixa de ter 30 chamadas `RegridOrCopy` escritas à mão: percorre os campos que chegam a `MED@ocn_med` pela rota `atm2ocn` no mapa (nova `cpl_route_fields`, em `cpl_map`, no molde de `cpl_arrivals`), na ordem do mapa, e tira cada um do registro de campos internos da R-FASE13-17 (`med_field_index`). Ficam explícitos, antes do laço, a fração de gelo (`export_ice_fraction`, rota `atm2ocn_ice`) e o cálculo de `Sx_tsfc` (`export_surface_temperature`), que não dependem das outras exportações. A ordem das interpolações muda (a do mapa); cada uma é independente das outras, e os valores não mudam. Um campo da rota fora de `MED_FIELDS` é erro (`log_error`), e a conferência estática o acusa antes. A conferência `exportacao` (`confere-exportacao.py`) passa a conferir o novo caminho: todo campo que sai do mediador por conector é exportado pelo laço (rota `atm2ocn` e nome em `MED_FIELDS`) ou preenchido pelo nome em `src/mediator/`, e o inverso. `test_cpl_map` confere, nas cinco configurações, a lista e a ordem de `cpl_route_fields` e que todos os nomes estão em `MED_FIELDS`. Com isto, um campo calculado no mediador e enviado ao oceano precisa de quatro lugares: a linha em `FIELDS`, a troca no mapa, a linha em `MED_FIELDS` (com o componente e a ligação no estado interno) e o cálculo. Literais: saem os nomes das 30 chamadas e os quatro avisos que repetiam, para So_u, So_v, Sf_zorl e Sx_tsfc, a falha que `RegridOrCopy` já registra ('RegridOrCopy So_u falhou: exportState mantem zeros', 'RegridOrCopy So_v falhou: exportState mantem zeros', 'RegridOrCopy Sf_zorl falhou: exportState mantem 0.01 m', 'RegridOrCopy Sx_tsfc falhou: exportState ' e 'mantem o valor inicial (FillInternalField de f_tsfc_atm)'); entram `'atm2ocn'`, `'MED@ocn_med'` e `''` nas chamadas a `cpl_route_fields`, a mensagem de erro do laço e os textos do teste novo. Nenhum resultado muda. Tag `fase13-18-validada`; com ela, o bloco B está concluído.
+- **Campos internos do mediador por nome (R-FASE13-17).** Segunda etapa do bloco B da fase 13 (P8, primeira parte). Os 36 campos internos do mediador, na malha de fluxo, passam a ser descritos pela tabela `MED_FIELDS` (`med_cap_types`): nome de acoplamento (o de `FIELDS` e do mapa), nome do `ESMF_Field` e valor inicial, na ordem de criação de antes. `create_internal_fields` (`med_init`) cria os campos num laço, guarda-os no novo registro `is%fields` (nome e campo), liga os componentes de `is%ocn_flx`, `is%ocn`, `is%ice` e `is%sfc` às entradas do registro (`bind_internal_fields`; o `ESMF_Field` é uma referência, e componente e entrada são o mesmo campo) e os preenche com os valores iniciais, que antes eram 36 chamadas a `ZeroInternalField`, `ZeroOcnFluxFields` e `FillInternalField`. A física e as fases do mediador continuam a usar os mesmos componentes e não mudam. O gravador do mediador (`internal_field_ptr`) passa a procurar o campo pelo nome no registro (`med_field_index`), no lugar do `select case` de 31 casos; o aviso para um nome fora do registro tem o mesmo texto. O teste dos gravadores passa a criar os campos internos por `create_internal_fields` antes de lhes dar os valores sintéticos, nas duas versões comparadas. Literais: nenhum sai; entram os nomes de acoplamento dos 36 campos (na tabela e na ligação), três `''` (valores padrão dos tipos novos) e a mensagem de `error stop` `'bind_internal_fields: campo fora de MED_FIELDS'`, para um nome de ligação fora da tabela (erro de programação). Nenhum resultado muda. Tag `fase13-17-validada`.
+- **Dicionário de campos com nome longo e nome CF, consultado pelos gravadores (R-FASE13-16).** Primeira etapa do bloco B da fase 13 (P7). `FIELDS` (`cpl_fields`) ganha as colunas `long_name` e `cf_name`, preenchidas em 40 campos com exatamente os textos que os gravadores escreviam: os 31 campos exportados pelo mediador (`mom6_import_*.nc`, `med_cap_netcdf`) e os 9 campos `*_mpas` com caso no gravador da exportação do MONAN-A (`monan_export_*.nc`, `mpas_cap_netcdf`). A nova `cpl_field_attributes` devolve units, long_name e standard_name pelo dicionário, ou os padrões de antes ('1', o nome, 'unknown') para campo sem nome longo. Os dois gravadores passam a usá-la: sai o `select case` de 31 casos de `put_field_metadata` e saem `field_units`, `field_long_name` e `field_stdname` do gravador do MONAN-A, com os casos para nomes sem o sufixo `_mpas` (`Sa_pslv`, `Sa_ubot`, `Faxa_prec`, `Faxa_taux`, `Faxa_lhflx` e outros), que o cap nunca exporta. O gravador do MONAN-A continua gravando os textos com o comprimento de antes (brancos à direita incluídos). Conferido que, para cada nome que chega a cada gravador (os 31 do `exportState` do mediador; os 13 `*_mpas` do cap), os atributos são os mesmos; a conferência `gravadores` compara os arquivos byte a byte. Os gravadores da importação do MONAN-A (`mpas_import_diag`) e do DOCN têm textos próprios e não mudam; as diferenças em relação ao dicionário ficam registradas em `docs/estado-do-projeto.md` (seção 6), para decisão do GT. `docs/acoplamento.md` ganha as duas colunas (gerado por `mapa-acoplamento.py`), e `test_cpl_map` confere o dicionário e `cpl_field_attributes`. Literais, no total dos três arquivos: nenhum texto de atributo novo (os nomes longos e CF passam dos gravadores para `cpl_fields.F90` com o mesmo texto, e entram duas vezes `''`, o valor padrão das colunas novas); saem os rótulos dos casos (os nomes dos campos), as unidades (agora as da coluna `units`, iguais às dos casos), as repetições dos textos que valiam para mais de um caso, `'unknown'` e `'1'` repetidos, e os textos só dos casos inalcançáveis: 'Taxa de precipitacao total media no intervalo de acoplamento', 'Radiacao SW descendente media no intervalo de acoplamento', 'Radiacao LW descendente media no intervalo de acoplamento', 'Tensao de cisalhamento zonal na superficie', 'Tensao de cisalhamento meridional na superficie', 'Fluxo de calor latente na superficie', 'Fluxo de calor sensivel na superficie', 'precipitation_flux' e 'surface_upward_latent_heat_flux'. Nenhum resultado muda. Tag `fase13-16-validada`.
+- **Comentários de `src/coupling`, `src/regrid`, `src/shared`, do driver e do programa principal (R-FASE13-15).** Terceira e última etapa da P1 (bloco A da fase 13). Mesmo tratamento da R-FASE13-13 e da R-FASE13-14: saem as referências a etapas da refatoração (`R-FASE9-01`, `R-FASE11-03` a `25`, a tag `fase11-01-validada`) e a como o código era antes, mantendo o porquê de cada escolha; saem as 44 linhas de moldura. Os cabeçalhos de `cpl_map`, `cpl_fields` e `cpl_check` passam a descrever o mapa como ele é usado hoje (dele saem as listas de campos, os métodos dos conectores e a conferência), com os nomes atuais das colunas (`via`, `methods`, `fallback`, `scheme`, `fill`, `units`), e os rótulos das colunas comentadas de `EXCHANGES`, `EXPORTS` e `GAPS` passam aos nomes dos campos dos tipos; o de `mom6_supergrid` troca o relato da causa pela explicação de por que a grade T vem do supergrid, e o de `diag_bitsum` passa ao modelo `@file`. 34 rotinas sem cabeçalho ganham um (entre elas as operações `setup`, `execute` e `release` dos esquemas de `src/regrid`, que também ganham a descrição nas interfaces abstratas de `regrid_base`), e 128 cabeçalhos `!>` ganham o `@brief`. Os nomes depois de `@param` que ainda eram os de antes da fase 12 (`rotulos`, `nomes`, `grade`, `ponto`, `chaves` e outros, 40 em `src/coupling`, `src/regrid`, `src/shared` e no mediador) passam aos nomes dos argumentos; o README registra a regra. Comentários corrigidos onde descreviam o código de forma errada: o modelo de esquema de `regrid_idw` não pede mais a edição do `Makefile` (fontes e dependências saem dos `use` desde a R-FASE13-07) e `cpl_fields` deixa de dizer que nenhum componente usa `FIELDS`. As citações de literais nos comentários (`SIMULACAO CONCLUIDA COM SUCESSO`, `DIFERENCA`, `MediatorAdvance concluido`) ficam sem acento, como no código. Corrige também o negrito da entrada da R-FASE13-13 neste arquivo. Só comentários mudam: as instruções são as mesmas (conferência `instrucoes`), e as constantes de texto também. Com esta etapa, a P1 está concluída. Tag `fase13-15-validada`.
+- **Comentários dos caps (R-FASE13-14).** Segunda etapa da P1 (bloco A da fase 13), em `src/caps` (sem `caps/ocean/upstream/`, que vem do MOM6). Mesmo tratamento da R-FASE13-13: saem as referências a etapas da refatoração (`R-FASE8-02` a `15`, `R-FASE11-23` e `24`), a versões anteriores do código (`v2`, o histórico das versões 2.0 a 2.6, 2.5 a 3.0 e 7.0 a 9.2), às sondas e investigações já encerradas (o relato da troca de halo em `exchange_surface_halos`, da conferência de conexão em `verify_import_connected`, do diagnóstico de `monan2_import_*.nc` e o roteiro de medição do passo lento do SIS2, que já não existe) e ao "antes/agora", mantendo o porquê de cada escolha; saem as 182 linhas de moldura e os quadros do cabeçalho do `DATM_cap.F90` e do `DOCN_cap.F90`, que passam ao modelo `@file` com a tabela dos campos; cerca de 270 linhas recebem acento (inclusive formas que o dicionário não decide sozinho, como `está`, `contínua`, `pública`, `lê` e `é`). Os cabeçalhos seguem o modelo Doxygen do README: 37 rotinas ganham cabeçalho ou passam ao modelo (as fases NUOPC dos caps do MPAS, do SIS2, do DATM e do DOCN, `fill_invalid_sst`, `mpas_atm_init_sfc`, `warn_if_null` e outras), e 35 cabeçalhos `!>` dos caps e 41 do mediador ganham o `@brief` que faltava; `point_to`, interna de `associate_fluxes` (`med_exchange`), ganha a sua linha `!>`. Comentários corrigidos onde descreviam o código de forma errada: a decomposição do DOCN (blocos quase quadrados, e não só em longitude) e as dependências do cap do MOM6. Só comentários mudam: as instruções são as mesmas (conferência `instrucoes`), e as constantes de texto também. Tag `fase13-14-validada`.
+- **Comentários do mediador (R-FASE13-13).** Primeira etapa da P1 (bloco A da fase 13), em `src/mediator`. Os comentários passam a descrever o código de hoje: saem as referências a etapas da refatoração (`R-FASE8-01`, `R-FASE11-15` a `20` e outras), a investigações e à forma como o código era antes, mantendo o porquê de cada escolha; saem as 172 linhas de moldura (`!====`, `!----`); as palavras sem acento dos comentários recebem acento (cerca de 400 linhas, conferidas contra o dicionário pt_BR; nomes de variáveis, valores entre aspas e textos de mensagens ficam como estão). Os cabeçalhos das rotinas seguem um modelo Doxygen (`@brief`, detalhes, `@param`), registrado no README (convenção "Comentários" e "Modelo dos cabeçalhos"): 14 rotinas ganham cabeçalho e os 6 do ciclo NUOPC em `MED_cap` passam ao modelo. Só comentários mudam: as instruções são as mesmas (conferência `instrucoes`), e as constantes de texto também. Tag `fase13-13-validada`.
+- **Mensagens do driver e dos módulos comuns no registro com níveis (R-FASE13-12).** Quinta e última etapa da P10 (bloco A da fase 13). As 57 chamadas a `ESMF_LogWrite` que restavam (driver `esm`, `cpl_check`, `src/regrid`, `mom6_supergrid` e `nc_writer`) passam a `log_error`, `log_warning`, `log_info` e `log_report`. O driver usa a marca `ESM` (as linhas `ESM: layout ...`, que as ferramentas de balanceamento leem, não mudam); os erros que valem em todos os PETs (partição split inválida, `CplList` sem espaço, conferência do mapa com diferenças) são registrados por `log_error` só no PET 0. A interpolação ganha a marca `COMP_REGRID` (`regrid`), e as linhas `CPL-REL: rota ...` e as do `cpl_check` saem por `log_report` (o texto das linhas não muda; sai a constante `CPL_PREFIX`). `mom6_supergrid` e `cpl_tripolar_grid` trocam o rótulo livre (`tag`, `tag_corners`) pela marca do componente (`comp`): saem `MED B-OCNGRID-01`, `MED B-CONSERVE-01` e `ICE(SIS2)` dessas mensagens, e o diagnóstico da leitura dos centros passa a `DIAG supergrid tcoords`, de depuração e só calculado nesse nível. `nc_writer` registra as falhas do NetCDF por `log_warning`, com o mesmo texto. Ficam com `write(*)` só a leitura do `nuopc.input` (antes de existir o registro do ESMF), as linhas do `esmApp` lidas pelas ferramentas e a própria `log_error`. O teste `supergrid` passa a compilar as duas versões inteiras (`compila-local.bash`), a ligar os objetos pelos `use` e a traduzir o log antigo, e pede `log_level = 'debug'`; `test_supergrid` passa a marca por posição, para servir às duas versões. O teste `malhas` pede `log_level = 'debug'` à versão que tem a chave (macro `COM_LOG_LEVEL`). Regras de tradução na seção R-FASE13-12 de `tests/log-traduzido.sed`. Nenhum cálculo muda. Tag `fase13-12-validada`; com ela, a P10 está concluída.
+- **Mensagens dos caps no registro com níveis (R-FASE13-11).** Quarta etapa da P10 (bloco A da fase 13). A migração que restava foi dividida em duas etapas (decisão do Daniel): esta, dos caps, e a R-FASE13-12, do driver e dos módulos de `src/coupling`, `src/regrid` e `src/shared`; a P1 passa a R-FASE13-13 a 15, e os blocos 0 a C, a 24 etapas. As 101 chamadas a `ESMF_LogWrite` e as 48 impressões `write(*)` dos caps do MONAN-A, do DATM, do MOM6, do SIS2 e do DOCN passam a `log_error`, `log_warning`, `log_info` e `log_debug`, com as marcas `ATM`, `OCN`, `ICE` e as novas `DATM` e `DOCN` (antes `mpas_cap:`, `(mpas_import)`, `OCN(MOM6)`, `OCN(Alt1)`, `OCN(proxy)`, `ICE(SIS2)` e nenhuma); os nomes de rotina ficam sem parênteses (`ATM: mpas_export: ...`) e saem os códigos de investigação (`B-59`, `B-58v2`, `B-ICE-DECOMP-01`, `B-INJECT-HALO-01`, `BUG-WIND-01`, `B-DIAGMASK-01`, `v2.3`, `v7.0`). As impressões na saída padrão dos caps do MONAN-A (`[NetCDF] ...`, avisos de `mpas_atm_init`, o retorno de u10/v10 pelo perfil logarítmico) vão para o log do ESMF (decisão do Daniel). Novo `log_error` em `coupler_log_mod`: grava no log do ESMF com severidade ERROR e também na saída padrão, para que o motivo da parada apareça no `esmApp_run.log` (decisão do Daniel); o quadro "ERRO FATAL: campos de importacao nao conectados" do cap do MPAS vira uma chamada a `log_error` no PET 0. Diagnósticos de `mpas_cell_binning` como depuração: `DIAG cell_binning fill` (antes `##### BUG-SPARSE-02 v7.6 ATIVO #####`) e `DIAG cell_binning coverage` (antes `[MPAS-DIAG]`, na saída padrão). O detalhe de cada passo (interpolação do DATM e do DOCN, importação e exportação do MPAS, etapas do SIS2, `update_ocean_model`, persistência e sigmoide de `Si_ifrac`) passa a depuração; `ModelAdvance concluido` de cada cap fica como informação. O teste `test_log` confere também `log_error` e `log_report`; os testes `grade` e `docn` passam a traduzir o log da versão anterior e a ignorar a severidade, e pedem `log_level = 'debug'`. As regras de tradução estão em `tests/log-traduzido.sed`, seção R-FASE13-11. Nenhum cálculo muda. Tag `fase13-11-validada`.
+- **Mensagens e diagnósticos do mediador no registro com níveis (R-FASE13-10).** Terceira etapa da P10 (bloco A da fase 13). As 74 chamadas a `ESMF_LogWrite` e as 11 impressões `write(*)` de `src/mediator` passam a `log_warning`, `log_info`, `log_debug` e `log_report` (`coupler_log_mod`): a marca `MED:` é posta pela rotina e os textos perdem os códigos de investigação (`B-45`, `Fase3`, `Sprint C`, `A.5.2`, `B-ICEREGRID-01` e outros) e o `AVISO` que repetia a severidade. Nível: aviso para falha contornada ou valor suspeito; informação para o que acontece uma vez por rodada, mais `MediatorAdvance concluido` a cada passo; depuração para o detalhe de cada passo (fonte da forçante, fluxos nativos, `Sf_zorl`, interpolação do gelo, SST completada, carimbo do relógio, `CheckImport`). Os diagnósticos permanentes vão para `med_diag`, chamados por uma linha protegida por `log_debug_enabled()`, com nomes que dizem o que medem (decisão do Daniel, estilo da NTC): `DIAG ice_fraction source`, `destination`, `raw` e `bitsum etapa1` a `etapa4` (antes `FIX-DIAG-ICESRC`, `ICEMASK-02` e `BITSUM`), `DIAG ocean_mask` (`ICEMASK-01`), `DIAG ice_stability` (`ICESTAB`), `DIAG sst raw` (`MED B-OCNGRID-02 DIAG: So_t BRUTO`) e `DIAG atm_forcing summary`, o resumo da forçante que ia para a saída padrão com o rótulo `[MED BUG-CALC-08 + BUG-MPAS-01 DIAG]` e passa ao log do ESMF, em depuração (decisão do Daniel). Os avisos `ICEGEO` e `CONSERVE02` passam a "gelo em latitude implausivel" e "grade OCN: ...". `diag_bitsum_log` recebe a marca do componente e grava por `log_debug`. Novo `log_report` em `coupler_log_mod`, para o relatório de acoplamento (`CPL-REL:`, em qualquer nível; o texto das linhas não muda). `tools/coupler/mede-taxa-repro.sh` lê os novos rótulos. Os testes `bulk`, `completar`, `malhas` e `gravadores` comparam a mensagem sem a severidade (o `gravadores` passa a pedir `log_level = 'debug'` à versão nova, para a linha da máscara do diagnóstico) e passam o log da versão anterior por `tests/log-traduzido.sed`, que tem, para cada mensagem que mudou, o texto antigo e o novo; essa é a lista completa dos literais trocados. As mensagens de erro de `ESMF_LogFoundError` e os rótulos passados a `cpl_grids` e `mom6_supergrid` (`MED B-OCNGRID-01`, `MED B-CONSERVE-01`) ficam para a próxima etapa. Documentação: `README.md` (convenção), `docs/inventario-sondas.md`, `docs/uso-mede-taxa-repro.md`, `docs/ferramentas.md` e `docs/validacao-refatoracao.md`. Nenhum cálculo muda. Tag `fase13-10-validada` (com a bateria `mede-taxa-repro --runs 2` em `log_level = 'debug'`: as duas execuções idênticas nas quatro etapas das somas de bits).
+- **Registro com níveis e chave `log_level` (R-FASE13-09).** Segunda etapa da P10 (bloco A da fase 13). Novo módulo `coupler_log_mod` (`src/shared/coupler_log.F90`), com `log_warning`, `log_info` e `log_debug`, as marcas de componente `COMP_ATM`, `COMP_OCN`, `COMP_ICE`, `COMP_MED` e `COMP_DRV` e `log_debug_enabled()`, que protege diagnósticos caros. A nova chave `log_level` do `&nuopc_driver` (`'warning'`, `'info'` ou `'debug'`; padrão `'info'`, decidido pelo Daniel) escolhe o que é gravado; valor fora desses três é erro fatal na leitura. A chave `write_fixdiag` fica obsoleta: é aceita, não tem efeito e, ligada, gera um aviso. As sondas de depuração (`BITSUM`, `ICESRC`, `ICEMASK`, `ICESTAB`) passam a depender de `log_level = 'debug'`; como `write_fixdiag` valia `.true.` por padrão, uma rodada com o `nuopc.input` de sempre deixa de gravá-las (e de calculá-las), e o `mede-taxa-repro.sh` avisa no início quando `log_level` não é `'debug'`. O alerta `ICEGEO` passa a ser gravado sempre, como já acontecia com o padrão. As mensagens existentes ainda não passam pelo novo módulo (próxima etapa). Novo teste `tests/unit/test_log.F90` (leitura da chave e o que cada nível grava). Os testes `bulk` e `completar` pedem `log_level = 'debug'` à versão nova (no `completar`, pela macro `COM_LOG_LEVEL`, quando a versão tem a chave), para que o log continue com as mesmas sondas da versão anterior. Documentação: `nuopc.input` da raiz, `README.md` (convenção e tabela de níveis), `docs/uso-mede-taxa-repro.md`, `docs/ferramentas.md` e `docs/inventario-sondas.md`. Nenhum cálculo muda. Literais novos: `'AVISO: write_fixdiag (&nuopc_driver) '`, `'e obsoleta e nao tem efeito; os diagnosticos saem com log_level=''debug''.'`, `'log_level="'`, `'" invalido; use warning|info|debug.'` e os textos de `coupler_log_mod` (níveis, marcas e o separador `': '`). Tag `fase13-09-validada`.
+- **Sondas de investigações encerradas retiradas (R-FASE13-08).** Primeira etapa da P10 (bloco A da fase 13). Novo `docs/inventario-sondas.md`, com as 18 sondas de investigação e o destino de cada uma, decidido pelo Daniel. Ficam, para o registro com níveis da próxima etapa, as lidas por `tools/coupler/mede-taxa-repro.sh` (`BITSUM`, `ICESRC`, `ICEMASK`), `ICESTAB`, o alerta `ICEGEO` e os dois alertas de `CONSERVE02`. Saem 13: `ICEFLUX` (`med_bulk_ncar`), `CONSERVE01` e a linha informativa de `CONSERVE02` (`med_init`), `NCWRITE` (`med_cap_netcdf`, com o argumento e o estado `first_import_write` que só a serviam), as quatro linhas `write(*)` de `[MED-DIAG]`, `TSFCCOMP` e `ICEREGRID04` (`med_export`), `SPRINTB2` (`med_ocean`), `SLOWSPLIT` com as três somas de controle por passo do SIS2 (`sis_cap_MONAN`), `FASTSYNC`, `ALBEDO` e `TSKIN` (`sis_cap_fields`) e `ALBFEEDBACK` (`mpas_atm_model`, com os argumentos que só a serviam). Nenhum cálculo muda. Dois efeitos laterais: a sonda `SPRINTB2` fazia `rc = ESMF_SUCCESS` quando `write_fixdiag` estava ligado, escondendo uma falha da interpolação da SST; agora o resultado é o mesmo com a chave ligada ou desligada. O aviso de SST nula na inicialização (`med_exchange`) deixa de citar `[MED-DIAG] f_sst_atm`. Os testes que comparam o log com `REV` ignoram as linhas retiradas (`tests/log-retirado.txt`). Literais: saem os textos das 13 sondas; muda `'"So_t BRUTO" e "[MED-DIAG] f_sst_atm" no passo 1 antes de '` para `'"So_t BRUTO" no passo 1 antes de '`. Tag `fase13-08-validada`.
+- **Fim das listas de fontes escritas à mão (R-FASE13-07).** Segunda e última etapa da P2 (bloco A da fase 13). O `Makefile` compila todo `.F90` dos diretórios de `SRC_SUBDIRS` (`SRCS` sai da lista de 57 nomes); `MOM6_SRCS`, os fontes com real de 8 bytes, continua no `Makefile` e é lida também pelo `compila-local.bash`. O `compila-local.bash` compila os fontes de `src/` menos `caps/ocean/upstream/` e `main/`, na ordem dada pelos `use` (`dependencias.py ordem`), e perde a opção `-a` e os nomes antigos de fontes renomeados, que só serviam a versões anteriores; uma versão anterior é compilada a partir da sua própria árvore (as extrações de `REV` passam a levar o `Makefile`). Os oito roteiros de teste e o `tests/regrid/Makefile` ligam os objetos de que cada programa depende (`dependencias.py objetos`), no lugar das listas `OBJS` e `REGRID`. O `make check` passa a conferir `src/dependencies.mk`. Saem 11 listas de fontes ou objetos (a `SRCS` do `Makefile`, a do `compila-local.bash`, a `REGRID` do `tests/regrid/Makefile` e as `OBJS` de oito roteiros); fica só `MOM6_SRCS`. Na Jaci, os 57 objetos são compilados com os mesmos comandos; muda só a ordem dos objetos na ligação de `bin/esmApp`. Nenhum fonte Fortran muda. Tag `fase13-07-validada`.
+- **Dependências entre módulos geradas dos `use` (R-FASE13-06).** Primeira etapa do bloco A da fase 13 (proposta P2). O novo `tools/dev/dependencias.py` lê os `.F90` de `src/`, acha onde cada módulo do acoplador é definido e escreve, a partir dos `use`, `src/dependencies.mk`, que o `Makefile` inclui no lugar das 46 regras escritas à mão (e o `tests/regrid/Makefile`, no lugar das suas 7). As regras geradas são as mesmas: o `make -p` dá os mesmos pré-requisitos para os 57 objetos e o `make -n` dá os mesmos comandos, na mesma ordem. O script também lista os fontes em ordem de compilação (`ordem`) e os objetos de que um programa depende (`objetos`), para a próxima etapa, que troca as listas de fontes escritas à mão. Nova conferência `dependencias` (`dependencias.py gera -c`; 19 conferências). Só compilação e ferramentas; nenhum fonte Fortran muda. Tag `fase13-06-validada`.
+- **Colunas de limite retiradas de `ROUTES` e conferência da exportação do mediador (R-FASE13-05).** Quinta e última etapa do bloco 0 da fase 13, defeitos C4 e C5. C4: saem de `cpl_route_t` as colunas `min_limit` e `max_limit`, que nenhuma rota usava e nenhum código aplicava; a etapa "limitar" das rotas fica só com `nan_to` (cabeçalho do `cpl_map.F90`, `mapa-acoplamento.py`, `docs/acoplamento.md` e `docs/arquitetura-acoplamento.md`). C5: o novo `tools/dev/confere-exportacao.py` confere que cada um dos 31 campos que saem do mediador por conector no mapa é o destino de um `RegridOrCopy(..., exportState, "<nome>", ...)` em `src/mediator/`, e que todo nome preenchido assim está no mapa; entra no `confere-tudo.bash` como a conferência `exportacao` (18 conferências). A solução definitiva continua sendo a P8 (exportação pelo mapa), no bloco B. Nenhum cálculo e nenhum literal mudam. Tag `fase13-05-validada`.
+- **Guardas sem curto-circuito (R-FASE13-04).** Bloco 0 da fase 13, defeito C3. O Fortran não garante que, em `a .and. b`, o termo `b` deixe de ser avaliado quando `a` é falso. O novo `tools/dev/confere-curto-circuito.py` acusa toda instrução que usa, na mesma expressão, um nome testado por `associated`, `allocated` ou `present`; achou 11, e não 6 como na NTC: a SST na física bulk (3, agora a função `effective_sst` de `med_bulk_ncar`), `zgrid` em `wind_10m_fallback`, `raw_local` (2) e `fp1` no gravador do MONAN-A, `fp1d` e `fp2d` com `.or.` e `lon_rad`/`lat_rad` ausentes (2, agora a função `have_cell_coords`) no adaptador do MPAS. Todas viraram `if` aninhados; quando os ponteiros estão associados, os valores são os mesmos, e a conferência `bulk` confere a física bit a bit. A busca entra no `confere-tudo.bash` como a conferência `curtocircuito` (17 conferências). Sai da seção 6 do `estado-do-projeto.md` o item `wind_10m_fallback`. Nenhum literal muda. Tag `fase13-04-validada`.
+- **Falha de leitura no PET 0 avisada a todos os PETs (R-FASE13-03).** Bloco 0 da fase 13, defeito C2. Em `ReadOcnFieldInterp` (`docn_cap_netcdf.F90`), usada pelo DOCN e pelo cap do MOM6 com `use_docn_ice`, o PET 0 passa a distribuir a situação da leitura antes dos dados: se ela falhou, todos os PETs registram o erro e retornam com `ESMF_FAILURE`. Antes, só o PET 0 retornava; os demais ficavam parados no broadcast dos dados até o aborto do MPI disparado pelo PET 0 (no driver de teste, e na rodada pelo `abort_run` do programa principal), sem nada no log deles. No caminho sem erro, os dados distribuídos são os mesmos; nenhum cálculo muda. `tests/docn/compara-docn.bash` ganha o caso `arquivo_ausente`, só da árvore de trabalho, que exige erro em menos de 120 s e a falha no log de todos os PETs (a versão anterior só a registra no PET 0). O `ReadJRAFieldInterp` do DATM tem a mesma falha e fica para a validação do DATM. Literais novos: `'DOCN ReadOcnFieldInterp: o PET 0 nao conseguiu ler '` e `' de '`. Tag `fase13-03-validada`.
+- **Conferência do executável no `valida_rodada.bash prepara` (R-FASE13-02).** Só o script de validação e a documentação. O `prepara` passa a recusar a rodada quando `bin/esmApp` é mais antigo que o último commit que mudou `src/` ou o `Makefile` (um `git am` sem `make` validaria o binário anterior, como na primeira rodada da R-FASE13-01, refeita como R-FASE13-01b) e quando esses fontes têm mudanças fora de commit; passa também a mostrar o commit dos fontes. Nenhum fonte Fortran muda. Tag `fase13-02-validada`.
+- **Tabela de configurações de componentes e padrões de produção (R-FASE13-01).** Primeira etapa da fase 13 (bloco 0, defeito C1 da NTC de análise da arquitetura). A regra de quais combinações de `use_datm`, `use_docn`, `use_med_to_mpas` e `use_sis2_dynamic` são aceitas, antes escrita em cinco lugares, passa a ser a tabela `COUPLER_MODES` em `src/shared/coupler_config.F90`, com as 16 combinações: 2 suportadas (produção, com e sem o SIS2), 6 não validadas (DOCN e DATM, aceitas com aviso no início da rodada) e 8 recusadas na leitura com mensagem que diz o que mudar (MOM6 com contorno direto, antes aceito e parando no cap do MPAS; SIS2 com DOCN, já recusado). `config_read`, `cpl_config_is_valid` e `tools/dev/mapa-acoplamento.py` consultam a tabela; `docs/acoplamento.md` ganha a lista das combinações. Os valores padrão passam a formar a produção (`use_med_to_mpas` e `use_sis2_dynamic` verdadeiros; o `run_esmApp.jaci` segue o novo padrão do SIS2). Saem do mapa as três trocas MOM6 para MONAN-A com contorno direto e a lacuna `Sf_zorl` correspondente (151 trocas), que só valiam na combinação recusada, e o aviso de `SetRunSequence` sobre o SIS2 sem o mediador, que deixou de ser alcançável. Inclui as duas correções de documentação que fecharam a fase 12 (estado e CHANGELOG da R-FASE12-07, decisão do GT sobre o foco atual). Testes: `test_cpl_map` confere a tabela e que toda linha do mapa vale em alguma combinação aceita; `test_connectors` passa a 8 combinações; `test_grids` e `test_bulk_ncar` escrevem as chaves que antes vinham dos padrões. Na configuração de validação nada muda e nenhum cálculo muda. Literais: saem de `cpl_map.F90` os das três trocas e da lacuna retiradas, e de `esm.F90` os três do aviso retirado (`'ESM: AVISO: '`, `'use_sis2_dynamic=.true. com use_med_to_mpas=.false.: o ICE e registrado '`, `'mas nunca executado.'`); entram em `coupler_config.F90` as notas e situações de `COUPLER_MODES` e o aviso `'AVISO: combinacao de componentes nao validada: '`, e nos testes os textos dos casos novos. Tag `fase13-01-validada`.
+- **Documentação de trabalho mais curta (R-FASE12-07).** Só documentação. `docs/arquitetura-acoplamento.md` (616 para 91 linhas), `docs/estado-do-projeto.md` (382 para 126), `docs/conferencias-locais.md` (355 para 58) e este CHANGELOG (1 625 para 216, uma entrada curta por etapa) foram reescritos de forma sucinta; as versões completas foram para `docs/historico/`, sem mudança. Referências nos comentários, no README e nos scripts apontam para os documentos novos ou para o histórico; `renomeia-identificadores.py` não altera `docs/historico/`. Tag `fase12-07-validada`.
+- **`grade` → `grid` no catálogo de malhas (R-FASE12-06).** Complemento da fase 12: o argumento de saída das funções do catálogo de malhas (`cpl_latlon_grid`, `cpl_tripolar_grid`, `cpl_block_grid`) e das rotinas internas de `cpl_grids`, e a variável correspondente do teste das malhas, ainda se chamavam `grade`, palavra que também existe em inglês e por isso escapou da varredura da R-FASE12-05. Tag `fase12-06-validada`.
+- **Nomes em inglês em `src/shared`, no driver e no programa principal; encerramento da fase 12 (R-FASE12-05).** Quinta e última etapa da fase 12. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-05.txt` (10 trocas). Tag `fase12-05-validada`.
+- **Nomes em inglês nos caps dos modelos (R-FASE12-04).** Quarta etapa da fase 12. Troca os nomes de `src/caps` (sem os fontes de `upstream/`, que vêm do MOM6, nem os nomes das interfaces do MPAS, do MOM6, do FMS e do SIS2) e dos seus testes. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tag `fase12-04-validada`.
+- **Nomes em inglês no mediador (R-FASE12-03).** Terceira etapa da fase 12. Troca os nomes de `src/mediator` e dos seus testes; os nomes públicos mudam também onde são usados. Textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tabela: `tools/dev/nomes/R-FASE12-03.txt` (87 trocas e três arquivos renomeados). Tag `fase12-03-validada`.
+- **Nomes em inglês no mapa de acoplamento (R-FASE12-02).** Segunda etapa da fase 12. Troca os nomes de `src/coupling` e dos seus testes; os nomes públicos mudam também onde são usados (mediador, caps, driver e testes). Tag `fase12-02-validada`.
+- **Nomes em inglês no framework de interpolação (R-FASE12-01).** Primeira etapa da fase 12: os identificadores Fortran passam a ser em inglês dos EUA, uma área por etapa. Só nomes mudam; textos entre aspas, comentários (fora os nomes de código citados) e cálculos ficam como estão. Tag `fase12-01-validada`.
+- **Encerramento da fase 11 (R-FASE11-26).** Vigésima sexta e última etapa da fase 11 (arquitetura de acoplamento). Uma mudança de código pequena, para levar o último indicador à meta, e a documentação do encerramento. Nenhum cálculo muda. Tag `fase11-26-validada`.
+- **Conferência do mapa como barreira e dicionário do NUOPC (R-FASE11-25).** Vigésima quinta etapa da fase 11. A conferência do mapa passa a interromper a inicialização quando acha diferença, e o dicionário do NUOPC passa a ter só os nomes de `CAMPOS`. O comportamento só muda quando há erro; na configuração de produção nada muda, e nenhum cálculo muda. Tag `fase11-25-validada`.
+- **Adaptador do MPAS (R-FASE11-24).** Vigésima quarta etapa da fase 11. A tradução entre o MONAN-A e o ESMF passa a ficar num módulo só, o adaptador do MPAS. Só código movido: nenhuma instrução muda e nenhum cálculo muda. Tag `fase11-24-validada`.
+- **Base dos esquemas de pesos, opções em texto e lista de esquemas (R-FASE11-23).** Vigésima terceira etapa da fase 11. O framework de interpolação (`src/regrid/`) ganha o que a seção 3.8 do documento de arquitetura previa: escrever um esquema novo passa a ser um arquivo, a partir de um modelo, e uma linha numa lista. Nenhuma rota muda de esquema e nenhum cálculo muda. Tag `fase11-23-validada`.
+- **Método de cada campo dos conectores pelo mapa (R-FASE11-22).** Vigésima segunda etapa da fase 11. O método de interpolação de cada campo dos conectores passa a sair do mapa de acoplamento e a ser escrito na `CplList`, no lugar do padrão implícito do conector. Nenhum cálculo muda. Tag `fase11-22-validada`.
+- **Conectores registrados pelo mapa de acoplamento (R-FASE11-21).** Vigésima primeira etapa da fase 11, a primeira do bloco F. O driver passa a registrar os conectores que o mapa tem na configuração atual, no lugar das condições sobre `use_med_to_mpas` e o SIS2. Nenhum cálculo muda. Tag `fase11-21-validada`.
+- **Física bulk em arrays (R-FASE11-20).** Vigésima etapa da fase 11, a última do bloco E. `med_bulk_ncar` passa a ler e escrever só arrays, reunidos no tipo novo `med_fluxo_t`; a fase `calcula_fluxos`, de `med_exchange`, os associa aos campos internos e chama a física. Nenhum cálculo muda. Tag `fase11-20-validada`.
+- **Fração de gelo sem o SIS2 fora da física bulk (R-FASE11-19).** Décima nona etapa da fase 11, a quinta do bloco E. O recálculo da fração de gelo sem o SIS2, que era a última chamada de `calc_bulk_ncar` e a única chamada de rota da física, passa a ser uma fase de `med_exchange`, chamada logo depois da física. Nenhum cálculo muda. Tag `fase11-19-validada`.
+- **Rotas criadas durante o passo pelas fases de `med_exchange` (R-FASE11-18).** Décima oitava etapa da fase 11, a quarta do bloco E, acrescentada ao plano na R-FASE11-17. Cada fase de `med_exchange` passa a criar as rotas que usa, guiada pela coluna `criar` de `ROTAS`, antes de chamar quem as aplica; `med_ocean`, `med_ice` e `med_export` só aplicam rotas. Nenhum cálculo muda. Tag `fase11-18-validada`.
+- **Fase de inicialização do mediador em `med_exchange` (R-FASE11-17).** Décima sétima etapa da fase 11, a terceira do bloco E. O `InitializeDataComplete` do mediador passa a só obter os estados e chamar a fase `inicializar_dados`, de `med_exchange`; as rotas da inicialização passam a ser criadas pela coluna `criar` da tabela `ROTAS`. Nenhum cálculo muda. Tag `fase11-17-validada`.
+- **Fase `ir_para_malha_de_fluxo` do mediador (R-FASE11-16).** Décima sexta etapa da fase 11, a segunda do bloco E. As duas chamadas que levam os campos do oceano e do gelo para a malha de fluxo, antes da física, passam a ser uma fase de `med_exchange`, na mesma ordem. Nenhum cálculo muda. Tag `fase11-16-validada`.
+- **Fase `entregar` do mediador em `med_exchange.F90` (R-FASE11-15).** Décima quinta etapa da fase 11, a primeira do bloco E (mediador por fases). A exportação dos campos do mediador e o carimbo de tempo deles passam a ficar num módulo só, na ordem de antes, e `RouteOcnToAtm` sai. Nenhum cálculo muda. Tag `fase11-15-validada`.
+- **Etapa completar executada pela rota (R-FASE11-14).** Décima quarta etapa da fase 11, a última do bloco D. O preenchimento por vizinhança da SST na malha de fluxo e da fração de gelo exportada ao oceano passa a ser feito pela rota, com a coluna `completar` da tabela `ROTAS`, e não mais por chamadas à parte depois da interpolação. Nenhum cálculo muda. Tag `fase11-14-validada`.
+- **Pontos sem valor e NaN tratados pela rota (R-FASE11-13).** Décima terceira etapa da fase 11, a segunda do bloco D. As colunas `sem_valor` e `nan_para` da tabela `ROTAS` passam a ser aplicadas pela rota; as chamadas de interpolação deixam de passar `zero_total`, e `RegridOrCopy` deixa de trocar os NaN. Nenhum cálculo muda. Tag `fase11-13-validada`.
+- **Rotas do mediador criadas com a configuração da tabela `ROTAS` (R-FASE11-12).** Décima segunda etapa da fase 11, a primeira do bloco D (rotas). As seis rotas do mediador, nos mesmos sete pontos de criação, passam a ler os métodos, o esquema, a máscara na origem e a rota de reserva da tabela `ROTAS` do mapa de acoplamento. Nenhum cálculo muda. Tag `fase11-12-validada`.
+- **Grade do cap do MOM6 construída por `cpl_grids` (R-FASE11-11).** Décima primeira etapa da fase 11, a última do bloco C. A grade do cap do MOM6 (`ocn_mom6`) passa a ser construída por `cpl_grids`, com as mesmas chamadas do ESMF, os mesmos blocos e as mesmas coordenadas. Nenhum cálculo muda. Tag `fase11-11-validada`.
+- **Oceano no mediador e malha do SIS2 construídos por `cpl_grids` (R-FASE11-10).** Décima etapa da fase 11, a terceira do bloco C. As malhas `ocn_med` (com o MOM6 e com o DOCN) e `ice_sis2` passam a ser construídas por `cpl_grids`, com as mesmas coordenadas, cantos, máscara e decomposição. Nenhum cálculo muda. Tag `fase11-10-validada`.
+- **Fórmulas de índice e de longitude das grades regulares em `cpl_grids` (R-FASE11-09).** Nona etapa da fase 11, a segunda do bloco C. As expressões que levam uma coordenada à coluna ou à linha de uma grade regular, e as que trazem a longitude para uma faixa de 360 graus, passam a ser funções de `cpl_grids`, uma por regra. Nenhum cálculo muda. Tag `fase11-09-validada`.
+- **Malhas regulares do lado atmosférico construídas por `cpl_grids` (R-FASE11-08).** Oitava etapa da fase 11, a primeira do bloco C (malhas). A malha de fluxo do mediador e a grade do cap do MONAN-A passam a ser construídas por um só construtor, com as mesmas coordenadas e a mesma decomposição, bit a bit. Nenhum cálculo muda. Tag `fase11-08-validada`.
+- **Campos dos caps do MONAN-A, do DOCN e do DATM a partir do mapa de acoplamento (R-FASE11-07).** Sétima etapa da fase 11, a última do bloco B. Os três caps anunciam e realizam os mesmos campos, na mesma ordem, nas mesmas fases e nas mesmas grades; as listas passam a sair do mapa. Com isso, nenhum componente escreve à mão os nomes dos campos que anuncia. Nenhum cálculo muda. Tag `fase11-07-validada`.
+- **Campos dos caps do MOM6 e do SIS2 a partir do mapa de acoplamento (R-FASE11-06).** Sexta etapa da fase 11, a segunda do bloco B. Os caps do oceano e do gelo anunciam e realizam os mesmos campos, na mesma ordem, nas mesmas fases e nas mesmas grades; as listas passam a sair do mapa. Nenhum cálculo muda. Tag `fase11-06-validada`.
+- **Campos do mediador a partir do mapa de acoplamento (R-FASE11-05).** Quinta etapa da fase 11, a primeira do bloco B. O mediador anuncia e realiza os mesmos campos, na mesma ordem, nas mesmas fases e nas mesmas grades; as listas passam a sair do mapa. Nenhum cálculo muda. Tag `fase11-05-validada`.
+- **Pontos completados no último passo do mediador (R-FASE11-04-FIX01).** Correção da R-FASE11-04. Nenhum cálculo muda. Tag `fase11-04-fix01`.
+- **Relatório das rotas e dos pontos completados; comparação do relatório no `valida_rodada` (R-FASE11-04).** Quarta etapa da fase 11, a última do bloco A. Só acrescenta linhas ao log e contagens que alimentam essas linhas. Nenhum cálculo muda. Tag `fase11-04-validada`.
+- **Conferência do mapa e relatório dos conectores no log (R-FASE11-03).** Terceira etapa da fase 11. O driver passa a registrar no log, uma vez, o relatório dos conectores e a conferência do mapa de acoplamento; nada mais muda. Nenhum cálculo muda. Tag `fase11-03-validada`.
+- **Mapa de acoplamento (R-FASE11-02).** Segunda etapa da fase 11. Dois módulos novos descrevem o acoplamento de hoje; eles são compilados e ligados ao `esmApp`, mas nenhum componente os usa, e nenhum fonte existente de `src/` muda. Nenhum cálculo muda. Tag `fase11-02-validada`.
+- **Início da fase 11: arquitetura de acoplamento (R-FASE11-01).** Primeira etapa da fase 11. Nenhum fonte de `src/`, script de execução ou arquivo de configuração muda, e o executável é o mesmo da R-FASE9-07. Tag `fase11-01-validada`.
+- **Encerramento da fase 9 (R-FASE9-07).** Só documentação; nenhum fonte, script ou arquivo de configuração muda, e o executável é o mesmo da R-FASE9-06. Tag `fase9-07-validada`.
+- **Zeragem dos fluxos do oceano e busca de campos do MONAN-A sem cópias (R-FASE9-06).** Sexta etapa da fase 9. Nenhum cálculo muda. Tag `fase9-06-validada`.
+- **Leitura do supergrid do MOM6 numa rotina só (R-FASE9-05).** Quinta etapa da fase 9. Nenhum cálculo muda. Tag `fase9-05-validada`.
+- **Inicialização de dados e carimbo de tempo dos caps de dados em `cap_common` (R-FASE9-04).** Quarta etapa da fase 9, pedida para reduzir os trechos repetidos entre `DATM_cap` e `DOCN_cap`. Nenhum cálculo muda. Tag `fase9-04-validada`.
+- **Revisão final dos comentários (R-FASE9-03).** Terceira etapa da fase 9. Só comentários mudam: a conferência das instruções dá zero diferenças nos 16 arquivos alterados, e as constantes de texto são as mesmas. Tag `fase9-03-validada`.
+- **Números fixos levados para `coupler_constants` (R-FASE9-02).** Segunda etapa da fase 9. Só entram as trocas em que o valor e o `kind` são idênticos; nenhum cálculo muda. Tag `fase9-02-validada`.
+- **Procedimentos comuns aos caps em módulo compartilhado (R-FASE9-01).** Primeira etapa da fase 9 (duplicação e consistência). Nenhum cálculo muda. Tag `fase9-01-validada`.
+- **Cópia das células MPAS para a grade regular em módulo próprio (R-FASE8-15).** Última das quatro divisões de arquivo da fase 8. Nenhuma instrução muda. Tag `fase8-15-validada`.
+- **Troca de campos do cap do gelo em módulo próprio (R-FASE8-14).** Terceira das quatro divisões de arquivo da fase 8. Nenhuma instrução muda. Tag `fase8-14-validada`.
+- **Fração de gelo do cap do oceano em módulo próprio (R-FASE8-13).** Segunda das quatro divisões de arquivo da fase 8. Nenhuma instrução muda. Tag `fase8-13-validada`.
+- **Diagnóstico de importação do cap atmosférico em módulo próprio (R-FASE8-12).** Primeira das quatro divisões de arquivo da fase 8 (limite de 1 200 linhas, decisão de 29/09/2026). Nenhuma instrução muda. Tag `fase8-12-validada`.
+- **Passo do DOCN: leitura dos campos e carimbo de tempo em rotinas próprias (R-FASE8-11).** Nona e última revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-11-validada`.
+- **Fluxos instantâneos do MONAN-A: uma rotina por grandeza (R-FASE8-10).** Oitava revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-10-validada`.
+- **Passo do MONAN-A: injeção do contorno do oceano e diagnóstico do albedo em rotinas próprias (R-FASE8-09).** Sétima revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-09-validada`.
+- **Fração de gelo do OISST: leitura, difusão e remapeamento em etapas (R-FASE8-08).** Sexta revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-08-validada`.
+- **Forçante atmosférica do mediador: DATM e campos opcionais do MPAS em rotinas próprias (R-FASE8-07).** Quinta revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-07-validada`.
+- **Exportação do cap atmosférico sem o bloco repetido 13 vezes (R-FASE8-06).** Quarta revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-06-validada`.
+- **Diagnóstico `monan2_import_*.nc`: reunião e gravação em etapas (R-FASE8-05).** Terceira revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-05-validada`.
+- **Física bulk: geometria solar e fluxos de água aberta em rotinas próprias (R-FASE8-04).** Segunda revisão de rotina longa da fase 8. Nenhum cálculo muda. Tag `fase8-04-validada`.
+- **Gravador `monan_export_*.nc` dividido em etapas; último `BLOCK` retirado (R-FASE8-03).** Terceira etapa da fase 8 e primeira das revisões de rotinas longas. Nenhum cálculo muda. Tag `fase8-03-validada`.
+- **Modelo atmosférico dividido em inicialização, passo e fluxos (R-FASE8-02).** Segunda etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem. Tag `fase8-02-validada`.
+- **Mediador dividido em módulos por assunto (R-FASE8-01).** Primeira etapa da fase 8. Nenhuma instrução muda: as rotinas mudaram de arquivo inteiras, com os comentários que as precedem, na mesma ordem. Tag `fase8-01-validada`.
+- **Marcas de primeira vez e contadores no estado interno (R-FASE7-06).** Última etapa da fase 7. Nenhum cálculo muda. Tag `fase7-06-validada`.
+- **Cap atmosférico: estado interno ESMF (R-FASE7-05).** Quinta etapa da fase 7, acrescentada na R-FASE7-03. Nenhum cálculo muda. Tag `fase7-05-validada`.
+- **Modelo atmosférico: estado do MPAS no `mpas_atm_state_type` (R-FASE7-04).** Quarta etapa da fase 7. Nenhum cálculo muda. Tag `fase7-04-validada`.
+- **Cap atmosférico: gravador `monan_export_*.nc` com estado próprio (R-FASE7-03).** Terceira etapa da fase 7. Nenhum cálculo muda. Tag `fase7-03-validada`.
+- **Mediador: estado interno agrupado por assunto (R-FASE7-02).** Segunda etapa da fase 7. Nenhum cálculo muda. Tag `fase7-02-validada`.
+- **Mediador: estado de comunicação e de diagnóstico no estado interno (R-FASE7-01).** Primeira etapa da fase 7 do roteiro de código limpo. Nenhum cálculo muda. Tag `fase7-01-validada`.
+- **Testes com valor esperado da grade do cap atmosférico (R-FASE6-03).** Terceira etapa da fase 6. Nenhum cálculo muda. Tag `fase6-03-validada`.
+- **Testes com valor esperado das fórmulas da física bulk (R-FASE6-02).** Segunda etapa da fase 6. Nenhum cálculo muda. Tag `fase6-02-validada`.
+- **Conferências locais num comando só e indicadores de código limpo (R-FASE6-01).** Primeira etapa da fase 6 do roteiro de código limpo. Nenhum fonte Fortran muda. Tag `fase6-01-validada`.
+- **Scripts de `tools/` sem marcas de histórico nos comentários (R-FASE5-07).** Sétima etapa da fase 5. Só comentários e docstrings mudam: nenhuma instrução, nenhuma constante de texto impressa pelos scripts e nada do código Fortran. Tag `fase5-07-validada`.
+- **Mediador: `InitializeDataComplete` e `blend_albedo_with_ice` em etapas (R-FASE5-06).** Nenhum cálculo muda. Tag `fase5-06-validada`.
+- **Cap atmosférico: `map_cells_to_regular_grid` em etapas (R-FASE5-05).** Nenhum cálculo muda. Tag `fase5-05-validada`.
+- **Comentários do cap atmosférico e de `src/shared` sem marcas de histórico (R-FASE5-04).** Quarta etapa da fase 5. Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código. Tag `fase5-04-validada`.
+- **Comentários dos caps do oceano e do gelo sem marcas de histórico (R-FASE5-03).** Terceira etapa da fase 5. Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código. Tag `fase5-03-validada`.
+- **Comentários do mediador sem marcas de histórico (R-FASE5-02).** Segunda etapa da fase 5 (limpeza). Só comentários mudam: nenhuma instrução e nenhuma constante de texto do código. Tag `fase5-02-validada`.
+- **`nuopc.input` sem histórico nos comentários (R-FASE5-01).** Primeira etapa da fase 5 (limpeza). Nenhum valor do `nuopc.input` muda e nenhum fonte Fortran muda. Tag `fase5-01-validada`.
+- **`nuopc.input` com a configuração de validação (R-FASE4-08).** O `nuopc.input` do repositório passa a ter as contagens de PETs usadas nos experimentos de reprodutibilidade e na linha de base de validação: `atm_pet_count = 128` e `ocn_pet_count = 20` (antes 32 e 4), com `ice_pet_count = 4`, num total de 152 PETs. Os demais valores já eram iguais aos desses experimentos. Tag `fase4-08-validada`.
+- **Cap do gelo: `InitializeRealize` em etapas e `intent` refinados (R-FASE4-07).** Nenhum cálculo muda. Tag `fase4-07-validada`.
+- **`WriteDOCNDiag` em etapas (R-FASE4-06).** Passou de 244 linhas (210 de código) para 53 (42 de código). Tag `fase4-06-validada`.
+- **Gelo na grade ATM e fluxos sobre o gelo em etapas (R-FASE4-05).** Nenhum cálculo muda. Tag `fase4-05-validada`.
+- **Conferências locais no repositório (R-FASE4-04).** As conferências feitas antes de cada rodada na Jaci, que até aqui existiam só num ambiente de trabalho à parte, passam a fazer parte do repositório. Nenhum fonte Fortran de `src/` muda. Tag `fase4-04-validada`.
+- **`MediatorAdvance` em etapas (R-FASE4-03).** Passou de 648 linhas (308 de código) para 244 (97 de código). Tag `fase4-03-validada`.
+- **Anotação de linha de base congelada e aviso de comparação não feita (R-FASE4-02).** Só scripts e documentação; nenhum fonte Fortran muda. Tag `fase4-02-validada`.
+- **Rotinas longas divididas em etapas (R-FASE4-01).** As quatro rotinas da pendência 7 do `docs/estado-do-projeto.md` passam a ser uma sequência curta de chamadas a procedimentos de módulo com argumentos explícitos e `intent` declarado. Tag `fase4-01-validada`.
+- **Documentação de passagem (R-FASE3-04).** Novo `docs/estado-do-projeto.md`, com o ambiente, as etapas validadas, as linhas de base, o roteiro de validação, as armadilhas encontradas e as pendências. O `valida_rodada.bash` e o roteiro de validação passam a usar a linha de base R-NOFMA-02 como padrão.
+- **Comentários sem marcas de histórico (R-FASE3-03).** Retiradas de 482 linhas de comentário, em 17 arquivos, as marcas de correção e de etapa (`FIX B-OCNGRID-01`, `BUG-NC-03`, `B-45`, `Sprint A (Maio 2026)` e semelhantes), que já estão neste CHANGELOG e no histórico do git. O texto explicativo foi mantido; linhas que só continham a marca foram removidas. Tag `fase3-03-validada`.
+- **Módulo comum dos gravadores NetCDF (R-FASE3-02).** Novo `src/shared/nc_writer.F90` com `nc_create`, `nc_global_header`, `nc_def_latlon`, `nc_def_field2d` e `nc_ok` (falha do NetCDF registrada no log com a mensagem de `nf90_strerror`).
+- **Calendário do gravador NetCDF do cap atmosférico pelo ESMF (R-FASE3-01).** O instante inicial gravado em `time:units` ("seconds since ...") dos arquivos `monan_export_*.nc` era calculado por uma conta manual de datas que não recuava para o mês anterior: com o instante atual em 1º de abril e 1 dia decorrido, gravava "2026-04-00"; em 2 de abril com 3 dias, "2026-04--1".
+- **Inicialização do mediador e mapeamento do cap atmosférico em etapas (R-FASE2B-03).** `InitializeRealize` do mediador passou de 359 para 62 linhas de código próprias, com as etapas `create_atm_grid`, `create_ocn_grid`, `realize_component_fields` e `create_internal_fields`, procedimentos de módulo com argumentos explícitos.
+- **Constantes e grade do MOM6 num só lugar (R-FASE2B-02).** Validado sem mudança de resultado: os valores e tipos são os mesmos de antes.
+- **Procedimentos de módulo com argumentos explícitos (R-FASE2B-01).** Os procedimentos internos criados na eliminação dos BLOCKs passaram a procedimentos de módulo: cada um declara na própria assinatura o que recebe, com `intent(in)` para o que só lê e `intent(inout)` para o que altera (conferido pelo compilador). Variáveis que só um procedimento usava passaram a ser locais dele.
+- **Compilação sem FMA e ferramentas de validação (R-FASE2A-02).** O código do acoplador passa a ser compilado com `-ffp-contract=off` (variável `FP_CONTRACT` do Makefile 16.1; `make FP_CONTRACT=fast` religa). Motivo: a validação da R-FASE2A-01 mostrou que, com a fusão de multiplicação e soma ligada, a reorganização do código muda o último bit do resultado sem mudar nenhum cálculo.
+- **Executável alternativo no job PBS (R-RUN-EXE-01).** O `ESMAPP_BIN` era lido só na submissão; o job, que executa o `run_esmApp.jaci` de novo, voltava ao `bin/esmApp`. A variável passa a ir no `#PBS -v`. O cabeçalho do log lia uma variável nunca definida e mostrava `Executável = ?`; agora mostra o caminho e a data do executável usado.
+- **Parser de streams do MPAS (R-FASE2A-01-FIX01).** A eliminação do BLOCK em `mpas_atm_init` deixou um bloco `interface` no meio das instruções executáveis (erro de compilação). O trecho virou o procedimento `parse_streams_xml`.
+- **Opções do MOM6 e comparação sem estouro de memória (R-FASE1-01-FIX02).** No Makefile, as opções do MOM6 (`-fdefault-real-8`) eram repassadas pelo `make` às dependências dos objetos do MOM6; com `make -j`, fontes do acoplador podiam ser compilados com elas. Os fontes do MOM6 passaram a ter regra própria.
+- **RunSequence truncada (R-FASE1-01-FIX01).** Passado direto como argumento, o construtor `[character(len=...) :: ...]` teve o comprimento reduzido pelo gfortran ao do primeiro elemento, e `MPAS` virou `MPA` (`key does not exist: MPA`). As linhas passam a ser montadas numa variável.
+- **Validação na Jaci das fases 1 e 2A.** Fase 1: duas rodadas, PASS contra a R-REF-00. Fase 2A: com FMA, duas rodadas idênticas entre si e diferentes da base; sem FMA, PASS contra a rodada original também sem FMA.
+- **Interpolação plugável (R-REGRID-01).** Novo diretório `src/regrid/` com um tipo abstrato `regridder_t` e três esquemas: `esmf` (pesos calculados pelo ESMF, com cadeia de métodos), `weights_file` (pesos SCRIP/ESMF lidos de arquivo) e `mpassit` (método do MPASSIT: malha ESMF a partir das células Voronoi do MPAS, método por classe de campo, valor de ausência fora da malha).
+- **Eliminação das construções BLOCK (R-DEBLOCK-01).** Os 109 BLOCKs de 12 arquivos foram removidos. Os 20 que correspondiam a etapas completas viraram procedimentos internos com nome (por exemplo `fill_sst_gaps`, `update_ice_fields_on_atm_grid`, `compute_ice_fluxes`, `compute_instantaneous_fluxes`); nos demais, as declarações foram para o início do procedimento.
+- **Refatoração, fase 1 (R-FASE1-01): código morto, duplicação e remendos.** Mudança estrutural, sem alteração intencional dos resultados numéricos. Detalhes e plano das fases seguintes em `docs/refatoracao-fase1.md`.
+- **Balanceamento de PETs e reprodutibilidade: regra medida.** Execuções de 24/09/2026 com a atmosfera fixa em 128 PETs estabeleceram o que altera o resultado bit a bit. Redistribuir PETs entre oceano e gelo, mantendo o total (128 + 8 + 8 e 128 + 12 + 4, ambos com 144 PETs), não altera nada, nem na atmosfera nem no estado interno do gelo.
+- **Documentação das ferramentas de execução e de reprodutibilidade.** Novo catálogo `docs/ferramentas.md`, com todas as ferramentas de `run/` e `tools/`, a pergunta que cada uma responde, o guia correspondente e sequências típicas de uso.
+- **Grade ESMF do gelo pela decomposição do SIS2 (`B-ICE-DECOMP-01`, commit `a9e6935`).** O cap do SIS2 criava a grade ESMF com uma regra própria (fatoração a partir da raiz quadrada do número de PETs) e supunha, sem conferir, que ela coincidia com o `LAYOUT` escolhido pelo SIS2.
 - **`analisa_balanceamento_pets.py` v14.22.** A primeira análise com os três componentes (144 PETs, 128 + 8 + 8) mostrou três limitações do relatório, corrigidas:
-  - a métrica "Desbalanceamento" comparava o componente mais lento com o mais rápido; com o gelo presente, sempre muito mais leve, dava números sem significado ("razão 55,71x", "5470,8% de tempo ocioso"). Foi substituída pelo tempo que cada componente passa parado esperando o gargalo, na execução concorrente, e pela participação de cada um no total, nos demais casos;
-  - a divisão proporcional podia propor contagens que o modelo não aproveita, como 17 ou 31 PETs para o oceano (primos: o MOM6 só divide em faixas finas). O relatório passa a avaliar cada contagem pelo tamanho dos blocos do oceano e do gelo e pelas células MPAS por PET, e mostra um ajuste prático com a contagem viável mais próxima. As grades são detectadas dos arquivos do MOM6 e do nome `x1.<N>.*` do MPAS, ou informadas por `--ocn-grid` e `--atm-cells`; os limites são ajustáveis por `--min-block` e `--min-cells-per-pet`;
-  - a coluna "Chamadas Run" somava todos os PETs; passa a mostrar as chamadas por PET.
-
-  O núcleo não mudou: os tempos e a divisão proporcional são idênticos aos da v14.21, e referências JSON gravadas pela versão anterior continuam comparáveis. O JSON ganhou `<comp>_idle_frac` e `suggested_practical_<comp>_pet_count`. Validado com logs sintéticos no formato do ESMF (os tempos da execução de 144 PETs, uma execução sequencial sem gelo com a linha de layout no formato anterior à v14.20, e um JSON de referência da v14.21). Integrado no commit `09346e2`.
-
 - **Máscara de continentes nos diagnósticos de importação (`B-DIAGMASK-01`).** Os arquivos `mom6_import_*.nc` e `monan2_import_*.nc` passam a mascarar os continentes com a máscara **real** do MOM6 (`ocean_grid%mask2dT`), e não mais com substitutos.
-
-  Até aqui, o continente saía do `mom6_import` como **zero** — os fluxos eram zerados pelo Sprint A.5.1 antes do export. Zero é um valor físico legítimo de fluxo: nem o GrADS nem o pós-processamento tinham como distinguir "fluxo nulo sobre oceano calmo" de "aqui não há oceano", e as células de terra entravam nas estatísticas. No `monan2_import` a situação era pior: só havia o filtro `ocean_frac_min` do binning Voronoi, que mede **cobertura de célula Voronoi por bin** e nada diz sobre terra ou oceano.
-
-  A máscara já existia no mediador desde o `B-LANDMASK-01` (`is%f_omask_atm`, regridada de `So_omask`); o que faltava era levá-la aos dois escritores NetCDF. Ela é exportada sob o StandardName novo `Sx_omask` — prefixo `Sx_` porque o MED já *importa* `So_omask` do oceano, e repetir o nome no `exportState` criaria um par homônimo no mesmo componente; mesmo precedente do `Sx_tsfc`. O cap do MPAS a recebe pelo conector MED→MPAS em `atm_bnd%omask`.
-
-  Célula de terra agora sai como `_FillValue`. A própria máscara é gravada na variável `Sx_omask` (1 = oceano, 0 = terra), para que os scripts não precisem readivinhá-la. O corte binário fica sempre no consumidor final — 0,5 no MED e no cap do MPAS, este depois do binning — e nunca no meio do caminho: binarizar entre dois regrids produz escadinha na linha de costa. No mediador o `MPI_Allreduce(MAX)` opera sobre 0/1, que é inequívoco, ao contrário do MAX sobre `FILL_IMP` usado nos campos.
-
-  **A máscara age apenas nos buffers de escrita.** O `exportState` continua com os zeros do Sprint A.5.1: um `_FillValue` que vazasse para lá viraria forçante do MOM6.
-
-  Corrigidos no mesmo passo dois defeitos encontrados durante o trabalho:
-  - `mpas_cap_MONAN.F90::init_import_defaults` — `defaults` é dimensionado por `N_IMP` e o laço percorre `1..N_IMP`, mas `defaults(6)` (`Sf_albedo`, Fase 2.6) nunca foi atribuído: o campo era inicializado com o que houvesse na pilha. Agora vale 0,08, o mesmo default de água aberta usado em `mpas_cap_methods.F90` e `mpas_atm_model.F90`.
-  - `postproc_monan2_import.py` — a FONTE 1 procurava apenas `mpas_import_step????.nc`, nome legado que o cap não escreve desde a v4.19. O efeito era silencioso: a FONTE 1 nunca encontrava nada e o script caía sempre na FONTE 2, que **infere** `Sf_zorl` por Charnock em vez de ler o valor real. Passa a aceitar `monan2_import_YYYYMMDD_HHMMSS.nc`, com o padrão antigo como retaguarda.
-
-  Na FONTE 2 do mesmo script, a máscara real substitui o marcador de 271,35 K quando o arquivo a traz. Aquela heurística sempre foi frágil: água aberta genuína no ponto de congelamento — justamente a borda do gelo marinho — cai no mesmo valor e era apagada do mapa junto com o continente.
-
-  **Quebra a linha de base por construção:** células de terra mudam de `0.0` para `-9,99e20` e o `nccmp -d` acusa diferença em todos os campos. Comparar somente as células de oceano contra a base congelada, exigir identidade exata ali, e só então recongelar com rótulo novo. Diferença em célula de oceano indica máscara deslocada — provavelmente convenção de longitude, já que o `mom6_import` usa 0 a 360 e o `monan2_import` usa −180 a +180.
-
-  **Não compilado nem executado.** As modificações foram revisadas, não construídas: falta rodar `make` e conferir a fração de oceano registrada no log contra os ~69,2% que o `domain-mom6.bash` reporta para a grade atual.
-
-- **Componente de gelo marinho (SIS2) integrado ao acoplador.** O SIS2 passa a existir como componente NUOPC próprio (`src/caps/ice/sis_cap_MONAN.F90`), com os conectores `MED -> ICE` e `ICE -> MED`, e não como subcomponente embutido no oceano via `combined_ice_ocean_driver`. Controlado por `use_sis2_dynamic` em `&nuopc_petlayout`; com a chave desligada (o padrão) nada é criado e o sistema é idêntico ao anterior.
-
-  A lógica de partição de PETs foi **reescrita**, e não copiada da origem. Lá o gelo só existia dentro do ramo `if (is_concurrent)`, porque os eixos temporal e espacial ainda estavam colapsados em um só. Aqui ela vive sobre o eixo `pet_layout`, o que faz duas combinações passarem a funcionar: `shared` com gelo, e a sequência sequencial com gelo. Quando o gelo está desligado, `nIce` vale 0 e as contas recaem exatamente na divisão em dois blocos anterior, o que permite exigir saída NetCDF byte-idêntica ao baseline como teste de regressão.
-
-  Regras acrescentadas, no mesmo princípio que motivou a correção do split: configuração lida e jogada fora sem aviso passa a ser erro. `ice_pet_count > 0` exige `use_sis2_dynamic`; `use_sis2_dynamic` exige `use_docn = .false.`; em `split` com gelo, `ice_pet_count` precisa ser explícito, porque o `select` do PBS é montado antes de o driver executar.
-
-  **Pendência conhecida:** o caminho do `Si_ifrac` real do ICE até o MPAS não foi validado. O mediador copia `Si_ifrac_sis2` ponto a ponto, e a cópia só está correta se as grades coincidirem; falta um regrid dedicado, análogo ao `rh_ocn2atm` do `So_t`. Há guarda de formato que preserva o valor anterior e registra aviso quando as formas divergem. Tratar como recurso em avaliação.
-
-- **Relógio compartilhado entre componentes (defeito grave).** `ESMF_Clock` é um tipo por referência. As rotinas que registram componentes passavam `driverClock` direto para `ESMF_GridCompSet`, o que fazia todos os componentes apontarem para o mesmo relógio físico. Como o NUOPC avança o relógio associado a cada componente depois do respectivo `Advance`, com três componentes Model o mesmo relógio recebia até três avanços por ciclo de `dt_coupling`. O sintoma observado foi a escrita de `monan2_import` passar de horária para a cada três horas: exatamente o fator 3 previsto.
-
-  Cada componente e cada conector passa a receber uma cópia independente, criada com `ESMF_ClockCreate(driverClock, rc=rc)`. Ao acrescentar um componente ou conector novo, use `AddModelCompWithClock` ou `AddConnectorWithClock` em vez de chamar `NUOPC_DriverAddComp` diretamente: assim a cópia do relógio vem junto, sem depender de alguém lembrar de repetir o bloco.
-
-- **Origem errada da fração de gelo no cap do SIS2.** O cap lia `Ice%part_size`, campo de fachada do acoplador preenchido apenas no caminho de acoplamento rápido, que nesta configuração permanece zerado. O estado real vive em `Ice%sCS%IST%part_size`, que é o que o próprio SIS2 usa para calcular área e massa; esse tem halos e categorias com base 0, então o deslocamento de índices passou a ser derivado da grade do próprio SIS2. A fórmula também mudou: era `1 - part_size(:,:,1)`, tratando o índice 1 como água aberta, quando o índice 1 é categoria de gelo.
-
-- **`SharePolicyField="share"` indevido na exportação do cap do gelo.** Era o único campo de exportação do sistema a usar essa política. O campo saía correto da origem e chegava zerado ao mediador. Removida na exportação, alinhando ao cap do oceano, que usa `share` apenas nas importações. Do lado do mediador a política foi mantida, porque ali todos os campos de importação a usam e funcionam.
-
-- **Contagem de passos com calendário aproximado (`esmApp.F90`).** O número de passos era estimado com aritmética manual, usando 365 dias por ano e 30 dias por mês, e esse número servia de limite do laço de execução. Para o intervalo de 2026-03-29 a 2026-04-30 dava 31 dias em vez de 32, porque março tem 31 dias, e a simulação parava cerca de 24 h antes da data final configurada. Passou a ser derivado do próprio intervalo ESMF (`stopTime - startTime`), que já respeita o calendário Gregoriano.
-
+- **Componente de gelo marinho (SIS2) integrado ao acoplador.** O SIS2 passa a existir como componente NUOPC próprio (`src/caps/ice/sis_cap_MONAN.F90`), com os conectores `MED -> ICE` e `ICE -> MED`, e não como subcomponente embutido no oceano via `combined_ice_ocean_driver`.
+- **Relógio compartilhado entre componentes (defeito grave).** `ESMF_Clock` é um tipo por referência. As rotinas que registram componentes passavam `driverClock` direto para `ESMF_GridCompSet`, o que fazia todos os componentes apontarem para o mesmo relógio físico.
+- **Origem errada da fração de gelo no cap do SIS2.** O cap lia `Ice%part_size`, campo de fachada do acoplador preenchido apenas no caminho de acoplamento rápido, que nesta configuração permanece zerado.
+- **`SharePolicyField="share"` indevido na exportação do cap do gelo.** Era o único campo de exportação do sistema a usar essa política. O campo saía correto da origem e chegava zerado ao mediador. Removida na exportação, alinhando ao cap do oceano, que usa `share` apenas nas importações.
+- **Contagem de passos com calendário aproximado (`esmApp.F90`).** O número de passos era estimado com aritmética manual, usando 365 dias por ano e 30 dias por mês, e esse número servia de limite do laço de execução. Para o intervalo de 2026-03-29 a 2026-04-30 dava 31 dias em vez de 32, porque março tem 31 dias, e a simulação parava cerca de 24 h antes da data final configurada.
 - **BUG-NC-06: `So_u`, `So_v` e `Sf_zorl` gravados apenas com `_FillValue`.** Os três campos faziam parte de `export_names` e por isso ganhavam variável no `mom6_import_*.nc`, com dimensões e atributos, mas não constavam de nenhum dos dois `select case` de `med_cap_netcdf.F90`. Caíam no `case default` e eram pulados pelo `cycle` antes de qualquer escrita.
+- **Terceiro bloco de nós no `run_esmApp.jaci`.** Com `pet_layout = 'split'` e gelo ativo, o script pedia ao PBS apenas `ATM + OCN` processos, enquanto o `mpiexec` era lançado com o total. Para `-n 8` com atm=4, ocn=2, ice=2 o pedido era de 6 slots para 8 PETs, e o trabalho falharia na largada com mensagem do PALS sem relação aparente com gelo.
+- **Endurecimento: o mediador declarava `InitializeDataComplete` sem verificar o dado (B-SEQINIT-01, revisto).** O `MED_cap.F90` marcava `InitializeDataComplete = "true"` na primeira chamada, incondicionalmente, e `NUOPC_IsAtTime` não era invocado em lugar nenhum do projeto.
+- **Endurecimento: o gate aceitava campo carimbado e vazio.** O `mom_cap` aplica `NUOPC_SetTimestamp` a todos os campos do `exportState` em laço cego sobre o `itemNameList`, sem verificar quais o `mom_export` preencheu; um `So_t` nulo passaria no `NUOPC_IsAtTime`.
+- **`mom_cap_MONAN.F90`: chamada de `ocean_model_init_sfc` antes do `mom_export` de t=0.** Acrescentada por precaução, **não** por defeito observado. A leitura estática sugeria que `ocean_public%t_surf` nunca era preenchido, já que a chamada de `convert_state_to_ocean_type` dentro de `ocean_model_init` está guardada por `if (present(gas_fields_ocn))` e o cap invoca `ocean_model_init` sem esse argumento.
+- **Correção: evaporação saturada quando `psl` é nula (BUG-CALC-06).** Em `med_bulk_ncar.F90`, o denominador de `qsat` era `max(psl(i,j), 1.0)` — uma proteção contra divisão por zero que produz resultado absurdo em vez de pular a célula: com `psl = 0` o divisor vira 1 Pa em lugar de ~101325 Pa, `qsat` sai cinco ordens de grandeza alto e `Foxx_evap` satura no clamp de +1e-4 kg/m²/s no globo inteiro.
+- **Documentado: o primeiro passo de acoplamento é incompleto nos dois modos.** Em `sequential` o mediador é o 3º elemento da `RunSequence` e calcula os fluxos antes do primeiro avanço do MPAS; radiação, precipitação e pressão saem nulas no passo 1, enquanto momento e calor sensível já são válidos.
+- **`postproc_mom6_import.py` v8.3: rodapé de consumo por modo.** A mesma figura "passo N" significa coisas diferentes — em `sequential` mostra os fluxos que o MOM6 consome naquele passo; em `concurrent`, os do passo seguinte. Comparar passo 1 com passo 1 entre modos é erro, e custou uma investigação inteira.
+- **Correção (`test-*.bash`): aborto silencioso do `wait` sob `set -e`.** A detecção de fim de processo era `wait "$pid" 2>/dev/null; ec=$?`. Como comando isolado, um retorno diferente de zero dispara o `set -e` e encerra o script antes de `ec` ser avaliado — sem veredito, sem análise, sem mensagem. O único caso que os testes existem para diagnosticar era o único que não conseguiam relatar.
+- **Correção (`test-sequential-split.bash`): faltava a guarda de `LAYOUT` do MOM6.** O pré-check validava a partição METIS do MPAS mas não o requisito simétrico do oceano.
+- **Correção (`run_esmApp.jaci`): partição METIS e `select` heterogêneo presos ao modo, não ao layout.** Duas decisões consultavam `coupling_mode` quando o que importava era `pet_layout`: o dimensionamento da partição METIS do MPAS (`atm_pet_count` em split, `-n` em shared) e a guarda `CONC_PER_COMP`, que emite o `select` com blocos de nós só-ATM e só-OCN. Com `sequential + split` as duas erravam.
+- **Correção (`MED_cap.F90`): último `ESMF_VMGetGlobal` dentro de rotina de componente.** Em `fill_ifrac_from_oisst`, o `ESMF_VMBroadcast` do arquivo OISST era coletivo sobre a VM **global**.
+- **Correção (`esm.F90`): `rc` de `config_read` descartado.** A chamada em `SetModelServices` gravava o retorno em `rc`, que a chamada NUOPC seguinte sobrescrevia antes de qualquer teste. Um `rc = 2` — configuração inválida — passava despercebido nesse ponto. Passa a usar variável própria (`cfg_rc`) e a abortar com mensagem no log ESMF.
+- **Novo: `test-sequential-split.bash`.** Smoke test da combinação `sequential + split`, ao lado do `test-concurrent.bash` e no mesmo padrão de duas fases (submissão no nó de login, execução dentro do job).
+- **Correção (`test-concurrent.bash`): baseline quebrado pela nova validação.** O `--baseline` gerava uma config `sequential` **com** `atm_pet_count` e `ocn_pet_count`, que passou a ser erro. O `gen_config` ganhou um terceiro argumento (`layout`) e zera as contagens em `shared`.
+- **Correção (`analisa_balanceamento_pets.py`): detecção de modo cega ao novo formato de log.** As expressões procuravam `modo CONCURRENT` / `modo SEQUENTIAL`, que deixaram de existir. Passa a ler os dois eixos separadamente, aceitando também o formato antigo.
+- **Documentação: `nuopc.input`, README e demais documentos sincronizados.** O Grupo 7 da `nuopc.input` foi reescrito com a tabela das quatro combinações e as duas regras (soma igual a `-n` em split; contagens zeradas em shared), e o bloco ativo ganhou `pet_layout = 'split'`, que é o que torna coerentes o `atm_pet_count = 2048` e o `ocn_pet_count = 128` que já estavam ali.
+- **Documentação: seções de Conclusão em `SMT-Jaci.md` e `MULTINO-run_esmApp.md`.** Os dois documentos terminavam direto no glossário, sem fechar a narrativa antes do material de referência. Acrescentada, em cada um, uma seção **Conclusão** entre o corpo técnico e o glossário, com as seções seguintes renumeradas (`SMT-Jaci.md`: Glossário passa a ser a seção 11 e Referências internas a 12;
+- **Correção de tradução: `alocação preguiçosa` → `alocação por demanda`.** A tradução literal de *lazy allocation* soava informal e não é o termo consagrado na literatura de sistemas operacionais em português. Corrigido em `SMT-Jaci.md` e neste changelog, mantendo `(*lazy allocation*)` como referência entre parênteses nos dois casos.
+- **Documentação: `README.md` sincronizado com `docs/`.** A árvore de estrutura ainda listava apenas `CHANGELOG.md` e `notas-standalone.md` em `docs/`, quando o diretório já reúne seis documentos.
+- **Documentação: nova nota técnica `SMT-Jaci.md`.** Registra a caracterização do SMT nos nós de cálculo do Jaci e a medição do seu efeito sobre o sistema acoplado, em onze seções: o mecanismo do SMT, a caracterização do hardware com os comandos e as saídas obtidas, a contabilidade das filas com a verificação experimental por `qsub`, a metodologia da medição, os resultados em tempo de parede e em tempo de máquina, a interpretação por componente, as limitações de escopo, as decisões decorrentes, o procedimento de reprodução, um glossário e as referências internas.
+- **Novo (`run_esmApp.jaci`): `TOPO` e `REGIME` no banner de dentro do job.** As duas linhas existiam apenas no resumo impresso no nó de login, que não é capturado pela diretiva `#PBS -o` e, portanto, não chegava ao `esmApp_run.log`. Sem elas, a autoverificação do `mede_smt.py` ficava inerte justamente nas duas checagens mais fortes.
+- **Novo (`run_esmApp.jaci`): procedência do build no banner do job.** Um tempo de parede anotado hoje não era reproduzível depois, por não haver registro de qual revisão do código nem de qual ESMF o produziram.
+- **Correção (documentação): diagrama impossível na seção 4 do `MULTINO-run_esmApp.md`.** O exemplo do nó misto usava `atm=512, ocn=128`, mas 512 é múltiplo de 256 e a distribuição natural já sai alinhada, de modo que o nó misto ilustrado não pode ocorrer.
+- **Documentação: escopo do resultado do SMT.** Acrescentada a subseção explicitando que os 11,2% valem para 512 PETs, malha `x1.40962` e modo `sequential`, e não são propriedade do sistema. Como o mecanismo é disputa pelo cache L2, subdomínios menores (por exemplo com 2176 PETs) podem reduzir ou inverter a penalidade, enquanto a malha `x1.163842` a agravaria.
+- **Novo (`plan-layout.py`): alinhamento com os dois patamares de limite do `run_esmApp.jaci`.** O planejador mantinha um único `--ppn-max`, enquanto o script já separava `PPN_PHYS` de `PPN_HARD`, e por isso podia imprimir um `select` que o script recusaria. Como a razão de existir do planejador é que o `select` impresso seja idêntico ao submetido, a divergência atacava a premissa da ferramenta.
+- **Novo (`mede_smt.py`): autoverificação a partir do conteúdo dos logs.** O script confiava apenas no nome do diretório: trocar `logs.A` por `logs.B` inverteria a conclusão sem qualquer sinal, num resultado que passou a sustentar uma decisão de projeto.
+- **Novo utilitário (`mede_smt.py`): comparação controlada do efeito do SMT.** Lê os logs de PET das rodadas com e sem uso do SMT (padrão `logs.A1..A3` e `logs.B1..B3`) e emite a tabela comparativa por componente, com a razão B/A, além de CSV (`--csv`) e gráfico de barras (`--grafico`).
+- **Novo (`run_esmApp.jaci`): `--allow-smt` e limite de PET/nó parametrizado.** A constante única `PPN_MAX=256` colapsava dois conceitos distintos, o que o hardware aceita e o que se recomenda, e por isso impedia qualquer medição do efeito do SMT. Passam a existir `PPN_PHYS=256` (cores físicos, limite recomendado e padrão) e `PPN_HARD=512` (CPUs lógicas, limite absoluto do hardware).
+- **Correção (`run_esmApp.jaci`): partição METIS dimensionada pelo número errado em modo concurrent.** Com `-n 2176` e `atm_pet_count = 2048` o pré-check exigia `x1.*.graph.info.part.2176` em vez de `.part.2048`, que estava presente no diretório do experimento.
+- **Execução multinó no `run_esmApp.jaci`: contabilidade de `ncpus` e posse do nó.** O gerador do `.pbs` deriva a topologia de `-n` (`NNODES x PPN`, `place=...`), substituindo o antigo `select=1`, que prendia qualquer job a um único nó.
+- **Novo utilitário (`plan-layout.py`): planejador de topologia.** Reproduz, fora do job, a lógica de consolidação do `run_esmApp.jaci`, imprimindo o mesmo `select`, para escolher `atm_pet_count` e `ocn_pet_count` antes de editar a `nuopc.input`. Modos `--atm/--ocn`, `--total` com `--ratio`, `--sweep`, `--suggest` e `--sequential`.
+- **Documentação.** Novo `docs/MULTINO-run_esmApp.md` (hardware do sítio, contabilidade de `ncpus`, topologia sequential e concurrent, tabela de filas e limites, planejador, boas práticas e glossário) e as subseções correspondentes no `README-MONAN-Coupler.md`.
+- **Correção (`mom_cap_MONAN.F90`): campos de importação sem estampilha de tempo.** No primeiro passo de acoplamento, o `CheckImportTolerant` comparava o `TimeStamp` de cada campo importado sem que ele tivesse sido definido: na RunSequence o OCN roda antes do conector MED para OCN, e o `NUOPC_GetTimestamp` do NUOPC 8.9.1 retorna `ESMF_SUCCESS` sem preencher o `ESMF_Time` (não existe o argumento `isValid=`).
+- **Correção (`domain-mom6.bash`): saída incoerente em `--no-mask`.** A coluna `PETs` da tabela de candidatos era sempre calculada como `NIPROC * NJPROC - Nmask`, mesmo em `--no-mask`, exibindo 121 para o `16x8` quando o resultado efetivo, informado três linhas abaixo, era 128.
+- **Ressalva em aberto (`domain-mom6.bash`): convenção de fronteiras difere da do FMS.** O script distribui as sobras da divisão nos primeiros blocos; o `mpp_compute_extent` as distribui simetricamente (`Y-AXIS = 53 52 53` para 158 pontos em 3 blocos, contra `53 53 52` do script).
+- **Documentação.** Novo `docs/mascara-cap-nuopc.md`, explicação didática e autocontida do problema da máscara: glossário PE/PET/DE, por que o split de comunicador não está envolvido, a diferença entre representação densa e esparsa no ESMF, como reconhecer o sintoma e as duas rotas de correção do cap, com a estimativa de ganho por número de PETs.
+- **Correção (incidente do LAYOUT 43x3, 22/07/2026).** Run de 256 PETs em modo concorrente (128 ATM + 128 OCN) abortava com SIGSEGV no PET 171 logo após `COMPLETED MOM INITIALIZATION`. Causa: o `mask_table` gerado para `LAYOUT = 43, 3` remove o bloco `(1,3)` da decomposição, e o cap NUOPC do MOM6 monta o `deBlockList` do `ESMF_Grid` apenas com os domínios dos PETs vivos.
+- **Novo utilitário (`domain-mom6.bash`): decomposição de domínio do MOM6+SIS2.** Calcula um `LAYOUT` (NIPROC, NJPROC) equilibrado e gera o `mask_table` do FMS, eliminando os blocos 100% terra.
+- **Documentação.** Novo `docs/domain-mom6.md` (algoritmo detalhado: soma de prefixos, escore dos candidatos, formato do `mask_table`, custo e armadilhas) e `README.md` com a subseção "Decomposição de domínio do MOM6+SIS2", logo após as partições METIS do MPAS, mais as entradas correspondentes na árvore de estrutura e na tabela "Onde mexer".
+- **Correção (ESMF externo no MONAN-A).** A etapa 1 falhava ao compilar `mpas_timekeeping.F` (`timeStringISOFrac`/`h=` não reconhecidos) porque o `-DMPAS_EXTERNAL_ESMF_LIB` resolvia `use ESMF` para o *stub* interno do MPAS (`src/external/esmf_time_f90`) em vez do ESMF 8.9.1 real.
+- **Correção (toolchain GNU na etapa 3 e no rebuild manual).** O `make all` do acoplador falhava com o `ftn` acionando o compilador Cray (CCE) e rejeitando os flags GNU do Makefile (`-mcmodel=small`, `-ffree-line-length-none`, `-fallow-argument-mismatch`, …).
 
-  O modo de falha é o que torna o caso instrutivo: o arquivo passava por `q file` parecendo saudável, com as 18 variáveis listadas, e só se revelava ao tentar plotar, quando o GrADS respondia *all undefined values*. Valor ausente e valor zerado são coisas diferentes, e confundir os dois levou a investigar o oceano e a rotação de grade sem necessidade. O único sinal disponível antes disso era o `long_name` genérico das três variáveis, herdado do mesmo `case default`.
+## Histórico do cap atmosférico (`mpas_cap_MONAN.F90`, versões 7.0 a 9.2, e `mpas_cap_netcdf.F90`, versões 2.5 a 3.0, Maio 2026)
 
-  Corrigido nos dois `select case`, com os campos internos `is%f_uocn_atm`, `is%f_vocn_atm` e `is%f_zorl_atm`. O `case default` passou a registrar aviso no log em vez de pular em silêncio. Conferido por script que os 18 nomes de `export_names` têm mapeamento.
+Resumo do histórico que ficava nos cabeçalhos dos arquivos, retirado na R-FASE5-04.
 
-- **Terceiro bloco de nós no `run_esmApp.jaci`.** Com `pet_layout = 'split'` e gelo ativo, o script pedia ao PBS apenas `ATM + OCN` processos, enquanto o `mpiexec` era lançado com o total. Para `-n 8` com atm=4, ocn=2, ice=2 o pedido era de 6 slots para 8 PETs, e o trabalho falharia na largada com mensagem do PALS sem relação aparente com gelo. O bloco do ICE entra no `select` e a opção `--ppn-ice` foi acrescentada por simetria. A ordem dos blocos segue a das faixas de rank atribuídas em `esm.F90`.
+- **`mpas_cap_MONAN` 7.0**: protocolo NUOPC completo via `NUOPC_CompDerive` (InitializeAdvertise, InitializeDataComplete). **7.1**: `mpas_atm_resize` eliminado (ESMF e MPAS usam decomposições distintas). **7.2**: coordenadas do NetCDF por `lonCell(1:n_local)`, sem `ownedElemCoords` (double-free no ESMF 8.9.1 em Cray/gfortran).
+- **`mpas_cap_MONAN` 8.0**: importação estendida de So_t para So_t, Si_ifrac, So_u e So_v (antes gelo e correntes usavam valores fixos). **9.0**: importação de Sf_zorl (Charnock + Smith no mediador), no lugar de `cfg_zorl_default` = 0,01 m. **9.2**: `set_mpas_diag_clock` passou para `mpas_cap_netcdf`. Depois vieram Sf_albedo, Sx_omask e a troca de So_t por Sx_tsfc.
+- **`mpas_cap_netcdf` 2.5**: conversão dos campos acumulados movida para `mpas_atm_model.F90` (a divisão pelo tempo total desde t=0 dava a média errada depois do primeiro passo) e limiar de outlier de Faxa_taux/tauy de 1e4 para 10 N/m². **2.6**: timestamp duplo em `export_write_netcdf` corrigido (usa o currTime de ModelRun). **2.8**: decomposição MPI salva em `netcdf_init_coords` e reutilizada na escrita. **3.0**: `write_mpas_import_diag`, `set_mpas_diag_clock` e `voronoi_to_grid` vieram de `mpas_cap_methods.F90`.
 
-- **Endurecimento: o mediador declarava `InitializeDataComplete` sem verificar
-  o dado (B-SEQINIT-01, revisto).** O `MED_cap.F90` marcava
-  `InitializeDataComplete = "true"` na primeira chamada, incondicionalmente, e
-  `NUOPC_IsAtTime` não era invocado em lugar nenhum do projeto. O laço de
-  resolução de dependência de dados do driver NUOPC encerrava então após uma
-  única passagem, e a correção da inicialização passava a depender inteiramente
-  de o oceano já ter escrito `So_t` naquele instante.
+## Histórico do cap do oceano (`mom_cap_MONAN.F90`, versões 2.0 a 2.6, Maio 2026)
 
-  `InitializeDataComplete` foi dividida em duas fases. A fase A (geometria: os
-  dois `FieldRegridStore` e a zeragem do `exportState`) roda uma única vez,
-  guardada por `is%rh_created`. Entre as duas há um gate: `NUOPC_IsAtTime(So_t,
-  startTime)` e, desde a revisão abaixo, também contagem global de células com
-  SST em [270,310] K. Enquanto o dado não chega, o mediador declara
-  `InitializeDataProgress="true"` e `InitializeDataComplete="false"`, forçando
-  nova passagem do laço. A fase B faz o regrid de `So_u`/`So_v`, o regrid de
-  `So_t` para `f_sst_atm` e publica a SST de t=0 no `exportState`, de modo que o
-  `MED -> MPAS` da mesma passagem entregue SST física em vez de zero.
+Resumo do histórico que ficava no cabeçalho do arquivo, retirado na R-FASE5-03.
 
-  **Comportamento observado (2026-08-14, rodadas de 8 PETs em ambos os modos).**
-  O gate fecha exatamente uma vez, e o faz igualmente em `sequential` e em
-  `concurrent`. Nos dois casos o `DataInitialize` do mediador é chamado ~75 ms
-  antes do `InitializeDataComplete` do oceano. A conclusão é que **o laço não
-  percorre a `RunSequence`**: ele chama os componentes na ordem de registro, e
-  em `SetModelServices` os `NUOPC_DriverAddComp` aparecem como MPAS, MED, OCN —
-  o mediador antes do oceano, independentemente do `coupling_mode`.
-
-  Isso corrige uma afirmação anterior desta entrada, que atribuía a espera à
-  ordem dos elementos da `RunSequence` e sustentava que o modo concorrente
-  funcionava "por acidente de ordenação". Era falso: os dois modos se comportam
-  igual neste ponto.
-
-  Registre-se também o escopo real do ganho. Não houve sintoma observado que
-  este gate corrija: em ambos os modos o `So_t` do passo 1 já saía correto
-  antes dele, porque o conector `OCN -> MED` no topo do passo entrega o campo
-  que o `mom_export` do oceano escreveu na inicialização. O gate é defesa contra
-  a janela t=0 — o `MED -> MPAS` emitido durante a própria inicialização — e
-  contra futuras mudanças de ordem de registro. É prática NUOPC correta, não a
-  correção de um defeito flagrado.
-
-  Uma otimização possível, deliberadamente **não** aplicada: registrar o OCN
-  antes do MED faria o gate abrir já na primeira passagem. O laço converge em
-  duas passagens de qualquer modo, o custo é de microssegundos, e mexer na ordem
-  de registro de um driver que funciona não se paga.
-
-- **Endurecimento: o gate aceitava campo carimbado e vazio.** O `mom_cap` aplica
-  `NUOPC_SetTimestamp` a todos os campos do `exportState` em laço cego sobre o
-  `itemNameList`, sem verificar quais o `mom_export` preencheu; um `So_t` nulo
-  passaria no `NUOPC_IsAtTime`. O `MED_cap.F90` passa a exigir também valor
-  fisicamente plausível, contando globalmente (`ESMF_VMAllReduce` sobre a VM do
-  mediador) as células em [270,310] K — global porque um DE pode legitimamente
-  conter apenas terra e gelo. Após cinco iterações sem dado físico, emite aviso
-  alto e prossegue. O aviso é deliberado, e não aborto: o comportamento do laço
-  de dependência de dados só foi caracterizado empiricamente, e derrubar
-  execuções que hoje funcionam com base em modelo incompleto seria imprudente.
-
-- **`mom_cap_MONAN.F90`: chamada de `ocean_model_init_sfc` antes do
-  `mom_export` de t=0.** Acrescentada por precaução, **não** por defeito
-  observado. A leitura estática sugeria que `ocean_public%t_surf` nunca era
-  preenchido, já que a chamada de `convert_state_to_ocean_type` dentro de
-  `ocean_model_init` está guardada por `if (present(gas_fields_ocn))` e o cap
-  invoca `ocean_model_init` sem esse argumento. A medição desmentiu: o `So_t`
-  bruto chega ao mediador com até 303,8 K, ou seja `t_surf` é preenchido por
-  alguma via não identificada. A chamada é idempotente e inofensiva; quem
-  preferir árvore mínima pode omiti-la sem consequência.
-
-- **Correção: evaporação saturada quando `psl` é nula (BUG-CALC-06).** Em
-  `med_bulk_ncar.F90`, o denominador de `qsat` era `max(psl(i,j), 1.0)` — uma
-  proteção contra divisão por zero que produz resultado absurdo em vez de pular
-  a célula: com `psl = 0` o divisor vira 1 Pa em lugar de ~101325 Pa, `qsat` sai
-  cinco ordens de grandeza alto e `Foxx_evap` satura no clamp de +1e-4 kg/m²/s
-  no globo inteiro. O fluxo saturado não ficava no diagnóstico: em
-  `coupling_mode='sequential'` o `MED -> OCN` o entregava ao MOM6 antes do
-  avanço do oceano. Acrescentada a guarda `if (psl(i,j) < 5.0e4) cycle`,
-  simétrica às de `lwdn` (BUG-CALC-03) e `tas` (BUG-CALC-04); pressão ao nível
-  do mar nunca desce de ~870 hPa, então 500 hPa é limiar seguro para ausência de
-  dado. Confirmado nas figuras de 2026-08-14: `Foxx_evap` zerado no passo 1 e
-  fisicamente correto (±8 mm/d, máximos subtropicais) no passo 2.
-
-- **Documentado: o primeiro passo de acoplamento é incompleto nos dois modos.**
-  Em `sequential` o mediador é o 3º elemento da `RunSequence` e calcula os
-  fluxos antes do primeiro avanço do MPAS; radiação, precipitação e pressão saem
-  nulas no passo 1, enquanto momento e calor sensível já são válidos. Em
-  `concurrent` o mediador é o último e o arquivo do passo 1 sai completo, mas a
-  forçante que o oceano de fato consumiu naquela hora é o `exportState` zerado da
-  inicialização, que não aparece em figura alguma. As duas situações são
-  simétricas; nenhum dos modos entrega forçante completa na primeira hora. A
-  partir do passo 2 tudo está completo, e uma hora de radiação nula é desprezível
-  frente à inércia térmica da camada de mistura — daí a opção por documentar em
-  vez de chamar radiação na inicialização do MPAS.
-
-- **`postproc_mom6_import.py` v8.3: rodapé de consumo por modo.** A mesma figura
-  "passo N" significa coisas diferentes — em `sequential` mostra os fluxos que o
-  MOM6 consome naquele passo; em `concurrent`, os do passo seguinte. Comparar
-  passo 1 com passo 1 entre modos é erro, e custou uma investigação inteira. O
-  script passa a ler `coupling_mode` da `nuopc.input` e anotar o pareamento
-  correto (sequencial N+1 × concorrente N) no rodapé de cada figura.
-
-- **Correção (`test-*.bash`): aborto silencioso do `wait` sob `set -e`.** A
-  detecção de fim de processo era `wait "$pid" 2>/dev/null; ec=$?`. Como comando
-  isolado, um retorno diferente de zero dispara o `set -e` e encerra o script
-  antes de `ec` ser avaliado — sem veredito, sem análise, sem mensagem. O único
-  caso que os testes existem para diagnosticar era o único que não conseguiam
-  relatar. Reescrito como `ec=0; wait "$pid" 2>/dev/null || ec=$?`, e acrescentado
-  aviso aos 2 s com as primeiras linhas do stdout, já que morte instantânea é
-  lançador recusado ou ambiente incompleto, nunca deadlock.
-
-- **Correção (`test-sequential-split.bash`): faltava a guarda de `LAYOUT` do
-  MOM6.** O pré-check validava a partição METIS do MPAS mas não o requisito
-  simétrico do oceano. Com `pet_layout='split'` o MOM6 recebe exatamente
-  `ocn_pet_count` PETs, e o `mpp_define_domains` aborta se `LAYOUT(1)*LAYOUT(2)`
-  não bater — o job morria em ~1 s num rank do bloco OCN, com mensagem que não
-  mencionava PET nem LAYOUT, e as verificações seguintes produziam diagnósticos
-  enganosos. O script agora lê `LAYOUT` do `MOM_input` e aborta no nó de login,
-  sugerindo `--ocn` e `-n` coerentes. Acrescentadas também as formas curtas
-  `-q`/`-A`, alinhadas ao `qsub`.
-
-- **Correção (`run_esmApp.jaci`): partição METIS e `select` heterogêneo presos
-  ao modo, não ao layout.** Duas decisões consultavam `coupling_mode` quando o
-  que importava era `pet_layout`: o dimensionamento da partição METIS do MPAS
-  (`atm_pet_count` em split, `-n` em shared) e a guarda `CONC_PER_COMP`, que
-  emite o `select` com blocos de nós só-ATM e só-OCN. Com `sequential + split`
-  as duas erravam. A guarda `atm_pet_count + ocn_pet_count == -n`, antes restrita
-  a `concurrent`, passa a valer para qualquer split. Acrescentada validação de
-  `pet_layout` desconhecido e da combinação `concurrent + shared`, ambas com
-  aborto ainda no nó de login, e uma linha `ACOPL` ao banner de dentro do job:
-  sem ela, um tempo de parede anotado hoje seria ambíguo depois, já que 2176
-  PETs podem significar quatro configurações com custos bem diferentes.
-
-- **Correção (`MED_cap.F90`): último `ESMF_VMGetGlobal` dentro de rotina de
-  componente.** Em `fill_ifrac_from_oisst`, o `ESMF_VMBroadcast` do arquivo
-  OISST era coletivo sobre a VM **global**. Hoje isso funciona por coincidência,
-  porque o mediador roda em todos os PETs nos dois layouts, mas era o único
-  ponto que não recebera a correção aplicada em `DATM_cap.F90`, `DOCN_cap.F90` e
-  `docn_cap_netcdf.F90` na v13.1. Trocado por `ESMF_VMGetCurrent`, que devolve a
-  VM do componente e torna `rootPet=0` local ao MED. O modo de falha evitado é
-  deadlock, não erro: se o mediador algum dia ganhar uma `petList` própria, os
-  PETs de fora nunca entrariam no broadcast e os de dentro ficariam bloqueados.
-
-- **Correção (`esm.F90`): `rc` de `config_read` descartado.** A chamada em
-  `SetModelServices` gravava o retorno em `rc`, que a chamada NUOPC seguinte
-  sobrescrevia antes de qualquer teste. Um `rc = 2` — configuração inválida —
-  passava despercebido nesse ponto. Passa a usar variável própria (`cfg_rc`) e a
-  abortar com mensagem no log ESMF.
-
-- **Novo: `test-sequential-split.bash`.** Smoke test da combinação
-  `sequential + split`, ao lado do `test-concurrent.bash` e no mesmo padrão de
-  duas fases (submissão no nó de login, execução dentro do job). Além das
-  verificações herdadas — partição aplicada, inicialização dos três componentes,
-  primeiro passo sem deadlock nos coletivos —, inclui a que distingue os dois
-  modos: as janelas `Run` de ATM e OCN não podem se sobrepor no tempo. A
-  necessidade é direta: `sequential + split` e `concurrent + split` produzem
-  exatamente os mesmos conjuntos de PETs, e só os carimbos de tempo dos logs
-  separam um do outro; sem essa checagem, um erro que montasse a *RunSequence*
-  concorrente passaria como sucesso. A medição une as janelas de cada bloco de
-  PETs (as de PETs irmãos se sobrepõem entre si, e isso é esperado) e mede a
-  interseção das duas uniões, com tolerância ajustável por `--overlap-tol`.
-  Requer `python3` no nó de execução; sem ele a verificação é pulada com aviso,
-  e as demais seguem valendo. O teste também avisa quando falta o
-  `x1.*.graph.info.part.<atm>`, cuja ausência apareceria como `initfail` sem
-  indicar a causa.
-
-- **Correção (`test-concurrent.bash`): baseline quebrado pela nova validação.**
-  O `--baseline` gerava uma config `sequential` **com** `atm_pet_count` e
-  `ocn_pet_count`, que passou a ser erro. O `gen_config` ganhou um terceiro
-  argumento (`layout`) e zera as contagens em `shared`. Os marcadores de log
-  procurados foram atualizados para o formato novo (`layout SPLIT (execucao
-  CONCURRENT)`), mantendo o antigo por alternativa, para que o mesmo teste sirva
-  na comparação com binários anteriores.
-
-- **Correção (`analisa_balanceamento_pets.py`): detecção de modo cega ao novo
-  formato de log.** As expressões procuravam `modo CONCURRENT` / `modo
-  SEQUENTIAL`, que deixaram de existir. Passa a ler os dois eixos separadamente,
-  aceitando também o formato antigo. Duas mudanças de conteúdo, e não só de
-  sintaxe: a ressalva de extrapolação da partição sugerida passou a depender do
-  *layout* (é `shared` que mede cada componente com todos os PETs, e portanto
-  extrapola; `sequential + split` já fornece medidas de uma partição real); e a
-  execução deixou de ser inferida quando não anunciada, porque conjuntos
-  disjuntos de PETs não distinguem sequencial de concorrente, e assumir
-  concorrente faria o relatório anunciar um ganho de tempo de parede
-  possivelmente inexistente.
-
-- **Documentação: `nuopc.input`, README e demais documentos sincronizados.** O
-  Grupo 7 da `nuopc.input` foi reescrito com a tabela das quatro combinações e
-  as duas regras (soma igual a `-n` em split; contagens zeradas em shared), e o
-  bloco ativo ganhou `pet_layout = 'split'`, que é o que torna coerentes o
-  `atm_pet_count = 2048` e o `ocn_pet_count = 128` que já estavam ali. A §6.2 do
-  README do `MONAN-Coupler` foi reescrita em
-  `README-secao-6.2-atualizada.md` (o arquivo alvo pertence à outra árvore).
-  Ajustadas ainda as menções a "modo concurrent" em `domain-mom6.md`,
-  `domain-mom6.bash` e `mascara-cap-nuopc.md`, onde o que se descrevia era, na
-  verdade, o efeito do *layout*.
-
-- **Documentação: seções de Conclusão em `SMT-Jaci.md` e
-  `MULTINO-run_esmApp.md`.** Os dois documentos terminavam direto no glossário,
-  sem fechar a narrativa antes do material de referência. Acrescentada, em cada
-  um, uma seção **Conclusão** entre o corpo técnico e o glossário, com as
-  seções seguintes renumeradas (`SMT-Jaci.md`: Glossário passa a ser a seção
-  11 e Referências internas a 12; `MULTINO-run_esmApp.md`: Glossário passa a
-  ser a seção 10). Nenhuma referência cruzada de seção, em nenhum documento,
-  apontava para os números antigos, então a renumeração não quebrou nada.
-- **Correção de tradução: `alocação preguiçosa` → `alocação por demanda`.**
-  A tradução literal de *lazy allocation* soava informal e não é o termo
-  consagrado na literatura de sistemas operacionais em português. Corrigido em
-  `SMT-Jaci.md` e neste changelog, mantendo `(*lazy allocation*)` como
-  referência entre parênteses nos dois casos.
-- **Documentação: `README.md` sincronizado com `docs/`.** A árvore de estrutura
-  ainda listava apenas `CHANGELOG.md` e `notas-standalone.md` em `docs/`, quando
-  o diretório já reúne seis documentos. Acrescentada a seção **Documentação**,
-  com uma tabela do assunto de cada arquivo e um roteiro de "por onde começar"
-  por tarefa, além da ressalva de que os scripts descritos em
-  `MULTINO-run_esmApp.md` e `SMT-Jaci.md` pertencem à árvore do `MONAN-Coupler`,
-  e não a este repositório. Nova seção **Depois de instalar**, que encaminha do
-  `bin/esmApp` recém-construído até a primeira submissão, com os três pontos que
-  costumam surpreender: a contabilidade de `ncpus` em cores físicos, a partição
-  METIS dimensionada por `atm_pet_count` no modo concurrent e a incompatibilidade
-  do `mask_table` com o cap NUOPC. Travessões removidos, conforme o padrão do
-  projeto.
-- **Documentação: nova nota técnica `SMT-Jaci.md`.** Registra a caracterização
-  do SMT nos nós de cálculo do Jaci e a medição do seu efeito sobre o sistema
-  acoplado, em onze seções: o mecanismo do SMT, a caracterização do hardware com
-  os comandos e as saídas obtidas, a contabilidade das filas com a verificação
-  experimental por `qsub`, a metodologia da medição, os resultados em tempo de
-  parede e em tempo de máquina, a interpretação por componente, as limitações de
-  escopo, as decisões decorrentes, o procedimento de reprodução, um glossário e
-  as referências internas. Toda a aritmética das tabelas foi conferida.
-- **Novo (`run_esmApp.jaci`): `TOPO` e `REGIME` no banner de dentro do job.** As
-  duas linhas existiam apenas no resumo impresso no nó de login, que não é
-  capturado pela diretiva `#PBS -o` e, portanto, não chegava ao
-  `esmApp_run.log`. Sem elas, a autoverificação do `mede_smt.py` ficava inerte
-  justamente nas duas checagens mais fortes. O banner do job passa a imprimir a
-  topologia derivada do `PBS_NODEFILE` e o regime de ocupação do core. Quando o
-  `PBS_NODEFILE` não é legível, o regime é declarado `indeterminado`, e o
-  `mede_smt.py` pula a verificação com aviso em vez de acusar troca de
-  diretórios. As expressões do `mede_smt.py` passam a aceitar tanto `TOPO:`
-  quanto `TOPO =`, cobrindo os dois formatos.
-- **Novo (`run_esmApp.jaci`): procedência do build no banner do job.** Um tempo
-  de parede anotado hoje não era reproduzível depois, por não haver registro de
-  qual revisão do código nem de qual ESMF o produziram. O banner passa a
-  imprimir a revisão (`git describe --tags --always --dirty` do
-  `COUPLER_ROOT`), a versão do ESMF (lida de `ESMF_VERSION_STRING` no
-  `ESMFMKFILE`) e a data de compilação do executável. Tudo tolerante a
-  ausência: fora de um clone git, sem `git` no `PATH` ou sem `esmf.mk`, o campo
-  vira `?` em vez de interromper o job.
-- **Correção (documentação): diagrama impossível na seção 4 do
-  `MULTINO-run_esmApp.md`.** O exemplo do nó misto usava `atm=512, ocn=128`,
-  mas 512 é múltiplo de 256 e a distribuição natural já sai alinhada, de modo
-  que o nó misto ilustrado não pode ocorrer. Substituído por `atm=384,
-  ocn=128`, em que a mistura de fato acontece, e acrescentada a observação de
-  que a consolidação custa um nó a mais (de dois para três) e de que os blocos
-  de 192 ainda atravessam a fronteira NUMA de 128 cores, que é a razão de o
-  `plan-layout.py` marcar 384 como quebrado.
-- **Documentação: escopo do resultado do SMT.** Acrescentada a subseção
-  explicitando que os 11,2% valem para 512 PETs, malha `x1.40962` e modo
-  `sequential`, e não são propriedade do sistema. Como o mecanismo é disputa
-  pelo cache L2, subdomínios menores (por exemplo com 2176 PETs) podem reduzir
-  ou inverter a penalidade, enquanto a malha `x1.163842` a agravaria. Registrada
-  também a hipótese não testada de `--ppn-atm 256` com `--ppn-ocn 512` no modo
-  concurrent. Novo slide "O que ainda não sabemos" na apresentação, com as
-  quatro ressalvas.
-- **Novo (`plan-layout.py`): alinhamento com os dois patamares de limite do
-  `run_esmApp.jaci`.** O planejador mantinha um único `--ppn-max`, enquanto o
-  script já separava `PPN_PHYS` de `PPN_HARD`, e por isso podia imprimir um
-  `select` que o script recusaria. Como a razão de existir do planejador é que
-  o `select` impresso seja idêntico ao submetido, a divergência atacava a
-  premissa da ferramenta. Passa a ter `PPN_PHYS_DEFAULT = 256` e
-  `PPN_HARD_DEFAULT = 512`, com `--allow-smt` e a mesma guarda aplicada a
-  `--ppn-max`, `--ppn-atm` e `--ppn-ocn`, além da linha `regime` na saída, nos
-  modos concurrent e sequential. Corrigido também o texto de ajuda de
-  `--ppn-ocn`, que anunciava padrão 128 quando o valor é 256.
-- **Novo (`mede_smt.py`): autoverificação a partir do conteúdo dos logs.** O
-  script confiava apenas no nome do diretório: trocar `logs.A` por `logs.B`
-  inverteria a conclusão sem qualquer sinal, num resultado que passou a
-  sustentar uma decisão de projeto. Passa a extrair o modo de acoplamento da
-  linha `ESM: modo ...` do log de PET e, quando o banner do job estiver
-  presente no diretório, a topologia e o regime de ocupação do core. Com isso
-  aborta quando A e B têm números de PETs diferentes, quando os modos divergem,
-  quando as rodadas de uma configuração usam números de nós distintos e,
-  sobretudo, quando o `REGIME` declarado contradiz a configuração, indicando
-  diretórios trocados. Avisa quando as rodadas estão em `CONCURRENT`, modo em
-  que o teste do SMT é confundido pelo balanceamento entre os blocos. O número
-  de nós lido do banner prevalece sobre `--nos-a` e `--nos-b`, com aviso.
-  Verificações ausentes são puladas, nunca inventadas.
-- **Novo utilitário (`mede_smt.py`): comparação controlada do efeito do SMT.**
-  Lê os logs de PET das rodadas com e sem uso do SMT (padrão `logs.A1..A3` e
-  `logs.B1..B3`) e emite a tabela comparativa por componente, com a razão B/A,
-  além de CSV (`--csv`) e gráfico de barras (`--grafico`). Segue o critério já
-  adotado nas notas técnicas do grupo: **soma** das durações dos pares
-  `Run intro` / `Run extro` dentro de cada passo, e não média por chamada, para
-  não subestimar componentes que subciclam; e **máximo entre os PETs**, e não
-  média, porque o grupo é limitado pelo processo mais lento na barreira
-  coletiva. O primeiro passo é descartado por padrão (`--descartar`), por conter
-  alocação por demanda e o custo inicial dos conectores. O casamento dos
-  marcadores exige o ponto final da linha, o que descarta as linhas de
-  `StateLog`, que repetem o texto `Run intro` seguido de `{IS}:` e não delimitam
-  a chamada. Avisa sobre marcadores órfãos e sobre divergência no número de
-  pares entre PETs, truncando no mínimo comum. O veredito é declarado
-  inconclusivo quando a diferença não supera a dispersão das repetições.
-  **Normalização pelo número de nós.** Na primeira versão o script comparava
-  apenas *wall-clock time*, o que embute um confundimento sério: com o mesmo
-  número de PETs, B usa metade dos nós de A e, portanto, metade dos cores
-  físicos, de modo que B seria 2,00 vezes mais lento mesmo com SMT
-  perfeitamente neutro. O efeito atribuível ao SMT é o excesso sobre esse
-  fator. O script passa a reportar também o custo em **nó vezes segundo por
-  passo** (opções `--nos-a` e `--nos-b`), que é a grandeza comparável entre as
-  duas configurações, e o veredito separa *wall-clock time* de custo de máquina.
-  **Propagação de erro corrigida.** A incerteza da razão era calculada como
-  `(dp_A + dp_B) / media_A`, dividindo o desvio de B pela média de A. Como B e A
-  têm magnitudes diferentes por construção (B é cerca de duas vezes maior), isso
-  inflava o ruído: os 12,5% relatados eram, de fato, 7,7% em soma linear ou 5,4%
-  em quadratura. O cálculo passa a dividir cada desvio pela sua própria média, e
-  o veredito ganhou o estado intermediário `MARGINAL`, para efeitos que superam
-  o critério em quadratura mas não a soma linear.
-  Na medição de 06/08/2026 (512 PETs, três repetições), o *wall-clock time* deu
-  B/A = 2,22, mas o custo de máquina deu 1,11, com sinais opostos por
-  componente: MED 0,97 e OCN 0,86, que se beneficiam do SMT por terem mais
-  espera de memória, contra MPAS 1,20, penalizado por já saturar a FPU. Como o
-  MPAS responde por cerca de 69% do passo, o saldo é negativo, e o efeito de
-  11,2% supera a incerteza de 7,7%.
-  O reconhecimento dos logs aceita tanto `PET000.esmApp.log`, que é o nome
-  gerado pelo ESMF no Jaci, quanto `PET000_esmApp.log`, variante que aparece
-  após transferências, e exige o número do PET no nome, o que descarta o
-  `esmApp_run.log` presente no mesmo diretório. A ordenação é numérica, e não
-  lexicográfica. A opção `--padrao` permite informar outro glob, e a mensagem de
-  erro passa a distinguir diretório inexistente de diretório sem logs
-  reconhecidos, listando o que encontrou.
-- **Novo (`run_esmApp.jaci`): `--allow-smt` e limite de PET/nó parametrizado.**
-  A constante única `PPN_MAX=256` colapsava dois conceitos distintos, o que o
-  hardware aceita e o que se recomenda, e por isso impedia qualquer medição do
-  efeito do SMT. Passam a existir `PPN_PHYS=256` (cores físicos, limite
-  recomendado e padrão) e `PPN_HARD=512` (CPUs lógicas, limite absoluto do
-  hardware). Valores de `--ppn` entre 257 e 512 exigem `--allow-smt` e, sem a
-  opção, o script aborta explicando que acima de 256 cada core passa a receber
-  dois ranks. Acima de 512 o erro é o limite do hardware, com ou sem a opção. O
-  modo automático (`--ppn 0`) nunca ultrapassa `PPN_PHYS`, de modo que o padrão
-  jamais entra em SMT por acidente. O resumo de topologia ganhou a linha
-  `REGIME`, que registra se o job rodou com um rank por core ou com SMT ativo:
-  sem ela, um *wall-clock time* anotado hoje seria ambíguo depois, já que 512 PETs
-  podem significar dois nós ou um nó com SMT. A guarda de fila não precisou de
-  ajuste, pois compara `NPES` com `resources_max.ncpus` e a aritmética fecha nos
-  dois regimes.
-- **Correção (`run_esmApp.jaci`): partição METIS dimensionada pelo número
-  errado em modo concurrent.** Com `-n 2176` e `atm_pet_count = 2048` o
-  pré-check exigia `x1.*.graph.info.part.2176` em vez de `.part.2048`, que
-  estava presente no diretório do experimento. A lógica de escolha estava
-  correta (sequential usa `-n`, concurrent usa `atm_pet_count`); o defeito era
-  a leitura da `nuopc.input`, que caía silenciosamente para `sequential` em
-  três situações:
-  - **Caixa do valor.** `_nuopc_get` usava `grep -i` para a chave mas comparava
-    o valor com `== "concurrent"`, sensível a maiúsculas. `'CONCURRENT'` ou
-    `'Concurrent'`, ambos válidos em namelist Fortran, viravam sequential. O
-    valor passa a ser normalizado para minúsculas.
-  - **Ausência de escopo de grupo.** A busca era global no arquivo, com
-    `head -1`, então uma ocorrência de `coupling_mode` anterior ao
-    `&nuopc_petlayout` (grupo antigo, bloco de exemplo) vencia a definição
-    real. Novo `_nuopc_get_in`, que lê a chave **dentro** do grupo indicado,
-    insensível a caixa, ignorando comentários `!` e aceitando os terminadores
-    `/` e `&end`, com recuo para a busca global em `nuopc.input` legados sem o
-    grupo.
-  - **Recuo silencioso.** Um `coupling_mode` com erro de digitação virava
-    sequential sem qualquer sinal. Agora é erro explícito, listando os valores
-    aceitos.
-  Acrescentadas duas linhas `INFO` informando de onde saiu o número de
-  partições (`atm_pet_count` em concurrent, `-n` em sequential), e a mensagem
-  de partição faltante passa a listar as partições presentes no diretório,
-  distinguindo "falta gerar" de "dimensionado pelo número errado".
-- **Execução multinó no `run_esmApp.jaci`: contabilidade de `ncpus` e posse do
-  nó.** O gerador do `.pbs` deriva a topologia de `-n` (`NNODES x PPN`,
-  `place=...`), substituindo o antigo `select=1`, que prendia qualquer job a um
-  único nó. O levantamento do sítio (`lscpu`, `pbsnodes -a`, `qstat -Qf`,
-  05/08/2026) fixou os parâmetros: o nó de cálculo `cn-0001..cn-0104` tem
-  **256 cores físicos** (2 sockets x 128 Zen5) com SMT ligado, expondo 512 CPUs
-  lógicos e ~754 GB, e o `pbsnodes` reporta `resources_available.ncpus = 512`.
-  O limite das filas, porém, é contado em **cores físicos**: a `pesqextra`
-  declara `resources_max.ncpus = 7680` para `resources_max.nodes = 30`, isto é
-  256 por nó, e os jobs em execução aparecem com `ncpus/nodect = 256`. Logo o
-  `select` mantém `ncpus = mpiprocs = PPN <= 256`; pedir `ncpus = 512` gastaria
-  o limite da fila em dobro e limitaria o job a 15 nós em vez de 30.
-  - **`place=scatter:excl` passa a ser o padrão** (antes `scatter`). Reservando
-    256 num nó que anuncia 512 lógicos, o `scatter` puro deixa metade do nó
-    aparentemente livre e autoriza o PBS a alocar outro job ali, com disputa de
-    memória e de largura de banda no mesmo socket. Com `:excl` o nó é exclusivo
-    e o SMT fica ocioso, que é o desejado para MPAS/MOM6.
-  - **Guarda de fila.** Constantes `QUEUE_LIMITS_*` e a rotina `_queue_guard`
-    conferem NPES, número de nós e *walltime* contra o `resources_max` da fila
-    antes do `qsub`, abortando com mensagem explícita. Fila desconhecida gera
-    aviso e prossegue. Limite prático do acoplado na `pesqextra`:
-    30 nós x 256 PET/nó = 7680 PETs, coincidindo com o `resources_max.ncpus`.
-  - **Padrão de 256 PET/nó** (nó físico cheio, 1 rank por core, sem SMT) e
-    **sem reserva de memória**: `--mem` e `--mem-per-pet` são opcionais, e a
-    resposta a OOM (`exit 137/143`) é reduzir `--ppn` ou reservar `--mem`.
-    Novas opções `--ppn`, `--place`, `--mem`, `--mem-per-pet`.
-  - **Modo concurrent com consolidação por componente:** `select` heterogêneo
-    alinhado a fronteiras de nó, de modo que nenhum nó fique misto (ATM+OCN);
-    opções `--ppn-atm`, `--ppn-ocn` e `--pet-order`.
-  - **Nós auxiliares documentados:** `aux01..aux10`, com `ncpus = 256` e
-    ~1,5 TB, alcançados pela fila `aux` (`worktype = aux`). Destinam-se a pré e
-    pós-processamento (geração de malha, particionamento METIS), não ao
-    acoplado. O roteamento entre classes de nó é feito pelo recurso `worktype`,
-    o que explica o `Qlist` vazio no `pbsnodes`.
-- **Novo utilitário (`plan-layout.py`): planejador de topologia.** Reproduz,
-  fora do job, a lógica de consolidação do `run_esmApp.jaci`, imprimindo o
-  mesmo `select`, para escolher `atm_pet_count` e `ocn_pet_count` antes de
-  editar a `nuopc.input`. Modos `--atm/--ocn`, `--total` com `--ratio`,
-  `--sweep`, `--suggest` e `--sequential`. Acompanha a mesma tabela de limites
-  de fila (opção `--queue`, padrão `pesqextra`), com o status `excede fila` na
-  varredura. Corrigido o padrão de `--ppn-ocn 0`, que resolvia para metade do
-  nó em vez de nó cheio, divergindo do `run_esmApp.jaci`.
-- **Documentação.** Novo `docs/MULTINO-run_esmApp.md` (hardware do sítio,
-  contabilidade de `ncpus`, topologia sequential e concurrent, tabela de filas
-  e limites, planejador, boas práticas e glossário) e as subseções
-  correspondentes no `README-MONAN-Coupler.md`. Acrescentado o critério de
-  alinhamento NUMA: com 2 domínios de 128 cores por nó, cortes de
-  `atm_pet_count`/`ocn_pet_count` em múltiplos de 128 mantêm cada componente
-  dentro de sockets inteiros.
-- **Correção (`mom_cap_MONAN.F90`): campos de importação sem estampilha de
-  tempo.** No primeiro passo de acoplamento, o `CheckImportTolerant` comparava
-  o `TimeStamp` de cada campo importado sem que ele tivesse sido definido: na
-  RunSequence o OCN roda antes do conector MED para OCN, e o
-  `NUOPC_GetTimestamp` do NUOPC 8.9.1 retorna `ESMF_SUCCESS` sem preencher o
-  `ESMF_Time` (não existe o argumento `isValid=`). O resultado eram dois
-  `ERROR` por campo (`ESMF_TimeLT` e `ESMF_TimeGT`, "Object Set or SetDefault
-  method not called"), 28 linhas por execução com 14 campos importados. Sem
-  efeito numérico, mas poluindo o log e mascarando erros reais. A
-  `InitializeDataComplete` passa a estampilhar os campos de importação com
-  `startTime`, como já fazia com os de exportação.
-- **Correção (`domain-mom6.bash`): saída incoerente em `--no-mask`.** A coluna
-  `PETs` da tabela de candidatos era sempre calculada como
-  `NIPROC * NJPROC - Nmask`, mesmo em `--no-mask`, exibindo 121 para o `16x8`
-  quando o resultado efetivo, informado três linhas abaixo, era 128. Agora a
-  coluna respeita o modo, o rótulo da coluna de blocos secos alterna entre
-  `MASCAR.` (eliminados) e `SECOS` (mantidos), e uma nota sob a tabela explicita
-  que em `--no-mask` a contagem é informativa. Corrigido também o exemplo do
-  `--help` e do cabeçalho, que apresentava `--target-eff` como receita para um
-  run concorrente, justamente a configuração incompatível com o cap; o exemplo
-  do acoplado passa a usar `--no-mask --pes N`, e o do `--target-eff` fica
-  identificado como standalone. Colunas documentadas em `docs/domain-mom6.md`,
-  seção 7.2.
-- **Ressalva em aberto (`domain-mom6.bash`): convenção de fronteiras difere da
-  do FMS.** O script distribui as sobras da divisão nos primeiros blocos; o
-  `mpp_compute_extent` as distribui simetricamente (`Y-AXIS = 53 52 53` para
-  158 pontos em 3 blocos, contra `53 53 52` do script). As fronteiras internas
-  ficam deslocadas em um ponto e o conjunto de blocos secos pode divergir: em
-  `15x9` o script marca `(8,8)` onde o FMS teria `(9,7)`. **No acoplado com
-  `--no-mask` o efeito é nulo** (nenhum `mask_table` é lido); no uso standalone,
-  porém, um bloco com oceano pode ser mascarado por engano. A distribuição
-  simétrica está comprovada pelo log, mas o algoritmo exato ainda não foi
-  conferido contra o fonte do `mpp_domains_mod`. Documentado em
-  `docs/domain-mom6.md`, seção 5.
-- **Documentação.** Novo `docs/mascara-cap-nuopc.md`, explicação didática e
-  autocontida do problema da máscara: glossário PE/PET/DE, por que o split de
-  comunicador não está envolvido, a diferença entre representação densa e
-  esparsa no ESMF, como reconhecer o sintoma e as duas rotas de correção do
-  cap, com a estimativa de ganho por número de PETs. A seção 2 do
-  `docs/domain-mom6.md` foi reduzida a um resumo com ponteiro para ele.
-- **Correção (incidente do LAYOUT 43x3, 22/07/2026).** Run de 256 PETs em modo
-  concorrente (128 ATM + 128 OCN) abortava com SIGSEGV no PET 171 logo após
-  `COMPLETED MOM INITIALIZATION`. Causa: o `mask_table` gerado para
-  `LAYOUT = 43, 3` remove o bloco `(1,3)` da decomposição, e o cap NUOPC do
-  MOM6 monta o `deBlockList` do `ESMF_Grid` apenas com os domínios dos PETs
-  vivos. O espaço de índices `[1..180] x [1..158]` fica com um buraco de
-  5 x 53 células; `ESMF_DistGridCreate` e `ESMF_GridCreate` aceitam em
-  silêncio, e a falha só emerge no conector `OCN-TO-MED`, em
-  `ESMF_GridToMesh`: `ESMCI_Mesh.C, line:1786: Bad processor number!`.
-  - Configuração corrigida: `LAYOUT = 16, 8` (produto exato = 128 PETs do OCN)
-    com `MASKTABLE` comentado em `MOM_input` e `SIS_input`.
-  - `domain-mom6.bash`: **filtro de forma** com `--min-tile` (padrão 9, que é
-    `2*NIHALO+1`, o halo do domínio `MOM_MOSAIC`) e `--max-aspect` (padrão
-    4,0). O `43x3` tinha blocos de 4,2 pontos, menores que o próprio halo, e
-    passava sem qualquer alerta.
-  - `domain-mom6.bash`: a varredura do `--target-eff` deixa de aceitar o
-    primeiro `EFF` que bate. O novo modo `scan` do awk devolve todos os pares
-    de fatores aprovados no filtro para cada nº de blocos, e vence o de melhor
-    forma em **toda** a faixa. Na grade 180 x 158, o alvo 128 passa a resolver
-    para `15x9` (blocos de 12,0 x 17,6; nmask = 7) em vez de `43x3`.
-  - `domain-mom6.bash`: novo `--no-mask`, que escolhe o melhor `LAYOUT` com
-    produto exatamente igual aos PETs do oceano e não gera `mask_table`,
-    comentando com `!` uma diretiva `MASKTABLE` remanescente nos arquivos de
-    entrada. É o único modo compatível com o cap NUOPC atual.
-  - `domain-mom6.bash`: aviso explícito sempre que um `mask_table` com
-    `nmask > 0` é produzido, indicando que ele serve ao MOM6+SIS2 standalone,
-    não ao acoplado.
-  - Pendência em `mom_cap_MONAN.F90`: para suportar `mask_table`, o
-    `deBlockList` precisa cobrir todo o espaço de índices, com DEs adicionais
-    para os blocos mascarados mapeados a PETs existentes via `petMap`
-    (o `ESMF_DELayout` aceita mais de um DE por PET).
-- **Novo utilitário (`domain-mom6.bash`): decomposição de domínio do MOM6+SIS2.**
-  Calcula um `LAYOUT` (NIPROC, NJPROC) equilibrado e gera o `mask_table` do FMS,
-  eliminando os blocos 100% terra. Os PETs efetivos passam a ser
-  `EFF = NIPROC * NJPROC - Nmask`, valor que deve casar com os PETs que o
-  oceano realmente recebe (o total do run em `sequential`; apenas
-  `ocn_pet_count` em `concurrent`), evitando o erro fatal
-  `fms2_io(parse_mask_table_2d): mpp_npes() .NE. layout(1)*layout(2) - nmask`.
-  - Três modos: `--pes N` (fatora N e ordena os candidatos por razão de aspecto,
-    divisão exata e tamanho mínimo de bloco), `--layout NI,NJ` (explícito) e
-    `--target-eff N` (varre `--pes N..N+search-range` até obter `EFF` exato,
-    já que o nº de blocos mascarados depende da **forma** do `LAYOUT`, não só
-    do produto).
-  - Implementação **100% shell**: `ncdump` (módulo `cray-netcdf`) e `awk`
-    (POSIX), sem dependência de Python, numpy ou netCDF4. Não depende do
-    `COUPLER_ROOT` nem do ESMF: opera apenas sobre a topografia.
-  - Núcleo: **soma de prefixos 2D** (imagem integral) do campo binário de
-    oceano, construída uma única vez; a contagem de oceano em cada bloco
-    candidato custa O(1), o que viabiliza a varredura do `--target-eff`.
-  - Detecção automática da variável (`depth`, `D`, `wet`, `mask`, ou
-    `--depth-var`) e das dimensões pelas duas últimas da declaração (robusto a
-    `ny,nx` / `lat,lon` / `grid_y,grid_x`). Limiar de oceano por `--min-depth`
-    para profundidade e 0,5 para máscara.
-  - Integração opcional com o experimento: `--input-dir` copia o `mask_table`
-    para `INPUT/`; `--mom-input`/`--sis-input` reescrevem `LAYOUT` e
-    `MASKTABLE` com backup `.bak.<timestamp>`; `--dry-run` suprime cópia e
-    edição (o `mask_table`, sendo o próprio resultado do cálculo, ainda é
-    gravado). Avisos para blocos pequenos, divisão inexata e `Nmask = 0`.
-  - Reaproveita o `include.bash` do instalador para o log padronizado, com
-    *fallback* próprio quando ausente.
-- **Documentação.** Novo `docs/domain-mom6.md` (algoritmo detalhado: soma de
-  prefixos, escore dos candidatos, formato do `mask_table`, custo e armadilhas)
-  e `README.md` com a subseção "Decomposição de domínio do MOM6+SIS2", logo
-  após as partições METIS do MPAS, mais as entradas correspondentes na árvore
-  de estrutura e na tabela "Onde mexer".
-
-- **Correção (ESMF externo no MONAN-A).** A etapa 1 falhava ao compilar
-  `mpas_timekeeping.F` (`timeStringISOFrac`/`h=` não reconhecidos) porque o
-  `-DMPAS_EXTERNAL_ESMF_LIB` resolvia `use ESMF` para o *stub* interno do MPAS
-  (`src/external/esmf_time_f90`) em vez do ESMF 8.9.1 real. O Makefile do
-  MONAN-Model só injeta o ESMF real quando `ESMF_MOD` e `ESMF_LIBDIR` estão no
-  ambiente — e os scripts não as exportavam.
-  - `sites/site-jaci.bash` e `sites/site-template.bash`: passam a **derivar e
-    exportar** `ESMF_MOD` (dir do `esmf.mod`, via `ESMF_F90COMPILEPATHS`) e
-    `ESMF_LIBDIR` (dir da `libesmf`, via `-L` de `ESMF_F90LINKPATHS`, com
-    *fallback* no diretório do próprio `esmf.mk`) — fonte única, em bloco
-    auto-contido (vale também para `source run/setenv-gnu.bash`). Não se usa a
-    variável `ESMF_LIBDIR` do `esmf.mk`: ela não existe em todo build do ESMF.
-  - `1-monan.bash`: deixa de recalcular; apenas **verifica** as variáveis
-    (`check_var`) e aborta com mensagem clara se faltarem.
-  - `2-mom.bash`: **consome** o `ESMF_LIBDIR` do sítio para o `LD_LIBRARY_PATH`;
-    `ESMF_APPSDIR` passa a ser tolerante a vazio (apenas avisa). O helper
-    `_esmf_mk` é mantido para as flags canônicas do cap NUOPC (Passo 3).
-- **Correção (toolchain GNU na etapa 3 e no rebuild manual).** O `make all` do
-  acoplador falhava com o `ftn` acionando o compilador Cray (CCE) e rejeitando
-  os flags GNU do Makefile (`-mcmodel=small`, `-ffree-line-length-none`,
-  `-fallow-argument-mismatch`, …). Causa: o `run/setenv-gnu.bash` só definia
-  caminhos (não carregava módulos) e fazia `unset MODULES_MONAN`; como cada
-  etapa roda em subprocesso, o `PrgEnv-gnu` das etapas 1-2 não persistia.
-  - `run/setenv-gnu.bash` (repo `MONAN-Coupler`): passa a **carregar os módulos**
-    (`module purge` + `MODULES_MONAN` do sítio — PrgEnv-gnu + hdf5 + netcdf +
-    parallel-netcdf + METIS) logo após o *source* da config, antes do
-    `PNETCDF_DIR`. Como é *sourced*, os módulos persistem na sessão — isso conserta
-    também o **rebuild manual** do README (`source run/setenv-gnu.bash && make`).
-    Opt-out: `export SETENV_NO_MODULES=1`. (Entregue como `setenv-gnu.patch`.)
-  - `3-coupler.bash`: **delega** os módulos ao setenv (sem `load_modules`
-    redundante) e adiciona uma **guarda de toolchain** — confere `PE_ENV=GNU`
-    (var padrão do Cray PE) após o *source* e aborta cedo, com mensagem clara, se
-    o `PrgEnv-gnu` não estiver ativo (ex.: setenv-gnu.bash desatualizado).
-- Organização: `docs/` (changelog + notas), `sites/site-template.bash`
-  (esqueleto para nova máquina) e `Makefile` fino (atalhos: `make`,
-  `make download`, `make build`, `make check`, `make help`).
-- Passos renomeados (nomes mais curtos, sem "install" redundante):
-  `1-install-monan.bash`→`1-monan.bash`, `2-install-mom.bash`→`2-mom.bash`,
-  `3-install-coupler.bash`→`3-coupler.bash`.
+- **2.0**: acoplamento real com o MOM6, no lugar do stub sintético (SST constante de 290 K).
+- **2.1**: `Si_ifrac` por uma sigmoide da SST, no lugar do proxy binário (gelo onde frazil > 0 ou SST ≤ T_freeze). **2.1.1**: guarda por `mask2dT` (continentes com `Si_ifrac` = 0).
+- **2.2**: com `use_docn_ice`, `Si_ifrac` lido do arquivo OISST (`set_si_ifrac_from_file`, interpolação temporal por `ReadOcnFieldInterp`); a sigmoide fica como alternativa.
+- **2.3**: `docn_ice_init_only`: OISST só em t=0 e, depois, a sigmoide da SST dinâmica do MOM6.
+- **2.4**: largura da sigmoide `DT_TRANS` de 0,5 K para 2,0 K (com 0,5 K, a SST polar de 278 a 282 K logo após o primeiro passo zerava o proxy) e contribuição do frazil contínua, `min(1, frazil/100 W/m²)`, no lugar da binária.
+- **2.5**: persistência entre passos, `Si_ifrac(t) = max(proxy(t), Si_ifrac(t-1) × SI_IFRAC_DECAY)`; sem ela, o gelo do OISST caía de 7918 para 38 células no primeiro passo.
+- **2.6**: `si_ifrac_mem` salvo depois do preenchimento do campo e fora da guarda de PET, e logs que confirmam se a persistência está ativa.
 
 ## v14.15 — Jun 2026
 

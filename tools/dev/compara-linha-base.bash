@@ -38,16 +38,21 @@ compara-linha-base.bash — compara a rodada atual com uma linha de base
   -t VALOR       tolerância relativa (ex.: 1e-12). Sem -t, exige
                  identidade exata dos dados, que é o critério das
                  etapas de refatoração.
+  -e             confere também as entradas pela soma registrada em
+                 entrada/CHECKSUMS.txt (arquivos ausentes são ignorados;
+                 pode levar alguns minutos com entradas grandes)
   -h             esta mensagem
 
 EOF
 }
 
-while getopts ":l:o:t:h" opt; do
+CONFERE_ENTRADAS=0
+while getopts ":l:o:t:eh" opt; do
   case "${opt}" in
     l) ROTULO="${OPTARG}" ;;
     o) BASE_DIR="${OPTARG}" ;;
     t) TOLERANCIA="${OPTARG}" ;;
+    e) CONFERE_ENTRADAS=1 ;;
     h) _uso; exit 0 ;;
     \?) echo "ERRO: opção inválida: -${OPTARG}" >&2; _uso; exit 2 ;;
     :)  echo "ERRO: a opção -${OPTARG} exige argumento" >&2; exit 2 ;;
@@ -85,8 +90,7 @@ fi
 echo "---------------------------------------------------------------"
 
 #-----------------------------------------------------------------------------
-# B-CMP-INTEG-01 (Set/2026): conferir a integridade da linha de base ANTES de
-# comparar.
+# Conferir a integridade da linha de base ANTES de comparar.
 #
 # O cria-linha-base.bash grava um SHA256SUMS e aplica chmod -R a-w, mas nada
 # impede que alguem desfaca a protecao e altere um arquivo, ou que uma copia
@@ -114,7 +118,7 @@ else
 fi
 
 #-----------------------------------------------------------------------------
-# B-CMP-CFG-01 (Set/2026): conferir a configuracao automaticamente.
+# Conferir a configuracao automaticamente.
 #
 # A triagem de FAIL sempre mandou o usuario comparar o nuopc.input a mao. O
 # arquivo esta' ali, entao o script faz isso sozinho e AVISA ANTES da
@@ -136,7 +140,47 @@ if [[ -f "${BASE_RAIZ}/config/nuopc.input" && -f nuopc.input ]]; then
 fi
 
 
+#-----------------------------------------------------------------------------
+# Conferência das entradas (opção -e).
+# O CHECKSUMS.txt tem três colunas (soma, tamanho, arquivo); o sha256sum -c
+# espera duas. Entradas que não existem aqui são ignoradas: a lista de bases
+# antigas pode incluir saídas de rodadas anteriores gravadas na raiz.
+#-----------------------------------------------------------------------------
+if [[ ${CONFERE_ENTRADAS} -eq 1 && -f "${BASE_RAIZ}/entrada/CHECKSUMS.txt" ]]; then
+  # Saídas que a própria rodada grava na raiz. Linhas de base antigas (ver
+  # B-BASE-ENTRADA-01 no CHANGELOG) as registravam como entradas; aqui são
+  # ignoradas.
+  # Manter igual à lista _PADROES_SAIDA_MODELOS do cria-linha-base.bash.
+  _SAIDAS_RAIZ=( 'MONAN_DIAG_*.nc' 'ice.nc' 'ocean_month.nc' 'sea_ice_geometry.nc' \
+                 'ocean.stats.nc' 'reprodiag.nc' 'reprodiag_*.nc' )
+  # shellcheck disable=SC2206
+  [[ -n "${BASE_SAIDA_RAIZ_EXTRA:-}" ]] && _SAIDAS_RAIZ+=( ${BASE_SAIDA_RAIZ_EXTRA} )
+  _n_ent=0; _n_ent_dif=0
+  while read -r _soma _tam _arq; do
+    [[ "${_soma}" =~ ^[0-9a-f]{64}$ && -f "${_arq}" ]] || continue
+    _eh_saida=0
+    for _pat in "${_SAIDAS_RAIZ[@]}"; do
+      # shellcheck disable=SC2053
+      [[ "${_arq}" == ${_pat} ]] && { _eh_saida=1; break; }
+    done
+    [[ ${_eh_saida} -eq 1 ]] && continue
+    _n_ent=$((_n_ent + 1))
+    if [[ "$(sha256sum "${_arq}" | cut -d' ' -f1)" != "${_soma}" ]]; then
+      [[ ${_n_ent_dif} -eq 0 ]] && echo " ATENCAO: entradas diferentes das usadas na base:"
+      echo "          ${_arq}"
+      _n_ent_dif=$((_n_ent_dif + 1))
+    fi
+  done < "${BASE_RAIZ}/entrada/CHECKSUMS.txt"
+  if [[ ${_n_ent_dif} -eq 0 ]]; then
+    echo " Entradas: ${_n_ent} arquivo(s) conferem com a base"
+  else
+    echo "          Qualquer diferenca de resultado pode vir dai, e nao do codigo."
+  fi
+fi
+
 n_ok=0; n_dif=0; n_faltando=0; n_extra=0; n_meta=0
+TMP_CMP=$(mktemp)
+trap 'rm -f "${TMP_CMP}"' EXIT
 
 # ── Compara cada arquivo da referência com o correspondente atual ────────────
 for ref_file in "${REF}"/*.nc; do
@@ -155,18 +199,22 @@ for ref_file in "${REF}"/*.nc; do
     continue
   fi
 
-  saida=$(nccmp "${NCCMP_OPTS[@]}" "${ref_file}" "${atual}" 2>&1)
+  # A saida do nccmp -f pode ter milhoes de linhas quando o
+  # arquivo inteiro difere; guardada numa variavel, estourava a memoria do
+  # bash (xrealloc). Vai para um arquivo temporario e so' o inicio e' lido.
+  nccmp "${NCCMP_OPTS[@]}" "${ref_file}" "${atual}" > "${TMP_CMP}" 2>&1
   rc_cmp=$?
-  if [[ ${rc_cmp} -eq 0 && -z "${saida}" ]]; then
+  saida=$(head -n 12 "${TMP_CMP}")
+  if [[ ${rc_cmp} -eq 0 && ! -s "${TMP_CMP}" ]]; then
     printf '  %-42s  %s\n' "${nome}" "igual"
     n_ok=$(( n_ok + 1 ))
   else
-    # B-CMP-META-01 (Set/2026): separar diferenca de DADOS de diferenca so de
-    # METADADOS. O NCCMP_OPTS inclui -m, que compara atributos de variavel, e
-    # uma mudanca de long_name ou standard_name faz o arquivo inteiro aparecer
-    # como DIFERE mesmo com os dados identicos.
+    # Separar diferenca de DADOS de diferenca so de METADADOS. O NCCMP_OPTS
+    # inclui -m, que compara atributos de variavel, e uma mudanca de long_name
+    # ou standard_name faz o arquivo inteiro aparecer como DIFERE mesmo com os
+    # dados identicos.
     #
-    # Isso deixou de ser hipotetico: a correcao B-DIAG-SOT-ROTULO-01 alterou o
+    # Exemplo (docs/uso-linha-base.md): a correcao B-DIAG-SOT-ROTULO-01 alterou o
     # long_name e o standard_name da variavel So_t nos monan2_import_*.nc, sem
     # tocar em nenhum valor. Comparado contra uma linha de base anterior a ela,
     # TODO monan2_import sai como DIFERE, e sem esta distincao a leitura
@@ -176,8 +224,10 @@ for ref_file in "${REF}"/*.nc; do
     # passar, a diferenca esta' confinada aos metadados.
     dados_opts=(-d -f)
     [[ -n "${TOLERANCIA}" ]] && dados_opts+=(-T "${TOLERANCIA}")
-    saida_dados=$(nccmp "${dados_opts[@]}" "${ref_file}" "${atual}" 2>&1)
-    if [[ $? -eq 0 && -z "${saida_dados}" ]]; then
+    nccmp "${dados_opts[@]}" "${ref_file}" "${atual}" > "${TMP_CMP}" 2>&1
+    rc_dados=$?
+    saida_dados=$(head -n 12 "${TMP_CMP}")
+    if [[ ${rc_dados} -eq 0 && ! -s "${TMP_CMP}" ]]; then
       printf '  %-42s  %s\n' "${nome}" "difere so nos METADADOS (dados iguais)"
       echo "${saida}" | head -4 | sed 's/^/        /'
       n_meta=$(( n_meta + 1 ))
@@ -204,7 +254,7 @@ printf ' iguais: %d   so metadados: %d   diferentes: %d   ausentes: %d   extras:
   "${n_ok}" "${n_meta}" "${n_dif}" "${n_faltando}" "${n_extra}"
 echo "==============================================================="
 
-# B-CMP-META-01: diferenca so' de metadados NAO reprova. O criterio das etapas
+# Diferenca so' de metadados NAO reprova. O criterio das etapas
 # de refatoracao e' identidade dos DADOS; renomear um long_name nao muda
 # resultado. Mas e' anunciada, porque tambem nao deve passar despercebida.
 if [[ "${n_dif}" -eq 0 && "${n_faltando}" -eq 0 && "${n_extra}" -eq 0 && "${n_ok}" -gt 0 ]] \
@@ -223,17 +273,17 @@ fi
 
 echo " FAIL — a rodada atual NÃO reproduz a linha de base ${ROTULO}"
 echo ""
-# B-CMP-RENAME-01 (Set/2026): a assinatura de RENOMEACAO em massa.
+# A assinatura de RENOMEACAO em massa.
 #
 # Muitos AUSENTE e muitos EXTRA com ZERO diferencas de dados nao significa que
 # o resultado mudou: significa que os NOMES dos arquivos mudaram. Sem esta
 # nota, a leitura natural e' que a rodada divergiu, e a investigacao comeca no
 # lugar errado.
 #
-# Caso concreto: a correcao BUG-SEQ-STAMP-01 acertou o carimbo de tempo dos
-# diagnosticos em coupling_mode='sequential', que antes saiam adiantados em um
-# dt_coupling. Toda linha de base sequencial anterior a essa correcao e'
-# incomparavel por construcao, e precisa ser refeita.
+# Caso concreto (docs/uso-linha-base.md): a correcao BUG-SEQ-STAMP-01 acertou o
+# carimbo de tempo dos diagnosticos em coupling_mode='sequential', que antes
+# saiam adiantados em um dt_coupling. Toda linha de base sequencial anterior a
+# essa correcao e' incomparavel por construcao, e precisa ser refeita.
 if [[ "${n_dif}" -eq 0 && "${n_faltando}" -gt 0 && "${n_extra}" -gt 0 ]]; then
   echo " ATENCAO: ${n_faltando} ausente(s) e ${n_extra} extra(s), com ZERO"
   echo "          diferenca de dados. Essa e' a assinatura de RENOMEACAO dos"

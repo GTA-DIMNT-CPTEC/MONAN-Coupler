@@ -4,179 +4,10 @@ postproc_mom6_import.py  —  Validação dos campos importados pelo MOM6+SIS2
                               (14 fluxos ATM→OCN calculados pelo mediador NCAR
                                bulk em MED_cap.F90)
 
-Versão 8.6 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Set 2026
+Valida os campos que o mediador grava em diag_import/mom6_import_*.nc.
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-HISTÓRICO DE CORREÇÕES
-  v8.6 — Limiares de sen/evap alinhados ao fluxo nativo do MPAS-A (Set 2026):
-    • BUG-PY-20: Foxx_sen e Foxx_evap entregues ao MOM6 são os fluxos de
-      superfície NATIVOS do MPAS-A (MED_cap.F90 Fase 3 sobrescreve o bulk NCAR
-      SEM reaplicar clamp), e legitimamente atingem −400…−600 W/m² (sensível) e
-      ~25–40 mm/d (latente) em células de corrente de contorno oeste sob ar
-      frio. Os limiares antigos (±500 W/m², [−15,200] mm/d) marcavam esses
-      extremos físicos como avisos. Alargados para ±800 W/m² e [−40,200] mm/d.
-      (Não é clamp de física — apenas o limiar do diagnóstico.)
-
-  v8.5 — Diagnóstico ponderado por área (Set 2026):
-    • BUG-ICE-MEAN-LABEL: a linha "média sobre células c/ gelo" do --check
-      mostrava, na verdade, a média sobre TODO o oceano (oceano sem gelo é 0.0,
-      não fill), dando ~0,16. Agora calcula a média REAL só sobre células com
-      gelo (conc≥0,15).
-    • BUG-AREA-WEIGHT: numa grade lat/lon, médias/contagens simples super-
-      representam os polos (células pequenas e numerosas), inflando SST fria e
-      cobertura de gelo. O --check passa a reportar, com peso cos(lat): a SST
-      média por área e a cobertura de gelo em % de ÁREA do oceano (≥15% e ≥50%),
-      ao lado dos valores por célula. check_physics agora recebe 'lat'.
-
-  v8.4 — Revisão dos scripts de diagnóstico/animação (Set 2026):
-    • BUG-PY-16: So_t deixava BURACOS BRANCOS nos polos. O mascaramento usava
-                 fill_min_threshold=271.4 K, que apagava água do mar real perto
-                 do congelamento (sob o gelo marinho, SST ~271,2–271,4 K) —
-                 justamente a borda do gelo. Agora mascara APENAS o marcador-
-                 stub pontual (271,35 K ± tol); a terra já vem da máscara real
-                 do MOM6 (Sx_omask). vmin_phys recuado 271,4 → 271,0 K.
-    • BUG-PY-17: --plot ABORTAVA (URLError) em nó HPC sem internet, pois
-                 cfeature.LAND/COASTLINE baixam os shapefiles Natural Earth no
-                 desenho. Agora testa a disponibilidade uma vez e, se offline,
-                 gera os mapas sem contornos em vez de abortar.
-    • BUG-PY-18: escala de cor recalculada POR PASSO (percentis do passo) —
-                 causa raiz do GIF "pulsante" e incomparável. Agora vmin/vmax
-                 são GLOBAIS (calculados uma vez sobre todos os passos) e a
-                 mesma cor significa o mesmo valor em toda a animação.
-    • BUG-PY-19: savefig(bbox_inches='tight') gerava PNGs de tamanhos distintos
-                 entre passos, fazendo a animação tremer. Removido (figsize fixo
-                 + constrained_layout → quadros idênticos).
-  v8.2 — BUG-PY-15 (Maio 2026):
-    • BUG-PY-15 (A/C): cfeature.LAND ausente em plot_maps.
-                 A função adicionava apenas COASTLINE e BORDERS, sem preencher
-                 o interior dos continentes.  Isso gerava dois artefatos visuais:
-                 1. Patches brancos (NaN transparente sobre fundo branco da figura)
-                    em campos oceânicos — Foxx_lwnet, onda curta e precipitação —
-                    onde a grade não calcula fluxos sobre terra.
-                 2. So_duu10n e outros campos atmosféricos exibiam dados de vento
-                    calculados sobre terra sem nenhuma máscara geográfica, tornando
-                    o mapa difícil de interpretar.
-                 Correção: cfeature.LAND desenhada em zorder=5 (acima do
-                 pcolormesh em zorder=1); COASTLINE e BORDERS elevados para
-                 zorder=6, mantendo-se visíveis sobre a máscara de terra.
-    • BUG-PY-15 (B): fill_min_threshold de So_t elevado de 270.0 K para 271.4 K.
-                 O marcador-stub do Sprint A.5 coloca pontos de terra/gelo em
-                 271.35 K — acima do limiar antigo (270 K) e por isso não
-                 mascarado.  Isso gerava patches azuis retangulares em áreas
-                 oceânicas no mapa de SST.
-                 271.4 K captura 271.35 K sem mascarar SST oceânica real,
-                 cujo mínimo observado é ≈ 271.8 K.
-                 vmin_phys atualizado consistentemente para 271.4 K.
-
-  v8.1 — Renomeação de arquivos de saída (Maio 2026):
-    • Mapas por passo : import_YYYYMMDD_HHMMSS.png  → mom6_import_YYYYMMDD_HHMMSS.png
-    • Série temporal  : import_timeseries.png        → mom6_import_timeseries.png
-    Padrão agora consistente com o prefixo dos arquivos NetCDF de entrada
-    (mom6_import_*.nc) e com o script de animação anim_mom6_import.py.
-  v8.0 — BUG-PY-14 (Maio 2026):
-    • BUG-PY-14 (A): Si_ifrac — escala adaptativa em plot_maps.
-                 O campo Si_ifrac é binário (0 ou 1). Com vmax=1.0 (padrão),
-                 as células polares com gelo (~0.05% da área) são visualmente
-                 invisíveis numa projeção global. Detecta automaticamente
-                 campos binários (max=1, p95=0) e aplica:
-                   vmax_efetivo = max(mean * 30, 0.005)
-                 tornando o gelo visível com colorbar interpretável.
-                 Paleta alterada para 'Blues' (intensidade de gelo) e
-                 annotation com área de gelo estimada.
-    • BUG-PY-14 (B): Si_ifrac — série temporal com eixo Y adaptativo.
-                 Com escala linear [0, 1], a curva de Si_ifrac (mean ~0.0005)
-                 aparece como linha reta no zero. Aplica escala simétrica-log
-                 (symlog com linthresh=1e-4) quando o sinal está abaixo de
-                 0.1, tornando o crescimento de gelo legível.
-    • BUG-PY-14 (C): So_t passo all-NaN — subplot informativo em vez de vazio.
-                 Quando So_t é 100% NaN num passo (passo 1: campo indisponível
-                 antes do primeiro avanço do MOM6), o subplot era pulado com
-                 'continue', deixando espaço em branco desorientador.
-                 Agora exibe painel cinza com texto "Campo indisponível /
-                 aguardando primeiro passo MOM6" para clareza diagnóstica.
-    • BUG-PY-14 (D): So_t — mascaramento do seam tripolar.
-                 A grade MOM6 (tripolar) tem uma descontinuidade de longitude
-                 que aparece como linha branca vertical no mapa após o roll
-                 de 0→360° para -180→180°. Aplica máscara automática de
-                 descontinuidade: células onde |Δlon_vizinho| > 90° são
-                 mascaradas como NaN antes do pcolormesh, eliminando o artefato
-                 sem alterar os dados físicos.
-    • BUG-PY-13 (C) rev.2: So_duu10n — vmax_phys calibrado de 900 para 1600 m²/s².
-                 Experimentos reais mostram máximos de 967–1459 m²/s² (|ΔV| ≈ 31–38 m/s)
-                 em ciclones extratropicais e furacões presentes no campo MPAS — valores
-                 fisicamente legítimos que disparavam falsos positivos com 900 m²/s².
-                 1600 m²/s² ≡ |ΔV| ≤ 40 m/s: teto físico real para vento em superfície
-                 oceânica; acima disso configura artefato numérico.
-                 check_msg atualizado para informar o limite e a ação sugerida.
-
-  v7.0 — BUG-PY-13 (Maio 2026):
-    • BUG-PY-13 (A): Foxx_lwnet — vmax_phys elevado de 100 W/m² para 150 W/m².
-    • BUG-PY-13 (B): So_t — vmin_phys reduzido de 271.0 K para 270.0 K.
-    • BUG-PY-13 (C): So_duu10n — vmax_phys inicial de 400 → 900 m²/s² (v7.0),
-                 corrigido para 1600 m²/s² em v7.1 após calibração experimental.
-
-  v6.0 — BUG-PY-12 (Maio 2026):
-    • BUG-PY-12 (A): fill_min_threshold de So_t elevado de 200 K para 270 K.
-                 O stub OCN coloca cells de terra/gelo em ~200.0049 K — logo
-                 ACIMA do limiar antigo (200.0 K), provocando os warnings:
-                   "⚠ So_t: min=200.0049 < 271.0 [K]" a cada execução.
-                 Com 270 K, todos os pontos terra/fill viram NaN antes da
-                 estatística e o aviso só aparece se houver SST de fato
-                 anômala (a abaixo do ponto de congelamento da água do mar).
-    • BUG-PY-12 (B): check_physics suprime aviso redundante de SST em °C.
-                 Antes, a falha em K e a derivada em °C geravam DOIS avisos:
-                   "⚠ So_t: min=200.0 < 271.0 [K]"
-                   "⚠ So_t − 273.15 = [-73.15, 31.19] °C — ..."
-                 sobre o MESMO problema. Agora a verificação em °C só roda
-                 (e só reporta confirmação ✓) quando a verificação em K já
-                 passou.
-    • BUG-PY-12 (C): plot_maps silencia RuntimeWarning de slice 100% NaN.
-                 np.nanpercentile sobre passo com todos NaN gerava warning
-                 "All-NaN slice encountered" mesmo já havendo fallback para
-                 limites físicos. Bloco encapsulado em warnings.catch_warnings.
-    • BUG-PY-12 (D): plot_timeseries idem — RuntimeWarning de nanmean e
-                 nanpercentile sobre slices 100% NaN são intencionais (geram
-                 gap natural no matplotlib) e foram silenciados.
-    • BUG-PY-12 (E): print_stats agora exibe coluna "Cobert." (percentual
-                 de pontos válidos por passo). Permite identificar passos
-                 com baixa cobertura de dados — útil para entender quando
-                 (sem dados) ou min/max suspeitamente pequenos aparecem.
-
-  v5.0 — BUG-PY-11 / CLEANUP (Maio 2026):
-    • BUG-PY-11 (A): imports não utilizados removidos.
-                 'timedelta' e 'date' importados mas nunca referenciados.
-                 Removidos para clareza e conformidade com PEP 8.
-    • BUG-PY-11 (B): código morto em compute_expected_interp.
-                 Ternário 'x if hasattr(ts, "date") else y' tinha ramo else
-                 inalcançável (ts é sempre datetime → possui .date()).
-                 Simplificado para chamada direta: (ts.date() - epoch_date).
-    • BUG-PY-11 (C): comentário mal-indentado em plot_maps.
-                 Linha '# BUG-PY-07: scale aplicado...' estava dentro do bloco
-                 'if flat.size == 0: continue' (código morto). Movido para
-                 fora do bloco condicional.
-
-  v4.0 — BUG-PY-08 (Maio 2026):
-    • BUG-PY-08 (A/B/C/D/E): scale não aplicado em nenhuma função de saída.
-                 print_stats, plot_maps, plot_timeseries e export_csv exibiam
-                 dados em unidades SI (kg/m²/s, Pa) com labels de scale_units
-                 (mm/d, hPa). Colorbars mostravam 1e-8 em vez de W/m².
-                 Corrigido: layer *= scale antes de calcular vmin/vmax/plot.
-                 Limites físicos de Faxa_rain/Faxa_snow corrigidos para mm/d.
-
-  v3.0 — BUG-PY-06 (Maio 2026):
-    • BUG-PY-06: Referências semânticas ao DOCN corrigidas em todo o script.
-                 Os campos dos arquivos mom6_import_*.nc são fluxos ATM→OCN
-                 calculados pelo mediador MED_cap.F90 (bulk NCAR), NÃO
-                 campos exportados pelo DOCN_cap (So_t, Si_ifrac, So_u, So_v).
-                 Corrigido: nome CSV, título de plot, comentários, docstrings.
-
-  v2.0 — BUG-PY-01/02/03 (Maio 2026):
-    • BUG-PY-01: padrão de busca corrigido de docn_import_*.nc → mom6_import_*.nc
-    • BUG-PY-02: remoção de prefixo corrigida (docn_import_ → mom6_import_)
-    • BUG-PY-03: FIELD_META e FIELDS atualizados dos campos DOCN (So_t, Si_ifrac,
-                 So_u, So_v) para os 14 campos do exportState MED→OCN:
-                 Foxx_taux/tauy, Foxx_sen, Foxx_evap, Foxx_lwnet,
-                 Foxx_swnet_vdr/vdf/idr/idf, Faxa_rain/snow,
-                 Sa_pslv, Si_ifrac, So_duu10n.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 ═══════════════════════════════════════════════════════════════════════════════
 Cenário de uso
@@ -195,7 +26,7 @@ Este script valida esses arquivos de três formas:
 Estrutura do arquivo de diagnóstico (diag_import/mom6_import_*.nc)
 ═══════════════════════════════════════════════════════════════════════════════
   Conventions: CF-1.8
-  dimensions: lat(320), lon(640)  [grade MED interna 640×320]
+  dimensions: lat(180), lon(360)  [grade ATM interna do mediador, 360×180]
   variables:
     lon(lon)            [degrees_east]
     lat(lat)            [degrees_north]
@@ -249,14 +80,12 @@ except ImportError:
     sys.exit("ERRO: netCDF4 não encontrado.  pip install --user netCDF4")
 
 # ─── Metadados de exibição ─────────────────────────────────────────────────────
-# BUG-PY-03 fix (GT Acoplamento de Modelos/INPE — Maio 2026):
 # Os arquivos mom6_import_*.nc contêm os 14 campos do exportState MED→OCN,
 # calculados pelo mediador MED_cap.F90 via parametrização bulk NCAR
 # (Large & Yeager 2009). A fonte ATM é o MPAS-A (ou DATM como fallback);
 # a SST provém do MOM6+SIS2 (ou do stub sintético 290 K).
 # NÃO são campos do DOCN_cap (So_t, Si_ifrac, So_u, So_v): o DOCN fornece
 # condições de contorno oceânicas ao mediador, não os fluxos ATM→OCN.
-# (A versão v1.0 do script cometia esse erro conceitual.)
 FIELD_META = {
     # ── Fluxos turbulentos ────────────────────────────────────────────────────
     'Foxx_taux': {
@@ -277,13 +106,12 @@ FIELD_META = {
         'long_name': 'Fluxo de calor sensível (Foxx_sen)',
         'units': 'W m-2', 'scale': 1.0, 'scale_units': 'W m⁻²',
         'cmap': 'RdBu_r', 'vperc': [2, 98], 'symmetric': True,
-        # BUG-PY-20 (Set/2026): limite alargado de ±500 para ±800 W/m². Em
-        # modo acoplado o Foxx_sen entregue ao MOM6 é o fluxo de superfície
-        # NATIVO do MPAS-A (MED_cap.F90 Fase 3, sobrescreve o bulk NCAR sem
-        # clamp), não o bulk clampado a ±500. Sobre correntes de contorno
-        # oeste (Kuroshio/Gulf Stream) em surto de ar frio, o calor sensível
-        # instantâneo alcança −400…−600 W/m² em células isoladas — física
-        # legítima na cauda, não artefato. ±500 gerava falso-positivo.
+        # Limite de ±800 W/m². Em modo acoplado o Foxx_sen entregue ao MOM6
+        # é o fluxo de superfície NATIVO do MPAS-A (o mediador sobrescreve o
+        # bulk NCAR sem clamp), não o bulk clampado a ±500. Sobre correntes de
+        # contorno oeste (Kuroshio/Gulf Stream) em surto de ar frio, o calor
+        # sensível instantâneo alcança −400…−600 W/m² em células isoladas:
+        # física legítima na cauda, não artefato. ±500 daria falso-positivo.
         'vmin_phys': -800.0, 'vmax_phys': 800.0,
         'check_msg': 'Fluxo sensível fora de [-800, 800] W m⁻² (extremo de corrente de contorno oeste; se >~800 verificar artefato)',
     },
@@ -291,10 +119,10 @@ FIELD_META = {
         'long_name': 'Fluxo de evaporação (Foxx_evap)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'RdBu_r', 'vperc': [2, 98], 'symmetric': True,
-        # BUG-PY-20: limite inferior alargado de −15 para −40 mm/d. Mesmo motivo
-        # do Foxx_sen: a evaporação entregue é o fluxo latente nativo do MPAS-A
-        # (Fase 3, sem clamp). Latente ~700–1000 W/m² sobre Kuroshio/Gulf Stream
-        # no inverno ⇒ ~25–40 mm/d instantâneos em células isoladas (física).
+        # Limite inferior de −40 mm/d. Mesmo motivo do Foxx_sen: a evaporação
+        # entregue é o fluxo latente nativo do MPAS-A (sem clamp). Latente
+        # ~700–1000 W/m² sobre Kuroshio/Gulf Stream no inverno ⇒ ~25–40 mm/d
+        # instantâneos em células isoladas (física).
         'vmin_phys': -40.0, 'vmax_phys': 200.0,
         'check_msg': 'Evaporação fora de [-40, 200] mm/d (extremo de corrente de contorno oeste)',
     },
@@ -339,7 +167,7 @@ FIELD_META = {
         'long_name': 'Precipitação líquida (Faxa_rain)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
-        # BUG-PY-08-B: limites em mm/d (scale_units), não em kg/m²/s.
+        # Limites em mm/d (scale_units), não em kg/m²/s.
         # check_physics aplica scale antes de comparar: 2e-4 kg/m²/s × 86400 = 17.28 mm/d → vmax=600 mm/d.
         'vmin_phys': 0.0, 'vmax_phys': 600.0,
         'check_msg': 'Precipitação líquida > 600 mm/d (improvável exceto artefato NaN)',
@@ -348,7 +176,7 @@ FIELD_META = {
         'long_name': 'Precipitação sólida (Faxa_snow)',
         'units': 'kg m-2 s-1', 'scale': 86400.0, 'scale_units': 'mm d⁻¹',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
-        # BUG-PY-08-B: limites em mm/d: 5e-5 kg/m²/s × 86400 = 4.32 mm/d → vmax=150 mm/d.
+        # Limites em mm/d: 5e-5 kg/m²/s × 86400 = 4.32 mm/d → vmax=150 mm/d.
         'vmin_phys': 0.0, 'vmax_phys': 150.0,
         'check_msg': 'Neve > 150 mm/d (improvável exceto artefato NaN)',
     },
@@ -357,11 +185,11 @@ FIELD_META = {
         'long_name': 'Pressão ao nível do mar (Sa_pslv)',
         'units': 'Pa', 'scale': 1.0e-2, 'scale_units': 'hPa',
         'cmap': 'RdYlBu_r', 'vperc': [2, 98], 'symmetric': False,
-        # BUG-PY-05-C: limites em unidades de scale_units (hPa), não em Pa.
+        # Limites em unidades de scale_units (hPa), não em Pa.
         # check_physics agora aplica 'scale' antes de comparar.
         'vmin_phys': 870.0, 'vmax_phys': 1080.0,
         'check_msg': 'Pressão fora de [870, 1080] hPa',
-        # BUG-PY-05-D: fill_threshold exclui células oceânicas sem dado (pslv=0 Pa).
+        # fill_threshold exclui células oceânicas sem dado (pslv=0 Pa).
         # Pontualmente o stub OCN deixa cells sem pressão → pslv=0.
         # Aplicar antes do scaling: 0 Pa × 0.01 = 0 hPa → abaixo de 870 hPa.
         'fill_min_threshold': 1000.0,  # Pa — mascara pslv < 1000 Pa (stub/terra com pslv=0)
@@ -371,7 +199,7 @@ FIELD_META = {
         'units': '1', 'scale': 1.0, 'scale_units': '[0–1]',
         'cmap': 'Blues', 'vperc': [0, 99], 'symmetric': False,
         'vmin_phys': 0.0, 'vmax_phys': 1.0,
-        # BUG-PY-14 (A): campo binário (0 ou 1) — escala adaptativa em plot_maps.
+        # Campo binário (0 ou 1) — escala adaptativa em plot_maps.
         # vmax_efetivo = max(mean * 30, 0.005) para tornar o gelo polar visível.
         'binary_field': True,   # flag: habilita escala adaptativa por passo
         'check_msg': 'Fração de gelo fora de [0, 1]',
@@ -381,21 +209,20 @@ FIELD_META = {
         'units': 'K', 'scale': 1.0, 'scale_units': 'K',
         'cmap': 'RdYlBu_r', 'vperc': [2, 98], 'symmetric': False,
         'vmin_phys': 271.0, 'vmax_phys': 310.0,
-        # BUG-PY-16 (correção): o mascaramento anterior usava
-        #   fill_min_threshold = 271.4 K, que APAGAVA água do mar real perto
-        #   do congelamento (S≈35 congela a ~271,35 K; sob o gelo marinho a
-        #   SST fica em ~271,2–271,4 K). Isso produzia BURACOS BRANCOS nos
-        #   mapas polares de SST — justamente a borda do gelo, o dado mais
-        #   relevante para o acoplamento. Além disso, era inconsistente com o
+        # Mascara APENAS o marcador-stub de terra/gelo do mediador, que é o
+        #   valor pontual 271,35 K (±tol), e não tudo abaixo de um limiar.
+        #   Um limiar como 271.4 K apagaria água do mar real perto do
+        #   congelamento (S≈35 congela a ~271,35 K; sob o gelo marinho a
+        #   SST fica em ~271,2–271,4 K) e abriria BURACOS BRANCOS nos
+        #   mapas polares de SST, justamente na borda do gelo, o dado mais
+        #   relevante para o acoplamento. Também seria inconsistente com o
         #   postproc_monan2_import.py, que trata SST < 271,35 K como física
         #   normal (oceano sob gelo).
-        #   Correção: mascarar APENAS o marcador-stub do Sprint A.5, que é o
-        #   valor pontual 271,35 K (±tol), em vez de tudo abaixo de 271,4 K.
         #   A terra já é removida pela máscara real do MOM6 (Sx_omask); onde
         #   ela existe, este stub-mask é redundante e inofensivo. vmin_phys
         #   recuado para 271,0 K para não sinalizar falso-positivo em água
         #   sub-congelamento legítima.
-        'fill_stub_value': 271.35,  # marcador de terra/gelo do Sprint A.5
+        'fill_stub_value': 271.35,  # marcador de terra/gelo do mediador
         'fill_stub_tol':   0.05,    # ±50 mK cobre arredondamento float32
         'check_msg': 'SST fora de [271.0, 310] K',
     },
@@ -415,7 +242,7 @@ SST_CELSIUS_OFFSET = 273.15   # offset de conversão °C → K (não usado nos c
 # ─── Carregamento ─────────────────────────────────────────────────────────────
 
 def find_diag_files(diag_dir):
-    # BUG-PY-01 fix: padrão correto é mom6_import_*.nc (gerado por
+    # Padrão correto é mom6_import_*.nc (gerado por
     # MED_cap.F90::med_write_import_fields), não docn_import_*.nc.
     pattern = os.path.join(diag_dir, 'mom6_import_*.nc')
     files = sorted(glob.glob(pattern))
@@ -427,7 +254,7 @@ def find_diag_files(diag_dir):
 
 def parse_timestamp_from_filename(fname):
     """Extrai datetime de mom6_import_YYYYMMDD_HHMMSS.nc."""
-    # BUG-PY-02 fix: prefixo correto é mom6_import_ (era docn_import_)
+    # Prefixo correto é mom6_import_ (era docn_import_)
     base = os.path.basename(fname).replace('mom6_import_', '').replace('.nc', '')
     try:
         return datetime.strptime(base, '%Y%m%d_%H%M%S')
@@ -435,14 +262,14 @@ def parse_timestamp_from_filename(fname):
         return None
 
 
-# Nome da variável de máscara gravada pelo acoplador (B-DIAGMASK-01).
+# Nome da variável de máscara gravada pelo acoplador.
 # 'omask' é aceito como alias para arquivos de versões intermediárias.
 OMASK_VARS = ('Sx_omask', 'omask')
 
 
 def ler_omask(ds):
     """
-    Máscara terra/oceano do MOM6 gravada no arquivo (B-DIAGMASK-01).
+    Máscara terra/oceano do MOM6 gravada no arquivo.
 
     Retorna um array booleano True=oceano na orientação nativa do arquivo,
     ou None quando a variável não existe — caso dos arquivos gerados antes
@@ -487,7 +314,7 @@ def load_diag_files(files, field_names):
                 for attr in ds.ncattrs():
                     attrs_sample[attr] = getattr(ds, attr)
 
-            # B-DIAGMASK-01: a máscara é estática, basta lê-la uma vez.
+            # A máscara é estática, basta lê-la uma vez.
             if omask_nativo is None:
                 omask_nativo = ler_omask(ds)
 
@@ -498,7 +325,7 @@ def load_diag_files(files, field_names):
                     arr = np.array(var[:], dtype=np.float64)
 
                     # Máscara 1: _FillValue declarado no atributo
-                    # BUG-PY-05-A: tolerância relativa (1e-3) em vez de absoluta 1.0.
+                    # Tolerância relativa (1e-3) em vez de absoluta 1.0.
                     # abs(arr - (-9.99e20)) < 1.0 é sempre False para qualquer valor
                     # finito, pois a diferença é sempre ~1e20. Tolerância relativa
                     # funciona para qualquer magnitude de fill value.
@@ -516,12 +343,12 @@ def load_diag_files(files, field_names):
                     if thresh is not None:
                         arr = np.where(np.abs(arr) > thresh, np.nan, arr)
                     # Máscara 4: limiar mínimo — exclui fill=0 em campos positivos
-                    # BUG-PY-05-D: Sa_pslv tem 0 Pa em pontos terra (stub sem pressão).
+                    # Sa_pslv tem 0 Pa em pontos terra (stub sem pressão).
                     fill_min = FIELD_META.get(fname, {}).get('fill_min_threshold', None)
                     if fill_min is not None:
                         arr = np.where(arr < fill_min, np.nan, arr)
-                    # Máscara 4b (BUG-PY-16): stub PONTUAL — mascara só o valor
-                    # do marcador (ex.: So_t=271,35 K de terra/gelo do Sprint A.5),
+                    # Máscara 4b: stub PONTUAL — mascara só o valor
+                    # do marcador (ex.: So_t=271,35 K de terra/gelo do mediador),
                     # preservando água do mar real perto do congelamento. Ao
                     # contrário do fill_min, NÃO apaga toda a cauda fria do campo.
                     stub_v = FIELD_META.get(fname, {}).get('fill_stub_value', None)
@@ -529,7 +356,7 @@ def load_diag_files(files, field_names):
                         stub_tol = FIELD_META.get(fname, {}).get('fill_stub_tol', 0.05)
                         arr = np.where(np.abs(arr - stub_v) <= stub_tol, np.nan, arr)
 
-                    # Máscara 5 (B-DIAGMASK-01): continentes, pela máscara
+                    # Máscara 5: continentes, pela máscara
                     # REAL do MOM6. Redundante para os arquivos novos, em que
                     # o próprio acoplador já grava _FillValue sobre terra;
                     # necessária apenas se algum campo escapar do mascaramento
@@ -569,7 +396,7 @@ def load_diag_files(files, field_names):
             arr_3d = np.transpose(arr_3d, (0, 2, 1))
         fields[fname] = arr_3d
 
-    # B-DIAGMASK-01: devolver a máscara já na orientação (nlat, nlon) usada
+    # Devolver a máscara já na orientação (nlat, nlon) usada
     # pelo resto do script — mesma regra de transposição dos campos.
     ocean_mask = omask_nativo
     if ocean_mask is not None and ocean_mask.ndim == 2 \
@@ -597,7 +424,7 @@ def load_diag_files(files, field_names):
 def print_stats(timestamps, fields, field_names):
     """Imprime min/máx/média/desvpad por campo e passo, em unidades de exibição.
 
-    BUG-PY-12-E: agora também mostra a fração de pontos válidos (não-NaN) por
+    Também mostra a fração de pontos válidos (não-NaN) por
     passo, útil para detectar passos com pouca cobertura (típico no início do
     experimento, quando a radiação SW ainda não foi escrita).
     """
@@ -615,7 +442,7 @@ def print_stats(timestamps, fields, field_names):
         print(f"  │  {'Passo':6s}  {'Data/hora':22s}  {'Mínimo':>12s}  {'Máximo':>12s}"
               f"  {'Média':>12s}  {'DesvPad':>10s}  {'Cobert.':>8s}")
         print(f"  │  {'─'*94}")
-        sc = meta.get('scale', 1.0)  # BUG-PY-08-A: aplicar scale antes de exibir
+        sc = meta.get('scale', 1.0)  # Aplicar scale antes de exibir
         for k, (ts, layer) in enumerate(zip(timestamps, data)):
             mask_ok = ~np.isnan(layer)
             n_ok    = int(mask_ok.sum())
@@ -642,7 +469,7 @@ def print_stats(timestamps, fields, field_names):
 
 def _area_weights(lat, shape):
     """Pesos de área ∝ cos(lat) para médias ponderadas numa grade regular
-    lat/lon (BUG-AREA-WEIGHT).
+    lat/lon.
 
     Numa grade 1°×1°, as células polares são minúsculas em área mas numerosas
     em contagem — uma média/contagem simples SUPER-representa os polos e infla
@@ -681,7 +508,7 @@ def check_physics(timestamps, fields, field_names, lat=None):
         flat   = data[~np.isnan(data)]
         if flat.size == 0:
             continue
-        # BUG-PY-05-B: comparar em unidades de exibição (após 'scale').
+        # Comparar em unidades de exibição (após 'scale').
         # vmin_phys/vmax_phys devem estar nas mesmas unidades de scale_units.
         fmin_s = flat.min() * scale
         fmax_s = flat.max() * scale
@@ -696,7 +523,7 @@ def check_physics(timestamps, fields, field_names, lat=None):
             ok_count += 1
 
     # Verificação especial: SST − 273.15 deve ser SST em °C ([-2.5, 42])
-    # BUG-PY-12-B: só relata aqui se a verificação principal em K passou OK.
+    # Só relata aqui se a verificação principal em K passou OK.
     # Caso contrário, geraríamos DOIS avisos sobre o mesmo problema:
     #   ⚠ So_t: min=200.0 < 271.0 [K]            (verificação em K)
     #   ⚠ So_t − 273.15 = [-73.15, 31.19] °C ...  (mesmo problema em °C)
@@ -715,7 +542,7 @@ def check_physics(timestamps, fields, field_names, lat=None):
                 print(f"  │  ✓ So_t em °C (={flat_c.mean():.2f}±{flat_c.std():.2f}) — "
                       f"conversão °C→K consistente (offset≈273.15)")
                 ok_count += 1
-        # BUG-AREA-WEIGHT: média de SST ponderada por área (cos-lat). A "Média"
+        # Média de SST ponderada por área (cos-lat). A "Média"
         # da tabela de estatísticas é por célula e, numa grade lat/lon, é puxada
         # para baixo pelas muitas células polares pequenas. A média ponderada por
         # área é a comparável com a climatologia (~288–292 K global).
@@ -750,10 +577,9 @@ def check_physics(timestamps, fields, field_names, lat=None):
         #   max > 1.05 → falta de divisão (dados em %, datocn_ice_pct=.false. errado)
         if flat_ice.size > 0:
             ice_max  = float(flat_ice.max())
-            # BUG-ICE-MEAN-LABEL (correção): antes a linha rotulada "média sobre
-            # células c/ gelo" mostrava, na verdade, a média sobre TODO o oceano
-            # (o oceano sem gelo é 0.0 neste dado, não fill), dando ~0.16. Aqui
-            # calculamos a média REAL apenas sobre células com gelo (conc≥0.15).
+            # A "média sobre células c/ gelo" é a média REAL apenas sobre
+            # células com gelo (conc≥0.15); a média sobre TODO o oceano seria
+            # outra coisa (o oceano sem gelo é 0.0 neste dado, não fill).
             ICE_THR = 0.15
             ice_present = flat_ice[flat_ice >= ICE_THR]
             ice_mean_over_ice = (float(ice_present.mean())
@@ -774,7 +600,7 @@ def check_physics(timestamps, fields, field_names, lat=None):
                       f"  (média sobre células c/ gelo, conc≥{ICE_THR:g}: {mo})")
                 ok_count += 1
 
-            # BUG-AREA-WEIGHT: cobertura de gelo em % de ÁREA (cos-lat), não em
+            # Cobertura de gelo em % de ÁREA (cos-lat), não em
             # % de células. Numa grade lat/lon a contagem simples de células
             # super-representa os polos (muitas células pequenas), inflando a
             # "cobertura". A fração de ÁREA é a comparável com observação.
@@ -961,7 +787,7 @@ def export_csv(timestamps, fields, field_names, outdir):
         for fname in field_names:
             if fname not in fields:
                 continue
-            sc    = FIELD_META.get(fname, {}).get('scale', 1.0)  # BUG-PY-08-E
+            sc    = FIELD_META.get(fname, {}).get('scale', 1.0)
             layer = fields[fname][k]
             flat  = layer[~np.isnan(layer)] * sc
             row[f'{fname}_min']  = f'{flat.min():.6f}' if flat.size > 0 else 'NaN'
@@ -984,7 +810,7 @@ def export_csv(timestamps, fields, field_names, outdir):
 
 # ─── Auxiliares de plotagem ─────────────────────────────────────────────────
 
-# BUG-PY-17 (correção): em nós de computação SEM acesso à internet (o caso do
+# Em nós de computação SEM acesso à internet (o caso do
 # supercomputador Jaci e da maioria dos clusters HPC), cfeature.LAND/COASTLINE
 # tentam BAIXAR os shapefiles Natural Earth na primeira chamada e o script
 # ABORTAVA com urllib.error.URLError, não gerando figura alguma. A função
@@ -1019,7 +845,7 @@ def _geo_features_available(cfeature):
 
 def _safe_add_geo_features(ax, cfeature, ccrs, with_borders=True):
     """Adiciona LAND/COASTLINE/BORDERS de forma resiliente a ambiente offline
-    (BUG-PY-17). Se os dados não estiverem acessíveis, apenas fixa a extensão
+. Se os dados não estiverem acessíveis, apenas fixa a extensão
     do mapa e retorna, sem abortar o script."""
     if _geo_features_available(cfeature):
         ax.add_feature(cfeature.LAND, facecolor='lightgray', zorder=5)
@@ -1038,7 +864,7 @@ def _field_scale(flat, meta):
     Aplica a mesma política de antes (percentis vperc + simetria + clamp aos
     limites físicos), mas agora é chamada UMA vez sobre a série inteira, para
     que o mesmo par vmin/vmax seja usado em todos os passos — condição
-    indispensável para uma animação comparável (BUG-PY-18)."""
+    indispensável para uma animação comparável."""
     phys_min = meta.get('vmin_phys')
     phys_max = meta.get('vmax_phys')
     if flat is None or flat.size == 0:
@@ -1127,12 +953,11 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
 
     LON2D, LAT2D = np.meshgrid(lon_plot, lat)
 
-    # BUG-PY-18 (correção principal p/ animação): escala de cor GLOBAL, igual
-    # em todos os passos. Antes, cada figura recalculava vmin/vmax a partir dos
-    # percentis DAQUELE passo — então, ao empilhar os PNGs no GIF, a mesma cor
-    # significava valores diferentes a cada quadro (a animação "pulsava" e não
-    # permitia comparação temporal). Agora vmin/vmax são calculados UMA vez
-    # sobre todos os passos plotados e reutilizados em cada quadro.
+    # Escala de cor GLOBAL, igual em todos os passos: vmin/vmax são calculados
+    # UMA vez sobre todos os passos plotados e reutilizados em cada quadro.
+    # Percentis por passo fariam a mesma cor significar valores diferentes a
+    # cada quadro do GIF (a animação "pulsaria" e não permitiria comparação
+    # temporal).
     global_scale = {}
     for fname in field_names:
         if fname not in fields:
@@ -1186,11 +1011,11 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
             if layer.ndim == 2 and layer.shape[1] == len(idx_sorted):
                 layer = layer[:, idx_sorted]
             sc_f  = FIELD_META.get(fname, {}).get('scale', 1.0)
-            flat  = layer[~np.isnan(layer)] * sc_f  # BUG-PY-07
+            flat  = layer[~np.isnan(layer)] * sc_f
             ax    = axes[ax_i]
 
             if flat.size == 0:
-                # BUG-PY-14 (C): painel informativo em vez de espaço em branco.
+                # Painel informativo em vez de espaço em branco.
                 # Quando So_t (ou qualquer campo) é 100% NaN num passo
                 # (ex.: passo 1 antes do primeiro avanço do MOM6), exibe
                 # mensagem diagnóstica clara em vez de subplot vazio.
@@ -1210,13 +1035,13 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                 ax_i += 1
                 continue
 
-            # BUG-PY-07: scale aplicado → unidades corretas na colorbar
+            # Scale aplicado → unidades corretas na colorbar
             sc_plot   = meta.get('scale', 1.0)
             layer_plt = layer * sc_plot
             phys_min  = meta.get('vmin_phys')
             phys_max  = meta.get('vmax_phys')
 
-            # BUG-PY-14 (D) FIX v2: mascaramento + interpolação do seam.
+            # Mascaramento + interpolação do seam.
             # A grade MED é regular 360x180 em (0–360°, -90–90°) e não tem seam
             # tripolar próprio. Porém o campo So_t (e fluxos calculados em
             # função de SST) carregam o seam da grade nativa MOM6 (tripolar),
@@ -1260,7 +1085,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                             layer_plt[:, col] = interp
                             break
 
-            # BUG-PY-18: usar a escala GLOBAL pré-calculada (mesma em todos os
+            # Usar a escala GLOBAL pré-calculada (mesma em todos os
             # passos), em vez de percentis por passo. Garante que uma mesma cor
             # signifique sempre o mesmo valor ao longo da animação.
             vmin, vmax = global_scale.get(fname, (phys_min, phys_max))
@@ -1282,7 +1107,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                                    cmap=meta['cmap'], vmin=vmin, vmax=vmax,
                                    transform=ccrs.PlateCarree(),
                                    zorder=1)
-                # BUG-PY-15 (A/C): adicionar LAND com zorder 5 garante que:
+                # Adicionar LAND com zorder 5 garante que:
                 #   • áreas de terra com NaN (campos oceânicos — Foxx_lwnet,
                 #     onda curta, precipitação) aparecem cinza em vez de
                 #     branco transparente;
@@ -1292,7 +1117,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                 #     a exibição de informação fisicamente sem sentido.
                 # COASTLINE e BORDERS em zorder 6 ficam visíveis acima
                 # da máscara de terra.
-                # BUG-PY-17: resiliente a ambiente offline (ver helper).
+                # Resiliente a ambiente offline (ver helper).
                 _safe_add_geo_features(ax, cfeature, ccrs, with_borders=True)
             else:
                 im = ax.pcolormesh(LON2D, LAT2D, layer_plt,
@@ -1321,7 +1146,7 @@ def plot_maps(timestamps, fields, field_names, lat, lon, step_indices, outdir,
                  ha='center', va='bottom', fontsize=8, color='0.35')
 
         outfile = os.path.join(outdir, f'mom6_import_{ts_str}.png')
-        # BUG-PY-19: NÃO usar bbox_inches='tight'. O recorte ajustado produz
+        # NÃO usar bbox_inches='tight'. O recorte ajustado produz
         # PNGs de dimensões LIGEIRAMENTE diferentes entre passos (dependendo do
         # texto/colorbar), o que faz o GIF/MP4 "tremer" (quadros de tamanhos
         # distintos são reposicionados no canto). Com figsize fixo +
@@ -1355,10 +1180,10 @@ def plot_timeseries(timestamps, fields, field_names, outdir):
     for ax, fname in zip(axes, available):
         meta  = FIELD_META.get(fname, {'long_name': fname, 'scale': 1.0,
                                         'scale_units': '?'})
-        sc    = meta.get('scale', 1.0)  # BUG-PY-08-D: scale para unidades de exibição
+        sc    = meta.get('scale', 1.0)  # Scale para unidades de exibição
         data  = fields[fname] * sc
         flat  = data.reshape(len(timestamps), -1)
-        # BUG-PY-12-D: passo com todos os NaN é situação esperada (ex.: SW
+        # Passo com todos os NaN é situação esperada (ex.: SW
         # logo após inicialização, antes do primeiro registro radiativo).
         # nanmean/nanpercentile sobre slice 100% NaN é INTENCIONAL aqui:
         # devolve NaN, que o matplotlib trata como gap natural na curva.
@@ -1378,7 +1203,7 @@ def plot_timeseries(timestamps, fields, field_names, outdir):
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc='upper right')
 
-        # BUG-PY-14 (B): escala symlog para campos binários com sinal pequeno.
+        # Escala symlog para campos binários com sinal pequeno.
         # Si_ifrac tem mean ~0.0005: numa escala linear [0, 1] a série aparece
         # como linha reta no zero, tornando o crescimento de gelo ilegível.
         # symlog com linthresh=1e-4 usa escala linear em [-1e-4, 1e-4] e

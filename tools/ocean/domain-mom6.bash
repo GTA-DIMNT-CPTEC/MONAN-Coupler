@@ -19,7 +19,7 @@
 #
 #   O acoplador pode rodar em mais de uma arquitetura de PETs, escolhida por
 #   pet_layout em &nuopc_petlayout (nuopc.input). Repare que o que decide é o
-#   LAYOUT, não o coupling_mode: desde a v14.20 os dois eixos são independentes,
+#   LAYOUT, não o coupling_mode: os dois eixos são independentes,
 #   e sequential+split também dá ao OCN apenas a sua fatia.
 #     - pet_layout='shared': os MESMOS PETs do run servem à atmosfera e ao
 #       oceano; nesse caso, EFF deve igualar o TOTAL de PETs (-n) do run.

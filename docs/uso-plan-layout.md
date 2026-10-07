@@ -21,7 +21,7 @@ Com `pet_layout = 'split'`, cada componente recebe um bloco próprio de nós. Os
 
 Escolher um divisor, e não simplesmente o teto, garante que cada bloco feche em nós inteiros e que nenhum nó fique misto, com dois componentes ao mesmo tempo. Isso melhora a localidade e o binding.
 
-A mesma regra vale para dois ou três blocos: atmosfera e oceano sempre, mais o gelo quando `use_sis2_dynamic` está ligado.
+A mesma regra vale para dois ou três blocos: atmosfera e oceano sempre, mais o gelo quando `ice_model = 'sis2'`.
 
 A consequência prática é que contagens "redondas" produzem topologias limpas e contagens primas ou quase primas produzem topologias ruins. Por exemplo, 341 PETs de atmosfera se consolidam em 11 nós de 31 PETs cada, desperdiçando a maior parte de cada nó. É exatamente esse tipo de escolha que o planejador serve para pegar antes.
 
@@ -56,13 +56,13 @@ Saída:
     pet_layout    = 'split'        ! obrigatório para as contagens abaixo
     atm_pet_count = 64
     ocn_pet_count = 4
-    use_sis2_dynamic = .true.
     ice_pet_count = 4
+  e, em &nuopc_mode: ice_model = 'sis2'
   e submeter:  bash run_esmApp.jaci -n 72
 ==========================================================================
 ```
 
-Sem `--ice`, o planejador recai no caso de dois blocos, com o mesmo `select` de antes, e a sugestão de `nuopc.input` traz `use_sis2_dynamic = .false.` como lembrete de que o plano não previu bloco de gelo.
+Sem `--ice`, o planejador recai no caso de dois blocos, com o mesmo `select` de antes, e a sugestão de `nuopc.input` traz `ice_model = 'none'` (no `&nuopc_mode`) como lembrete de que o plano não previu bloco de gelo.
 
 Layout compartilhado, em que todos os componentes ficam em todos os PETs:
 

@@ -99,7 +99,7 @@ Como ler cada bloco:
 | sugestão de partição | a divisão proporcional ao trabalho medido (seção 5) |
 | avisos e ajuste prático | contagens que o modelo não aproveitaria e a alternativa viável mais próxima (seção 6) |
 
-Sem o gelo, a linha de PETs do ICE diz `(componente desativado)`, o componente some da tabela, e a sugestão traz duas contagens seguidas de `use_sis2_dynamic = .false.`, como lembrete de que a medição não incluiu gelo.
+Sem o gelo, a linha de PETs do ICE diz `(componente desativado)`, o componente some da tabela, e a sugestão traz duas contagens seguidas da linha `(em &nuopc_mode: ice_model = 'none'; ...)`, como lembrete de que a medição não incluiu gelo.
 
 Na execução sequencial, ou com `pet_layout = 'shared'`, os componentes não rodam ao mesmo tempo. O bloco de tempo parado é substituído pela participação de cada componente no tempo total.
 
@@ -115,7 +115,7 @@ ESM: layout SPLIT (execucao CONCURRENT) - ATM=PET[0..127] OCN=PET[128..135] ICE=
 ESM: layout SHARED (execucao CONCURRENT) - MPAS, MED e OCN em todos os PETs
 ```
 
-O bloco do gelo vem na mesma linha, logo depois do de oceano, e só aparece com `use_sis2_dynamic = .true.`. O formato anterior à v14.20, em que os dois eixos eram um só, continua reconhecido, para que logs arquivados sigam legíveis.
+O bloco do gelo vem na mesma linha, logo depois do de oceano, e só aparece com o gelo ligado (`ice_model = 'sis2'`). O formato anterior à v14.20, em que os dois eixos eram um só, continua reconhecido, para que logs arquivados sigam legíveis.
 
 Segundo, se essa linha não existir, o layout é **inferido** a partir de quais PETs efetivamente reportam atividade de cada componente. Conjuntos disjuntos indicam `split`; conjuntos idênticos indicam `shared`. Esse é o caso comum em produção, porque `log_kind = 'multi_on_error'` suprime as mensagens de nível INFO.
 

@@ -61,6 +61,16 @@ _nuopc_get() {
     | head -1 | sed "s/\s*!.*//; s/.*=\s*//; s/['\",]//g; s/[[:space:]]*$//"
 }
 
+# Escolha dos modelos (chaves por modelo ou antigas, com os padrões de
+# produção): nuopc_modelo e nuopc_usa, comuns aos scripts.
+if [[ -f "${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash" ]]; then
+  # shellcheck source=../tools/coupler/chaves_nuopc.bash
+  source "${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash"
+else
+  echo "ERRO: ${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash não encontrado (COUPLER_ROOT certo?)" >&2
+  exit 1
+fi
+
 # Lê uma chave DENTRO de um grupo namelist específico. Necessário porque a busca
 # global acima casa a PRIMEIRA ocorrência no arquivo, que pode ser de um grupo
 # antigo ou de outro grupo que use o mesmo nome de chave. Insensível a
@@ -174,8 +184,8 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   NPES="${MPAS_NPES:-4}"
 
   # ── Detecção de modo ATM/OCN ────────────────────────────────────────────────
-  USE_DATM=$(_nuopc_get use_datm)
-  USE_DOCN=$(_nuopc_get use_docn)
+  USE_DATM=$(nuopc_usa "${CONFIG_FILE}" ATM datm)
+  USE_DOCN=$(nuopc_usa "${CONFIG_FILE}" OCN docn)
   DOCN_MODE=$(_nuopc_get docn_mode)
   DOCN_MODE="${DOCN_MODE:-stub}"
   WRITE_DIAG=$(_nuopc_get write_import_diag)
@@ -267,9 +277,11 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
     BUILD_ESMF="$(sed -n 's/^ESMF_VERSION_STRING=//p' "${ESMFMKFILE}" | head -1)"
     [[ -z "${BUILD_ESMF}" ]] && BUILD_ESMF="?"
   fi
-  BUILD_EXE="?"
-  if [[ -r "${EXE:-}" ]]; then
-    BUILD_EXE="$(date -r "${EXE}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
+  # B-RUN-EXE-01: caminho e data do executável de fato usado (antes lia a
+  # variável EXE, nunca definida, e o campo saía sempre '?').
+  BUILD_EXE="${EXECUTABLE} (?)"
+  if [[ -r "${EXECUTABLE}" ]]; then
+    BUILD_EXE="${EXECUTABLE} ($(date -r "${EXECUTABLE}" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?'))"
   fi
 
   # ── Banner ─────────────────────────────────────────────────────────────────
@@ -791,8 +803,8 @@ _opt() {
 }
 
 # ── Detecção de modo ATM/OCN ─────────────────────────────────────────────────
-USE_DATM=$(_nuopc_get use_datm)
-USE_DOCN=$(_nuopc_get use_docn)
+USE_DATM=$(nuopc_usa "${CONFIG_FILE}" ATM datm)
+USE_DOCN=$(nuopc_usa "${CONFIG_FILE}" OCN docn)
 DOCN_MODE=$(_nuopc_get docn_mode)
 DOCN_MODE="${DOCN_MODE:-stub}"
 
@@ -806,6 +818,22 @@ fi
 
 echo "--- Executável ---"
 _req "${EXECUTABLE}"
+# B-RUN-EXE-02: o executável não deve conter código de outra instalação. Com -g,
+# os caminhos dos fontes das bibliotecas ligadas ficam gravados no binário; se
+# aparecer um Coupler-Install diferente do deste COUPLER_ROOT, o setenv foi
+# carregado com outra instalação (caso real: bibliotecas do MPAS e do MOM6 de
+# coupling/ num executável de refatorado/, e resultados diferentes da base).
+if [[ -f "${EXECUTABLE}" ]] && command -v strings >/dev/null 2>&1; then
+  _minha_inst="$(cd "${COUPLER_ROOT}/.." 2>/dev/null && pwd)"
+  _outras=$(strings -a "${EXECUTABLE}" 2>/dev/null \
+            | grep -oE '/[^[:space:]"]*/Coupler-Install' | sort -u \
+            | grep -vxF "${_minha_inst}" | head -3 || true)   # sem ocorrência, grep devolve 1 (set -e)
+  if [[ -n "${_outras}" ]]; then
+    printf "  %-8s: %s\n" "AVISO" "o executável contém código de outra instalação:"
+    echo "${_outras}" | sed 's/^/             /'
+    echo "             Recompile com COUPLER_ROOT=${COUPLER_ROOT} definido antes do setenv."
+  fi
+fi
 echo ""
 
 echo "--- Configuração do acoplamento ---"
@@ -851,9 +879,10 @@ PET_LAYOUT=$(printf '%s' "${PET_LAYOUT}" | tr '[:upper:]' '[:lower:]')
 ATM_PET=$(_nuopc_pet atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
 OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
 ICE_PET=$(_nuopc_pet ice_pet_count || true); [[ "${ICE_PET}" =~ ^[0-9]+$ ]] || ICE_PET=0
-USE_SIS2=$(_nuopc_pet use_sis2_dynamic || true)
+USE_SIS2=$(nuopc_usa "${CONFIG_FILE}" ICE sis2)
 USE_SIS2=$(printf '%s' "${USE_SIS2}" | tr -d ". '\"" | tr '[:upper:]' '[:lower:]')
-case "${USE_SIS2}" in t|true) USE_SIS2=1 ;; *) USE_SIS2=0 ;; esac
+# Ausente vale .true., o padrão de config_read (configuração de produção).
+case "${USE_SIS2}" in f|false) USE_SIS2=0 ;; *) USE_SIS2=1 ;; esac
 
 # Modo desconhecido é ERRO, não recuo silencioso para sequential: um typo em
 # coupling_mode faria o script procurar a partição errada (NPES em vez de
@@ -890,7 +919,7 @@ fi
 # nenhum componente ICE chega a ser criado. Mesma regra do driver (config_read).
 if [[ "${USE_SIS2}" -eq 0 && "${ICE_PET}" -gt 0 ]]; then
   echo ""
-  printf "ERRO: ice_pet_count=%s exige use_sis2_dynamic = .true.\n" "${ICE_PET}"
+  printf "ERRO: ice_pet_count=%s exige ice_model = 'sis2' (ou use_sis2_dynamic = .true.)\n" "${ICE_PET}"
   printf "      Sem essa chave nenhum componente ICE e criado, e a contagem\n"
   printf "      nao teria a quem se aplicar. Corrija &nuopc_petlayout em %s.\n" "${CONFIG_FILE}"
   exit 1
@@ -928,7 +957,6 @@ if [[ "${PET_LAYOUT}" == "split" ]]; then
       "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
     printf "  %-8s: componente ICE (SIS2) ATIVO — ice_pet_count = %s (0 = auto)\n" \
       "INFO" "${ICE_PET}"
-    printf "  %-8s: ATENÇÃO — o caminho Si_ifrac ICE→MPAS ainda não foi validado.\n" "AVISO"
   else
     printf "  %-8s: pet_layout split (execução %s) — MPAS em %s PET(s), OCN em %s PET(s)\n" \
       "INFO" "${COUPLING_MODE}" "${MPAS_NPART}" "$(( NPES - MPAS_NPART ))"
@@ -1267,14 +1295,14 @@ mkdir -p logs diag_export diag_import diag_export/postproc diag_import/postproc
 # 'select=1:ncpus=NPES:mpiprocs=NPES', o que só cabia em um único nó (≤128 PETs).
 cat > "${PBS_SCRIPT}" << HEREDOC
 #!/bin/bash
-#PBS -N GTA-MONAN2xMOM6
+#PBS -N GTA-COUPLER
 #PBS -q ${QUEUE}
 #PBS -l ${SELECT}
 #PBS -l place=${PLACE}
 #PBS -l walltime=${WALLTIME}
 #PBS -j oe
 #PBS -o ${WORKDIR}/logs/esmApp_run.log
-#PBS -v MPAS_NPES=${NPES},REPRO_MPI=${REPRO_MPI:-0}
+#PBS -v MPAS_NPES=${NPES},REPRO_MPI=${REPRO_MPI:-0},ESMAPP_BIN=${EXECUTABLE}
 
 # Gerado por run_esmApp.jaci em $(date '+%Y-%m-%d %H:%M:%S')
 # NPES=${NPES}  nós=${NNODES}  layout=${TOPO_DESC}  place=${PLACE}

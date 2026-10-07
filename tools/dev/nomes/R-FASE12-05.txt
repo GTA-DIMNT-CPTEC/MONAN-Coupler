@@ -1,0 +1,13 @@
+# R-FASE12-05: nomes em inglês em src/shared, no driver e no programa
+# principal. Formato em tools/dev/renomeia-identificadores.py.
+
+PREFIXO                     PREFIX               src/shared/,src/driver/,src/main/
+acumula                     accumulate           src/shared/,src/driver/,src/main/
+acumula_2d                  accumulate_2d        src/shared/,src/driver/,src/main/
+grava                       write_sum            src/shared/,src/driver/,src/main/
+rotulo                      label                src/shared/
+rotulo                      comp_label           src/driver/
+lido                        was_read             src/shared/,src/driver/,src/main/
+n_cheia                     n_full_method        src/shared/,src/driver/,src/main/
+n_metodo                    n_method             src/shared/,src/driver/,src/main/
+ordem                       order                src/shared/,src/driver/,src/main/

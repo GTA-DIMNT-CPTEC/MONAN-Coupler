@@ -4,7 +4,7 @@
 #                        submissão PBS no supercomputador Jaci (Cray XD2000),
 #                        no mesmo padrão do run_esmApp.jaci.
 #
-# INPE / CGCT / DIMNT — GT Acoplamento de Modelos — v13.0
+# INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 # Sistema acoplado MONAN-A 2.0 x MOM6+SIS2 / NUOPC-ESMF 8.9.1
 #
 # OBJETIVO
@@ -12,7 +12,7 @@
 #     (1) reparte os PETs em blocos disjuntos ATM | OCN;
 #     (2) inicializa os três componentes (MPAS + MED + OCN) nesses subconjuntos;
 #     (3) AVANÇA o 1º passo de acoplamento SEM TRAVAR nos MPI_Allreduce coletivos
-#         (o cenário de deadlock que a blindagem v13.0 previne).
+#         (o cenário de deadlock que a blindagem do driver previne).
 #
 # DUAS FASES (igual ao run_esmApp.jaci — detecção por PBS_O_WORKDIR)
 #   • No NÓ DE LOGIN (sem PBS_O_WORKDIR): gera um script .pbs e faz `qsub`.
@@ -33,7 +33,7 @@
 #
 # SEGURANÇA / ISOLAMENTO
 #   NÃO altera o seu nuopc.input: gera uma cópia de teste injetada via a variável
-#   NUOPC_INPUT (suportada por mpas_cap_config_mod). Logs e diagnósticos vão para
+#   NUOPC_INPUT (suportada por coupler_config_mod). Logs e diagnósticos vão para
 #   diretórios *-concurrent-test isolados.
 #
 # CONVENÇÕES DE CAMINHO (idênticas ao run_esmApp.jaci)
@@ -58,10 +58,10 @@
 #   test-concurrent.bash -n 8 --dry-run            # mostra o .pbs e o comando, não submete
 #
 #   -n, --np N            Total de PETs                     (padrão: 8)
-#       --ice K           PETs do ICE (SIS2). >0 liga use_sis2_dynamic.
-#                         (padrão: herda use_sis2_dynamic da nuopc.input base)
+#       --ice K           PETs do ICE (SIS2). >0 liga o gelo (ice_model=sis2).
+#                         (padrão: herda o gelo da nuopc.input base)
 #       --no-ice          Força a rodada SEM componente ICE, mesmo que a
-#                         nuopc.input base tenha use_sis2_dynamic = .true.
+#                         nuopc.input base tenha o gelo ligado (ice_model=sis2).
 #       --overlap-tol S   Sobreposição MÍNIMA exigida entre componentes
 #                         (padrão: 1.0 s). Aqui a expectativa é o oposto da do
 #                         test-sequential-split.bash.
@@ -102,12 +102,11 @@ export COUPLER_ROOT
 # ── Padrões (a maioria sobrescrevível por env ou flag) ───────────────────────
 NP=8; ATM=0; OCN=0
 # ── Componente ICE (SIS2 dinâmico) ───────────────────────────────────────────
-# BUG-SEQ-TEST-ICE-01 (Set/2026): até esta versão o teste não conhecia o gelo.
-# gen_config removia o grupo &nuopc_petlayout inteiro da nuopc.input base e
-# reinjetava um grupo SEM use_sis2_dynamic, de modo que uma configuração com
-# gelo ligado era testada sem gelo — silenciosamente, e com o veredito PASSOU.
-# Agora o valor é herdado da nuopc.input base e pode ser forçado nos dois
-# sentidos por --ice / --no-ice.
+# gen_config remove o grupo &nuopc_petlayout inteiro da nuopc.input base e
+# reinjeta um grupo novo; o gelo vai para ice_model, em &nuopc_mode. Ele é herdado da nuopc.input
+# base e pode ser forçado nos dois sentidos por --ice / --no-ice; sem isso, uma
+# configuração com gelo ligado seria testada sem gelo, em silêncio e com o
+# veredito PASSOU.
 #   ICE_REQ = -1 herdar da base | 0 forçar sem gelo | >0 nº de PETs do ICE
 # Tolerância da sobreposição temporal entre componentes, em segundos.
 # Aqui a expectativa é o OPOSTO da do teste sequencial: a sobreposição precisa
@@ -199,15 +198,14 @@ IMPORT_DIR="$RUNDIR/diag_import-$TAG"
 EXPORT_DIR="$RUNDIR/diag_export-$TAG"
 STDOUT_LOG="$RUNDIR/$LOG_DIR/stdout.log"
 
-# ── Herança de use_sis2_dynamic da nuopc.input base ──────────────────────────
-# Lê a chave ignorando comentários (tudo depois do '!') e maiúsculas/minúsculas.
+# ── Herança do gelo da nuopc.input base ───────────────────────────────────────
+# O modelo do gelo sai das chaves por modelo ou das antigas (chaves_nuopc.bash);
+# sem nenhuma das duas, vale o padrão de produção (sis2).
+# shellcheck source=chaves_nuopc.bash
+source "$SCRIPT_DIR/chaves_nuopc.bash"
 _base_sis2() {
   [[ -f "$BASE_INPUT" ]] || { echo 0; return; }
-  local v
-  v="$(sed 's/!.*//' "$BASE_INPUT" \
-        | grep -iE '^[[:space:]]*use_sis2_dynamic[[:space:]]*=' \
-        | tail -1 | tr 'A-Z' 'a-z')"
-  [[ "$v" == *.true.* ]] && echo 1 || echo 0
+  [[ "$(nuopc_modelo "$BASE_INPUT" ICE)" == sis2 ]] && echo 1 || echo 0
 }
 _base_icepet() {
   [[ -f "$BASE_INPUT" ]] || { echo 0; return; }
@@ -249,7 +247,7 @@ fi
 [[ "$USE_ICE" -eq 0 || "$ICE" -ge 1 ]] \
   || die "componente ICE pedido mas ice=$ICE; use --ice K com K>=1 ou --no-ice"
 [[ "$USE_ICE" -eq 1 || "$ICE" -eq 0 ]] \
-  || die "ice=$ICE sem use_sis2_dynamic; mesma regra do driver (config_read)"
+  || die "ice=$ICE sem gelo (ice_model=none); mesma regra do driver (config_read)"
 
 # ── Decisão de fase: submeter (login) vs executar (dentro do job/interativo) ──
 #   PBS_O_WORKDIR definido ⇒ estamos dentro de um job PBS (batch ou interativo).
@@ -379,11 +377,10 @@ detect_launcher() {
 #   $1 = coupling_mode (sequential|concurrent)   $2 = arquivo de saída
 #   $3 = pet_layout    (shared|split)            — padrão: split
 #
-# v14.20: o grupo &nuopc_petlayout tem DOIS eixos, e as contagens de PET só
-# são aceitas com pet_layout=split. Emitir sequential + atm/ocn_pet_count sem
-# pet_layout (como fazia o baseline até a v14.19) passou a ser ERRO de
-# configuração, e não mais descarte silencioso — por isso o baseline abaixo
-# zera as contagens explicitamente.
+# O grupo &nuopc_petlayout tem DOIS eixos, e as contagens de PET só são
+# aceitas com pet_layout=split. Emitir sequential + atm/ocn_pet_count sem
+# pet_layout é ERRO de configuração (e não descarte silencioso); por isso o
+# baseline abaixo zera as contagens explicitamente.
 gen_config() {
   local mode="$1" out="$2" layout="${3:-split}"
   awk '
@@ -392,7 +389,11 @@ gen_config() {
     skip && /^[[:space:]]*\// {skip=0; next}
     skip {next}
     {print}
-  ' "$BASE_INPUT" > "$out"
+  ' "$BASE_INPUT" > "$out.base"
+  # O gelo pedido vai para ice_model em &nuopc_mode (nuopc_troca_modelo tira
+  # ice_model e a chave antiga use_sis2_dynamic, onde estiverem).
+  nuopc_troca_modelo "$out.base" "$out" ICE "$( [[ "$USE_ICE" -eq 1 ]] && echo sis2 || echo none )"
+  rm -f "$out.base"
   sed -i -E "s|^([[:space:]]*log_dir[[:space:]]*=[[:space:]]*).*|\1'$LOG_DIR'|" "$out"
   sed -i -E "s|^([[:space:]]*write_import_diag[[:space:]]*=[[:space:]]*)\.[a-zA-Z]+\.|\1.true.|" "$out"
   sed -i -E "s|^([[:space:]]*import_diag_dir[[:space:]]*=[[:space:]]*).*|\1'diag_import-$TAG'|" "$out"
@@ -412,21 +413,16 @@ gen_config() {
       echo "  atm_pet_count = 0"
       echo "  ocn_pet_count = 0"
     fi
-    # BUG-CONC-TEST-ICE-01 (Set/2026): sem estas linhas o grupo reinjetado
-    # ficava sem use_sis2_dynamic, o default Fortran .false. valia, e uma
-    # nuopc.input com gelo ligado era testada SEM gelo, com veredito PASSOU.
-    # Mesma lacuna corrigida em test-sequential-split.bash sob
-    # BUG-SEQ-TEST-ICE-01. Em layout 'shared' o ICE fica em todos os PETs e
-    # ice_pet_count DEVE ser 0 (config_read rejeita contagem com shared).
+    # O gelo já está em ice_model (acima). Em layout 'shared' o ICE fica em
+    # todos os PETs e ice_pet_count DEVE ser 0 (config_read rejeita contagem
+    # com shared).
     if [[ "$USE_ICE" -eq 1 ]]; then
-      echo "  use_sis2_dynamic = .true."
       if [[ "$layout" == "split" ]]; then
         echo "  ice_pet_count = $ICE"
       else
         echo "  ice_pet_count = 0"
       fi
     else
-      echo "  use_sis2_dynamic = .false."
       echo "  ice_pet_count = 0"
     fi
     echo "/"
@@ -499,7 +495,7 @@ run_and_watch() {
   done
 }
 
-# BUG-CONC-TEST-ICE-01: mede os TRÊS blocos. Devolve, no stdout, seis
+# Mede os TRÊS blocos. Devolve, no stdout, seis
 # campos:
 #   <ov_atm_ocn> <ov_atm_ice> <ov_ocn_ice> <span_atm> <span_ocn> <span_ice>
 # Campos do ICE saem 0 quando o componente não está ativo.
@@ -608,7 +604,7 @@ _diag_tail() {
 }
 analyze() {
   echo ""; log "análise dos logs em $RUNDIR/$LOG_DIR/"
-  # v14.20: "layout SPLIT (execucao CONCURRENT) — ATM=PET[..] OCN=PET[..]".
+  # Formato atual: "layout SPLIT (execucao CONCURRENT) — ATM=PET[..] OCN=PET[..]".
   # O formato <= v14.19 ("modo CONCURRENT — ...") segue aceito, para que o
   # mesmo teste sirva na comparação com binários antigos.
   if   grep_any "(layout SPLIT|modo CONCURRENT).*ATM=PET\[0\.\.$((ATM-1))\] OCN=PET\[$ATM\.\."; then
@@ -635,7 +631,7 @@ analyze() {
     fi
     if grep_any "componente ICE \(SIS2\) registrado"; then
       ok "componente ICE registrado no driver"
-    else bad "componente ICE NÃO registrado (use_sis2_dynamic chegou ao driver?)"
+    else bad "componente ICE NÃO registrado (ice_model=sis2 chegou ao driver?)"
       NFAIL=$((NFAIL+1)); fi
     if grep_any "RunSequence.*CONCORRENTE.*ICE|RunSequence.*ICE.*SIS2"; then
       ok "RunSequence concorrente COM gelo selecionada"

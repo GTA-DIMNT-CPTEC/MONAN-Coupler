@@ -1,0 +1,70 @@
+# R-FASE12-01: nomes em inglês no framework de interpolação (src/regrid,
+# tests/regrid). Formato em tools/dev/renomeia-identificadores.py.
+
+# públicos (valem em todo o código)
+calcula_pesos                 compute_weights
+calcula_pesos_i               compute_weights_iface
+idw_calcula_pesos             idw_compute_weights
+pi_calcula_pesos              iw_compute_weights
+regrid_pontos_t               regrid_points_t
+regrid_esquemas_do_acoplador  regrid_coupler_schemes
+registra_i                    register_iface
+pesos_identidade_t            identity_weights_t
+new_pesos_identidade          new_identity_weights
+origem_k                      src_index
+destino_k                     dst_index
+valido                        valid                 src/regrid/,tests/regrid/
+indice                        global_index          src/regrid/,tests/regrid/
+fator                         factors               src/regrid/,tests/regrid/
+
+# locais de src/regrid e tests/regrid
+origem                        src_points            src/regrid/,tests/regrid/
+destino                       dst_points            src/regrid/,tests/regrid/
+locais                        local_points          src/regrid/,tests/regrid/
+pontos_locais                 get_local_points      src/regrid/,tests/regrid/
+reune_origem                  gather_source         src/regrid/,tests/regrid/
+campo                         field                 src/regrid/,tests/regrid/
+com_mascara                   use_mask              src/regrid/,tests/regrid/
+tem_mascara                   has_mask              src/regrid/,tests/regrid/
+contagens                     counts                src/regrid/,tests/regrid/
+deslocamentos                 offsets               src/regrid/,tests/regrid/
+desl                          offsets               src/regrid/,tests/regrid/
+dmelhor                       best_dist             src/regrid/,tests/regrid/
+kmelhor                       best_k                src/regrid/,tests/regrid/
+expoente                      power                 src/regrid/,tests/regrid/
+vizinhos                      neighbors             src/regrid/,tests/regrid/
+nvalidos                      nvalid                src/regrid/,tests/regrid/
+opcoes_idw                    idw_options           src/regrid/,tests/regrid/
+na_esfera                     to_sphere             src/regrid/,tests/regrid/
+insere                        insert_sorted         src/regrid/,tests/regrid/
+chave                         key                   src/regrid/,tests/regrid/
+padrao                        default_val           src/regrid/,tests/regrid/
+valor                         val                   src/regrid/,tests/regrid/
+texto                         text                  src/regrid/,tests/regrid/
+achou                         found                 src/regrid/,tests/regrid/
+conhecidas                    known                 src/regrid/,tests/regrid/
+inicio                        first                 src/regrid/,tests/regrid/
+fim                           last                  src/regrid/,tests/regrid/
+k_pedida                      k_requested           src/regrid/,tests/regrid/
+completar                     fill_cfg              src/regrid/,tests/regrid/
+registra                      register              src/regrid/,tests/regrid/
+esquema                       scheme_name           src/regrid/,tests/regrid/
+opcoes                        scheme_options        src/regrid/,tests/regrid/
+referencia                    reference             src/regrid/,tests/regrid/
+saida                         output_file           src/regrid/,tests/regrid/
+fesq                          fscheme               src/regrid/,tests/regrid/
+erros                         errors                src/regrid/,tests/regrid/
+grava                         write_field           src/regrid/,tests/regrid/
+arquivo                       file_name             src/regrid/,tests/regrid/
+dentro                        inside                src/regrid/,tests/regrid/
+soma                          acc                   src/regrid/,tests/regrid/
+soma_g                        acc_g                 src/regrid/,tests/regrid/
+todos                         all_vals              src/regrid/,tests/regrid/
+idx_todos                     all_idx               src/regrid/,tests/regrid/
+unidade                       iunit                 src/regrid/,tests/regrid/
+iguais                        equal                 src/regrid/,tests/regrid/
+test_opcoes                   test_options          src/regrid/,tests/regrid/
+write_pesos                   write_factors         src/regrid/,tests/regrid/
+test_esquema                  test_scheme           src/regrid/,tests/regrid/
+
+@arquivo  tests/regrid/test_esquema.F90  tests/regrid/test_scheme.F90

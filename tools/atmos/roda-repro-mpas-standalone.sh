@@ -9,8 +9,8 @@
 # MPAS diverge entre duas rodadas idênticas, e descartou memória não
 # inicializada como causa (pilha, tipos derivados, caracteres e monte cobertos,
 # sem alterar a assinatura da divergência). O isolamento via DOCN não é
-# executável na develop atual (campos da Fase 1 incompatíveis com o cap, ver
-# B-DOCN-FASE1-CAMPOS-01). Este teste tira o acoplador inteiro do circuito.
+# executável na develop atual (os campos do DOCN são incompatíveis com o
+# cap). Este teste tira o acoplador inteiro do circuito.
 #
 # LEITURA DO VEREDITO (assimétrica — vale reler antes de concluir):
 #   DIFERE     conclusivo: o MPAS-A não é determinístico sozinho; o acoplamento
@@ -135,7 +135,7 @@ if grep -aq 'gfortran-coupler-xd2000' "${EXE}" 2>/dev/null; then
 fi
 
 #-----------------------------------------------------------------------------
-# B-STANDALONE-LDD-01: as bibliotecas compartilhadas do binario resolvem?
+# As bibliotecas compartilhadas do binario resolvem?
 #
 # Em 20/09/2026 o alvo standalone-esmflib foi ligado com -lesmf mas sem rpath,
 # e o job autonomo nao carrega o ambiente do acoplador. O carregador dinamico
@@ -245,7 +245,7 @@ cd ${d} || exit 1
 # Os arquivos de radiacao (RRTMG_*.DBL, CAM_*.DBL) sao big-endian na unidade 101.
 export GFORTRAN_CONVERT_UNIT=big_endian:101
 
-# B-STANDALONE-LDD-01: o job autonomo nao carrega o setenv do acoplador, entao
+# O job autonomo nao carrega o setenv do acoplador, entao
 # o caminho do ESMF externo precisa vir explicito. Vazio para os alvos que nao
 # dependem de libesmf.so.
 export LD_LIBRARY_PATH="${ESMF_LIBDIR:-}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"
@@ -277,7 +277,7 @@ submete_e_espera() {                     # $1 = A|B  -> ecoa jobid
 
 verifica_saida() {                       # $1 = A|B
   local d="${RUN_DIR}/$1" n
-  # B-STANDALONE-SILENT-01: 'find' em vez de 'ls | wc -l'. Com set -euo
+  # 'find' em vez de 'ls | wc -l'. Com set -euo
   # pipefail, 'ls' sobre um glob sem correspondencia falha, o pipefail propaga
   # a falha e o set -e encerra o script EM SILENCIO, antes desta mensagem.
   # Foi o que aconteceu em 20/09/2026 com o alvo standalone-esmflib: o modelo

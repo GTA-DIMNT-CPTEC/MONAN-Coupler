@@ -13,7 +13,8 @@
 #                  (e mpas_import_*.nc, nome legado, se ainda existir),
 #                  mais as saidas NetCDF gravadas na RAIZ do experimento
 #                  (reprodiag.nc e o que BASE_SAIDA_RAIZ_EXTRA acrescentar;
-#                   ver B-BASE-RAIZ-NC-01)
+#                   ver B-BASE-RAIZ-NC-01 em
+#                   docs/status-reprodutibilidade-24set2026.md)
 #   logs/          o primeiro PET de CADA bloco (ATM, OCN, ICE) e o log de
 #                  execução. Com layout shared, apenas o PET0.
 #   SHA256SUMS     soma de verificação de tudo o que foi guardado
@@ -108,15 +109,13 @@ if [[ "${_n_export}" -eq 0 ]]; then
 fi
 
 # ── Inventário da saída ──────────────────────────────────────────────────────
-# monan2_import_*.nc é o nome que o cap do MPAS escreve desde a v4.19;
-# mpas_import_step????.nc é o nome legado anterior. O padrão do legado NÃO tem
-# carimbo de tempo, e sim um contador de quatro dígitos: a primeira versão desta
-# correção usou 'mpas_import_????????_??????.nc', que nunca casou com nada,
-# como se vê em postproc_monan2_import.py::_load_fonte1 e na entrada do
-# B-DIAGMASK-01 no CHANGELOG. Até esta correção só o legado era
-# congelado, de modo que o lado atmosférico do diagnóstico ficava fora da linha
-# de base sem qualquer aviso, e o compara-linha-base.bash nunca teria como
-# acusar regressão ali.
+# monan2_import_*.nc é o nome que o cap do MPAS escreve;
+# mpas_import_step????.nc é o nome legado. O padrão do legado NÃO tem
+# carimbo de tempo, e sim um contador de quatro dígitos, como se vê em
+# postproc_monan2_import.py::_load_fonte1 e na entrada do B-DIAGMASK-01 no
+# CHANGELOG. Os dois são congelados: sem o nome atual, o lado atmosférico do
+# diagnóstico ficaria fora da linha de base sem qualquer aviso, e o
+# compara-linha-base.bash nunca teria como acusar regressão ali.
 _n_mom6=$(_conta   diag_import 'mom6_import_????????_??????.nc')
 _n_monan2=$(_conta   diag_import 'monan2_import_????????_??????.nc')
 _n_monan2c=$(_conta  diag_import 'monan2_import_????.nc')
@@ -124,11 +123,11 @@ _n_monan2=$(( _n_monan2 + _n_monan2c ))
 _n_legado=$(_conta diag_import 'mpas_import_step????.nc')
 
 #-----------------------------------------------------------------------------
-# B-BASE-RAIZ-NC-01 (Set/2026): saídas NetCDF gravadas na RAIZ do experimento.
+# Saídas NetCDF gravadas na RAIZ do experimento.
 #
-# Até aqui só diag_export/ e diag_import/ eram congelados. Qualquer stream que
-# grave na raiz ficava fora da linha de base, e o compara-linha-base.bash nunca
-# chegava a comparar o arquivo, embora ele já saiba procurá-lo ali (terceira
+# Além de diag_export/ e diag_import/, congela os streams que gravam na raiz.
+# Sem isso eles ficariam fora da linha de base, e o compara-linha-base.bash nunca
+# chegaria a comparar o arquivo, embora ele já saiba procurá-lo ali (terceira
 # alternativa do laço de localização). O sintoma é o pior possível: a
 # comparação passa em silêncio sobre um arquivo que ninguém verificou.
 #
@@ -153,8 +152,16 @@ _PADROES_RAIZ=( 'reprodiag.nc' 'reprodiag_*.nc' )
 [[ -n "${BASE_SAIDA_RAIZ_EXTRA:-}" ]] && _PADROES_RAIZ+=( ${BASE_SAIDA_RAIZ_EXTRA} )
 
 # Entradas conhecidas da raiz: nunca copiar para saida/.
-_PADROES_ENTRADA_RAIZ=( 'x1.*.nc' 'mpas_mesh.nc' 'ocean_*.nc' 'OISST*.nc' \
-                        '*_init.nc' 'grid_spec*.nc' )
+_PADROES_ENTRADA_RAIZ=( 'x1.*.nc' 'mpas_mesh.nc' 'OISST*.nc' '*_init.nc' \
+                        'grid_spec*.nc' 'MOM_IC.nc' 'tempsalt.nc' 'ucur.nc' \
+                        'vcur.nc' 'Vertical_coordinate.nc' 'monan_tos.nc' 'srflx.nc' )
+
+# Saídas dos modelos gravadas na raiz que NÃO entram na
+# comparação (diagnósticos próprios do MPAS, do MOM6 e do SIS2). Antes eram
+# somadas em entrada/CHECKSUMS.txt como se fossem entradas, e uma rodada nova
+# acusava "entrada diferente" em arquivos que ela mesma regrava.
+_PADROES_SAIDA_MODELOS=( 'MONAN_DIAG_*.nc' 'ice.nc' 'ocean_month.nc' \
+                         'sea_ice_geometry.nc' 'ocean.stats.nc' )
 
 _ARQS_RAIZ=()
 for _pat in "${_PADROES_RAIZ[@]}"; do
@@ -194,6 +201,10 @@ _sujo() {
     printf '-'
   fi
 }
+
+# Escolha dos modelos, nas duas formas de chave (nuopc_modelo)
+# shellcheck source=../coupler/chaves_nuopc.bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../coupler/chaves_nuopc.bash"
 
 _nuopc_get() {
   # Lê um parâmetro do nuopc.input, ignorando comentários.
@@ -236,17 +247,17 @@ _nuopc_get() {
   echo "stop_date       : $(_nuopc_get stop_date)"
   echo "dt_coupling     : $(_nuopc_get dt_coupling)"
   echo "dt_atm          : $(_nuopc_get dt_atm)"
-  echo "use_datm        : $(_nuopc_get use_datm)"
-  echo "use_docn        : $(_nuopc_get use_docn)"
-  echo "use_med_to_mpas : $(_nuopc_get use_med_to_mpas)"
+  # Modelo de cada posição e contorno, lidos das chaves por modelo ou das
+  # antigas (chaves_nuopc.bash); as antigas presentes ficam registradas
+  echo "atm_model       : $(nuopc_modelo nuopc.input ATM)"
+  echo "ocn_model       : $(nuopc_modelo nuopc.input OCN)"
+  echo "ice_model       : $(nuopc_modelo nuopc.input ICE)"
+  echo "atm_boundary    : $(nuopc_modelo nuopc.input BND)"
+  echo "chaves antigas  : $(nuopc_chaves_antigas nuopc.input | paste -sd' ' -)"
   echo "coupling_mode   : $(_nuopc_get coupling_mode)"
   echo "pet_layout      : $(_nuopc_get pet_layout)"
   echo "atm_pet_count   : $(_nuopc_get atm_pet_count)"
   echo "ocn_pet_count   : $(_nuopc_get ocn_pet_count)"
-  # Sem estas três linhas, duas linhas de base com e sem gelo ficavam
-  # indistinguíveis pelo manifesto, e o caminho OCN->ATM (Fase 1 direta
-  # contra Fase 2 pelo mediador) não era registrado em lugar nenhum.
-  echo "use_sis2_dynamic: $(_nuopc_get use_sis2_dynamic)"
   echo "ice_pet_count   : $(_nuopc_get ice_pet_count)"
   echo "write_import_diag: $(_nuopc_get write_import_diag)"
   echo ""
@@ -287,6 +298,12 @@ done
   echo ""
   for f in *.nc INPUT/*.nc; do
     [[ -f "${f}" ]] || continue
+    _eh_saida=0
+    for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_SAIDA_MODELOS[@]}"; do
+      # shellcheck disable=SC2053
+      [[ "${f}" == ${_pat} ]] && { _eh_saida=1; break; }
+    done
+    [[ ${_eh_saida} -eq 1 ]] && continue
     printf '%s  %12s  %s\n' \
       "$(sha256sum "${f}" | cut -d' ' -f1)" "$(stat -c%s "${f}")" "${f}"
   done
@@ -303,7 +320,7 @@ cp -p diag_import/monan2_import_????.nc             "${DESTINO}/saida/" 2>/dev/n
 # antiga continue completa. Execuções atuais não produzem este arquivo.
 cp -p diag_import/mpas_import_step????.nc           "${DESTINO}/saida/" 2>/dev/null || true
 
-# B-BASE-RAIZ-NC-01: cópia das saídas da raiz (lista montada acima).
+# Cópia das saídas da raiz (lista montada acima).
 for _f in "${_ARQS_RAIZ[@]:-}"; do
   [[ -n "${_f}" && -f "${_f}" ]] || continue
   cp -p "${_f}" "${DESTINO}/saida/" 2>/dev/null || true
@@ -316,7 +333,7 @@ _nao_classificados=()
 for _f in *.nc; do
   [[ -f "${_f}" ]] || continue
   _classificado=0
-  for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_ENTRADA_RAIZ[@]}"; do
+  for _pat in "${_PADROES_RAIZ[@]}" "${_PADROES_ENTRADA_RAIZ[@]}" "${_PADROES_SAIDA_MODELOS[@]}"; do
     # shellcheck disable=SC2053
     [[ "${_f}" == ${_pat} ]] && { _classificado=1; break; }
   done
@@ -335,16 +352,15 @@ fi
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 #-----------------------------------------------------------------------------
-# B-BASE-PETLOG-01 (Set/2026): congelar o PRIMEIRO PET DE CADA BLOCO, e nao so'
-# o PET0.
+# Congelar o PRIMEIRO PET DE CADA BLOCO, e nao so' o PET0.
 #
 # Com pet_layout='split', o PET0 pertence ao bloco da ATMOSFERA. Os
-# diagnosticos do oceano e do gelo saem em outros PETs, e nenhum deles era
-# preservado. Concretamente: toda a investigacao da oscilacao do Si_t_sis2
-# (Set/2026, ver docs/investigacao-oscilacao-si-t-sis2.md) dependeu do
+# diagnosticos do oceano e do gelo saem em outros PETs. Concretamente: toda a
+# investigacao da oscilacao do Si_t_sis2 (ver
+# docs/investigacao-oscilacao-si-t-sis2.md) dependeu do
 # logs/PET68.esmApp.log, onde saem os FIX-DIAG-TSKIN-*. Uma linha de base
-# congelada com a versao anterior deste script NAO conteria esse log, e a
-# investigacao teria sido irreproduzivel a partir dela.
+# so' com o PET0 NAO conteria esse log, e a investigacao seria
+# irreproduzivel a partir dela.
 #
 # As faixas de PET vem da linha que o esm.F90 grava no log:
 #   "ESM: layout SPLIT (execucao ...) - ATM=PET[0..63] OCN=PET[64..67]

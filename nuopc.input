@@ -1,45 +1,16 @@
 !-----------------------------------------------------------------------
-! nuopc.input — Arquivo de configuração do sistema de acoplamento
-!               NUOPC-MPAS-Integrado (MONAN-A 2.0 / ESMF 8.9.1)
+! nuopc.input: configuração do MONAN-Coupler
+!               (MONAN-A 2.0, MOM6 + SIS2, ESMF/NUOPC 8.9.1)
 !
-! Versão 12.0 — INPE / CGCT / DIMNT — GT Acoplamento MONAN — Maio 2026
-!
-! Histórico:
-!   v10.0 (13/05/2026):
-!   v12.0 (Maio 2026):
-!     [N-B1] Sprint B.1: docn_ice_init_only adicionado a &nuopc_mode.
-!       OISST inicializa Si_ifrac apenas em t=0; a partir de t≥1 o
-!       proxy sigmoide f(T_surf do MOM6) é usado — Si_ifrac evolui
-!       com a dinâmica oceânica. Requer use_docn_ice=.true..
-!
-!   v11.0 (Maio 2026):
-!     [N1] BUG CORRIGIDO: use_med_to_mpas ausente de &nuopc_mode.
-!          O parâmetro é declarado no Fortran (namelist /nuopc_mode/)
-!          mas estava faltando neste arquivo, defaultando para .false.
-!          (Fase 1: OCN direto para ATM) mesmo com use_docn=.false.
-!          (MOM6 ativo). Adicionado com valor .true. para ativar o
-!          caminho Fase 2 (MED→MPAS) correto para modo MOM6+SIS2.
-!     [N2] Comentário de write_import_diag corrigido:
-!          'docn_import_*.nc' → 'mom6_import_*.nc' (alinhado com
-!          run_esmApp.jaci v10.0). Adicionada nota que &nuopc_docn é
-!          lido INCONDICIONALMENTE pelo Fortran — write_import_diag é
-!          ativo tanto em modo DOCN quanto em modo MOM6+SIS2.
-!     [N3] Comentário de dt_coupling simplificado: removida tag
-!          'Migração v7.0' (ruído histórico; 3600 s é a produção atual).
-!     [N4] Seção &nuopc_mode aprimorada: adicionada documentação de
-!          use_med_to_mpas; tabela de combinações expandida com fases.
-!     [N5] Comentário de mesh_ocn esclarecido: distingue ocean_hgrid.nc
-!          (grade bruta FRE-NCtools) do arquivo ESMF_FILEFORMAT_ESMFMESH.
-!     [N6] Comentário de docn_epoch_* esclarecido: epoch refere-se ao
-!          primeiro registro do arquivo usado, não ao epoch do produto.
-!     [N7] Comentário de docn_cur_u/v_varname: esclarece que o default
-!          Fortran é 'uo'/'vo'; OSCAR NRT v2.0 requer 'u'/'v'.
-!     [N8] Cabeçalho atualizado: data Abril → Maio 2026.
+! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
+! O histórico das mudanças deste arquivo está em docs/CHANGELOG.md.
 !
 ! Uso:
 !   Copiar para o diretório de execução antes de submeter.
 !   Variável de ambiente NUOPC_INPUT pode apontar para caminho alternativo.
-!   Qualquer grupo omitido → defaults do módulo mpas_cap_config_mod.
+!   Lido uma vez por coupler_config_mod (src/shared/coupler_config.F90).
+!   Grupo omitido mantém os valores padrão; grupo com erro de sintaxe é
+!   erro fatal.
 !
 ! Formato: namelists Fortran padrão (! para comentários).
 ! Datas: formato ISO 8601 'YYYY-MM-DD' (entre aspas simples).
@@ -73,66 +44,104 @@
 !                                    logs/PET*.esmApp.log completo. Reserve
 !                                    para produção já calibrada, quando não
 !                                    for mais preciso medir tempo por passo.
+!   log_level    Quais mensagens do acoplador vão para o log ESMF:
+!                'warning' -> só avisos;
+!                'info'    -> avisos e mensagens de andamento (padrão);
+!                'debug'   -> tudo, inclusive os diagnósticos do mediador
+!                             (linhas FIX-DIAG, somas de bits do Si_ifrac)
+!                             lidos por tools/coupler/mede-taxa-repro.sh.
+!                A chave antiga write_fixdiag é obsoleta e não tem efeito.
+!   run_sequence_file  (opcional) arquivo com a sequência de execução de
+!                cada passo, no formato do NUOPC, sob o rótulo runSeq::,
+!                para experimentar outra ordem sem recompilar. Vazio
+!                (padrão): a sequência da tabela RUN_SEQUENCES
+!                (src/driver/run_sequences.F90), escolhida por
+!                coupling_mode, atm_boundary, ice_model e
+!                seq_repro. O período da linha @ deve ser dt_coupling.
+!                Exemplo de arquivo (a sequência seq_mom6_ice):
+!                  runSeq::
+!                  @3600
+!                    OCN -> MED
+!                    ICE -> MED
+!                    MPAS -> MED
+!                    MED
+!                    MED -> MPAS
+!                    MPAS
+!                    MED -> OCN
+!                    OCN
+!                    MED -> ICE
+!                    ICE
+!                  @
+!                  ::
 !-----------------------------------------------------------------------
 &nuopc_driver
   start_date  = '2026-03-29'
   stop_date   = '2026-03-30'
-  dt_coupling = 3600  ! [N3] 3600 s recomendado MOM6 global (default Fortran: 1800)
+  dt_coupling = 3600  ! 3600 s recomendado para o MOM6 global (padrão: 1800)
   dt_atm      = 60
   log_dir     = 'logs'
   log_kind    = 'multi'  ! 'multi' (calibração) | 'multi_on_error' (produção)
+  log_level   = 'info'   ! 'warning' | 'info' (padrão) | 'debug' (diagnósticos)
 /
 
 !-----------------------------------------------------------------------
-! Grupo 1b: Modos de operação ATM e OCN  (&nuopc_mode)
+! Grupo 2: Modelos de cada posição (&nuopc_mode)
 !
-!   use_datm  .true.  → DATM (JRA55 sintético) como componente ATM
-!             .false. → MPAS-A real como componente ATM  (PRODUÇÃO)
+! Cada posição recebe um modelo:
+!   atm_model     'mpas' (MONAN-A, PRODUÇÃO) | 'datm' (JRA55; o driver
+!                 ainda não registra o DATM)
+!   ocn_model     'mom6' (MOM6, PRODUÇÃO) | 'docn' (SST/gelo por dados)
+!   ice_model     'sis2' (SIS2 dinâmico, PRODUÇÃO) | 'none' (sem gelo)
+!   atm_boundary  'med' (contorno da atmosfera pelo mediador: So_t, So_u,
+!                 So_v e Si_ifrac pelo caminho OCN → MED → ATM; PRODUÇÃO,
+!                 obrigatório com o MOM6) | 'ocn' (direto do OCN; só DOCN)
+! Os modelos possíveis estão na tabela COMPONENTS, em
+! src/shared/coupler_config.F90.
 !
-!   use_docn  .true.  → DOCN (SST/gelo por dados) como componente OCN
-!             .false. → MOM6+SIS2 dinâmico como componente OCN  (PRODUÇÃO)
+! As chaves antigas continuam aceitas, com um aviso na leitura, e são
+! traduzidas:
+!   use_datm=T → atm_model='datm'      use_docn=T → ocn_model='docn'
+!   use_med_to_mpas=F → atm_boundary='ocn'
+!   use_sis2_dynamic=F (&nuopc_petlayout) → ice_model='none'
+! Uma chave antiga e a nova podem vir juntas se concordarem; se se
+! contradisserem, a leitura para com erro. Os scripts (run/run_esmApp.jaci,
+! tools/coupler, cria-linha-base) leem as duas formas
+! (tools/coupler/chaves_nuopc.bash), uma chave por linha.
 !
-!   use_med_to_mpas
-!     .true.  → Fase 2 (MOM6): mediador roteia OCN→MED→ATM.
-!               RouteOcnToAtm envia So_t, So_u, So_v, Si_ifrac via MED.
-!               Necessário quando use_docn=.false. (MOM6 ativo).
-!     .false. → Fase 1 (DOCN/stub): OCN exporta campos direto para ATM.
-!               Default Fortran: .false. — INADEQUADO para modo MOM6.
+! Os valores padrão (mpas, mom6, sis2, med) formam a configuração de
+! produção. Que combinações são aceitas está numa tabela só, COUPLER_MODES
+! em src/shared/coupler_config.F90:
+!   suportada     MPAS + MOM6 + contorno pelo mediador, com ou sem o SIS2
+!                 (com o SIS2, PRODUÇÃO, validada a cada etapa)
+!   não validada  combinações com o DOCN ou com o DATM: aceitas, com
+!                 aviso no início da rodada (docs/estado-do-projeto.md, seção 6)
+!   recusada      MOM6 com contorno direto (atm_boundary='ocn'); SIS2 com o
+!                 DOCN. A rodada para na leitura, com mensagem que diz o que
+!                 mudar.
 !
-! [N1] ATENÇÃO: use_med_to_mpas deve ser .true. quando use_docn=.false.
-!      (MOM6 ativo). Omitir este parâmetro causa acoplamento incorreto:
-!      o MPAS recebe SST/gelo pelo caminho Fase 1 (OCN direto), mas o
-!      MOM6 não expõe os campos nesse caminho.
-!
-! COMBINAÇÕES ATM x OCN:
-!   use_datm=F  use_docn=F  use_med=T → MPAS  + MOM6  (PRODUÇÃO / Fase 2)
-!   use_datm=F  use_docn=T  use_med=F → MPAS  + DOCN  (Fase 1)
-!   use_datm=T  use_docn=F  use_med=T → DATM  + MOM6  (teste MOM6 isolado)
-!   use_datm=T  use_docn=T  use_med=F → DATM  + DOCN  (teste mediador)
-!
-! NOTA: &nuopc_docn é lido INCONDICIONALMENTE pelo Fortran independente
-!       de use_docn. Em particular, write_import_diag em &nuopc_docn
+! NOTA: &nuopc_docn é lido sempre, independentemente de ocn_model. Em particular, write_import_diag em &nuopc_docn
 !       controla a escrita de mom6_import_*.nc nos dois modos OCN.
 !-----------------------------------------------------------------------
 &nuopc_mode
-  use_datm        = .false.   ! .true. → DATM JRA55 | .false. → MPAS-A real
-  use_docn        = .false.   ! .true. → DOCN SST   | .false. → MOM6+SIS2
-  use_med_to_mpas = .true.    ! [N1] Fase 2 MOM6: .true. obrigatório se use_docn=F
-  use_docn_ice    = .false.   ! Alternativa 1: Si_ifrac do arquivo OISST
-                              !   .false. → proxy sigmoide Sprint A.5
+  atm_model       = 'mpas'    ! 'mpas' → MONAN-A real | 'datm' → DATM JRA55
+  ocn_model       = 'mom6'    ! 'mom6' → MOM6          | 'docn' → DOCN SST
+  ice_model       = 'sis2'    ! 'sis2' → SIS2 dinâmico | 'none' → sem gelo
+  atm_boundary    = 'med'     ! 'med' obrigatório com o MOM6; 'ocn' só DOCN
+  use_docn_ice    = .false.   ! .true. → Si_ifrac do arquivo OISST
+                              ! .false. → aproximação sigmoide pela SST
   !
-  ! [N-B1] Sprint B.1 — docn_ice_init_only (Maio 2026)
+  ! docn_ice_init_only
   !   .true.  → OISST lido APENAS no passo t=0 (InitializeDataComplete).
   !             A partir de t=1 (ModelAdvance), Si_ifrac é calculado pelo
   !             proxy sigmoide f(T_surf) do MOM6 dinâmico — campo evolui.
   !             Requer use_docn_ice=.true. (validado em config_read).
   !   .false. → comportamento original: OISST prescrito a cada passo
   !             (campo congelado; recomendado apenas para diagnóstico).
-  docn_ice_init_only = .false.   ! [N-B1] Sprint B.1: evolução dinâmica
+  docn_ice_init_only = .false.
 /
 
 !-----------------------------------------------------------------------
-! Grupo 2: Parâmetros do cap atmosférico (mpas_cap_mod)
+! Grupo 3: Parâmetros do cap atmosférico (mpas_cap_MONAN_mod)
 !
 !   mesh_atm     Arquivo de malha ESMF do MONAN-A.
 !                Gerado por ESMF_Scrip2Unstruct a partir do init.nc.
@@ -149,7 +158,7 @@
 /
 
 !-----------------------------------------------------------------------
-! Grupo 3: Saída NetCDF dos campos exportados (mpas_cap_netcdf_mod)
+! Grupo 4: Saída NetCDF dos campos exportados (mpas_cap_netcdf_mod)
 !
 !   write_netcdf Ativa (.true.) ou desativa (.false.) a escrita dos
 !                campos exportados em diag_export/monan_export_*.nc.
@@ -172,7 +181,7 @@
 /
 
 !-----------------------------------------------------------------------
-! Grupo 4: Defaults de condição de contorno (mpas_atm_model_mod)
+! Grupo 5: Valores padrão de condição de contorno (mpas_atm_model_mod)
 !
 !   Valores usados quando o campo correspondente não está disponível
 !   no importState ESMF. Ativos apenas em modo standalone (sem mediador)
@@ -189,21 +198,20 @@
 /
 
 !-----------------------------------------------------------------------
-! Grupo 5: Componente oceânico por dados (DOCN_cap)
+! Grupo 6: Componente oceânico por dados (DOCN_cap)
 !
-! ATIVO como componente OCN quando use_docn=.true. em &nuopc_mode.
-! INATIVO (substituído por MOM6+SIS2) quando use_docn=.false.
+! ATIVO como componente OCN quando ocn_model='docn' em &nuopc_mode.
+! INATIVO (substituído por MOM6+SIS2) quando ocn_model='mom6'.
 !
-! [N2] IMPORTANTE: este grupo é lido INCONDICIONALMENTE pelo Fortran
-! (mpas_cap_config_mod::config_read, linha ~275) independente de
-! use_docn. Em particular:
+! IMPORTANTE: este grupo é lido sempre, independentemente de ocn_model.
+! Em particular:
 !   write_import_diag: grava diag_import/mom6_import_*.nc em modo DOCN
 !                      E em modo MOM6+SIS2 (mediador escreve o arquivo).
 !
 !   docn_mode    Modo do componente oceânico por dados:
 !                    'stub'   — SST sintética constante (= sst_default)
 !                    'netcdf' — lê SST/gelo de arquivo NetCDF com interp.
-!                Usado apenas quando use_docn=.true.
+!                Usado apenas quando ocn_model='docn'.
 !
 !   docn_nx/ny   Dimensões da grade do dado oceânico:
 !                    1440 × 720  = OISST 0.25°  (padrão)
@@ -213,8 +221,8 @@
 !                    86400 = diário (OISST v2.1)
 !
 !   docn_epoch_* Data do PRIMEIRO REGISTRO no arquivo NetCDF usado.
-!                [N6] Atenção: epoch refere-se ao arquivo em uso, NÃO ao
-!                produto. Default Fortran: 1981-09-01 (epoch do produto
+!                Atenção: refere-se ao arquivo em uso, NÃO ao produto.
+!                Padrão: 1981-09-01 (epoch do produto
 !                OISST v2.1 completo). Para arquivo anual de 2026,
 !                epoch = 2026-01-01 → tidx(2026-03-29) = 88 (base 0).
 !
@@ -227,8 +235,8 @@
 !       ERSSTv5    : sst_varname='sst'   ice_varname='sic'
 !
 !   docn_cur_u/v_varname — variáveis de corrente no arquivo NetCDF:
-!       [N7] Default Fortran: 'uo' / 'vo' (convenção CMIP6/CF).
-!            OSCAR NRT v2.0 usa 'u' / 'v' — overrideado abaixo.
+!       Padrão: 'uo' / 'vo' (convenção CMIP6/CF).
+!       O OSCAR NRT v2.0 usa 'u' / 'v', definidos abaixo.
 !            Verificar: ncdump -h INPUT/OISST_cur.nc | grep ' u\b\| v\b\|uo\|vo'
 !
 !   docn_ice_pct  Unidade do campo de gelo no arquivo fonte:
@@ -237,7 +245,7 @@
 !                    Verificar: ncdump -h INPUT/OISST_ice.nc | grep 'units'
 !
 !   write_import_diag  Escreve diag_import/mom6_import_*.nc por passo.
-!                      [N2] Ativo nos modos DOCN e MOM6+SIS2.
+!                      Ativo nos modos DOCN e MOM6+SIS2.
 !                      Validar: python3 postproc_mom6_import.py --stats --check --plot
 !                      Desativar em produção longa (I/O extra ~1.7 MB/passo;
 !                      24h × dt=3600 s = 24 arquivos ≈ 41 MB/dia).
@@ -247,74 +255,54 @@
   docn_nx          = 1440
   docn_ny          = 720
   docn_dt_data     = 86400   ! diário (OISST v2.1)
-  ! [N6] epoch = primeiro registro DO ARQUIVO (não do produto).
-  ! Default Fortran: 1981-09-01 (produto OISST v2.1 completo).
+  ! Época = primeiro registro DO ARQUIVO (não do produto).
+  ! Padrão: 1981-09-01 (produto OISST v2.1 completo).
   docn_epoch_year  = 2026
   docn_epoch_month = 1
   docn_epoch_day   = 1
   docn_sst_file    = 'INPUT/OISST_sst.nc'
   docn_ice_file    = 'INPUT/OISST_ice.nc'
-  ! [N7] OSCAR NRT v2.0 (2025-06-22) — substituir por arquivo de março 2026.
+  ! Correntes OSCAR NRT v2.0 de 22/06/2025; substituir por um arquivo de março de 2026.
   ! Preparado por prepare_cur_file.sh (eixos: time, lat, lon; grade 1440×720).
   docn_cur_file    = 'INPUT/OISST_cur.nc'
   docn_sst_varname   = 'sst'
   docn_ice_varname   = 'icec'
-  docn_cur_u_varname = 'u'    ! [N7] OSCAR: 'u'/'v' (default Fortran: 'uo'/'vo')
-  docn_cur_v_varname = 'v'    ! [N7] OSCAR: 'u'/'v' (default Fortran: 'uo'/'vo')
+  docn_cur_u_varname = 'u'    ! OSCAR: 'u'/'v' (padrão: 'uo'/'vo')
+  docn_cur_v_varname = 'v'    ! OSCAR: 'u'/'v' (padrão: 'uo'/'vo')
   docn_ice_pct       = .false.   ! OISST: fração [0,1] (não percentagem)
-  ! [N2] Arquivo: diag_import/mom6_import_YYYYMMDD_HHMMSS.nc
+  ! Arquivo: diag_import/mom6_import_YYYYMMDD_HHMMSS.nc
   write_import_diag    = .true.
   import_diag_dir      = 'diag_import'
 /
 
 !-----------------------------------------------------------------------
-! Grupo 6: Componente oceânico MOM6+SIS2 (mom_cap_MONAN.F90)
+! Grupo 7: Componente oceânico MOM6+SIS2 (mom_cap_MONAN.F90)
 !
-! ATIVO quando use_docn=.false. em &nuopc_mode (padrão de produção).
-! Requer também use_med_to_mpas=.true. para acoplamento Fase 2 correto.
+! ATIVO quando ocn_model='mom6' em &nuopc_mode (padrão de produção).
+! Requer também atm_boundary='med'.
 !
-!   mesh_ocn      Arquivo de grade para o componente MOM6.
-!                 [N5] Atenção: o valor abaixo aponta para ocean_hgrid.nc
-!                 (supergrid FRE-NCtools). Verificar se mom_cap_MONAN.F90
-!                 espera este arquivo ou um ESMF mesh pré-gerado. Se o cap
-!                 exigir formato ESMF_FILEFORMAT_ESMFMESH, gerar com:
-!                   ESMF_RegridWeightGen --source ocean_hgrid.nc \
-!                     --destination ocean_esmf_mesh.nc \
-!                     --src_type SCRIP --dst_type ESMFMESH
-!                 e atualizar para: mesh_ocn = 'INPUT/ocean_esmf_mesh.nc'
+!   mesh_ocn      Supergrade do MOM6 (ocean_hgrid.nc, formato FRE-NCtools).
+!                 O mediador e o cap do gelo leem dela as dimensões e as
+!                 coordenadas reais da grade T do oceano.
 !
-!   use_mommesh   .true.  → MOM6 usa ESMF_Mesh tripolar (produção)
-!                 .false. → MOM6 usa ESMF_Grid simplificado (testes)
-!                 Default Fortran: .false. — deve ser .true. em produção.
-!
-!   restart_n     Número do restart a carregar:
-!                   0 → sem restart; MOM6 parte do estado inicial
-!                  >0 → carrega MOM6_input/restart.nc número N
-!
-! ATENÇÃO: stop_ymd e stop_tod NÃO são definidos aqui.
-!   Calculados automaticamente por esm_MONAN.F90 a partir do
-!   stopTime do relógio ESMF — passados ao MOM6 via
-!   NUOPC_CompAttributeSet para o FMS time manager.
+! As chaves use_mommesh e restart_n foram retiradas: não tinham efeito.
+! Se ainda presentes, o acoplador emite aviso de chave obsoleta.
 !-----------------------------------------------------------------------
 &nuopc_ocn
-  mesh_ocn       = 'INPUT/ocean_hgrid.nc'  ! [N5] ver nota sobre ESMF mesh acima
-  use_mommesh    = .true.                   ! default Fortran: .false.
-  restart_n      = 0
+  mesh_ocn       = 'INPUT/ocean_hgrid.nc'
 /
 
 !-----------------------------------------------------------------------
-! Grupo 7: Particionamento de PETs entre componentes (&nuopc_petlayout)
+! Grupo 8: Particionamento de PETs entre componentes (&nuopc_petlayout)
 !
 ! Controla como os PETs (persistent execution threads = ranks MPI) são
 ! distribuídos entre os componentes MPAS (ATM), MOM6/DOCN (OCN) e o
 ! mediador (MED), e em que ordem eles avançam no tempo.
 !
-! São DOIS eixos ORTOGONAIS. Até a v14.19 eles estavam colapsados em
-! coupling_mode, de modo que atm_pet_count/ocn_pet_count eram DESCARTADOS
-! EM SILÊNCIO quando coupling_mode='sequential'.
+! São DOIS eixos ORTOGONAIS:
 !
 !   coupling_mode  eixo TEMPORAL — ordem de execução.
-!                  Decidido em esm_MONAN.F90::SetRunSequence.
+!                  Decidido em esm.F90::SetRunSequence.
 !                  'sequential' → ATM e OCN avançam um depois do outro; o
 !                                  MED entrega os campos do MESMO passo, sem
 !                                  defasagem. Tempo por passo = t_ATM+t_OCN.
@@ -325,7 +313,7 @@
 !                                  max(t_ATM, t_OCN).
 !
 !   pet_layout     eixo ESPACIAL — ocupação de PETs.
-!                  Decidido em esm_MONAN.F90::SetModelServices (petList).
+!                  Decidido em esm.F90::SetModelServices (petList).
 !                  'shared' → MPAS, MED e OCN em TODOS os PETs. Sem split de
 !                             comunicador. atm_pet_count/ocn_pet_count devem
 !                             ser 0.
@@ -351,8 +339,7 @@
 !                        própria definição de execução concorrente.
 !
 ! COMPATIBILIDADE: pet_layout ausente é derivado do coupling_mode
-!   ('concurrent'→'split', 'sequential'→'shared'), de modo que nuopc.input
-!   anteriores à v14.20 mantêm exatamente o comportamento que tinham.
+!   ('concurrent'→'split', 'sequential'→'shared').
 !
 !   atm_pet_count  Nº de PETs do ATM (MPAS) quando pet_layout='split'.
 !                  0 → auto: ceil(petCount/2).
@@ -366,25 +353,21 @@
 !   aborta antes disso, ainda no nó de login.
 !
 ! REGRA (shared): atm_pet_count e ocn_pet_count devem ser 0. Informar
-!   contagens com pet_layout='shared' é ERRO explícito desde a v14.20 —
-!   antes era descarte silencioso, e o MOM6 recebia TODOS os PETs em vez da
-!   fatia pretendida, abortando bem depois, no mpp_define_domains, com
-!   mensagem que não mencionava PET algum.
+!   contagens com pet_layout='shared' é ERRO, detectado na leitura.
 !
 ! ATENÇÃO (split): a partição METIS do MPAS é dimensionada por
 !   atm_pet_count, NÃO por -n. O run_esmApp.jaci gera a partição que faltar.
 !
 ! COMPONENTE ICE (gelo marinho SIS2 dinâmico)
 !
-!   use_sis2_dynamic  .false. (padrão) → nenhum componente ICE é criado, e o
-!                     sistema se comporta exatamente como antes desta chave
-!                     existir. A fração de gelo continua vindo da fórmula
-!                     aproximada do OCN.
-!                     .true. → registra o cap do SIS2 (sis_cap_MONAN.F90)
-!                     como componente NUOPC próprio, com os conectores
-!                     MED -> ICE e ICE -> MED.
+!   ice_model (em &nuopc_mode; chave antiga use_sis2_dynamic, aqui)
+!                     'none' → nenhum componente ICE é criado; a
+!                     fração de gelo vem da aproximação pela SST.
+!                     'sis2' (padrão) → registra o cap do SIS2
+!                     (sis_cap_MONAN.F90) como componente NUOPC próprio,
+!                     com os conectores MED -> ICE e ICE -> MED.
 !   ice_pet_count     Nº de PETs do ICE quando pet_layout='split' e
-!                     use_sis2_dynamic=.true. 0 → auto: divide em três partes
+!                     ice_model='sis2'. 0 → auto: divide em três partes
 !                     aproximadamente iguais o que não tiver sido fixado.
 !
 ! O gelo segue os MESMOS dois eixos dos demais componentes:
@@ -396,20 +379,18 @@
 !
 ! REGRA (shared): as três contagens devem ser 0.
 !
-! REGRA: ice_pet_count > 0 com use_sis2_dynamic=.false. é ERRO, e não
+! REGRA: ice_pet_count > 0 com ice_model='none' é ERRO, e não
 !   descarte silencioso: sem o componente ICE a contagem não teria a quem se
 !   aplicar. Mesma lógica da regra de shared acima.
 !
-! REGRA: use_sis2_dynamic=.true. exige use_docn=.false. em &nuopc_mode. Com o
+! REGRA: ice_model='sis2' exige ocn_model='mom6' em &nuopc_mode. Com o
 !   DOCN o oceano é um arquivo OISST lido do disco e o Si_ifrac vem do próprio
 !   arquivo, então não há a quem o SIS2 se acoplar.
 !
-! ESTADO: o caminho do Si_ifrac real do ICE até o MPAS AINDA NÃO FOI
-!   VALIDADO. O mediador copia Si_ifrac_sis2 ponto a ponto, e essa cópia só
-!   está correta se as grades do ICE e do ATM coincidirem, o que em geral não
-!   acontece: falta um regrid dedicado. Se as formas diferirem, o mediador
-!   mantém o valor anterior e registra aviso no log. Trate use_sis2_dynamic
-!   como recurso em avaliação, não de produção.
+! FRAÇÃO DE GELO: o mediador interpola Si_ifrac_sis2 do SIS2 para a grade
+!   da atmosfera pela rota ocn2atm_ice (conservativa, com máscara de terra
+!   e extrapolação por vizinhança), junto com os albedos e a temperatura
+!   do gelo. Esse caminho, do ICE até o MPAS, está validado.
 !
 ! DIMENSIONAMENTO (concurrent): escolha a razão ATM:OCN pelo custo relativo
 !   de cada componente. Como o MPAS costuma dominar, um ponto de partida
@@ -419,22 +400,51 @@
 !   mal dimensionada pode ficar MAIS lenta que sequential+shared.
 !
 ! IMPORTANTE: os grupos &nuopc_mode e &nuopc_petlayout são independentes.
-!   Os dois modos funcionam tanto na Fase 1 (DOCN) quanto na Fase 2 (MOM6
-!   dinâmico) — a RunSequence correta é selecionada automaticamente. O ganho
-!   de concorrência é maior na Fase 2, onde o OCN é caro.
+!   Os dois modos de execução funcionam com o DOCN e com o MOM6; a
+!   RunSequence correta é escolhida automaticamente. O ganho da execução
+!   concorrente é maior com o MOM6, cujo custo é alto.
 !-----------------------------------------------------------------------
+! Valores abaixo: configuração dos experimentos de reprodutibilidade e da
+! linha de base de validação (152 PETs = 128 ATM + 20 OCN + 4 ICE).
 &nuopc_petlayout
   coupling_mode = 'concurrent'   ! 'sequential' | 'concurrent'
   pet_layout    = 'split'        ! 'shared' | 'split'
-  atm_pet_count = 32             ! split: nº PETs do ATM (0 = auto: metade)
-  ocn_pet_count = 4              ! split: nº PETs do OCN (0 = auto: resto)
-  use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
+  atm_pet_count = 128            ! split: nº PETs do ATM (0 = auto: metade)
+  ocn_pet_count = 20             ! split: nº PETs do OCN (0 = auto: resto)
   ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)
-  seq_repro     = .true.        ! .true. → sequential+split+SIS2 REPRODUTIVEL
+  seq_repro     = .true.         ! .true. → sequential+split+SIS2 REPRODUTIVEL
                                  !   (fluxo de dados idêntico ao concurrent+split,
                                  !   bit-a-bit). Só efetivo com coupling_mode=
-                                 !   'sequential' + use_med_to_mpas + use_sis2_
-                                 !   dynamic + pet_layout='split'. Default .false.
+                                 !   'sequential' + atm_boundary='med' + ice_model=
+                                 !   'sis2' + pet_layout='split'. Default .false.
                                  !   preserva o arranque com SST real no passo 1.
                                  !   NÃO altera o modo concurrent.
+/
+
+!=======================================================================
+! Grupo 9 (opcional): esquema de interpolação por rota (src/regrid)
+!
+! Cada rota de interpolação do mediador tem uma configuração padrão no
+! código. Este grupo permite trocá-la sem recompilar. Entradas vazias
+! mantêm o padrão. Rotas do mediador: atm2ocn, ocn2atm, ocn2atm_sst,
+! ocn2atm_ice, ocn2atm_landmask, atm2ocn_ice.
+!
+!   regrid_route    nome da rota
+!   regrid_scheme   'esmf' | 'weights_file' | 'mpassit' | 'idw' | esquema
+!                   da lista de src/regrid/regrid_schemes.F90
+!   regrid_methods  métodos em ordem de preferência, separados por vírgula:
+!                   bilinear, conserve, conserve_2nd, patch,
+!                   nearest_stod, nearest_dtos
+!   regrid_weights  arquivo de pesos SCRIP/ESMF (esquema weights_file)
+!   regrid_class    classe do campo no esquema mpassit:
+!                   continuous | integer | accumulated
+!   regrid_options  opções do esquema, 'chave=valor,chave=valor'; no idw:
+!                   vizinhos (padrão 4) e expoente (padrão 2)
+!
+! Exemplo (desativado):
+!   regrid_route(1)   = 'ocn2atm_sst'
+!   regrid_scheme(1)  = 'weights_file'
+!   regrid_weights(1) = 'INPUT/pesos_ocn2atm_sst.nc'
+!-----------------------------------------------------------------------
+&nuopc_regrid
 /

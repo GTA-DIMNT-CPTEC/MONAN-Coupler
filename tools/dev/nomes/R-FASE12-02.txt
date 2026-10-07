@@ -1,0 +1,267 @@
+# R-FASE12-02: nomes em inglês no mapa de acoplamento (src/coupling) e nos
+# seus testes. Formato em tools/dev/renomeia-identificadores.py.
+# As tabelas do mapa vêm em maiúsculas para que os comentários também mudem.
+
+# tabelas e constantes públicas
+CAMPOS                   FIELDS
+MALHAS                   GRIDS
+TROCAS                   EXCHANGES
+EXPORTACOES              EXPORTS
+LACUNAS                  GAPS
+ROTAS                    ROUTES
+CONDICOES                CONDITIONS
+CONECTOR_DE              CONNECTOR_SRC
+CONECTOR_PARA            CONNECTOR_DST
+N_CONECTORES             N_CONNECTORS
+METODOS_CONECTOR         CONNECTOR_METHODS
+CPL_AUSENTE              CPL_UNSET
+CPL_NOME_LEN             CPL_NAME_LEN
+CPL_PONTO_LEN            CPL_POINT_LEN
+CPL_MEIO_LEN             CPL_VIA_LEN
+CPL_QUANDO_LEN           CPL_WHEN_LEN
+CPL_METODO_LEN           CPL_METHOD_LEN
+CPL_PREFIXO              CPL_PREFIX
+OPT_METODO               OPT_METHOD
+ORIGEM_LESTE0            ORIGIN_EAST0
+ORIGEM_OESTE180          ORIGIN_WEST180
+ORIGEM_LESTE0_CANTO      ORIGIN_EAST0_CORNER
+
+# tipos
+cpl_campo_t              cpl_field_t
+cpl_malha_ref_t          cpl_grid_ref_t
+cpl_troca_t              cpl_exchange_t
+cpl_exporta_t            cpl_export_t
+cpl_lacuna_t             cpl_gap_t
+cpl_rota_t               cpl_route_t
+cpl_blocos_t             cpl_blocks_t
+
+# rotinas públicas
+cpl_campo_indice         cpl_field_index
+cpl_metodo_conector      cpl_connector_method
+cpl_troca_vale           cpl_exchange_applies
+cpl_condicoes_validas    cpl_valid_conditions
+cpl_rota_indice          cpl_route_index
+cpl_malha_indice         cpl_grid_index
+cpl_ponto_componente     cpl_point_component
+cpl_ponto_malha          cpl_point_grid
+cpl_config_atual         cpl_current_config
+cpl_config_valida        cpl_config_is_valid
+cpl_chegadas             cpl_arrivals
+cpl_conector_vale        cpl_connector_applies
+cpl_conector_fora        cpl_unlisted_connector
+cpl_conectores_do_driver cpl_driver_connectors
+cpl_exportacoes          cpl_exports
+cpl_lacuna               cpl_is_gap
+cpl_check_acoplamento    cpl_check_coupling
+cpl_escreve_metodos      cpl_write_methods
+cpl_dicionario_nuopc     cpl_nuopc_dictionary
+cpl_confere_conector     cpl_check_connector_fields
+cpl_confere_metodos      cpl_check_methods
+cpl_confere_estado       cpl_check_state
+cpl_metodo_da_entrada    cpl_method_of_entry
+cpl_malha_latlon         cpl_latlon_grid
+cpl_malha_tripolar       cpl_tripolar_grid
+cpl_blocos_de_limites    cpl_blocks_from_bounds
+cpl_malha_de_blocos      cpl_block_grid
+centro_lon_leste0        center_lon_east0
+centro_lat_leste0        center_lat_east0
+canto_lon_leste0         corner_lon_east0
+canto_lat_leste0         corner_lat_east0
+centro_lon_oeste180      center_lon_west180
+centro_lat_oeste180      center_lat_west180
+indice_trunca            index_trunc
+indice_arredonda         index_round
+lon_0a360_piso           lon_0to360_floor
+lon_m180a180_piso        lon_m180to180_floor
+lon_0a360_laco           lon_0to360_loop
+lon_m180a180_laco        lon_m180to180_loop
+
+# componentes dos tipos do mapa (e os mesmos nomes como variáveis locais
+# nos fontes em que os tipos são usados)
+nome                     name                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+campo                    field                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+de                       src                  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+para                     dst                  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+meio                     via                  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+quando                   when                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+metodo                   method               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+metodos                  methods              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+esquema                  scheme               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+mascara                  mask                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+reserva                  fallback             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+sem_valor                no_value             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+completar                fill                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+limite_min               min_limit            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+limite_max               max_limit            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+nan_para                 nan_to               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+criar                    create               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+ponto                    point                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+componente               component            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+tipo                     grid_type            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+descricao                description          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+unidade                  units                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+sinal                    sign_conv            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+motivo                   reason               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_cap_methods.F90,src/mediator/med_exchange.F90,src/driver/esm.F90
+
+# variáveis e rotinas internas de src/coupling e dos seus testes
+achou                    found                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+acrescenta               append_msg           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+arquivo                  file_name            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+blocos                   blocks               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/caps/ice/sis_cap_MONAN.F90,tests/malhas/test_malhas_modelos.F90
+campos                   fields               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+canto                    corner               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+cantos                   corners              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+chave                    key                  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+chaves                   keys                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+comp_de                  comp_src             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+comp_para                comp_dst             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+rot_de                   label_src            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+rot_para                 label_dst            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+concorda                 agrees               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+condicao_vale            condition_holds      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conector                 connector            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_no_pet0          check_on_pet0        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_um_componente    check_component      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_um_conector      check_connector      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conta_trocas             count_exchanges      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+contador                 counter              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+coordenadas_do_de        de_coordinates       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+cria_grade               create_grid          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+descreve_config          describe_config      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+entrada                  entry                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+escreve                  write_line           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+estado                   state                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+existe                   exists               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+importacao               is_import            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+lacuna                   is_gap               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+leste0                   east0                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+limites                  bounds               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+lista                    list                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+malha                    grid_name            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+malhas                   grids                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+n_cheia                  n_full               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+n_conectores             n_connectors         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+n_metodo                 n_method             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+naviso                   nwarn                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nomes                    names                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nomes_do_estado          state_names          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nomes_exp                exp_names            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nomes_imp                imp_names            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+novo                     is_new               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+opcao                    option               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ordem                    order                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ordena                   sort_pairs           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+origem_lon               lon_origin           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+paras                    dsts                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+des                      srcs                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+pedido                   requested            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ponto_confere            point_matches        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+por_conector             by_connector         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+prepara_coordenadas      prepare_coordinates  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+previstas                expected_count       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+previsto                 expected             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+proxima_condicao         next_condition       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+resto                    rest                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+rotulo                   label                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+rotulos                  labels               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+t_fora                   t_unlisted           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+tag_cantos               tag_corners          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_,src/mediator/med_init.F90
+titulo                   title                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+troca                    xchg                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+troca_por_conector       exchange_via_connector src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+trocas                   exchanges            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+vale                     applies              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+vale_em_alguma           applies_in_some      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+componentes              components           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+condicoes                conditions           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conector_de              connector_src        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conector_para            connector_dst        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+exportacoes              exports              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+lacunas                  gaps                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+metodos_conector         connector_methods    src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+
+# só nos testes do mapa
+antes                    before               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+anuncia                  advertise            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+anuncia_lista            advertise_list       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+atm_med_para_ocn_med     atm_med_to_ocn_med   src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+avanca                   advance              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+chegadas_por_conector    arrivals_by_connector src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+chegou                   arrived              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conector_i               connector_i          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conectores_de_antes      connectors_before    src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+conectores_producao      production_connectors src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_cadeia           check_chain          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_campos           check_fields         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_centros_gelo     check_ice_centers    src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_configuracoes    check_configurations src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_contagens        check_counts         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_exporta_conector check_export_connector src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_exportacoes      check_exports        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_indices          check_indices        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_listas_caps      check_cap_lists      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_listas_mediador  check_mediator_lists src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_malhas_e_rotas   check_grids_and_routes src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_mediador         check_mediator       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_metodos          check_methods        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_origens          check_origins        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_trocas           check_exchanges      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+confere_trocas_cap       check_cap_exchanges  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+contem                   has_item             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+coordenadas              coordinates          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+cde                      comp_src_i           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+cpara                    comp_dst_i           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+mde                      grid_src_i           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+mpara                    grid_dst_i           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+defeito                  defect               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+descreve                 describe             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+descreve_exp             describe_exp         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+destino                  destination          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+esperada                 is_expected          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+esp_atm                  want_atm             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+esp_ocn                  want_ocn             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+estados_producao         production_states    src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+exporta_vale             export_applies       src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+exportadas               exported             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+falha                    fail_at              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+fase0                    phase0               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+guarda                   store_names          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+iniciadados              init_data            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+liga                     connect              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+lista_igual              same_list            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+malha_do_mediador        mediator_grid        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+mediador_real            real_mediator        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+mesmo_bit                same_bits            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+modo                     mode                 src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+n_antes                  n_before             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+n_conector               n_connector          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nbil                     nbilinear            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ncasos                   ncases               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nesperadas               nexpected            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nfalhas                  nfailures            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nfaltas                  nmissing             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nlac                     ngaps                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nlac_aviso               ngap_warnings        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nome_cfg                 cfg_name             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nsem_uso                 nunused              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+nvazio                   nempty               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ida                      outbound             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+volta                    inbound              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ok_ida                   ok_outbound          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ok_volta                 ok_inbound           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ok_sem_datm              ok_without_datm      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+onde                     location             src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+origem                   origin               src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+passos                   steps                src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+poe                      put_connector        src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+ponto_valido             valid_point          src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+producao                 production           src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+realiza                  realize              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+resultado                outcome              src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+todos_exportados         all_exported         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+tudo                     all_names            src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+um                       one                  src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+zera                     reset_counts         src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+test_conectores          test_connectors      src/coupling/,tests/unit/test_cpl_,tests/unit/test_conectores,tests/unit/test_connectors,tests/cplcheck/,tests/unit/listas_
+
+@arquivo  tests/unit/test_conectores.F90  tests/unit/test_connectors.F90

@@ -1,30 +1,9 @@
 #!/usr/bin/env python3
 """Lê comparacao_standalone_cap.csv e imprime resumo estatístico por campo.
 
-Versão : 1.4 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-Histórico:
-  v1.4 (13/05/2026):
-    [N1] quality_badge — guarda contra sigma_cap negativo (improvável mas defensivo).
-    [N2] load_csv — mensagem de erro aprimorada ao encontrar CSV vazio.
-    [N3] build_table — variável 'sratio' renomeada para 'sflag' para evitar
-         ambiguidade com o valor numérico da razão calculado em row_line.
-    [N4] Versão do script alinhada com demais scripts de pós-processamento.
-  v1.3 (25/04/2026):
-    [N1] Caminho CSV atualizado: diag_export/postproc/ (era postproc_standalone/).
-    [N2] argparse com --help, --csv, --no-interp.
-    [N3] Tratamento explícito de FileNotFoundError e CSV malformado.
-    [N4] encoding=utf-8 em open(); fallback latin-1 para CSVs antigos.
-    [N5] Notas de interpretação atualizadas para Experimentos 4.2-5.x
-         (DOCN modo netcdf, 9 OK 0 avisos — SST variável via OISST v2.1).
-    [N6] Novos campos Sa_shum_mpas e Faxa_snow_mpas na tabela de thresholds.
-    [N7] Coluna sigma_ratio com flag (≈ dentro 5%, ↑ SA maior, ↓ cap maior).
-    [N8] Coluna Q (qualidade: ❶ excelente ❷ muito bom ❸ bom ❹ revisar).
-  v1.2 (21/04/2026):
-    [N1] SST corrigida de 298 K para 290 K (OCN stub mom_cap.F90 v1.0).
-    [N2] Interpretação acswdnb atualizada para bias negativo correto.
-    [N3] Classificação de qualidade por faixa de Corr.
-    [N4] Razão sigma_SA/sigma_cap para diagnóstico de variabilidade espacial.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 Uso:
     python3 analisa_comparacao.py

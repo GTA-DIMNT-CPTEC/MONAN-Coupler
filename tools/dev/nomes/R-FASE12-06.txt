@@ -1,0 +1,4 @@
+# R-FASE12-06: nome em português que a fase 12 deixou passar (grade, que
+# também é palavra inglesa). Formato em tools/dev/renomeia-identificadores.py.
+
+grade                       grid                 src/coupling/,tests/malhas/

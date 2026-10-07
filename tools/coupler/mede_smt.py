@@ -6,30 +6,7 @@ mede_smt.py - Comparacao controlada do efeito do SMT no sistema acoplado
 
 INPE / CGCT / DIMNT - Grupo de Trabalho para Acoplamento de Modelos.
 
-ALTERACOES (Set/2026)
----------------------
-1. O reconhecimento do modo de acoplamento estava quebrado com binario atual.
-   O padrao procurado era "ESM: modo SEQUENTIAL|CONCURRENT", formato ANTERIOR a
-   v14.20. Desde a separacao dos dois eixos o driver grava
-   "ESM: layout SPLIT (execucao SEQUENTIAL) - ...", que nao casava. Tres
-   verificacoes eram puladas em silencio: consistencia de modo entre rodadas,
-   igualdade de modo entre A e B, e o aviso de modo concorrente. Os dois
-   formatos passaram a ser aceitos.
-2. O componente de gelo (SIS2) entrou na ordem de exibicao. O leitor de logs
-   sempre foi generico e ja' capturava o rotulo ICE, mas sem estar na lista ele
-   caia no rabo alfabetico e vinha antes de MPAS e OCN.
-3. Nova verificacao do CONJUNTO DE COMPONENTES entre A e B. Sem ela, uma
-   configuracao com gelo comparada contra outra sem gelo passava sem sinal: as
-   linhas de componente ausente eram puladas, e a linha TOTAL comparava somas
-   de conjuntos diferentes. Num caso de teste com quatro componentes em A e
-   tres em B, o custo de maquina saiu 0,977 em vez de 1,062, ou seja, o
-   veredito anunciaria melhora de 2,3% onde havia degradacao de 6,2%.
-4. Nova verificacao do EIXO ESPACIAL. O experimento exige layout SHARED; com
-   split o 'select' e' heterogeneo, cada bloco fecha em nos inteiros e a
-   configuracao B nao ocupa um no' so'.
-5. A agregacao entre repeticoes passou a usar a intersecao das chaves, para
-   que uma divergencia de componentes chegue a' mensagem de erro em vez de
-   estourar antes com KeyError.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 CONTEXTO
 --------
@@ -46,7 +23,7 @@ alocar o mesmo numero de PETs:
 Este script le os logs de PET das duas configuracoes e responde se B e mais
 lento, igual ou mais rapido que A, e em qual componente a diferenca aparece.
 Os componentes reconhecidos sao MED, MPAS, OCN e ICE; o de gelo aparece apenas
-quando use_sis2_dynamic esta' ligado, e precisa estar ligado (ou desligado) nas
+quando o gelo esta' ligado (ice_model = 'sis2'), e precisa estar ligado (ou desligado) nas
 DUAS configuracoes.
 
 METODOLOGIA
@@ -122,14 +99,14 @@ ORDEM_PADRAO = ["MED", "MPAS", "OCN", "ICE"]
 # proprio conteudo o modo de acoplamento (log de PET) e a topologia com o
 # regime de ocupacao do core (banner do job), permitindo conferir que cada
 # configuracao e o que se supoe que seja.
-# ATENCAO AO FORMATO DA LINHA (corrigido em Set/2026). Ate' esta revisao o
-# padrao era apenas "ESM: modo SEQUENTIAL|CONCURRENT", que e' o formato ANTERIOR
-# a' v14.20. Desde a separacao dos dois eixos o driver grava
+# ATENCAO AO FORMATO DA LINHA. O padrao aceita os dois formatos: o ANTERIOR
+# a' v14.20, "ESM: modo SEQUENTIAL|CONCURRENT", e o atual, gravado pelo driver
+# desde a separacao dos dois eixos:
 #   "ESM: layout SPLIT (execucao SEQUENTIAL) - ATM=PET[...] ..."
-# que nao casava. O efeito era que o conjunto de modos ficava vazio com binario
-# atual e TRES verificacoes eram puladas em silencio: a de consistencia entre
-# rodadas, a de igualdade entre A e B, e o aviso de modo concorrente. Justamente
-# as que protegem contra o erro mais grave do experimento, medir no modo errado.
+# Se a linha nao casar, o conjunto de modos fica vazio e TRES verificacoes
+# seriam puladas em silencio: a de consistencia entre rodadas, a de igualdade
+# entre A e B, e o aviso de modo concorrente. Justamente as que protegem contra
+# o erro mais grave do experimento, medir no modo errado.
 MODO_RE   = re.compile(
     rb"ESM:\s*(?:modo\s+(?P<antigo>SEQUENTIAL|CONCURRENT)"
     rb"|layout\s+\w+\s*\(\s*execucao\s+(?P<novo>SEQUENTIAL|CONCURRENT)\s*\))",
@@ -324,12 +301,12 @@ def resume_rodada(custos, descartar):
 def agrega(rodadas):
     """Media e desvio-padrao amostral entre as repeticoes de uma configuracao.
 
-    Usa a INTERSECAO das chaves das repeticoes. Antes usava as chaves da
-    primeira, o que estourava com KeyError caso uma repeticao tivesse um
-    componente a mais (por exemplo, uma das tres rodadas feita com o gelo
-    ligado). A divergencia em si e' apanhada pela autoverificacao, que
-    interrompe a comparacao; a intersecao aqui evita que o erro apareca como
-    excecao antes de a mensagem util ser impressa.
+    Usa a INTERSECAO das chaves das repeticoes. Usar as chaves da primeira
+    estouraria com KeyError caso uma repeticao tivesse um componente a mais
+    (por exemplo, uma das tres rodadas feita com o gelo ligado). A divergencia
+    em si e' apanhada pela autoverificacao, que interrompe a comparacao; a
+    intersecao aqui evita que o erro apareca como excecao antes de a mensagem
+    util ser impressa.
     """
     chaves = set(rodadas[0])
     for r in rodadas[1:]:
@@ -524,7 +501,7 @@ def autoverifica(metas, petcount, args, comps_por_cfg=None):
             f"exige o mesmo numero de PETs nas duas configuracoes.")
 
     # 1b) Mesmo CONJUNTO DE COMPONENTES em A e B, e entre as repeticoes de cada
-    # configuracao. Sem isso, uma rodada com use_sis2_dynamic ligado e outra
+    # configuracao. Sem isso, uma rodada com o gelo ligado e outra
     # sem seriam comparadas assim mesmo: o ICE simplesmente nao apareceria na
     # tabela (as linhas so' saem quando o componente existe nas duas), e a
     # linha TOTAL, que soma os componentes, compararia somas de conjuntos

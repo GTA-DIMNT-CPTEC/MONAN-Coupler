@@ -27,16 +27,17 @@
 # resultado idêntico, que é a leitura mais informativa: ver a seção de
 # interpretação no fim da saída.
 #
-# B-BITSUM-01 (22/09/2026): recolhe o checksum exato do Si_ifrac que o
-# mediador grava por PET (FIX-DIAG-BITSUM-01, quatro etapas do caminho
-# gelo -> atmosfera) em bitsum_r<k>.txt, e compara os pares por etapa.
+# Recolhe o checksum exato do Si_ifrac que o
+# mediador grava por PET ("DIAG ice_fraction bitsum", quatro etapas do
+# caminho gelo -> atmosfera) em bitsum_r<k>.txt, e compara os pares por etapa.
+# Os diagnosticos do mediador so' saem com log_level='debug' (&nuopc_driver).
 #
 # INPE / CGCT / DIMNT — GT Acoplamento de Modelos
 #=============================================================================
 set -uo pipefail
 
 RUNS="${RUNS:-4}"
-RETOMAR="${RETOMAR:-0}"   # B-RETOMADA-SILENT-01
+RETOMAR="${RETOMAR:-0}"
 NPES="${NPES:-72}"
 WALLTIME="${WALLTIME:-01:00:00}"
 POLL="${POLL:-30}"
@@ -44,8 +45,8 @@ RUNNER="${RUNNER:-run/run_esmApp.jaci}"
 ARQ="${ARQ:-reprodiag.nc}"
 VAR="${VAR:-surface_pressure}"
 PREFIXO="${PREFIXO:-reprodiag_r}"
-PREFIXO_EXP="${PREFIXO_EXP:-export_t0_r}"   # B-EXPORT-T0-01
-# B-OCN-DIAG-01: saidas NetCDF do MOM6 pelo diag_table, que tem cadencia
+PREFIXO_EXP="${PREFIXO_EXP:-export_t0_r}"
+# Saidas NetCDF do MOM6 pelo diag_table, que tem cadencia
 # PROPRIA e nao herda a do acoplamento como o ocean.stats. Padroes de nome, e
 # nao nomes fixos, porque o FMS pode prefixar com data.
 #
@@ -61,17 +62,24 @@ PREFIXO_EXP="${PREFIXO_EXP:-export_t0_r}"   # B-EXPORT-T0-01
 # Para incluir o tempsalt numa investigacao especifica:
 #   export OCEAN_GLOBS='*monan_tos*.nc *tempsalt*.nc'
 OCEAN_GLOBS="${OCEAN_GLOBS:-*monan_tos*.nc}"
-# B-IMPORT-DIAG-01: o que o MPAS RECEBE do mediador, por instante. E' a
+# O que o MPAS RECEBE do mediador, por instante. E' a
 # bisseccao entre "o mediador entrega campo diferente" e "a atmosfera usa mal
 # um campo identico": o monan2_import e' escrito depois da importacao, na
 # grade regular de 1 grau, e existe um arquivo por troca de acoplamento.
 IMPORT_GLOBS="${IMPORT_GLOBS:-diag_import/monan2_import_*.nc}"
-# B-MEDDIAG-01: log do PET0, onde o mediador grava as linhas FIX-DIAG que
+# Log do PET0, onde o mediador grava as linhas DIAG que
 # separam as etapas do caminho do gelo (mascara -> regrid bruto -> extrapolacao).
 PET_LOG="${PET_LOG:-logs/PET00.esmApp.log}"
-# B-BITSUM-01: diretorio dos logs de todos os PETs.
+# Linhas de diagnostico do mediador (src/mediator/med_diag.F90):
+#   DIAG_MASK    mascara de origem, gravada uma vez por execucao (rota do gelo)
+#   DIAG_RAW     ifrac bruto, depois da interpolacao e antes da extrapolacao
+#   DIAG_BITSUM  soma de bits do Si_ifrac, por PET, em quatro etapas
+DIAG_MASK="MED: DIAG ocean_mask"
+DIAG_RAW="MED: DIAG ice_fraction raw"
+DIAG_BITSUM="MED: DIAG ice_fraction bitsum"
+# Diretorio dos logs de todos os PETs.
 LOG_DIR="$(dirname "${PET_LOG}")"
-# B-RUNLOG-01: saida padrao do job. O #PBS -o aponta para este arquivo e o PBS
+# Saida padrao do job. O #PBS -o aponta para este arquivo e o PBS
 # o SOBRESCREVE a cada job, entao sem copia sobra apenas a ultima execucao.
 # E' nele que caem os checksums do SIS2 (DEBUG_CHKSUMS/SLOW_ICE/FAST_ICE).
 RUN_LOG="${RUN_LOG:-logs/esmApp_run.log}"
@@ -85,13 +93,13 @@ RUN_LOG="${RUN_LOG:-logs/esmApp_run.log}"
 #
 # O rotulo e' 'Before', nao 'Start': filtros que procuravam so' Start/End nao
 # achavam esses dois pontos, que ja existiam no log.
-# B-GELO-OSS-01 (21/09/2026): 'Start update_ice_slow_thermo' e' o PRIMEIRO
+# 'Start update_ice_slow_thermo' e' o PRIMEIRO
 # ponto em que o SIS2 mede FIA%bmelt no ciclo. Em modo sequencial, com ou sem
 # icebergs, o bmelt ja' diverge na troca 1, com estado de entrada identico e
 # forcamento atmosferico nulo. Este ponto diz se ele ja' chega divergente ao
 # passo lento ou se diverge entre este e o 'Before slow_thermodynamics'.
 ETAPAS_GELO="${ETAPAS_GELO:-Start set_ice_surface_state|End set_ice_surface_state|Start do_update_ice_model_fast|End do_update_ice_model_fast|Start update_ice_slow_thermo|Before slow_thermodynamics|Start update_ice_model_slow|Before set_ocean_top_fluxes|End ice_state_cleanup}"
-# B-GELO-CAMPOS-01: quais grandezas comparar em cada ponto.
+# Quais grandezas comparar em cada ponto.
 #
 # Ate 19/09/2026 so' o part_size era guardado, e isso levou a investigacao ate'
 # "o trecho final do passo lento" e parou ali. Os pontos do SIS2 medem dezenas
@@ -100,7 +108,7 @@ ETAPAS_GELO="${ETAPAS_GELO:-Start set_ice_surface_state|End set_ice_surface_stat
 # Ficam de fora mH_snow, mH_pond, mH_pond_ice e enth_snow: medidos como zero em
 # toda a integracao (nao ha neve nem pocas neste caso), entao nao discriminam
 # nada e so' gastariam linhas.
-# B-GELO-CAMPOS-02 (19/09/2026): acrescentados os fluxos que o gelo RECEBE
+# Acrescentados os fluxos que o gelo RECEBE
 # sem calcular (radiativos, precipitacao, evaporacao). Eles sao o que
 # discrimina entre as duas hipoteses restantes:
 #   - radiativos e precipitacao IDENTICOS com os turbulentos divergentes
@@ -110,7 +118,7 @@ ETAPAS_GELO="${ETAPAS_GELO:-Start set_ice_surface_state|End set_ice_surface_stat
 #     mensageiro.
 # Os turbulentos (flux_sh_top, flux_lh_top) NAO discriminam: sao calculados
 # dentro do passo rapido e divergem nas duas hipoteses.
-# B-GELO-OSS-01: acrescentado o OSS (ocean surface state como o GELO o ve',
+# Acrescentado o OSS (ocean surface state como o GELO o ve',
 # desempacotado do oib que o mediador entrega). OSS%bheat e' o fluxo de calor
 # do oceano para a base do gelo, de onde sai o bmelt. Leitura na troca 1:
 #   OSS divergente             => o que o gelo RECEBE do oceano ja' difere:
@@ -118,7 +126,7 @@ ETAPAS_GELO="${ETAPAS_GELO:-Start set_ice_surface_state|End set_ice_surface_stat
 #   OSS identico, bmelt nao    => o calculo do fluxo basal nao e' deterministico.
 # OSS%s_surf, OSS%frazil e OSS%sea_lev vem de campos do oib que o cap NAO
 # preenche a partir do mediador (salinidade fixa em 34,7, frazil e nivel do mar
-# em zero: ver B-ICE-SALIN-FIXA-01) — devem sair identicos e servem de controle.
+# em zero) — devem sair identicos e servem de controle.
 CAMPOS_GELO="${CAMPOS_GELO:-IST%part_size|IST%mH_ice|IST%enth_ice\(\(1\)|IST%enth_ice\(\(2\)|IST%sal_ice\(\(1\)|FIA%ice_cover|FIA%ice_free|FIA%bmelt|FIA%tmelt|FIA%flux_sh_top|FIA%flux_lh_top|FIA%flux_lw_top|FIA%flux_sw_dn|FIA%flux_sw_top\(1\)|FIA%lprec_top|FIA%fprec_top|FIA%evap_top|FIA%p_atm_surf|FIA%WindStr_x|OSS%SST_C|OSS%bheat|OSS%T_fr_ocn|OSS%s_surf|OSS%frazil|OSS%sea_lev}"
 
 ok()    { printf '   OK      %s\n' "$*"; }
@@ -192,6 +200,14 @@ _cpl="$(grep -E '^\s*coupling_mode'  nuopc.input | head -1 | tr -s ' ')"
 info "configuracao:${_atm}"
 info "configuracao:${_dtc}"
 info "configuracao:${_cpl}"
+# Os diagnósticos do mediador (linhas DIAG) só saem
+# com log_level='debug' em &nuopc_driver; sem eles, o relatório fica sem as
+# linhas do mediador e sem o checksum do Si_ifrac.
+if grep -qiE "^\s*log_level\s*=\s*['\"]debug['\"]" nuopc.input; then
+  ok "log_level='debug': diagnosticos do mediador ligados"
+else
+  info "log_level diferente de 'debug': sem DIAG do mediador (meddiag_r*.txt e bitsum_r*.txt vazios)"
+fi
 info "execucoes: ${RUNS}   pares a comparar: $(( RUNS * (RUNS - 1) / 2 ))"
 
 espera_fila() {
@@ -208,7 +224,7 @@ espera_fila() {
 for k in $(seq 1 "${RUNS}"); do
   alvo="${PREFIXO}${k}.nc"
   if [[ -s "${alvo}" ]]; then
-    # B-RETOMADA-SILENT-01 (20/09/2026): reaproveitar execucoes existentes so'
+    # Reaproveitar execucoes existentes so'
     # com --retomar explicito. Sem isso, uma bateria NOVA lancada com arquivos
     # da anterior no diretorio virava recomparacao silenciosa dos arquivos
     # velhos, anunciada por quatro linhas INFO faceis de perder — foi o que
@@ -222,7 +238,7 @@ for k in $(seq 1 "${RUNS}"); do
   echo
   echo "== Execucao ${k} de ${RUNS} =="
   rm -f "${ARQ}"
-  # B-MONANDIAG-CLOBBER-01 (21/09/2026): o stream 'diagnostics' do MPAS grava
+  # O stream 'diagnostics' do MPAS grava
   # MONAN_DIAG_*.nc na raiz com clobber_mode='never_modify'. Se os arquivos da
   # execucao anterior estiverem la', o MPAS registra ERROR em
   # log.atmosphere.*.err e SEGUE SEM GRAVAR: os MONAN_DIAG da raiz ficam sendo
@@ -234,7 +250,7 @@ for k in $(seq 1 "${RUNS}"); do
     mv MONAN_DIAG_*.nc "monan_diag-pre-r${k}/"
     info "execucao ${k}: MONAN_DIAG antigos movidos para monan_diag-pre-r${k}/"
   fi
-  # B-BITSUM-01: os logs de PET sao cumulativos entre jobs. Guardar o numero
+  # Os logs de PET sao cumulativos entre jobs. Guardar o numero
   # de linhas de cada um ANTES da execucao permite recortar depois so' o que
   # esta execucao escreveu, em todos os PETs, sem depender de marcador.
   unset _BS_PRE; declare -A _BS_PRE=()
@@ -247,7 +263,7 @@ for k in $(seq 1 "${RUNS}"); do
   mv "${ARQ}" "${alvo}"
   ok "execucao ${k}: ${alvo}"
 
-  # B-EXPORT-T0-01: preservar tambem o PRIMEIRO monan_export.
+  # Preservar tambem o PRIMEIRO monan_export.
   #
   # Ele e' o primeiro artefato que o cap produz, antes de qualquer resposta do
   # oceano, e passa pelo mapeamento malha Voronoi -> grade regular 360x180 do
@@ -264,7 +280,7 @@ for k in $(seq 1 "${RUNS}"); do
     info "execucao ${k}: nenhum monan_export em diag_export/; export nao sera comparado"
   fi
 
-  # B-STATS-PRESERVA-01: ocean.stats e seaice.stats sao reescritos a cada
+  # ocean.stats e seaice.stats sao reescritos a cada
   # execucao no mesmo caminho, entao sem copia so' sobra o da ultima. Eles sao
   # a camada que diz se o OCEANO diverge antes da injecao, e sao pequenos.
   for _st in ocean.stats seaice.stats; do
@@ -273,14 +289,14 @@ for k in $(seq 1 "${RUNS}"); do
     fi
   done
 
-  # B-OCN-DIAG-01: preserva as saidas do diag_table numa pasta por execucao.
+  # Preserva as saidas do diag_table numa pasta por execucao.
   #
   # O ocean.stats so' e' escrito quando update_ocean_model retorna, logo ele
   # herda a cadencia do acoplamento: com dt_coupling grande sobram dois ou tres
   # registros, amostragem grossa demais para dizer QUANDO o oceano se separa.
   # O diag_manager do FMS tem cadencia propria (output_freq no diag_table), e
   # com 1 hora da' 24 amostras por rodada.
-  # B-IMPORT-DIAG-01: preserva o que a atmosfera recebeu, por instante.
+  # Preserva o que a atmosfera recebeu, por instante.
   _n_imp=0
   mkdir -p "imp_r${k}"
   # shellcheck disable=SC2086
@@ -295,15 +311,15 @@ for k in $(seq 1 "${RUNS}"); do
     rmdir "imp_r${k}" 2>/dev/null || true
   fi
 
-  # B-MEDDIAG-01: preserva as linhas de diagnostico do mediador.
+  # Preserva as linhas de diagnostico do mediador.
   #
   # Sao elas que dizem em QUAL etapa do caminho do gelo a divergencia entra:
-  #   ICEMASK-01  mascara de origem, gravada uma vez no RegridStore
-  #   ICEMASK-02  ifrac bruto, POS-regrid e PRE-extrapolacao, por troca
+  #   DIAG_MASK  mascara de origem, gravada uma vez no RegridStore
+  #   DIAG_RAW   ifrac bruto, POS-regrid e PRE-extrapolacao, por troca
   # A pasta logs/ e' reescrita a cada execucao, entao sem esta copia as
   # quatro rodadas se perdem.
   if [[ -s "${PET_LOG}" ]]; then
-    # B-MEDDIAG-02: recorta SO o ciclo desta execucao.
+    # Recorta SO o ciclo desta execucao.
     #
     # O logs/PET00.esmApp.log NAO e' truncado entre rodadas: cada execucao
     # acrescenta o seu ciclo ao que ja' estava la'. Extrair o arquivo inteiro
@@ -313,26 +329,26 @@ for k in $(seq 1 "${RUNS}"); do
     # verdade e' so' acumulo, e foi o que produziu o falso veredito "a mascara
     # de origem varia".
     #
-    # A fronteira do ciclo e' a ULTIMA ocorrencia de ICEMASK-01, que o
+    # A fronteira do ciclo e' a ULTIMA ocorrencia de DIAG_MASK, que o
     # mediador emite uma vez por execucao, no RegridStore do gelo.
-    grep -E "FIX-DIAG-ICEMASK-0[12]" "${PET_LOG}" \
+    grep -E "${DIAG_MASK}|${DIAG_RAW}" "${PET_LOG}" \
       | sed -E 's/^[0-9]+ +[0-9.]+ +INFO +PET[0-9]+ +//' \
-      | awk '/ICEMASK-01/{n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' \
+      | awk -v m="${DIAG_MASK}" 'index($0, m){n=NR} {l[NR]=$0} END{for(i=n;i<=NR;i++) print l[i]}' \
       > "meddiag_r${k}.txt" || true
     if [[ -s "meddiag_r${k}.txt" ]]; then
-      ok "execucao ${k}: $(wc -l < "meddiag_r${k}.txt") linha(s) FIX-DIAG em meddiag_r${k}.txt"
+      ok "execucao ${k}: $(wc -l < "meddiag_r${k}.txt") linha(s) DIAG em meddiag_r${k}.txt"
     else
-      info "execucao ${k}: nenhuma linha FIX-DIAG-ICEMASK em ${PET_LOG}"
+      info "execucao ${k}: nenhuma linha '${DIAG_MASK}' em ${PET_LOG}"
       rm -f "meddiag_r${k}.txt"
     fi
   else
     info "execucao ${k}: ${PET_LOG} ausente; diagnostico do mediador nao preservado"
   fi
 
-  # B-BITSUM-01: checksum exato do Si_ifrac, por PET e por etapa.
+  # Checksum exato do Si_ifrac, por PET e por etapa.
   #
-  # O mediador (FIX-DIAG-BITSUM-01) grava uma linha por PET em cada etapa:
-  #   etapa1 origem (Si_ifrac_sis2, grade do oceano)   etapa2 pos-regrid
+  # O mediador (DIAG_BITSUM) grava uma linha por PET em cada etapa:
+  #   etapa1 origem (Si_ifrac_sis2, grade do oceano)   etapa2 pos-interpolacao
   #   etapa3 pos-extrapolacao                           etapa4 exportState
   # Cada linha vira "t=<troca> <etapa> <PET> n=.. hi=.. lo=..", ordenada por
   # troca, etapa e PET, para que diff entre execucoes aponte a primeira
@@ -342,8 +358,8 @@ for k in $(seq 1 "${RUNS}"); do
     _p="${_BS_PRE[${_f}]:-0}"
     _t="$(wc -l < "${_f}")"
     (( _t < _p )) && _p=0   # log truncado ou movido durante a execucao
-    tail -n +"$(( _p + 1 ))" "${_f}" | grep -E "FIX-DIAG-BITSUM-01" \
-      | sed -E 's/^.*(PET[0-9]+) +FIX-DIAG-BITSUM-01: +/\1 /'
+    tail -n +"$(( _p + 1 ))" "${_f}" | grep -F "${DIAG_BITSUM} " \
+      | sed -E "s/^.*(PET[0-9]+) +${DIAG_BITSUM} +/\\1 /"
   done | awk '
       { pet = $1; et = $2; t = ++cnt[pet " " et]
         if (match($0, / n=[0-9]+ hi=[0-9]+ lo=[0-9]+( ERRO=[0-9]+)?/))
@@ -353,13 +369,13 @@ for k in $(seq 1 "${RUNS}"); do
         printf "t=%04d %s %s %s\n", t, et, pet, v }' \
     | sort -k1,1 -k2,2 -k3,3 > "bitsum_r${k}.txt"
   if [[ -s "bitsum_r${k}.txt" ]]; then
-    ok "execucao ${k}: $(wc -l < "bitsum_r${k}.txt") checksum(s) FIX-DIAG-BITSUM em bitsum_r${k}.txt"
+    ok "execucao ${k}: $(wc -l < "bitsum_r${k}.txt") checksum(s) DIAG ice_fraction bitsum em bitsum_r${k}.txt"
   else
-    info "execucao ${k}: nenhuma linha FIX-DIAG-BITSUM nos logs de PET (binario sem o diagnostico?)"
+    info "execucao ${k}: nenhuma linha '${DIAG_BITSUM}' nos logs de PET (log_level diferente de 'debug'?)"
     rm -f "bitsum_r${k}.txt"
   fi
 
-  # B-RUNLOG-01: preserva as linhas de checksum do SIS2 desta execucao.
+  # Preserva as linhas de checksum do SIS2 desta execucao.
   #
   # O checksum inteiro (campo 'c=') e' imune a arredondamento de impressao, ao
   # contrario do mean/min/max da linha anterior, e por isso e' o que se compara.
@@ -453,7 +469,7 @@ for i in $(seq 1 "${RUNS}"); do
 done
 
 #-----------------------------------------------------------------------------
-# Comparação do primeiro monan_export (B-EXPORT-T0-01)
+# Comparação do primeiro monan_export
 #
 # Camada separada de propósito. O reprodiag mede o ESTADO do MPAS; este mede o
 # que o cap ENTREGA ao mediador. Divergirem juntos ou separados distingue duas
@@ -492,7 +508,7 @@ echo
 echo "== Comparacao de ocean.stats e seaice.stats =="
 echo
 #-----------------------------------------------------------------------------
-# Comparação de ocean.stats e seaice.stats (B-STATS-PRESERVA-01)
+# Comparação de ocean.stats e seaice.stats
 #
 # Texto, comparado com cmp. Sao diagnosticos do estado interno do oceano e do
 # gelo, independentes do caminho de acoplamento, e por isso dizem se esses
@@ -515,7 +531,7 @@ for _st in ocean seaice; do
 done
 
 #-----------------------------------------------------------------------------
-# Etapas do ciclo do gelo (B-RUNLOG-01)
+# Etapas do ciclo do gelo
 #
 # Localiza a divergência DENTRO do SIS2. As etapas estão na ordem em que
 # ocorrem no ModelAdvance; a primeira que divergir é onde a semente entra, e as
@@ -584,13 +600,13 @@ if [[ -s "gelo_r1.txt" ]]; then
     echo "   ANTES dela no ciclo; se for um 'End', ela entra DENTRO da rotina."
   else
     echo "   Nenhuma etapa do gelo divergiu nos checksums."
-    echo "   Se a origem (FIX-DIAG-ICESRC-01) divergir mesmo assim, a semente"
+    echo "   Se a origem (DIAG ice_fraction source) divergir mesmo assim, a semente"
     echo "   esta entre a ultima etapa medida e a montagem do campo exportado."
   fi
 fi
 
 #-----------------------------------------------------------------------------
-# Diagnóstico do mediador: em QUAL etapa a divergência entra (B-MEDDIAG-01)
+# Diagnóstico do mediador: em QUAL etapa a divergência entra
 #
 # Separa a cadeia do gelo em três pontos. A leitura está impressa junto.
 #-----------------------------------------------------------------------------
@@ -603,29 +619,30 @@ if [[ -s "meddiag_r1.txt" ]]; then
     for j in $(seq $(( i + 1 )) "${RUNS}"); do
       [[ -s "meddiag_r${i}.txt" && -s "meddiag_r${j}.txt" ]] || continue
       _np_md=$(( _np_md + 1 ))
-      # B-MEDDIAG-02: conta apenas linhas ALTERADAS, nao acrescentadas.
+      # Conta apenas linhas ALTERADAS, nao acrescentadas.
       #
       # cmp e diff simples tratam "um arquivo tem mais linhas" como diferenca.
       # Aqui o que interessa e' valor divergente na MESMA posicao, entao a
       # comparacao e' linha a linha ate' o menor dos dois, e a diferenca de
       # comprimento e' reportada a parte, como aviso, nao como divergencia.
-      for _et in 01 02; do
-        grep -h "ICEMASK-${_et}" "meddiag_r${i}.txt" > /tmp/_a_$$.txt
-        grep -h "ICEMASK-${_et}" "meddiag_r${j}.txt" > /tmp/_b_$$.txt
+      for _et in mask raw; do
+        [[ "${_et}" == "mask" ]] && _pad="${DIAG_MASK}" || _pad="${DIAG_RAW}"
+        grep -hF "${_pad}" "meddiag_r${i}.txt" > /tmp/_a_$$.txt
+        grep -hF "${_pad}" "meddiag_r${j}.txt" > /tmp/_b_$$.txt
         _na="$(wc -l < /tmp/_a_$$.txt)"; _nb="$(wc -l < /tmp/_b_$$.txt)"
         _nmin=$(( _na < _nb ? _na : _nb ))
         if [[ "${_nmin}" -gt 0 ]]; then
           head -n "${_nmin}" /tmp/_a_$$.txt > /tmp/_at_$$.txt
           head -n "${_nmin}" /tmp/_b_$$.txt > /tmp/_bt_$$.txt
           if ! cmp -s /tmp/_at_$$.txt /tmp/_bt_$$.txt; then
-            [[ "${_et}" == "01" ]] && _nd_mask=$(( _nd_mask + 1 )) \
+            [[ "${_et}" == "mask" ]] && _nd_mask=$(( _nd_mask + 1 )) \
                                    || _nd_raw=$(( _nd_raw + 1 ))
           fi
           rm -f /tmp/_at_$$.txt /tmp/_bt_$$.txt
         fi
         if [[ "${_na}" -ne "${_nb}" ]]; then
-          printf '   AVISO ICEMASK-%s: r%s tem %s linha(s), r%s tem %s.\n' \
-                 "${_et}" "${i}" "${_na}" "${j}" "${_nb}"
+          printf '   AVISO %s: r%s tem %s linha(s), r%s tem %s.\n' \
+                 "${_pad}" "${i}" "${_na}" "${j}" "${_nb}"
           printf '         Numero de ciclos diferente, nao valor diferente:\n'
           printf '         o log de PET pode nao ter sido truncado entre rodadas.\n'
         fi
@@ -633,9 +650,9 @@ if [[ -s "meddiag_r1.txt" ]]; then
       done
     done
   done
-  printf '   mascara de origem (ICEMASK-01)      %d de %d pares divergem\n' \
+  printf '   mascara de origem (DIAG ocean_mask)        %d de %d pares divergem\n' \
          "${_nd_mask}" "${_np_md}"
-  printf '   ifrac bruto pos-regrid (ICEMASK-02) %d de %d pares divergem\n' \
+  printf '   ifrac bruto (DIAG ice_fraction raw)        %d de %d pares divergem\n' \
          "${_nd_raw}" "${_np_md}"
   echo
   if (( _nd_mask > 0 )); then
@@ -655,7 +672,7 @@ if [[ -s "meddiag_r1.txt" ]]; then
 fi
 
 #-----------------------------------------------------------------------------
-# Checksum exato do Si_ifrac no mediador (B-BITSUM-01)
+# Checksum exato do Si_ifrac no mediador
 #
 # Quatro etapas do caminho gelo -> atmosfera, somadas bit a bit em cada PET.
 # A primeira (troca, etapa) que difere entre duas execucoes localiza a rotina
@@ -664,7 +681,7 @@ fi
 #-----------------------------------------------------------------------------
 if [[ -s "bitsum_r1.txt" ]]; then
   echo
-  echo "== Checksum exato do Si_ifrac no mediador (FIX-DIAG-BITSUM-01) =="
+  echo "== Checksum exato do Si_ifrac no mediador (DIAG ice_fraction bitsum) =="
   echo
   echo "   Cobertura na troca 1 da execucao 1 (PETs que gravaram e pontos somados):"
   for _e in etapa1 etapa2 etapa3 etapa4; do
@@ -708,13 +725,13 @@ if [[ -s "bitsum_r1.txt" ]]; then
   echo "     etapa1 difere           : o Si_ifrac ja' chega diferente do gelo (cap do SIS2)"
   echo "     etapa1 igual, 2 difere  : o regrid CONSERVE mascarado (rh_ocn2atm_ice)"
   echo "     etapa2 igual, 3 difere  : a extrapolacao (NeighborFillExtrapolate)"
-  echo "     etapa3 igual, 4 difere  : o RouteOcnToAtm ou a copia para o exportState"
+  echo "     etapa3 igual, 4 difere  : a copia para o exportState (fase deliver)"
   echo "     as quatro iguais        : a diferenca entra depois do mediador"
   echo "                               (conector MED->MPAS ou importacao do MPAS)"
 fi
 
 #-----------------------------------------------------------------------------
-# Comparação do que a atmosfera RECEBE (B-IMPORT-DIAG-01)
+# Comparação do que a atmosfera RECEBE
 #
 # Bissecção do último trecho da cadeia. Se o monan2_import de um instante já
 # difere entre execuções, o mediador entregou campo diferente e a atmosfera é
@@ -755,7 +772,7 @@ if [[ -d "imp_r1" ]]; then
 fi
 
 #-----------------------------------------------------------------------------
-# Comparação das saídas do oceano (B-OCN-DIAG-01)
+# Comparação das saídas do oceano
 #
 # Camada com resolução temporal própria. Responde "em que hora o MOM6 se
 # separa", que o ocean.stats não consegue quando há poucas janelas.
@@ -860,7 +877,7 @@ echo "                         ${PREFIXO_EXP}1.nc .. ${PREFIXO_EXP}${RUNS}.nc"
 echo "                         ocean_r*.stats  seaice_r*.stats"
 echo "                         ocn_r*/ (saidas do diag_table)"
 echo "                         imp_r*/ (monan2_import por instante)"
-echo "                         meddiag_r*.txt (FIX-DIAG do mediador)"
+echo "                         meddiag_r*.txt (DIAG do mediador)"
 echo "                         bitsum_r*.txt (checksum exato do Si_ifrac, por PET)"
 echo "                         gelo_r*.txt (checksums de part_size do SIS2)"
 echo "   Outras variaveis:     --var t2m, --var skintemp, --var xice"

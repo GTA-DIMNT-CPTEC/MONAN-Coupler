@@ -3,63 +3,9 @@
 postproc_monan2_standalone.py — Pós-processamento do MONAN-A 2.0 Standalone
                                 (arquivos MONAN_DIAG_*.nc)
 
-Versão : 1.5 — GT Acoplamento de Modelos / INPE/CGCT/DIMNT — Maio 2026
+GT Acoplamento de Modelos / INPE/CGCT/DIMNT.
 
-Novidades v1.5 (13/05/2026):
-  [N4] import 'timezone' removido — importado do módulo datetime mas nunca
-       referenciado no corpo do script (PEP 8, F401).
-  [N5] load_all_steps — fallback de detecção de nCells protegido com
-       tratamento de StopIteration: se nenhuma variável (Time, nCells) existir
-       no arquivo, emite mensagem de erro clara em vez de exceção genérica.
-  [N6] Docstring de discover_all_fields() aprimorada com exemplo de uso.
-
-Novidades v1.4 (21/04/2026):
-  [N1] NOVO argumento --allmaps: gera um mapa por campo por TODOS os passos de
-       tempo presentes nos arquivos MONAN_DIAG_*.nc. Complementa --plot, que por
-       padrão produz apenas 3 passos (primeiro, meio, último).
-       Implica --plot. Pode ser combinado com --field para selecionar campos.
-       Uso: python3 postproc_monan2_standalone.py --allmaps
-            python3 postproc_monan2_standalone.py --allmaps --field t2m acswdnb
-
-  [N2] NOVO argumento --allfields: descobre automaticamente TODOS os campos
-       presentes nos arquivos MONAN_DIAG_*.nc e os processa, mesmo que não
-       estejam em FIELD_META. Campos desconhecidos recebem metadados genéricos
-       automáticos (cmap viridis, escala linear, percentis [2,98]).
-       Pode ser combinado com --allmaps para o processamento completo.
-       Uso: python3 postproc_monan2_standalone.py --allfields
-            python3 postproc_monan2_standalone.py --allmaps --allfields
-
-  [N3] Função discover_all_fields(): varre o primeiro arquivo MONAN_DIAG e
-       retorna todas as variáveis com dimensão (Time, nCells), incluindo as
-       que não constam em FIELD_META. Gera metadados genéricos sob demanda.
-
-Correções v1.3 (20/04/2026):
-  [S1] CRÍTICO: load_cap_fields — faltava .T antes de .flatten().
-       O Fortran grava campo 2D como (NLON,NLAT)=(360,181); sem transposta,
-       compare_fields comparava pontos geograficamente distintos ponto-a-ponto.
-       Bias/RMSE/corr de TODOS os campos estavam matematicamente errados.
-  [S2] compare_fields — __import__('datetime').timedelta → timedelta (já importado).
-  [S3] FIELD_META e CAP_MAP — cap_field com nomes legados (Sa_tbot, Sa_pslv...)
-       corrigidos para nomes _mpas (Sa_tbot_mpas, Sa_pslv_mpas...).
-  [S4] plot_maps — máscara data>0 substituída por data>=norm.vmin para
-       consistência com os limites da colorbar em campos log.
-
-Correção v1.2 (13/04/2026):
-  Bug voronoi_to_latlon: o algoritmo anterior usava binning simples (1 célula
-  → 1 bin, índice lon via floor), enquanto o Fortran mpas_cap_netcdf.F90 usa
-  spray adaptativo (1 célula → janela lat ±1 × lon ±nspan_lon, índice lon via
-  nint/round). A diferença causava σ SA > σ cap para campos de fluxo (hfx, lh)
-  e deslocamento de 0.5° em longitude. Corrigido: voronoi_to_latlon agora
-  replica exatamente o spray adaptativo do Fortran (CELL_HALF_DEG=0.60,
-  NSPAN_LAT=1, wrap periódico, round em lon).
-
-Correção v1.1 (07/04/2026):
-  Bug --compare: campos standalone estão na grade Voronoi (40962 células) e
-  campos do cap NUOPC v2.5 estão na grade lat/lon 1°×1° (181×360 = 65160 pontos).
-  A comparação direta causava ValueError por shapes incompatíveis (40962,) vs (65160,).
-  Correção: voronoi_to_latlon() reprojecta o campo standalone para a grade lat/lon
-  do cap antes de calcular bias/RMSE/correlação. Placeholder em load_cap_fields
-  corrigido de nCells=40962 para CAP_NCELLS=65160.
+O histórico das versões deste script está em docs/historico-scripts.md.
 
 Lê os arquivos MONAN_DIAG_G_MOD_GFS_*.nc gerados pelo SMIOL do MONAN-A 8.3
 e produz estatísticas, CSVs e mapas para validação científica.
@@ -122,7 +68,7 @@ try:
 except ImportError:
     sys.exit("ERRO: netCDF4 não encontrado. Instalar: pip install --user netCDF4")
 
-# ─── Grade lat/lon do cap NUOPC (mpas_cap_netcdf.F90 v2.5) ──────────────────
+# ─── Grade lat/lon do cap NUOPC (mpas_cap_netcdf.F90) ───────────────────────
 # Deve ser idêntico ao definido em mpas_cap_netcdf.F90:
 #   NLON = 360  (-180° a +179°, passo 1°)
 #   NLAT = 181  ( -90° a  +90°, passo 1°)
@@ -137,7 +83,7 @@ def voronoi_to_latlon(data_v, lon_v, lat_v,
     Reprojecta campo Voronoi (nCells,) → grade regular (nlat, nlon).
 
     Replica exatamente o algoritmo voronoi_to_latlon do Fortran em
-    mpas_cap_netcdf.F90 v2.6:
+    mpas_cap_netcdf.F90:
       - Índices centrais via round/nint (ilon, ilat)
       - Spray adaptativo em longitude: nspan_lon = ceil(CELL_HALF_DEG /
         (max(cos(lat), 0.009) * DLON)) + 1, limitado a NLON/2
@@ -145,7 +91,7 @@ def voronoi_to_latlon(data_v, lon_v, lat_v,
       - Wrap periódico em longitude (±180°)
       - Fill value: NaN nos bins sem contribuição
 
-    Compatível com a saída de mpas_cap_netcdf.F90 v2.6
+    Compatível com a saída de mpas_cap_netcdf.F90
     (lat de -90° a +90°, lon de -180° a +179°, passo 1°).
 
     Parâmetros
@@ -222,7 +168,7 @@ FIELD_META = {
     'q2':              {'long_name': 'Umidade específica a 2 m',      'units': 'kg/kg',
                         'scale': 1e3,   'scale_units': 'g/kg',   'acum': False,
                         'cmap': 'YlGnBu', 'norm': 'linear', 'vperc': [2, 98], 'sym': False,
-                        'cap_field': 'Sa_shum_mpas'},  # Fase 2 — pool diag_physics%q2
+                        'cap_field': 'Sa_shum_mpas'},  # pool diag_physics%q2
     # Vento superficial
     'u10':             {'long_name': 'Vento zonal a 10 m',            'units': 'm/s',
                         'scale': 1.0,   'scale_units': 'm/s',    'acum': False,
@@ -271,7 +217,7 @@ FIELD_META = {
     'snownc':          {'long_name': 'Neve estratiforme acum. (→ mm/h)', 'units': 'mm',
                         'scale': 1.0,   'scale_units': 'mm/h',   'acum': True,
                         'cmap': 'Blues', 'norm': 'log', 'vperc': [50, 99], 'sym': False,
-                        'cap_field': 'Faxa_snow_mpas'},  # Fase 2 — Δsnownc/dt [kg/m²/s]
+                        'cap_field': 'Faxa_snow_mpas'},  # Δsnownc/dt [kg/m²/s]
     # Diagnósticos atmosféricos
     'cape':            {'long_name': 'CAPE',                          'units': 'J/kg',
                         'scale': 1.0,   'scale_units': 'J/kg',   'acum': False,
@@ -780,7 +726,7 @@ def plot_maps(timestamps, fields, field_names, lon, lat, step_indices, outdir,
             data = fields[fname][step_i, :]
             cmap, norm, vmin, vmax, extend = _get_plot_norm(fname, data)
 
-            # FIX S4: preservar zeros em campos lineares; para log, usar vmin
+            # Preservar zeros em campos lineares; para log, usar vmin
             if norm is not None and hasattr(norm, 'vmin'):
                 data_plot = np.where(data >= norm.vmin, data, np.nan)
             else:
@@ -921,8 +867,8 @@ CAP_MAP = {
 #   v10       → Sa_v10m_mpas
 #   mslp      → Sa_pslv_mpas
 #   acswdnb   → Faxa_swdn_mpas
-#   q2        → Sa_shum_mpas    (Fase 2 — requer bl_mynn_in ou bl_ysu_in)
-#   snownc    → Faxa_snow_mpas  (Fase 2 — requer mp_thompson_in ou mp_wsm6_in)
+#   q2        → Sa_shum_mpas    (requer bl_mynn_in ou bl_ysu_in)
+#   snownc    → Faxa_snow_mpas  (requer mp_thompson_in ou mp_wsm6_in)
 # Campos bulk MED (lh, hfx) e diagnósticos sem cap_field ficam excluídos.
 
 
@@ -930,9 +876,8 @@ def load_cap_fields(capdir, field_names_cap):
     """
     Carrega campos do cap NUOPC de monan_export_*.nc.
 
-    Os arquivos v2.5 têm campos em grade lat/lon 1°×1° (181×360 = 65160 pontos),
-    não na grade Voronoi. O argumento nCells foi removido — o tamanho correto
-    é CAP_NCELLS = CAP_NLAT × CAP_NLON.
+    Os arquivos têm campos em grade lat/lon 1°×1° (181×360 = 65160 pontos),
+    não na grade Voronoi: o tamanho é CAP_NCELLS = CAP_NLAT × CAP_NLON.
 
     Retorna dict {campo_cap: np.ndarray (nsteps, CAP_NCELLS)}, timestamps_cap.
     """
@@ -960,7 +905,7 @@ def load_cap_fields(capdir, field_names_cap):
                     if alt in nc.variables:
                         found_name = alt
                 if found_name in nc.variables:
-                    # BUG FIX S1: o Fortran grava campo 2D com dims [dimid_lon, dimid_lat],
+                    # O Fortran grava campo 2D com dims [dimid_lon, dimid_lat],
                     # resultando em shape (NLON, NLAT) = (360, 181) ao leitura em Python.
                     # voronoi_to_latlon retorna (NLAT, NLON) = (181, 360) em ordem lat-maior.
                     # Sem .T, flatten() produz ord. lon-maior → mismatch espacial ponto-a-ponto
@@ -1144,7 +1089,7 @@ def main():
     parser.add_argument('--all',     action='store_true',
                         help='stats + csv + plot  (padrão se nenhum modo especificado)')
 
-    # ── NOVOS argumentos v1.4 ─────────────────────────────────────────────────
+    # ── Todos os passos e todos os campos ─────────────────────────────────────
     parser.add_argument(
         '--allmaps',
         action='store_true',

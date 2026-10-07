@@ -21,7 +21,7 @@ bash run_esmApp.jaci -n 512 --ppn 512 --allow-smt -w 01:00:00
 
 O `mede_smt.py` lê os logs de PET das duas configurações e responde se B é mais lento, igual ou mais rápido que A, e em qual componente a diferença aparece.
 
-Os componentes reconhecidos são `MED`, `MPAS`, `OCN` e `ICE`. O de gelo aparece quando `use_sis2_dynamic` está ligado, e precisa estar no mesmo estado nas duas configurações; ver a seção 7.
+Os componentes reconhecidos são `MED`, `MPAS`, `OCN` e `ICE`. O de gelo aparece quando o gelo está ligado (`ice_model = 'sis2'`), e precisa estar no mesmo estado nas duas configurações; ver a seção 7.
 
 Ele não executa nada. É pós-processamento de logs de execuções que você já rodou.
 

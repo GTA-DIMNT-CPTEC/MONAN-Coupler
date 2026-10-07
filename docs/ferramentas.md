@@ -43,7 +43,7 @@ Quando um componente quebra, os outros esperam por ele e o job fica parado até 
 | `tools/atmos/gen-metis.bash` | gera as partições METIS da malha do MPAS para o número de PETs da atmosfera | `docs/uso-gen-metis.md` |
 | `tools/ocean/domain-mom6.bash` | calcula um `LAYOUT` equilibrado para o MOM6 e o SIS2 e gera a `mask_table` do FMS | `docs/domain-mom6.md` |
 
-**O layout do gelo.** Desde a correção `B-ICE-DECOMP-01` (commit `a9e6935`, 24/09/2026), o cap do SIS2 constrói a grade ESMF do gelo a partir da decomposição que o próprio SIS2 escolheu, como o cap do oceano já fazia. Qualquer `ice_pet_count` e qualquer `LAYOUT` funcionam, inclusive o automático (`LAYOUT = 0, 0`), e a divisão do gelo não altera o resultado. O primeiro PET do gelo confirma no log: `ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF segue a decomposicao do SIS2: <a> x <b> blocos`. Em binários anteriores a esse commit, o cap usava uma regra própria, que só coincidia com a do SIS2 em alguns casos (4 PETs, por exemplo); com outras contagens a inicialização quebrava com índice fora do intervalo em `sis_cap_MONAN.F90`, e o contorno era fixar o layout no `SIS_override` (com 8 PETs, `#override LAYOUT = 4, 2`).
+**O layout do gelo.** Desde a correção `B-ICE-DECOMP-01` (commit `a9e6935`, 24/09/2026), o cap do SIS2 constrói a grade ESMF do gelo a partir da decomposição que o próprio SIS2 escolheu, como o cap do oceano já fazia. Qualquer `ice_pet_count` e qualquer `LAYOUT` funcionam, inclusive o automático (`LAYOUT = 0, 0`), e a divisão do gelo não altera o resultado. O primeiro PET do gelo confirma no log: `ICE: grade ESMF segue a decomposicao do SIS2: <a> x <b> blocos` (até a R-FASE13-10, `ICE(SIS2): B-ICE-DECOMP-01 - grade ESMF ...`). Em binários anteriores a esse commit, o cap usava uma regra própria, que só coincidia com a do SIS2 em alguns casos (4 PETs, por exemplo); com outras contagens a inicialização quebrava com índice fora do intervalo em `sis_cap_MONAN.F90`, e o contorno era fixar o layout no `SIS_override` (com 8 PETs, `#override LAYOUT = 4, 2`).
 
 ## 4. Desempenho
 
@@ -86,8 +86,8 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | Instrumento | Onde | Para que serve |
 | --- | --- | --- |
 | stream `reprodiag` | bloco no `streams.atmosphere` | estado do MPAS a cada 10 minutos simulados em `reprodiag.nc`; retirar em produção |
-| `FIX-DIAG-BITSUM-01` | `src/mediator/MED_cap.F90`, atrás de `cfg_write_fixdiag` | checksum exato (soma inteira dos bits) do `Si_ifrac` em quatro etapas do mediador, gravado por PET; foi o instrumento que localizou a causa da não reprodutibilidade |
-| `FIX-DIAG-ICESRC-01/-02`, `FIX-DIAG-ICEMASK-01/-02` | `src/mediator/MED_cap.F90` | valores do `Si_ifrac` e da máscara no PET 0, com 17 e 4 algarismos |
+| `DIAG ice_fraction bitsum` | `src/mediator/med_diag.F90`, com `src/shared/diag_bitsum.F90`, só com `log_level = 'debug'` | checksum exato (soma inteira dos bits) do `Si_ifrac` em quatro etapas do mediador, gravado por PET; foi o instrumento que localizou a causa da não reprodutibilidade |
+| `DIAG ice_fraction source`, `destination` e `raw`, `DIAG ocean_mask` | `src/mediator/med_diag.F90`, só com `log_level = 'debug'` | valores do `Si_ifrac` e da máscara no PET 0, com 17 e 4 algarismos |
 | `DEBUG_CHKSUMS`, `DEBUG_SLOW_ICE`, `DEBUG_FAST_ICE` | `SIS_override` | checksums internos do SIS2 no `esmApp_run.log`; desligar em produção |
 | linha `B-CPL-TERMORDER-01` / `B-SRCTERM-01` no log do PET 0 | `src/driver/esm.F90` | confirma, a cada execução, que as 60 ligações entre componentes receberam as opções de reprodutibilidade (`sem espaco: 0`) |
 
@@ -99,6 +99,22 @@ Nesta grade, o oceano é o componente que limita a velocidade, e o gelo precisa 
 | --- | --- | --- |
 | `tools/dev/cria-linha-base.bash` | congela uma execução de referência: saídas, configuração, código e ambiente | `docs/uso-linha-base.md` |
 | `tools/dev/compara-linha-base.bash` | compara a execução atual com uma linha de base, com `nccmp -d` | `docs/uso-linha-base.md` |
+| `tools/dev/anota-linha-base.bash` | acrescenta uma observação ao MANIFEST de uma base congelada e atualiza a soma dele no `SHA256SUMS` | `docs/uso-linha-base.md` |
+| `tools/dev/valida_rodada.bash` | prepara, submete e compara uma rodada de validação na Jaci | `docs/validacao-refatoracao.md` |
+| `tools/dev/confere-tudo.bash` | executa todas as conferências locais (compilação, avisos, literais, testes) e mostra um resumo e os indicadores | `docs/conferencias-locais.md` |
+| `tools/dev/indicadores.py` | mede os indicadores de código limpo (tamanho de arquivos e rotinas, estado de módulo, trechos repetidos) de uma ou mais versões | `docs/conferencias-locais.md` |
+| `tools/dev/compila-local.bash` | compila o acoplador fora da Jaci, contra um ESMF local e as interfaces mínimas de `tests/interfaces/` | `docs/conferencias-locais.md` |
+| `tools/dev/confere-literais.py` | compara as constantes de texto dos fontes com as de um commit | `docs/conferencias-locais.md` |
+| `tools/dev/confere-curto-circuito.py` | acusa guardas que contam com o curto-circuito do `.and.` (`associated`, `allocated` ou `present` e uso do mesmo nome na expressão) | `docs/conferencias-locais.md` |
+| `tools/dev/confere-cabecalhos.py` | conferência `cabecalhos`: cabeçalhos Doxygen das rotinas (`!> @brief`; `!>` nas internas) e nomes de `@param` iguais aos dos argumentos | `docs/conferencias-locais.md` |
+| `tools/dev/confere-camadas.py` | conferência `camadas`: os `use` de `src/` respeitam as camadas (tabela `CAMADAS`), os componentes não usam uns aos outros, e `src/regrid` e `src/coupling` recebem a configuração por argumento | `docs/conferencias-locais.md` |
+| `tools/dev/dependencias.py` | dependências entre os fontes tiradas dos `use`: gera `src/dependencies.mk` (`gera`, `gera -c` confere), lista os fontes em ordem de compilação (`ordem`) e os objetos de que um programa depende (`objetos`) | `docs/conferencias-locais.md` |
+| `tools/dev/confere-exportacao.py` | confere que todo campo exportado pelo mediador por conector tem preenchimento em `src/mediator/`, e o inverso | `docs/conferencias-locais.md` |
+| `tools/dev/renomeia-identificadores.py` | troca nomes de identificadores Fortran por uma tabela de `tools/dev/nomes/` (`aplica`) e confere que a troca não mudou mais nada (`confere REV`) | `docs/conferencias-locais.md` |
+| `tools/dev/confere-instrucoes.py` | compara as instruções de um fonte com as de um commit (etapas que só movem código) | `docs/conferencias-locais.md` |
+| `tests/writers/compara-gravadores.bash` | executa os gravadores de diagnóstico de duas versões com os mesmos dados e compara os arquivos byte a byte | `docs/conferencias-locais.md` |
+| `tests/unit/roda-unitarios.bash` | executa os testes com valor esperado: as fórmulas do acoplador comparadas com valores calculados à parte | `docs/conferencias-locais.md` |
+| `tests/bulk/compara-bulk.bash` | executa a física bulk do mediador (`calc_bulk_ncar`) de duas versões com os mesmos dados e compara todos os campos bit a bit | `docs/conferencias-locais.md` |
 
 A linha de base responde se uma alteração de código mudou o resultado; a bateria do `mede-taxa-repro.sh` responde se a configuração é reprodutível. São perguntas diferentes: uma alteração pode ser reprodutível e ainda assim mudar o resultado.
 
@@ -136,7 +152,8 @@ Os comandos sugeridos ao fim de cada job pelo `run_esmApp.jaci` usam estes scrip
 **Uma alteração de código que não deveria mudar o resultado.**
 
 1. Antes da alteração, `cria-linha-base.bash`.
-2. Depois, uma execução e `compara-linha-base.bash`.
+2. Fora da Jaci, `confere-tudo.bash`.
+3. Depois, uma execução e `compara-linha-base.bash`.
 
 **Uma alteração que deveria mudar o resultado (correção física, novo campo).**
 
@@ -146,6 +163,6 @@ Os comandos sugeridos ao fim de cada job pelo `run_esmApp.jaci` usam estes scrip
 **Uma perda de reprodutibilidade.**
 
 1. `mede-taxa-repro.sh`, para medir a taxa e classificar as execuções.
-2. Com os instrumentos ligados (checksums do SIS2, `FIX-DIAG-BITSUM-01`), a primeira troca e a primeira etapa em que as execuções diferem.
+2. Com os instrumentos ligados (checksums do SIS2, `DIAG ice_fraction bitsum` com `log_level = 'debug'`), a primeira troca e a primeira etapa em que as execuções diferem.
 3. As duplas rodadas para isolar a origem: `roda-repro-mpas-standalone.sh` (a atmosfera sozinha), `roda_repro_datm_mom6.sh` (sem a atmosfera).
 4. Investigar no modo sequencial reprodutível (`seq_repro = .true.`), que é equivalente ao concorrente bit a bit e deixa causa e efeito em ordem.

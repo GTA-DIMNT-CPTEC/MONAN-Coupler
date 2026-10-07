@@ -1,40 +1,26 @@
-!> @file mpas_cap.F90
-!! @brief Cap NUOPC/ESMF para o modelo atmosferico MPAS-A 8.3 / MONAN-A 2.0.
+!> @file mpas_cap_MONAN.F90
+!! @brief Cap NUOPC/ESMF para o modelo atmosférico MPAS-A 8.3 / MONAN-A 2.0.
 !!
-!! Versao 9.2 -- Reorganizacao (Mai/2026):
-!!   set_mpas_diag_clock movido de mpas_cap_methods_mod para mpas_cap_netcdf_mod
-!!   (reorganizacao de responsabilidades — Passo 6).
+!! Protocolo NUOPC completo via NUOPC_CompDerive (InitializeAdvertise,
+!! InitializeRealize, DataInitialize, ModelAdvance, ModelFinalize). O
+!! cap exporta a forçante atmosférica do MONAN-A ao mediador e importa dele
+!! a superfície do oceano e do gelo (POINT_ATM, abaixo). A tradução entre
+!! o MPAS-A e o ESMF fica no adaptador (mpas_adapter.F90), e os
+!! diagnósticos NetCDF em mpas_cap_netcdf.F90 e mpas_import_diag.F90.
 !!
-!! Versao 9.0 -- Sprint C Fase 2 (Maio 2026):
-!!   N_IMP estendido de 4 -> 5: agora importa Sf_zorl (rugosidade Charnock)
-!!   do mediador. Substitui o default fixo cfg_zorl_default = 0.01 m
-!!   por valor dinamico calculado no MED via Charnock + Smith (1988):
-!!     z0 = 0.018 * u*^2 / g + 0.11 * nu / u*
-!!
-!! Versao 8.0 -- Sprint A Fase 2 (Maio 2026):
-!!   N_IMP estendido de 1 -> 4: agora importa So_t, Si_ifrac, So_u, So_v
-!!   do mediador (antes apenas So_t; Si_ifrac/correntes usavam defaults
-!!   fixos = 0, ignorando MOM6+SIS2 dinamico). Habilita gelo marinho,
-!!   vento relativo ao oceano e fluxos de momento corretos em alta lat.
-!!
-!! Versao 7.0 -- Protocolo NUOPC completo via NUOPC_CompDerive.
-!!
-!! Patches aplicados:
-!!   v8.0: Sprint A — IMP_NAMES estendido com Si_ifrac/So_u/So_v
-!!   v7.0: NUOPC_CompDerive + InitializeAdvertise + InitializeDataComplete
-!!   v7.1: mpas_atm_resize eliminado (ESMF e MPAS usam decomposicoes distintas)
-!!   v7.2: coordenadas para NetCDF via lonCell(1:n_local) com
-!!          n_local = min(localCells_ESMF, nCells_MPAS) -- sem ownedElemCoords
-!!          que causa double-free no ESMF 8.9.1 em Cray/gfortran.
+!! As coordenadas para o NetCDF vêm de lonCell(1:n_local), com
+!! n_local = min(localCells_ESMF, nCells_MPAS), e não de ownedElemCoords,
+!! que causa double-free no ESMF 8.9.1 em Cray/gfortran.
 
 module mpas_cap_MONAN_mod
 
   use ESMF
+  use coupler_constants_mod, only : RAD2DEG, ALB_OCEAN_DEFAULT
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
-                           NUOPC_Advertise,         NUOPC_Realize,           &
+                           NUOPC_Realize,                                     &
                            NUOPC_CompAttributeGet,  NUOPC_CompAttributeSet,  &
-                           NUOPC_IsConnected   ! B-IMPORT-DESCONECTADO-01
+                           NUOPC_IsConnected
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
                            model_label_CheckImport    => label_CheckImport,  &
                            model_label_DataInitialize => label_DataInitialize, &
@@ -46,161 +32,102 @@ module mpas_cap_MONAN_mod
                                     mpas_atm_state_type,     &
                                     atm_ocean_boundary_type
 
-  use mpas_cap_methods_mod, only : mpas_import,         &
+  use mpas_atm_model_mod,   only : mpas_atm_init, mpas_atm_init_sfc, mpas_atm_run, &
+                                    mpas_atm_final
+
+  use mpas_adapter_mod,     only : mpas_import,         &
                                     mpas_export,         &
                                     mpas_create_grid,    &
                                     state_diagnose
 
   use mpas_cap_netcdf_mod,  only : export_write_netcdf, &
+                                    mpas_diag_export_t,  &
                                     netcdf_init_coords,  &
-                                    netcdf_config_set,   &
-                                    set_mpas_diag_clock   ! timestamp do diag import (mpas_cap_netcdf)
+                                    netcdf_config_set
+  use mpas_import_diag_mod, only : mpas_import_diag_clock_t, &
+                                    set_mpas_diag_clock   ! timestamp do diag import (mpas_import_diag)
 
-  use mpas_cap_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
-                                    cfg_mesh_atm, cfg_config_dir,     &
+  use coupler_config_mod,  only : cfg_write_netcdf, cfg_write_diag, &
+                                    cfg_config_dir,                   &
                                     cfg_dt_coupling, cfg_dt_atm,      &
                                     cfg_output_dir, cfg_grid_res_deg, &
                                     cfg_sst_default,                  &
                                     cfg_ice_fraction_default,         &
-                                    cfg_zorl_default, config_read
+                                    cfg_zorl_default, cpl_current_config
 
-  use mpas_cap_utils_mod,   only : ChkErr
+  use coupler_utils_mod,   only : ChkErr, int_to_str
+  use coupler_log_mod,     only : COMP_ATM, log_error, log_info
+  use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields, cap_advertise, &
+                                  ADVERTISE_DEFAULT
+  use cpl_fields_mod,      only : CPL_NAME_LEN
+  use cpl_map_mod,         only : cpl_arrivals, cpl_exports
 
   implicit none
   private
 
-  interface
-    subroutine mpas_atm_init(atm_public, atm_state, atm_bnd, &
-                              dt_seconds, config_dir, mpi_comm, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,          intent(in)  :: dt_seconds
-      character(len=*), intent(in)  :: config_dir
-      integer,          intent(in)  :: mpi_comm
-      integer,          intent(out) :: rc
-    end subroutine mpas_atm_init
-
-    subroutine mpas_atm_init_sfc(atm_public, atm_state, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type, mpas_atm_state_type
-      type(mpas_atm_public_type), intent(inout) :: atm_public
-      type(mpas_atm_state_type),  intent(inout) :: atm_state
-      integer,                    intent(out)   :: rc
-    end subroutine mpas_atm_init_sfc
-
-    subroutine mpas_atm_run(atm_public, atm_state, atm_bnd, dt_coupling, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(in)    :: atm_bnd
-      integer,                       intent(in)    :: dt_coupling
-      integer,                       intent(out)   :: rc
-    end subroutine mpas_atm_run
-
-    subroutine mpas_atm_final(atm_public, atm_state, atm_bnd, rc)
-      use mpas_atm_types_mod, only : mpas_atm_public_type,    &
-                                      mpas_atm_state_type,     &
-                                      atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,                       intent(out)   :: rc
-    end subroutine mpas_atm_final
-
-    subroutine mpas_atm_resize(atm_public, atm_state, atm_bnd, nCells_new)
-      use mpas_atm_types_mod, only : mpas_atm_public_type, mpas_atm_state_type, &
-                                     atm_ocean_boundary_type
-      type(mpas_atm_public_type),    intent(inout) :: atm_public
-      type(mpas_atm_state_type),     intent(inout) :: atm_state
-      type(atm_ocean_boundary_type), intent(inout) :: atm_bnd
-      integer,                       intent(in)    :: nCells_new
-    end subroutine mpas_atm_resize
-  end interface
 
   public :: SetServices
   public :: SetVM
 
-  type(mpas_atm_public_type),    pointer, save :: g_atm_public => null()
-  type(mpas_atm_state_type),     pointer, save :: g_atm_state  => null()
-  type(atm_ocean_boundary_type), pointer, save :: g_atm_bnd    => null()
-  type(ESMF_Grid),                        save :: g_grid
+  !> Estado interno do cap, guardado no componente ESMF
+  !! (ESMF_GridCompSetInternalState) e recuperado em cada fase por
+  !! get_cap_state. Criado em InitializeRealize.
+  type :: mpas_cap_state_t
+    type(mpas_atm_public_type),    pointer :: atm_public => null()
+    type(mpas_atm_state_type),     pointer :: atm_state  => null()
+    type(atm_ocean_boundary_type), pointer :: atm_bnd    => null()
+    type(ESMF_Grid) :: grid   !< grade regular 360x180 do cap
+    !> Gravador monan_export_*.nc: grade de saída, coordenadas e campos
+    !! MPAS guardados. Configurado em InitializeRealize.
+    type(mpas_diag_export_t) :: diag_export
+    !> Relógio do diagnóstico de importação monan2_import_*.nc.
+    type(mpas_import_diag_clock_t) :: diag_clock
+    integer :: step_count = 0   !< passos de acoplamento já executados
+  end type mpas_cap_state_t
 
-  ! ── Campos importados do mediador (Fase 2 MED→MPAS) ─────────────────────────
-  !
-  ! Histórico:
-  !   v9 (Fase 1, DOCN OISST): N_IMP=1 — apenas So_t. Si_ifrac/Sf_zorl/uocn/vocn
-  !     usavam defaults fixos via cfg_*_default (gelo=0, zorl=0.01 m, correntes=0).
-  !
-  !   Sprint A Fase 2 (Maio 2026): N_IMP=4 — So_t, Si_ifrac, So_u, So_v.
-  !
-  !   Sprint C Fase 2 (Maio 2026): N_IMP=5 — adiciona Sf_zorl (rugosidade).
-  !     Calculada via Charnock + Smith no MED a partir de Foxx_taux/tauy.
-  !     Substitui o default fixo cfg_zorl_default = 0.01 m, habilitando
-  !     feedback dinamico vento <-> rugosidade essencial em tempestades.
+  type :: mpas_cap_state_wrapper_t
+    type(mpas_cap_state_t), pointer :: ptr => null()
+  end type mpas_cap_state_wrapper_t
+
+  ! Campos importados do mediador (MED→MPAS)
   !
   ! O NUOPC só cria RouteHandle para campos MUTUAMENTE anunciados: o MED
-  ! anuncia So_t, Si_ifrac, So_u, So_v, Sf_zorl no exportState; o MPAS precisa
-  ! anunciá-los espelhadamente no importState (este array).
-  ! Fase 4b (B-TSFC-DUALEXPORT-01, Set/2026): trocado de 'So_t' para
-  ! 'Sx_tsfc'. So_t e' SST pura do MOM6 — o SIS2 tambem a importa e precisa
-  ! dela pura para o fluxo de calor basal do gelo (ICE_KMELT). Sx_tsfc e' o
-  ! composto (1-Si_ifrac)*So_t + Si_ifrac*Si_t_sis2, calculado no MED
-  ! (MED_cap.F90) especificamente para a atmosfera, que enxerga uma unica
-  ! celula mista agua+gelo — index 1 continua alimentando atm_bnd%sst.
+  ! anuncia estes campos no exportState, e o MPAS os anuncia espelhadamente
+  ! no importState (este array).
   !
-  ! FIX B-DIAGMASK-01 (Set/2026): N_IMP=7 — adiciona Sx_omask, a mascara
-  ! terra/oceano REAL do MOM6 (ocean_grid%mask2dT). Nao alimenta a fisica do
-  ! MONAN-A, que tem a propria landmask; serve para mascarar continentes no
-  ! diagnostico monan2_import_*.nc, que ate' aqui so' contava com o filtro
-  ! ocean_frac_min do binning Voronoi — um criterio de COBERTURA de celula
-  ! Voronoi por bin, sem nenhuma relacao com terra/oceano.
-  integer, parameter :: N_IMP = 7
-  character(len=20), parameter :: IMP_NAMES(N_IMP) = [ &
-    character(len=20) ::  &
-    'Sx_tsfc ',          &  ! Temp. de pele composta [K] → atm_bnd%sst
-    'Si_ifrac',          &  ! Fração de gelo [0-1]       → atm_bnd%ice_fraction
-    'So_u    ',          &  ! Corrente zonal [m/s]       → atm_bnd%uocn
-    'So_v    ',          &  ! Corrente meridional [m/s]  → atm_bnd%vocn
-    'Sf_zorl ',          &  ! Rugosidade Charnock [m]    → atm_bnd%zorl  (Sprint C)
-    'Sf_albedo',         &  ! Albedo de superfície [0-1] → atm_bnd%alb  (Fase 2.6)
-    'Sx_omask' ]            ! Máscara 1=oceano/0=terra   → atm_bnd%omask (B-DIAGMASK-01)
-
-  integer, parameter :: N_EXP = 13
-  character(len=20), parameter :: EXP_NAMES(N_EXP) = [ &
-    character(len=20) ::            &
-    'Sa_pslv_mpas  ',               &
-    'Sa_tbot_mpas  ',               &
-    'Sa_u10m_mpas  ',               &
-    'Sa_v10m_mpas  ',               &
-    'Faxa_swdn_mpas',               &
-    'Faxa_lwdn_mpas',               &
-    'Faxa_rain_mpas',               &
-    'Sa_shum_mpas  ',               &  ! B-Fase2-01: q2 [kg/kg] — hum. espec. 2m
-    'Faxa_snow_mpas',               &  ! B-Fase2-02: Δsnownc/dt [kg/m²/s] — neve
-    'Faxa_sen_mpas ',               &  ! Fase 3: calor sensivel nativo do PBL (hfx)
-    'Faxa_lat_mpas ',               &  ! Fase 3: calor latente nativo do PBL (lh)
-    'Faxa_taux_mpas',               &  ! Fase 3: tensao zonal nativa (de ust)
-    'Faxa_tauy_mpas' ]                 ! Fase 3: tensao meridional nativa (de ust)
-
-  integer, parameter :: netcdf_write_freq = 1
-
-  logical            :: write_diag    = .false.
-  logical            :: write_netcdf  = .true.
-  character(len=256) :: mesh_atm      = 'mpas_mesh.nc'
-  character(len=256) :: config_dir    = './'
-  integer            :: dt_coupling_s = 1800
-  integer            :: dt_atm_s      = 1800
-  integer, save      :: step_count    = 0
+  ! Sx_tsfc (e não So_t) alimenta atm_bnd%sst: So_t é a SST pura do MOM6,
+  ! que o SIS2 também importa e precisa pura para o fluxo de calor basal do
+  ! gelo (ICE_KMELT); Sx_tsfc é o composto (1-Si_ifrac)*So_t +
+  ! Si_ifrac*Si_t_sis2, calculado no MED (med_export.F90) para a atmosfera, que
+  ! enxerga uma única célula mista água+gelo.
+  !
+  ! Sf_zorl é a rugosidade calculada no MED por Charnock + Smith a partir de
+  ! Foxx_taux/tauy, no lugar do valor fixo cfg_zorl_default = 0.01 m
+  ! (realimentação vento <-> rugosidade, importante em tempestades).
+  !
+  ! Sx_omask é a máscara terra/oceano REAL do MOM6 (ocean_grid%mask2dT).
+  ! Não alimenta a física do MONAN-A, que tem a própria landmask; serve para
+  ! mascarar continentes no diagnóstico monan2_import_*.nc, em vez de contar
+  ! só com o filtro ocean_frac_min do binning Voronoi, um critério de
+  ! COBERTURA de célula Voronoi por bin, sem relação com terra/oceano.
+  !
+  ! Os campos saem do mapa de acoplamento (src/coupling/cpl_map.F90), no
+  ! ponto ATM@atm_cap: a importação são os 7 campos que chegam por conector
+  ! (cpl_arrivals: Sx_tsfc, Si_ifrac, So_u, So_v, Sf_zorl, Sf_albedo e
+  ! Sx_omask), e a exportação, os 13 campos *_mpas de EXPORTS
+  ! (cpl_exports), a forçante nativa do MONAN-A. O cap anuncia sempre as
+  ! mesmas listas: não consulta chaves de &nuopc_mode. O valor inicial de
+  ! cada campo importado está em initial_import_value.
+  character(len=*), parameter :: POINT_ATM = 'ATM@atm_cap'
 
   character(len=*), parameter :: u_FILE_u = __FILE__
 
 contains
 
+  !> @brief Registra o cap no NUOPC: fases de inicialização e especializações
+  !! (DataInitialize, Advance, Finalize e CheckImport).
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine SetServices(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer, intent(out) :: rc
@@ -228,198 +155,184 @@ contains
          specLabel=model_label_Finalize, &
          specRoutine=ModelFinalize, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    ! Suprimir validacao de timestamp de import (lag OCN->MPAS: t-1 != currTime)
+    ! Suprimir validação de timestamp de import (lag OCN->MPAS: t-1 != currTime)
     call NUOPC_CompSpecialize(gcomp, &
          specLabel=model_label_CheckImport, &
          specRoutine=CheckImportAlwaysOK, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_LogWrite('mpas_cap: SetServices concluido (v7.0 NUOPC_CompDerive)', &
-         ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'SetServices concluido')
   end subroutine SetServices
 
+  !> @brief Fase 0: mapa de fases do cap (cap_initialize_p0) e registro do instante inicial no log.
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeP0(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
     type(ESMF_Time)    :: startTimeLoc
-    logical            :: isPresent, isSet
-    character(len=256) :: value
+    character(len=32)  :: value
     integer            :: yr, mo, dy, hr, mn, sc
-    character(len=*), parameter :: subname = '(mpas_cap:InitializeP0)'
     rc = ESMF_SUCCESS
-    call NUOPC_CompFilterPhaseMap(gcomp, ESMF_METHOD_INITIALIZE, &
-         acceptStringList=(/'IPDv03p'/), rc=rc)
+    call cap_initialize_p0(gcomp, importState, exportState, clock, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    block
-      integer :: cfg_rc
-      call config_read(cfg_rc)
-    end block
-    write_netcdf  = cfg_write_netcdf
-    write_diag    = cfg_write_diag
-    mesh_atm      = trim(cfg_mesh_atm)
-    config_dir    = trim(cfg_config_dir)
-    dt_coupling_s = cfg_dt_coupling
-    dt_atm_s      = cfg_dt_atm
-    call NUOPC_CompAttributeGet(gcomp, name='DumpFields', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) write_diag = (trim(value) == 'true')
-    call NUOPC_CompAttributeGet(gcomp, name='WriteNetCDF', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) write_netcdf = (trim(value) == 'true')
-    call NUOPC_CompAttributeGet(gcomp, name='mesh_atm', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) mesh_atm = trim(value)
-    call NUOPC_CompAttributeGet(gcomp, name='config_dir', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) config_dir = trim(value)
-    call NUOPC_CompAttributeGet(gcomp, name='dt_coupling', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) read(value, *) dt_coupling_s
-    call NUOPC_CompAttributeGet(gcomp, name='dt_atm', value=value, &
-         isPresent=isPresent, isSet=isSet, rc=rc)
-    if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (isPresent .and. isSet) read(value, *) dt_atm_s
     call ESMF_ClockGet(clock, startTime=startTimeLoc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_TimeGet(startTimeLoc, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     write(value, '(I4.4,"-",I2.2,"-",I2.2,"T",I2.2,":",I2.2,":",I2.2)') &
           yr, mo, dy, hr, mn, sc
-    call ESMF_LogWrite(subname//': start_time = '//trim(value), ESMF_LOGMSG_INFO)
-    call ESMF_LogWrite(subname//': InitializeP0 concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'start_time = '//trim(value))
+    call log_info(COMP_ATM, 'InitializeP0 concluido')
   end subroutine InitializeP0
 
+  !> @brief Anuncia os campos importados e exportados, lidos do mapa de acoplamento (POINT_ATM).
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeAdvertise(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
-    integer :: i
-    character(len=*), parameter :: subname = '(mpas_cap:InitializeAdvertise)'
+    character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
     rc = ESMF_SUCCESS
-    do i = 1, N_IMP
-      call NUOPC_Advertise(importState, StandardName=trim(IMP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
-    do i = 1, N_EXP
-      call NUOPC_Advertise(exportState, StandardName=trim(EXP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
-    call ESMF_LogWrite(subname//': anunciados '// &
-         trim(adjustl(int_to_str(N_IMP)))//' imp + '// &
-         trim(adjustl(int_to_str(N_EXP)))//' exp', ESMF_LOGMSG_INFO)
+    call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', imp)
+    call cpl_exports(POINT_ATM, cpl_current_config(), '', exp)
+    call cap_advertise(importState, imp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call cap_advertise(exportState, exp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call log_info(COMP_ATM, 'InitializeAdvertise: anunciados '// &
+         int_to_str(size(imp))//' imp + '// &
+         int_to_str(size(exp))//' exp')
   end subroutine InitializeAdvertise
 
+  !> @brief Cria a grade e os campos do cap, inicializa o MONAN-A e prepara o gravador NetCDF.
+  !!
+  !! A grade e os campos ESMF são criados antes de mpas_atm_init, que inicia
+  !! o SMIOL; as coordenadas do gravador são reunidas depois.
+  !! @param[inout] gcomp        componente do cap
+  !! @param[inout] importState  estado de importação
+  !! @param[inout] exportState  estado de exportação
+  !! @param[in]    clock        relógio do componente
+  !! @param[out]   rc           código de retorno
   subroutine InitializeRealize(gcomp, importState, exportState, clock, rc)
     type(ESMF_GridComp) :: gcomp
     type(ESMF_State)    :: importState, exportState
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
-    type(ESMF_Field)   :: field
     type(ESMF_VM)      :: vm
-    integer            :: i, localMpiComm, localPet
-    real(ESMF_KIND_R8), parameter   :: RAD2DEG = 57.29577951308232_ESMF_KIND_R8
+    integer            :: localMpiComm, localPet
+    type(mpas_cap_state_wrapper_t) :: wrap
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:InitializeRealize)'
+      real(ESMF_KIND_R8), allocatable :: lon_local_nc(:)
+      real(ESMF_KIND_R8), allocatable :: lat_local_nc(:)
+      integer :: k
+      integer :: n_local
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
     rc = ESMF_SUCCESS
 
-    ! ── 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada ─
+    ! 0. VM: obter localMpiComm e localPet ANTES de qualquer outra chamada
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, localPet=localPet, mpiCommunicator=localMpiComm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 1. ESMF_Grid 360x180 (ANTES de mpas_atm_init) ────────────────────
-    ! SOLUCAO DEFINITIVA: ESMF_Grid nao usa MOAB. Zero deadlocks possiveis.
-    ! Criado ANTES do SMIOL (mpas_atm_init) para MPI completamente limpo.
-    call mpas_create_grid(g_grid, rc)
+    ! Estado interno do cap, guardado no componente
+    allocate(wrap%ptr)
+    st => wrap%ptr
+    call ESMF_GridCompSetInternalState(gcomp, wrap, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init) ──────────
-    ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
-    ! ESMF_Grid distribui automaticamente -> todos os PETs tem celulas locais.
-    do i = 1, N_IMP
-      field = ESMF_FieldCreate(g_grid, ESMF_TYPEKIND_R8, &
-                               staggerloc=ESMF_STAGGERLOC_CENTER, &
-                               name=trim(IMP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call NUOPC_Realize(importState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
-    do i = 1, N_EXP
-      field = ESMF_FieldCreate(g_grid, ESMF_TYPEKIND_R8, &
-                               staggerloc=ESMF_STAGGERLOC_CENTER, &
-                               name=trim(EXP_NAMES(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call NUOPC_Realize(exportState, field=field, rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
+    ! 1. ESMF_Grid 360x180 (ANTES de mpas_atm_init)
+    ! ESMF_Grid não usa MOAB (ver mpas_create_grid) e é criada antes do
+    ! SMIOL (mpas_atm_init), com o MPI ainda limpo.
+    call mpas_create_grid(st%grid, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! ── 3. Inicializar MPAS-A (SMIOL começa aqui) ────────────────────────
-    allocate(g_atm_public)
-    allocate(g_atm_state)
-    allocate(g_atm_bnd)
-    call mpas_atm_init(g_atm_public, g_atm_state, g_atm_bnd, &
-                       dt_atm_s, config_dir, localMpiComm, rc)
+    ! 2. Campos ESMF e NUOPC_Realize (ANTES de mpas_atm_init)
+    ! ESMF_FieldCreate sobre ESMF_Grid: sem MOAB, sem deadlock.
+    ! ESMF_Grid distribui automaticamente -> todos os PETs têm células locais.
+    call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', names)
+    call cap_realize_fields(importState, st%grid, names, size(names), rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call cpl_exports(POINT_ATM, cpl_current_config(), '', names)
+    call cap_realize_fields(exportState, st%grid, names, size(names), rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+
+    ! 3. Inicializar MPAS-A (SMIOL começa aqui)
+    allocate(st%atm_public)
+    allocate(st%atm_state)
+    allocate(st%atm_bnd)
+    call mpas_atm_init(st%atm_public, st%atm_state, st%atm_bnd, &
+                       cfg_dt_atm, trim(cfg_config_dir), localMpiComm, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_init falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
 
-    ! ── 4. Coordenadas NetCDF (MPI_Allgather apos SMIOL — seguro) ────────
-    block
-      real(ESMF_KIND_R8), allocatable :: lon_local_nc(:), lat_local_nc(:)
-      integer :: k, n_local
-      ! B-32: usar nCellsSolve (células próprias sem halos) para que a soma
+    ! 4. Coordenadas NetCDF (MPI_Allgather após SMIOL; seguro)
+      ! usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
-      n_local = g_atm_public%nCellsSolve
-      if (n_local == 0) n_local = g_atm_public%nCells   ! fallback se não disponível
+      n_local = st%atm_public%nCellsSolve
+      if (n_local == 0) n_local = st%atm_public%nCells   ! fallback se não disponível
       allocate(lon_local_nc(n_local), lat_local_nc(n_local))
       do k = 1, n_local
-        lon_local_nc(k) = real(g_atm_public%lonCell(k), ESMF_KIND_R8) * RAD2DEG
-        lat_local_nc(k) = real(g_atm_public%latCell(k), ESMF_KIND_R8) * RAD2DEG
+        lon_local_nc(k) = real(st%atm_public%lonCell(k), ESMF_KIND_R8) * RAD2DEG
+        lat_local_nc(k) = real(st%atm_public%latCell(k), ESMF_KIND_R8) * RAD2DEG
       end do
-      call netcdf_config_set(cfg_grid_res_deg, cfg_output_dir, localPet)
-      call netcdf_init_coords(lon_local_nc, lat_local_nc, n_local, vm, rc)
+      call netcdf_config_set(st%diag_export, cfg_grid_res_deg, cfg_output_dir, localPet)
+      call netcdf_init_coords(st%diag_export, lon_local_nc, lat_local_nc, n_local, vm, rc)
       deallocate(lon_local_nc, lat_local_nc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end block
+    if (allocated(lon_local_nc)) deallocate(lon_local_nc)
+    if (allocated(lat_local_nc)) deallocate(lat_local_nc)
 
-    call ESMF_LogWrite(subname//': InitializeRealize concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'InitializeRealize concluido')
   end subroutine InitializeRealize
 
+  !> @brief DataInitialize: confere a conexão dos importados, aplica os valores
+  !! iniciais e exporta os campos de t=0.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine InitializeDataComplete(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
     type(ESMF_State)  :: importState, exportState
     type(ESMF_Clock)  :: clock
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:InitializeDataComplete)'
     rc = ESMF_SUCCESS
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_ModelGet(gcomp, &
          importState=importState, exportState=exportState, &
          modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! B-IMPORT-DESCONECTADO-01: barreira antes de qualquer leitura do
-    ! importState. Ver o cabecalho de verify_import_connected para o motivo.
+    ! barreira antes de qualquer leitura do
+    ! importState. Ver o cabeçalho de verify_import_connected para o motivo.
     call verify_import_connected(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
     call init_import_defaults(importState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call mpas_atm_init_sfc(g_atm_public, g_atm_state, rc)
+    call mpas_atm_init_sfc(st%atm_public, st%atm_state, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_init_sfc falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_atm_public, exportState, rc)
+    call mpas_export(st%diag_export, st%atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_CompAttributeSet(gcomp, &
          name='InitializeDataProgress', value='true', rc=rc)
@@ -427,9 +340,12 @@ contains
     call NUOPC_CompAttributeSet(gcomp, &
          name='InitializeDataComplete', value='true', rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call ESMF_LogWrite(subname//': DataInitialize SATISFIED', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'DataInitialize SATISFIED')
   end subroutine InitializeDataComplete
 
+  !> @brief Avança um intervalo de acoplamento: importa o contorno, roda o MONAN-A e exporta a forçante.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine ModelAdvance(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
@@ -438,15 +354,18 @@ contains
     type(ESMF_VM)       :: vm
     type(ESMF_Time)     :: currTimeLoc
     integer             :: yr, mo, dy, hr, mn, sc
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:ModelAdvance)'
     rc = ESMF_SUCCESS
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call NUOPC_ModelGet(gcomp, &
          importState=importState, exportState=exportState, &
          modelClock=clock, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    step_count = step_count + 1
+    st%step_count = st%step_count + 1
 
-    ! ── Timestamp para o diagnóstico de importação ────────────────────────────
+    ! Timestamp para o diagnóstico de importação
     ! Lê o tempo corrente do clock ANTES de mpas_import para que
     ! write_mpas_import_diag (acionado dentro de mpas_import quando
     ! cfg_write_import_diag=.true.) nomeie o arquivo como:
@@ -457,33 +376,33 @@ contains
     call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                       h=hr, m=mn, s=sc, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    call set_mpas_diag_clock(yr, mo, dy, hr, mn, sc)
+    call set_mpas_diag_clock(st%diag_clock, yr, mo, dy, hr, mn, sc)
 
-    ! BUG-FIX-01: usar nCellsSolve (células próprias sem halos) em vez de nCells.
+    ! usar nCellsSolve (células próprias sem halos) em vez de nCells.
     ! nCells inclui células halo de PETs vizinhos, que podem conter valores não
     ! inicializados ou de outra região geográfica, corrompendo os campos importados.
-    call mpas_import(importState, g_atm_bnd, &
-         merge(g_atm_public%nCellsSolve, g_atm_public%nCells, &
-               g_atm_public%nCellsSolve > 0), rc, &
-         g_atm_public%lonCell, g_atm_public%latCell)
+    call mpas_import(st%diag_clock, importState, st%atm_bnd, &
+         merge(st%atm_public%nCellsSolve, st%atm_public%nCells, &
+               st%atm_public%nCellsSolve > 0), rc, &
+         st%atm_public%lonCell, st%atm_public%latCell)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (write_diag) then
+    if (cfg_write_diag) then
       call state_diagnose(importState, 'importState@Advance', rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    call mpas_atm_run(g_atm_public, g_atm_state, g_atm_bnd, dt_coupling_s, rc)
+    call mpas_atm_run(st%atm_public, st%atm_state, st%atm_bnd, cfg_dt_coupling, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_run falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    call mpas_export(g_atm_public, exportState, rc)
+    call mpas_export(st%diag_export, st%atm_public, exportState, rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    if (write_diag) then
+    if (cfg_write_diag) then
       call state_diagnose(exportState, 'exportState@Advance', rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    if (write_netcdf .and. mod(step_count, netcdf_write_freq) == 0) then
+    if (cfg_write_netcdf) then
       call ESMF_VMGetCurrent(vm, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       call ESMF_ClockGet(clock, currTime=currTimeLoc, rc=rc)
@@ -491,69 +410,82 @@ contains
       call ESMF_TimeGet(currTimeLoc, yy=yr, mm=mo, dd=dy, &
                         h=hr, m=mn, s=sc, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      call export_write_netcdf(exportState, step_count * dt_coupling_s, &
+      call export_write_netcdf(st%diag_export, exportState, st%step_count * cfg_dt_coupling, &
                                 yr, mo, dy, hr, mn, sc, vm, rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
     end if
-    call ESMF_LogWrite(subname//': ModelAdvance concluido', ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'ModelAdvance concluido')
   end subroutine ModelAdvance
 
+  !> @brief Recupera o estado interno do cap, criado em InitializeRealize.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   st     estado interno
+  !! @param[out]   rc     código de retorno ESMF
+  subroutine get_cap_state(gcomp, st, rc)
+    type(ESMF_GridComp),             intent(inout) :: gcomp
+    type(mpas_cap_state_t), pointer, intent(out)   :: st
+    integer,                         intent(out)   :: rc
+
+    type(mpas_cap_state_wrapper_t) :: wrap
+
+    nullify(st)
+    call ESMF_GridCompGetInternalState(gcomp, wrap, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    st => wrap%ptr
+  end subroutine get_cap_state
+
+  !> @brief Finaliza o MONAN-A (mpas_atm_final); a grade fica para o ESMF_Finalize.
+  !! @param[inout] gcomp  componente do cap
+  !! @param[out]   rc     código de retorno
   subroutine ModelFinalize(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer,             intent(out) :: rc
+    type(mpas_cap_state_t), pointer :: st
     character(len=*), parameter :: subname = '(mpas_cap:ModelFinalize)'
     rc = ESMF_SUCCESS
-    call mpas_atm_final(g_atm_public, g_atm_state, g_atm_bnd, rc)
+    call get_cap_state(gcomp, st, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call mpas_atm_final(st%atm_public, st%atm_state, st%atm_bnd, rc)
     if (rc /= 0) then
       call ESMF_LogSetError(ESMF_FAILURE, msg=subname//': mpas_atm_final falhou', &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
-    ! ESMF_GridDestroy removido: os campos do importState/exportState
-    ! ainda referenciam g_grid quando ModelFinalize e chamado.
+    ! Sem ESMF_GridDestroy: os campos do importState/exportState
+    ! ainda referenciam st%grid quando ModelFinalize é chamado.
     ! Destruir o grid aqui causa SIGSEGV no cleanup posterior do framework.
     ! O ESMF finaliza o grid automaticamente em ESMF_Finalize.
-    deallocate(g_atm_public, g_atm_state, g_atm_bnd)
-    g_atm_public => null()
-    g_atm_state  => null()
-    g_atm_bnd    => null()
-    call ESMF_LogWrite(subname//': ModelFinalize concluido', ESMF_LOGMSG_INFO)
+    deallocate(st%atm_public, st%atm_state, st%atm_bnd)
+    st%atm_public => null()
+    st%atm_state  => null()
+    st%atm_bnd    => null()
+    call log_info(COMP_ATM, 'ModelFinalize concluido')
   end subroutine ModelFinalize
 
-  !> @brief Preenche campos de importacao com valores padrao (t=0).
+  !> @brief Aborta se algum campo importado não estiver conectado.
   !!
-  !! FIX v5.2: usa ESMF_FieldGet(dimCount=) antes de farrayPtr para campos rank-2
-  !! (ESMF_Grid 360x180), evitando erro ESMF_LocalArrayGetData rank mismatch.
-  !> @brief Aborta se algum campo de IMP_NAMES nao estiver conectado.
-  !!
-  !! FIX B-IMPORT-DESCONECTADO-01 (Set/2026).
-  !!
-  !! O PROBLEMA. Quando o componente OCN nao oferece todos os campos que este
-  !! cap anuncia, o NUOPC registra no log de PET
+  !! Quando o componente OCN não oferece todos os campos que este cap
+  !! anuncia, o NUOPC registra no log do PET
   !!     MPAS: Import Field not connected: <nome>
   !!     ERROR ... NUOPC INCOMPATIBILITY DETECTED: Import Fields not all connected
-  !! e mesmo assim DEVOLVE ESMF_SUCCESS. O esmApp.F90 ja' confere o rc de
-  !! ESMF_GridCompInitialize com ChkErr e abortaria se ele viesse com erro;
-  !! como nao vem, a execucao segue. No primeiro passo o mpas_import le os
-  !! N_IMP campos assim mesmo, inclusive os que nunca foram realizados, e o
-  !! ponteiro do farrayPtr de um campo nao conectado leva a SIGSEGV dentro do
-  !! libesmf.so, com backtrace irresoluvel. Foi o que aconteceu no perfil
-  !! MPAS+DOCN (B-DOCN-FASE1-CAMPOS-01): tres campos faltando, morte sete
-  !! segundos depois, sem nenhuma pista no esmApp_run.log.
+  !! e mesmo assim DEVOLVE ESMF_SUCCESS, e a execução segue. No primeiro
+  !! passo, mpas_import leria os campos importados, inclusive os nunca
+  !! realizados, e o farrayPtr de um campo não conectado levaria a SIGSEGV
+  !! dentro do libesmf.so, sem pista no esmApp_run.log. Por isso esta rotina
+  !! confere a conexão antes de tocar no importState e aborta nomeando os
+  !! campos ausentes. Custo: uma chamada a NUOPC_IsConnected por campo
+  !! importado, uma vez por execução.
   !!
-  !! O CONSERTO. Verificar explicitamente, antes de tocar no importState, e
-  !! abortar nomeando os campos ausentes. Custo: N_IMP chamadas a
-  !! NUOPC_IsConnected, uma vez por execucao.
+  !! A conferência fica no cap, e não no driver, porque precisa dos campos
+  !! que este cap importa (do mapa, no ponto POINT_ATM); no esm.F90 seria
+  !! preciso percorrer os cplLists de cada conector e reconstruir a mesma
+  !! informação de segunda mão.
   !!
-  !! POR QUE AQUI E NAO NO DRIVER. A checagem precisa da lista IMP_NAMES, que
-  !! e' deste modulo. Um guarda equivalente no esm.F90 teria de percorrer os
-  !! cplLists de cada conector e reconstruir a mesma informacao de segunda mao.
-  !!
-  !! ATENCAO: nao confundir com CheckImportAlwaysOK, logo abaixo. Aquela
-  !! suprime a validacao de TIMESTAMP, que e' legitima porque o conector
-  !! OCN->MPAS entrega com lag de um passo. Esta aqui verifica CONECTIVIDADE,
-  !! que e' outra coisa: um campo desconectado nunca fica correto, em nenhum
-  !! passo. Suprimir a primeira nao pode implicar em suprimir a segunda.
+  !! Não confundir com CheckImportAlwaysOK, logo abaixo. Aquela suprime a
+  !! validação de TIMESTAMP, que é legítima porque o conector OCN->MPAS
+  !! entrega com atraso de um passo. Esta verifica CONECTIVIDADE: um campo
+  !! desconectado nunca fica correto, em nenhum passo, e suprimir a
+  !! primeira não implica suprimir a segunda.
   subroutine verify_import_connected(importState, rc)
     type(ESMF_State), intent(in)  :: importState
     integer,          intent(out) :: rc
@@ -564,72 +496,60 @@ contains
     character(len=512) :: missing
     character(len=640) :: msg
     type(ESMF_VM)      :: vm
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
     n_missing = 0
     missing   = ''
+    call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', names)
 
     call ESMF_VMGetCurrent(vm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call ESMF_VMGet(vm, localPet=localPet, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    do i = 1, N_IMP
+    do i = 1, size(names)
       connected = NUOPC_IsConnected(importState, &
-                                    fieldName=trim(IMP_NAMES(i)), rc=rc)
+                                    fieldName=trim(names(i)), rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       if (.not. connected) then
         n_missing = n_missing + 1
         if (len_trim(missing) > 0) missing = trim(missing)//', '
-        missing = trim(missing)//trim(IMP_NAMES(i))
-        call ESMF_LogWrite(subname//': campo de importacao NAO conectado: '// &
-                           trim(IMP_NAMES(i)), ESMF_LOGMSG_ERROR)
+        missing = trim(missing)//trim(names(i))
       end if
     end do
 
     if (n_missing > 0) then
       write(msg,'(A,I0,A,I0,A)') subname//': ABORTANDO — ', n_missing, &
-        ' de ', N_IMP, ' campos de importacao nao estao conectados: '
+        ' de ', size(names), ' campos de importacao nao estao conectados: '
       msg = trim(msg)//trim(missing)
-      ! Tambem para a saida padrao: o log de PET nao e' lido quando o
-      ! sintoma aparece so' no esmApp_run.log, e foi exatamente esse o
-      ! ponto cego que custou dois jobs e um segfault opaco.
-      if (localPet == 0) then
-        write(*,'(A)') ''
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ' ERRO FATAL: campos de importacao nao conectados'
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ' '//trim(missing)
-        write(*,'(A)') ''
-        write(*,'(A)') ' O componente OCN configurado nao oferece todos os campos que'
-        write(*,'(A)') ' o cap do MPAS anuncia (IMP_NAMES em mpas_cap_MONAN.F90).'
-        write(*,'(A)') ' Prosseguir levaria a SIGSEGV no primeiro passo, ao ler um'
-        write(*,'(A)') ' campo nunca realizado.'
-        write(*,'(A)') ''
-        write(*,'(A)') ' Verifique a combinacao ATM x OCN em &nuopc_mode:'
-        write(*,'(A)') '   use_datm=F use_docn=F use_med=T -> MPAS + MOM6  (producao)'
-        write(*,'(A)') '   use_datm=F use_docn=T use_med=F -> MPAS + DOCN  (Fase 1)'
-        write(*,'(A)') '=============================================================='
-        write(*,'(A)') ''
-      end if
+      ! log_error grava também na saída padrão (esmApp_run.log), onde o
+      ! motivo da parada precisa aparecer; a condição vale em todos os PETs,
+      ! por isso só o PET 0 a registra.
+      if (localPet == 0) call log_error(COMP_ATM, 'verify_import_connected: '// &
+        int_to_str(n_missing)//' de '//int_to_str(size(names))// &
+        ' campos de importacao nao conectados: '//trim(missing)// &
+        '. O componente OCN configurado nao oferece todos os campos que o cap '// &
+        'do MPAS anuncia (ATM@atm_cap no mapa de acoplamento); prosseguir levaria '// &
+        'a SIGSEGV no primeiro passo. Verifique a combinacao de componentes '// &
+        '(&nuopc_mode e &nuopc_petlayout, tabela COUPLER_MODES).')
       call ESMF_LogSetError(ESMF_FAILURE, msg=trim(msg), &
            line=__LINE__, file=u_FILE_u, rcToReturn=rc)
       return
     end if
 
-    write(msg,'(A,I0,A)') subname//': todos os ', N_IMP, &
-      ' campos de importacao estao conectados'
-    call ESMF_LogWrite(trim(msg), ESMF_LOGMSG_INFO)
+    call log_info(COMP_ATM, 'verify_import_connected: todos os '// &
+      int_to_str(size(names))//' campos de importacao estao conectados')
 
   end subroutine verify_import_connected
 
-  !> @brief Suprime validacao de timestamp dos campos de importacao.
+  !> @brief Suprime validação de timestamp dos campos de importação.
   !!
   !! O conector OCN->MPAS fornece SST com lag de 1 passo (t-1), portanto
-  !! os campos de importacao nunca tem timestamp = currTime. A validacao
-  !! padrao NUOPC (label_CheckImport) geraria "INCOMPATIBILITY: Import Fields
+  !! os campos de importação nunca têm timestamp = currTime. A validação
+  !! padrão NUOPC (label_CheckImport) geraria "INCOMPATIBILITY: Import Fields
   !! not at current time" em todos os 48 passos. Esta rotina substitui o
-  !! CheckImport padrao com sucesso incondicional.
+  !! CheckImport padrão com sucesso incondicional.
   subroutine CheckImportAlwaysOK(gcomp, rc)
     type(ESMF_GridComp) :: gcomp
     integer, intent(out) :: rc
@@ -641,13 +561,8 @@ contains
   !! Chamado em DataInitialize ANTES do primeiro passo de acoplamento, antes
   !! do MED ter executado. Sem isso, o importState chega ao mpas_import com
   !! valores indefinidos (zero ou lixo de memória), causando NaN em t=0.
-  !!
-  !! Sprint A Fase 2: defaults estendidos para 4 campos (era 1).
-  !!   1: Sx_tsfc  → temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
-  !!                 (Fase 4b, B-TSFC-DUALEXPORT-01 — era So_t; ver IMP_NAMES)
-  !!   2: Si_ifrac → fração de gelo (cfg_ice_fraction_default = 0.0)
-  !!   3: So_u     → corrente zonal (0.0 m/s — oceano em repouso)
-  !!   4: So_v     → corrente meridional (0.0 m/s — oceano em repouso)
+  !! O valor de cada campo vem de initial_import_value; um campo do mapa
+  !! sem valor previsto lá interrompe a inicialização.
   !!
   !! Após o primeiro ciclo MED→MPAS, todos serão sobrescritos pelos campos
   !! reais do MOM6+SIS2.
@@ -657,56 +572,83 @@ contains
     type(ESMF_Field)               :: field
     real(ESMF_KIND_R8), pointer    :: fptr1d(:)
     real(ESMF_KIND_R8), pointer    :: fptr2d(:,:)
-    real(ESMF_KIND_R8)             :: defaults(N_IMP)
+    real(ESMF_KIND_R8)             :: init_val
+    logical                        :: known
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
     integer :: i, fld_rank, localDeCount_imp
     rc = ESMF_SUCCESS
 
-    ! Sprint A: defaults alinhados com IMP_NAMES (5 elementos):
-    defaults(1) = real(cfg_sst_default,          ESMF_KIND_R8)  ! Sx_tsfc   [K]
-    defaults(2) = real(cfg_ice_fraction_default, ESMF_KIND_R8)  ! Si_ifrac  [0-1]
-    defaults(3) = 0.0_ESMF_KIND_R8                              ! So_u      [m/s]
-    defaults(4) = 0.0_ESMF_KIND_R8                              ! So_v      [m/s]
-    defaults(5) = real(cfg_zorl_default,         ESMF_KIND_R8)  ! Sf_zorl   [m]  (Sprint C)
-    ! FIX B-DIAGMASK-01: defaults(6) estava faltando desde a Fase 2.6 —
-    ! o array e' dimensionado por N_IMP e o laco abaixo percorre 1..N_IMP,
-    ! entao Sf_albedo era inicializado com o que houvesse na pilha. Corrigido
-    ! junto com a entrada nova, para o mesmo valor de agua aberta usado em
-    ! mpas_cap_methods.F90 e mpas_atm_model.F90.
-    defaults(6) = 0.08_ESMF_KIND_R8                             ! Sf_albedo [0-1] (Fase 2.6)
-    defaults(7) = 1.0_ESMF_KIND_R8                              ! Sx_omask  [0-1] — tudo oceano
-
-    do i = 1, N_IMP
+    call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', names)
+    do i = 1, size(names)
+      call initial_import_value(names(i), init_val, known)
+      if (.not. known) then
+        call ESMF_LogSetError(ESMF_FAILURE, msg='(mpas_cap:init_import_defaults): '// &
+             'campo importado sem valor inicial: '//trim(names(i)), &
+             line=__LINE__, file=u_FILE_u, rcToReturn=rc)
+        return
+      end if
       nullify(fptr1d, fptr2d)
-      call ESMF_StateGet(importState, itemName=trim(IMP_NAMES(i)), &
+      call ESMF_StateGet(importState, itemName=trim(names(i)), &
                          field=field, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      ! B-45: PETs sem DE local na grade MPAS (360×180, regDecomp(2)=90) têm
+      ! PETs sem DE local na grade MPAS (360×180, regDecomp(2)=90) têm
       ! localDeCount=0 com 512 PETs (PETs 90-511). ESMF_FieldGet(farrayPtr)
       ! nestes PETs gera "localDe is out of range". Verificar antes de acessar.
       call ESMF_FieldGet(field, localDeCount=localDeCount_imp, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      if (localDeCount_imp == 0) cycle   ! PET sem dados locais — nada a inicializar
+      if (localDeCount_imp == 0) cycle   ! PET sem dados locais: nada a inicializar
       ! Consultar rank antes de chamar farrayPtr (evita erro rank mismatch)
       call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
       if (fld_rank == 1) then
         call ESMF_FieldGet(field, farrayPtr=fptr1d, rc=rc)
         if (ChkErr(rc, __LINE__, u_FILE_u)) return
-        fptr1d = defaults(i)
+        fptr1d = init_val
         nullify(fptr1d)
       else
         call ESMF_FieldGet(field, farrayPtr=fptr2d, rc=rc)
         if (ChkErr(rc, __LINE__, u_FILE_u)) return
-        fptr2d = defaults(i)
+        fptr2d = init_val
         nullify(fptr2d)
       end if
     end do
   end subroutine init_import_defaults
 
-  pure function int_to_str(n) result(s)
-    integer, intent(in) :: n
-    character(len=12)   :: s
-    write(s, '(I0)') n
-  end function int_to_str
+  !> @brief Valor inicial de um campo importado, antes do primeiro passo.
+  !!
+  !! conhecido = .false. se o campo não tem valor previsto aqui.
+  !!   Sx_tsfc   temp. de pele padrão tropical (cfg_sst_default ≈ 298 K)
+  !!   Si_ifrac  fração de gelo (cfg_ice_fraction_default = 0.0)
+  !!   So_u      corrente zonal (0.0 m/s, oceano em repouso)
+  !!   So_v      corrente meridional (0.0 m/s, oceano em repouso)
+  !!   Sf_zorl   rugosidade (cfg_zorl_default) [m]
+  !!   Sf_albedo o mesmo valor de água aberta usado em mpas_adapter.F90 e
+  !!             mpas_atm_setup.F90 (ALB_OCEAN_DEFAULT)
+  !!   Sx_omask  1, tudo oceano
+  subroutine initial_import_value(name, init_val, known)
+    character(len=*),   intent(in)  :: name
+    real(ESMF_KIND_R8), intent(out) :: init_val
+    logical,            intent(out) :: known
+
+    known = .true.
+    select case (trim(name))
+    case ('Sx_tsfc')
+      init_val = real(cfg_sst_default, ESMF_KIND_R8)
+    case ('Si_ifrac')
+      init_val = real(cfg_ice_fraction_default, ESMF_KIND_R8)
+    case ('So_u', 'So_v')
+      init_val = 0.0_ESMF_KIND_R8
+    case ('Sf_zorl')
+      init_val = real(cfg_zorl_default, ESMF_KIND_R8)
+    case ('Sf_albedo')
+      init_val = ALB_OCEAN_DEFAULT
+    case ('Sx_omask')
+      init_val = 1.0_ESMF_KIND_R8
+    case default
+      init_val = 0.0_ESMF_KIND_R8
+      known = .false.
+    end select
+  end subroutine initial_import_value
+
 
 end module mpas_cap_MONAN_mod
