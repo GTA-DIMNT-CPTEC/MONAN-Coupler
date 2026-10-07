@@ -16,10 +16,13 @@ module med_ocean_mod
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
-                                cfg_docn_epoch_day, cfg_ice_model
-  use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_SST, SST_BULK_FALLBACK
+                                cfg_docn_epoch_day, cfg_ice_model, cpl_current_config
+  use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_SST, SST_BULK_FALLBACK, &
+                               med_field_index
+  use cpl_fields_mod, only: CPL_NAME_LEN
+  use cpl_map_mod, only: cpl_route_fields
   use med_diag_mod, only: record_fill, log_sst_raw
-  use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
+  use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled, log_error
   use med_cap_methods_mod, only: ZeroInternalField, route_fill
   use med_ice_mod, only: update_ice_fields_on_atm_grid
   use cpl_grids_mod, only: index_trunc
@@ -28,7 +31,7 @@ module med_ocean_mod
   private
 
   public :: update_ocean_fields_on_atm_grid
-  public :: regrid_ocean_currents
+  public :: regrid_ocn2atm_fields
   public :: update_ice_fraction_from_docn
   public :: legacy_ice_fraction
 
@@ -83,11 +86,10 @@ contains
       end if
       if (n_invalid >= 0) call record_sst_fill(is%run%fill_counts(COMPL_SST), n_invalid, n_left)
 
-      ! Regrid de correntes oceânicas OCN → ATM.
-      ! So_u e So_v são anunciados e realizados no importState do MED
-      ! (ocn_grid); ESMF_StateGet é seguro.
-      ! Fallback seguro: se regrid falhar, mantém zeros em is%ocn%u/is%ocn%v.
-      call regrid_ocean_currents(is, importState, zero_on_error=.false.)
+      ! Campos da rota ocn2atm no mapa (as correntes So_u e So_v), da grade
+      ! do oceano para a malha de fluxo. Se a interpolação falhar, o campo
+      ! interno fica com o zero de zero_med_fluxes.
+      call regrid_ocn2atm_fields(is, importState, zero_on_error=.false.)
 
       ! Si_ifrac_sis2, albedos e T_gelo, pela rota MASCARADA 'ocn2atm_ice',
       ! com extrapolação por vizinhança após o regrid: o mesmo tratamento da
@@ -127,34 +129,39 @@ contains
 
 
 
-  !> @brief Correntes oceânicas So_u/So_v para a grade ATM (rota ocn2atm).
-  !! Com zero_on_error, a componente cuja interpolação falhar é zerada.
-  subroutine regrid_ocean_currents(is, importState, zero_on_error)
+  !> @brief Campos que o mapa leva da grade do oceano à malha de fluxo pela
+  !! rota 'ocn2atm' (hoje, as correntes So_u e So_v), na ordem de EXCHANGES:
+  !! cada um é interpolado do importState para o campo interno de mesmo
+  !! nome (MED_FIELDS). Um campo que só atravessa o mediador nesse sentido
+  !! precisa da passagem no mapa e da linha em MED_FIELDS, sem código aqui.
+  !! Um campo do mapa fora de MED_FIELDS é erro de programação, registrado
+  !! no log. Um campo ausente do importState é pulado; com zero_on_error, o
+  !! campo cuja interpolação falhar é zerado.
+  !! @param[inout] is             estado interno do mediador
+  !! @param[inout] importState    estado de importação
+  !! @param[in]    zero_on_error  zerar o campo interno se a interpolação falhar
+  subroutine regrid_ocn2atm_fields(is, importState, zero_on_error)
     type(MED_InternalState), intent(inout) :: is
     type(ESMF_State),        intent(inout) :: importState
     logical,                 intent(in)    :: zero_on_error
+    character(len=CPL_NAME_LEN), allocatable :: names(:)
+    type(ESMF_Field) :: src
+    integer :: i, k, rc_c
 
-    call regrid_one('So_u', is%ocn%u)
-    call regrid_one('So_v', is%ocn%v)
-
-  contains
-
-    !> Interpola um campo do importState pela rota 'ocn2atm'.
-    !! @param[in]    name  nome do campo
-    !! @param[inout] dst   destino na malha de fluxo
-    subroutine regrid_one(name, dst)
-      character(len=*), intent(in)    :: name
-      type(ESMF_Field), intent(inout) :: dst
-      type(ESMF_Field) :: src
-      integer :: rc_c
-
-      call ESMF_StateGet(importState, itemName=name, field=src, rc=rc_c)
-      if (rc_c /= ESMF_SUCCESS) return
-      call is%regrid%apply('ocn2atm', src, dst, rc_c)
-      if (rc_c /= ESMF_SUCCESS .and. zero_on_error) call ZeroInternalField(dst, rc_c)
-    end subroutine regrid_one
-
-  end subroutine regrid_ocean_currents
+    call cpl_route_fields('ocn2atm', 'MED@atm_med', cpl_current_config(), '', names)
+    do i = 1, size(names)
+      k = med_field_index(is, names(i))
+      if (k == 0) then
+        call log_error(COMP_MED, 'regrid_ocn2atm_fields: '//trim(names(i))// &
+          ' chega pela rota ocn2atm no mapa, mas nao esta em MED_FIELDS')
+        return
+      end if
+      call ESMF_StateGet(importState, itemName=trim(names(i)), field=src, rc=rc_c)
+      if (rc_c /= ESMF_SUCCESS) cycle
+      call is%regrid%apply('ocn2atm', src, is%fields(k)%field, rc_c)
+      if (rc_c /= ESMF_SUCCESS .and. zero_on_error) call ZeroInternalField(is%fields(k)%field, rc_c)
+    end do
+  end subroutine regrid_ocn2atm_fields
 
   !> @brief Fração de gelo do OISST (use_docn_ice): lê o arquivo no início
   !! (ou a cada passo, sem docn_ice_init_only) e, com docn_ice_init_only,

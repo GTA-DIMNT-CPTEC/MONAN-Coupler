@@ -45,7 +45,7 @@ module med_exchange_mod
   use med_export_mod,      only: export_to_components
   use med_diag_mod,        only: log_ocean_mask
   use med_ocean_mod,       only: update_ocean_fields_on_atm_grid, &
-                                 update_ice_fraction_from_docn, regrid_ocean_currents, &
+                                 update_ice_fraction_from_docn, regrid_ocn2atm_fields, &
                                  legacy_ice_fraction
 
   implicit none
@@ -189,8 +189,9 @@ contains
     call create_start_routes(is, importState, exp_field, rc)
     if (rc /= ESMF_SUCCESS) return
 
-    ! Correntes So_u/So_v: mesma grade de So_t, mesma rota.
-    call regrid_ocean_currents(is, importState, zero_on_error=.true.)
+    ! Campos da rota ocn2atm no mapa (as correntes So_u/So_v): mesma grade
+    ! de So_t, mesma rota.
+    call regrid_ocn2atm_fields(is, importState, zero_on_error=.true.)
 
     call idc_init_export_fields(exportState)
 
@@ -375,9 +376,9 @@ contains
 
   !> @brief Fase B de InitializeDataComplete: correntes e SST de t=0 na grade ATM.
   !!
-  !! Primeiro regrid de So_u e So_v para is%ocn%u/is%ocn%v, pela rota
-  !! 'ocn2atm' (bilinear, criada na fase A): So_u/So_v compartilham a grade
-  !! OCN de So_t. Depois, a SST de t=0: sem ela, is%ocn%sst ficaria no valor
+  !! Primeiro regrid dos campos da rota 'ocn2atm' no mapa (as correntes
+  !! So_u e So_v), pela rota bilinear criada na fase A: eles compartilham a
+  !! grade OCN de So_t. Depois, a SST de t=0: sem ela, is%ocn%sst ficaria no valor
   !! de bootstrap SST_BULK_FALLBACK até o primeiro MediatorAdvance, e o
   !! conector MED -> MPAS entregaria essa constante ao MPAS. A SST é
   !! publicada no exportState (zerado na fase A), para que o "MED -> MPAS"
@@ -389,7 +390,7 @@ contains
     type(ESMF_Field), intent(inout) :: ocn_field
     integer :: localrc
 
-    call regrid_ocean_currents(is, importState, zero_on_error=.true.)
+    call regrid_ocn2atm_fields(is, importState, zero_on_error=.true.)
 
     call is%regrid%apply('ocn2atm', ocn_field, is%ocn%sst, localrc)
     if (localrc /= ESMF_SUCCESS) then

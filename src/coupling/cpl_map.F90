@@ -232,6 +232,10 @@ module cpl_map_mod
     'Faxa_rain', 'Faxa_snow']
   !> Estado do oceano: temperatura e corrente na superfície.
   character(len=CPL_NAME_LEN), parameter :: GROUP_OCN_STATE(*) = [character(len=CPL_NAME_LEN) :: 'So_t', 'So_u', 'So_v']
+  !> Da grade do oceano para a malha de fluxo pela rota ocn2atm, sem
+  !! tratamento próprio: o mediador interpola cada um para o campo interno
+  !! de mesmo nome (regrid_ocn2atm_fields, med_ocean).
+  character(len=CPL_NAME_LEN), parameter :: GROUP_OCN2ATM(*) = [character(len=CPL_NAME_LEN) :: 'So_u', 'So_v']
   !> Do SIS2 para o mediador: fração, albedos e temperatura do gelo.
   character(len=CPL_NAME_LEN), parameter :: GROUP_ICE_SIS2(*) = [character(len=CPL_NAME_LEN) ::            &
     'Si_ifrac_sis2', 'Si_avsdr_sis2', 'Si_avsdf_sis2', 'Si_anidr_sis2', 'Si_anidf_sis2', &
@@ -294,8 +298,8 @@ module cpl_map_mod
       i_group = 1, size(GROUP_ICE_SIS2)),                                                                                                     &
     ! 5. Mediador: da grade do oceano para a malha de fluxo
     cpl_exchange_t('So_t',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm_sst',      '',                       ''),          &
-    cpl_exchange_t('So_u',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),          &
-    cpl_exchange_t('So_v',                        'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),          &
+    (cpl_exchange_t(GROUP_OCN2ATM(i_group),       'MED@ocn_med',  'MED@atm_med',  'ocn2atm',          '',                       ''),          &
+      i_group = 1, size(GROUP_OCN2ATM)),                                                                                                      &
     cpl_exchange_t('So_omask',                    'MED@ocn_med',  'MED@atm_med',  'ocn2atm_landmask', '',                       ''),          &
     (cpl_exchange_t(GROUP_ICE_SIS2(i_group),      'MED@ocn_med',  'MED@atm_med',  'ocn2atm_ice',      'sis2',                   ''),          &
       i_group = 1, size(GROUP_ICE_SIS2)),                                                                                                     &
@@ -467,8 +471,9 @@ contains
   !> @brief Campos que chegam a um ponto por uma rota do mediador, na ordem de
   !! EXCHANGES e sem repetição, com a mesma regra de chaves de cpl_arrivals.
   !!
-  !! É a lista que o mediador percorre para exportar os campos que voltam da
-  !! malha de fluxo pela rota 'atm2ocn' (med_export).
+  !! São as listas que o mediador percorre para exportar os campos que
+  !! voltam da malha de fluxo pela rota 'atm2ocn' (med_export) e para
+  !! levar à malha de fluxo os campos da rota 'ocn2atm' (med_ocean).
   !! @param[in]  route  nome da rota (coluna via)
   !! @param[in]  point  'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
   !! @param[in]  cfg    configuração atual

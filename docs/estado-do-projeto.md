@@ -93,7 +93,7 @@ Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um,
 | DATM no driver | registrá-lo (com a correção de `ReadJRAFieldInterp`) ou retirá-lo do mapa |
 | metadados dos diagnósticos | unificar pelo dicionário (`FIELDS`) os textos da importação do MONAN-A e do DOCN (tabela abaixo) |
 
-**Etapas 31 e 32, retomadas (decisão do Daniel, out/2026).** Adiadas no fechamento da fase 13, foram retomadas antes da fase 14, que não depende delas. R-FASE13-31: a física do mediador acessa os campos internos pela posição em `MED_FIELDS` (`fluxes%p(F_TAUX)%a`), e a associação e a zeragem a cada passo são laços sobre a tabela; um campo calculado no mediador passa a 5 lugares ([`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4). R-FASE13-32: o repasse pelo mediador sem cálculo, pelo mapa.
+**Etapas 31 e 32, retomadas (decisão do Daniel, out/2026).** Adiadas no fechamento da fase 13, foram retomadas antes da fase 14, que não depende delas. R-FASE13-31: a física do mediador acessa os campos internos pela posição em `MED_FIELDS` (`fluxes%p(F_TAUX)%a`), e a associação e a zeragem a cada passo são laços sobre a tabela; um campo calculado no mediador passa a 5 lugares ([`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4). R-FASE13-32: os campos que o mapa leva do oceano à malha de fluxo pela rota `ocn2atm` são interpolados num laço sobre o mapa, sem código por campo; o sentido contrário (da atmosfera para o oceano) continua com código, porque os campos do MONAN-A passam pela reunião dos blocos do MPAS antes da física.
 
 | Item | Situação |
 | --- | --- |

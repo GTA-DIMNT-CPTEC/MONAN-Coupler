@@ -72,6 +72,15 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 
 São 5 lugares em 4 arquivos, contando `FIELDS` e o mapa. O teste `tests/unit/test_med_fields.F90` confere cada constante `F_*` contra o nome do campo: incluir um campo inclui uma chamada a `check` ali. Os componentes nomeados do estado interno (`is%ocn_flx`, `is%ocn`, `is%ice`, `is%sfc`, ligados em `bind_internal_fields`) só são necessários quando o código fora da física (as fases de interpolação, a exportação explícita, os diagnósticos) precisa do `ESMF_Field` pelo nome.
 
+**Campo que só atravessa o mediador.** Na produção, os modelos não trocam campos diretamente: tudo passa pelo mediador, e a saída dele para qualquer modelo parte da grade do oceano (rota `atm2ocn`, percorrida pelo mapa em `export_to_components`). Os dois sentidos têm custos diferentes:
+
+| Sentido | O que fazer | Código no mediador |
+| --- | --- | --- |
+| do oceano para a atmosfera (por exemplo, um campo do MOM6 para o MONAN-A) | `FIELDS`; o nome em `EXPORT_MOM6` e o preenchimento no cap; a passagem do MOM6 ao mediador (uma linha própria, se o DOCN não exporta o campo); o nome em `GROUP_OCN2ATM` (rota `ocn2atm`), em `GROUP_ATM2OCN_OTHER` (volta à grade do oceano) e em `GROUP_ATM_SURFACE` (conector para o MONAN-A); a linha em `MED_FIELDS` com a constante `F_*` | nenhum: `regrid_ocn2atm_fields` (`med_ocean`) interpola pelo mapa |
+| da atmosfera para o oceano (por exemplo, um campo do MONAN-A para o MOM6) | `FIELDS` (o nome com o sufixo `_mpas` e o nome exportado); o nome em `EXPORT_MPAS`, o preenchimento no cap, os nomes em `GROUP_MPAS_ATM` e em `GROUP_OCEAN_FLUXES`; a linha em `MED_FIELDS` com a constante `F_*` | a leitura em `get_atm_forcing` (`med_flux`), que reúne os blocos do MPAS, e a cópia para o campo interno na física, como `Faxa_rain` |
+
+No segundo sentido, a cópia continua sendo código porque os campos do MONAN-A chegam com outro nome (sufixo `_mpas`) e passam pela reunião dos blocos do MPAS antes da física; torná-la genérica pede reorganizar `get_atm_forcing`, o que fica para quando houver um campo assim.
+
 ## 5. Como incluir um componente
 
 1. **Malha**: linha em `GRIDS`; o cap a constrói pelo catálogo (`cpl_grids`). Malha de tipo novo: função nova em `cpl_grids`.
