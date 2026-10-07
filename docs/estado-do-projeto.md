@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-34 (07/10/2026), no fechamento da fase 13. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-35 (07/10/2026), depois das etapas 31 e 32. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
 
 ## 1. O projeto
 
@@ -31,7 +31,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
 | 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
-| 13 | código de produção limpo e de fácil manutenção (NTC de análise da arquitetura): defeitos C1 a C5, comentários, registro com níveis, dicionário com nomes longos e CF, campos internos do mediador por nome, exportação do mediador pelo mapa, camadas sem variáveis globais, configuração por grupo e por modelo (`COMPONENTS`), sequência de execução como texto, mapa por grupos, anúncio comum e cap modelo, limpezas finais | R-FASE13-01 a 34 (com 29-FIX01); 31 e 32 retomadas depois do fechamento | concluída (`fase13-34-validada`); 31 e 32 em validação; etapa por etapa no [`CHANGELOG.md`](CHANGELOG.md) |
+| 13 | código de produção limpo e de fácil manutenção (NTC de análise da arquitetura): defeitos C1 a C5, comentários, registro com níveis, dicionário com nomes longos e CF, campos internos do mediador por nome, exportação do mediador pelo mapa, camadas sem variáveis globais, configuração por grupo e por modelo (`COMPONENTS`), sequência de execução como texto, mapa por grupos, anúncio comum e cap modelo, limpezas finais, física do mediador pela posição em `MED_FIELDS`, repasse do oceano para a malha de fluxo pelo mapa | R-FASE13-01 a 35 (com 29-FIX01); 31 e 32 feitas depois do fechamento | concluída (`fase13-32-validada`); etapa por etapa no [`CHANGELOG.md`](CHANGELOG.md) |
 | 14 | validação do DOCN e do DATM, com linhas de base próprias; em seguida, o bloco D da fase 13 (P6c, P6b e P4b) | 14-01 a 14-07 (NTC de análise da arquitetura, v5, capítulo 10) | aguardando as decisões do GT da seção 6 |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
@@ -93,7 +93,7 @@ Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um,
 | DATM no driver | registrá-lo (com a correção de `ReadJRAFieldInterp`) ou retirá-lo do mapa |
 | metadados dos diagnósticos | unificar pelo dicionário (`FIELDS`) os textos da importação do MONAN-A e do DOCN (tabela abaixo) |
 
-**Etapas 31 e 32, retomadas (decisão do Daniel, out/2026).** Adiadas no fechamento da fase 13, foram retomadas antes da fase 14, que não depende delas. R-FASE13-31: a física do mediador acessa os campos internos pela posição em `MED_FIELDS` (`fluxes%p(F_TAUX)%a`), e a associação e a zeragem a cada passo são laços sobre a tabela; um campo calculado no mediador passa a 5 lugares ([`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4). R-FASE13-32: os campos que o mapa leva do oceano à malha de fluxo pela rota `ocn2atm` são interpolados num laço sobre o mapa, sem código por campo; o sentido contrário (da atmosfera para o oceano) continua com código, porque os campos do MONAN-A passam pela reunião dos blocos do MPAS antes da física.
+**Etapas 31 e 32 (feitas depois do fechamento, a pedido do Daniel, out/2026).** R-FASE13-31 (`fase13-31-validada`): a física do mediador acessa os campos internos pela posição em `MED_FIELDS` (`fluxes%p(F_TAUX)%a`), e a associação e a zeragem a cada passo são laços sobre a tabela; um campo calculado no mediador passa de 9 para 5 lugares. R-FASE13-32 (`fase13-32-validada`): os campos que o mapa leva do oceano à malha de fluxo pela rota `ocn2atm` (`GROUP_OCN2ATM`) são interpolados num laço sobre o mapa. Ficou de fora o repasse da atmosfera para o oceano sem cálculo: os campos do MONAN-A chegam com o sufixo `_mpas` e passam pela reunião dos blocos do MPAS (`get_atm_forcing`, `med_flux`) antes da física, e torná-lo genérico pede reorganizar essa leitura, numa etapa própria, quando houver um campo assim. Procedimentos em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4.
 
 | Item | Situação |
 | --- | --- |
