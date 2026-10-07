@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-35 (07/10/2026), depois das etapas 31 e 32. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-36 (07/10/2026), depois da integração ao `develop`. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
 
 ## 1. O projeto
 
@@ -11,7 +11,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | Item | Valor |
 | --- | --- |
 | Repositório | `GTA-DIMNT-CPTEC/MONAN-Coupler`, a partir do commit `ea10fb6` do `develop` |
-| Ramo | `refactor/principal`; cada etapa validada tem a tag `faseN-NN-validada` |
+| Ramos | `develop`, com a refatoração integrada (tag `refatoracao-integrada`); `refactor/principal`, o ramo de trabalho das etapas; cada etapa validada tem a tag `faseN-NN-validada` |
 | Instalação na Jaci | `/p/projetos/gta/daniel.massaru/refatorado/Coupler-Install/MONAN-Coupler` |
 | Produção (não usar para validar) | `/p/projetos/gta/daniel.massaru/coupling/Coupler-Install/MONAN-Coupler` |
 | Linhas de base | `/p/projetos/gta/daniel.massaru/refatorado/baseline/` |
@@ -109,22 +109,26 @@ Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um,
 
 ## 7. Integração ao `develop`
 
-Adiada por decisão do Daniel. Quando for feita, na Jaci, um comando por vez, a partir da última tag validada:
+Feita em 07/10/2026, na Jaci, com o `develop` sem mudanças desde `ea10fb6`. O commit de integração é `e2b322d` ("Integra a refatoracao (fases 1 a 13) ao develop", criado com `--no-ff`); o código do `develop` ficou idêntico ao da tag `fase13-32-validada` (`git diff fase13-32-validada develop --stat` vazio), sem rodada nova.
+
+| Tag | Aponta para | Uso |
+| --- | --- | --- |
+| `develop-antes-da-refatoração` | `ea10fb6`, o `develop` antes da integração | ponto de retorno |
+| `refatoracao-integrada` | `e2b322d`, o commit de integração | marca da integração |
+
+**Como desfazer, se a equipe decidir.** Com o `develop` já em uso, reverter o commit de integração, mantendo o lado do `develop` original; o histórico fica, e o `refactor/principal` e as tags `faseN-NN-validada` não mudam:
 
 | Passo | Comando | O que conferir |
 | --- | --- | --- |
-| 1 | `git status` | árvore limpa em `refactor/principal` |
-| 2 | `git fetch origin` | |
-| 3 | `git merge-base --is-ancestor origin/develop refactor/principal && echo SEM-NOVIDADES` | `SEM-NOVIDADES` |
-| 4 | `git checkout develop` | |
-| 5 | `git merge --ff-only origin/develop` | |
-| 6 | `git merge --no-ff refactor/principal -m "Integra a refatoracao (fases 1 a 12) ao develop"` | sem conflitos |
-| 7 | `git diff refactor/principal develop --stat` | vazio |
-| 8 | `git tag refatoracao-integrada` | |
-| 9 | `git push origin develop` | |
-| 10 | `git push origin refatoracao-integrada` | |
+| 1 | `git checkout develop` | |
+| 2 | `git pull --ff-only origin develop` | |
+| 3 | `git revert -m 1 e2b322d` | um commit novo que desfaz a integração |
+| 4 | `git diff develop-antes-da-refatoração develop --stat` | vazio |
+| 5 | `git push origin develop` | |
 
-Se o passo 3 não imprimir `SEM-NOVIDADES`, o `develop` mudou desde `ea10fb6`: resolver os conflitos, compilar e validar antes do passo 8.
+Para integrar de novo depois de um revert, reverter o revert (`git revert <commit do revert>`): um segundo `git merge refactor/principal` não traria nada, porque o git considera esses commits já integrados.
+
+**Como o trabalho continua.** As etapas seguintes partem do `develop` integrado. Na Jaci, `git checkout refactor/principal` e `git merge --ff-only develop` deixam o ramo de trabalho igual ao `develop` (só avança, sem commit novo); os patches seguintes são aplicados nele com `git am`, validados como antes e levados ao `develop` com `git checkout develop` e `git merge --ff-only refactor/principal`.
 
 ## 8. Para retomar
 
@@ -139,6 +143,6 @@ export ESMF_DIR=$HOME/esmf ESMF_COMPILER=gfortran ESMF_COMM=mpich ESMF_NETCDF=nc
 cd $HOME/esmf && make -j2 lib && make install
 export ESMFMKFILE=$HOME/esmf-install/lib/libO/Linux.gfortran.64.mpich.default/esmf.mk
 export MPIRUN="mpirun.openmpi --allow-run-as-root --oversubscribe"
-git clone --branch refactor/principal https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git
+git clone --branch develop https://github.com/GTA-DIMNT-CPTEC/MONAN-Coupler.git
 cd MONAN-Coupler && tools/dev/confere-tudo.bash HEAD
 ```

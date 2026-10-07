@@ -23,7 +23,7 @@ As fases 1 a 5 cumpriram boa parte do primeiro, do quarto e do sexto critério d
 - **Nenhuma etapa de limpeza muda resultados.** Cada etapa é validada contra a linha de base R-NOFMA-02 (73 arquivos, bit a bit). O que puder mudar resultados fica na trilha de decisões (fase 10), com etapa e linha de base próprias.
 - **Cada etapa é um patch com um único commit**, com CHANGELOG atualizado, conferências locais e rodada na Jaci.
 - **O DTN-01 fica de lado por enquanto.** O levantamento de conformidade está em `docs/conformidade-dtn01.md` e será retomado depois deste roteiro.
-- **A integração de `refactor/principal` ao `develop` fica para o fim da limpeza** (fim da fase 9).
+- **A integração de `refactor/principal` ao `develop` fica para o fim da limpeza** (fim da fase 9). Feita em 07/10/2026, depois da fase 13 (tag `refatoracao-integrada`; ver `estado-do-projeto.md`, seção 7).
 
 ## 3. Onde estamos: indicadores
 
