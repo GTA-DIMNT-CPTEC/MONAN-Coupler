@@ -4,7 +4,8 @@
 #
 # Uso (de qualquer pasta):
 #   bash tools/dev/valida_rodada.bash prepara NOME   # confere ambiente e executável; cria exp/NOME
-#   bash tools/dev/valida_rodada.bash submete NOME   # --check e submissão (152 PETs)
+#   bash tools/dev/valida_rodada.bash submete NOME   # --check e submissão (152 PETs); recusa
+#                                                    # diretório com logs/PET*.esmApp.log
 #   bash tools/dev/valida_rodada.bash compara NOME   # compara com a linha de base
 #
 # O compara também extrai do log do PET 0 o relatório de acoplamento (linhas
@@ -32,7 +33,7 @@ NPES=${NPES:-152}
 export COUPLER_ROOT
 
 acao=${1:-}; nome=${2:-}
-[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,24p' "$0"; exit 2; }
+[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,25p' "$0"; exit 2; }
 DIR=${REF}/exp/${nome}
 
 falha() { echo "ERRO: $*" >&2; exit 1; }
@@ -150,6 +151,12 @@ prepara)
 submete)
   [[ -d "${DIR}" ]] || falha "${DIR} não existe; rode antes: bash $0 prepara ${nome}"
   cd "${DIR}" || exit 1
+  # O ESMF acrescenta ao fim de logs/PET*.esmApp.log: uma segunda submissão
+  # no mesmo diretório juntaria as duas execuções no log (e no relatório de
+  # acoplamento extraído dele). Cada rodada usa um diretório novo.
+  if compgen -G "logs/PET*.esmApp.log" > /dev/null; then
+    falha "${DIR} já tem logs/PET*.esmApp.log de uma execução anterior; prepare outro diretório: bash $0 prepara ${nome}b"
+  fi
   bash "${COUPLER_ROOT}/run/run_esmApp.jaci" -n "${NPES}" --check || falha "--check falhou"
   bash "${COUPLER_ROOT}/run/run_esmApp.jaci" -n "${NPES}" -w 01:00:00
   echo "Próximo passo: bash $0 compara ${nome}"
@@ -201,5 +208,5 @@ compara)
   echo " Relatório completo: ${DIR}/compara.txt"
   exit "${rc_cmp}"
   ;;
-*) sed -n '2,24p' "$0"; exit 2 ;;
+*) sed -n '2,25p' "$0"; exit 2 ;;
 esac

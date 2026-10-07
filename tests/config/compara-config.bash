@@ -7,7 +7,9 @@
 # árvore de trabalho, liga a cada uma o programa tests/config/test_config.F90
 # da árvore de trabalho e o roda com os mesmos arquivos de configuração. Para
 # cada caso, a saída (mensagens de config_read, código de retorno e valor de
-# todas as variáveis cfg_*) tem de ser idêntica nas duas versões.
+# todas as variáveis cfg_*) tem de ser idêntica nas duas versões. Confere
+# também que o nuopc.input da raiz é lido, na versão de hoje, sem erro, sem
+# chave obsoleta e sem grupo obrigatório ausente.
 #
 # Casos: o nuopc.input da raiz; arquivo vazio e arquivo ausente; chave
 # desconhecida num grupo obrigatório e no &nuopc_regrid; chaves obsoletas;
@@ -28,7 +30,7 @@
 set -uo pipefail
 
 REV=${1:-}
-[[ -n "${REV}" ]] || { sed -n '2,26p' "$0"; exit 2; }
+[[ -n "${REV}" ]] || { sed -n '2,28p' "$0"; exit 2; }
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 SAIDA=$(mkdir -p "${2:-${RAIZ}/build-local/config}" && cd "${2:-${RAIZ}/build-local/config}" && pwd)
 FC=${FC:-mpif90}
@@ -207,8 +209,20 @@ for caso in ${CASOS}; do
     ndif=$((ndif + 1))
   fi
 done
+# O nuopc.input da raiz, na versão de hoje: lido sem erro, sem chave
+# obsoleta e com todos os grupos obrigatórios (outros avisos, como o de
+# seq_repro ignorado no modo concorrente, são permitidos)
+raiz="${SAIDA}/raiz_atual.txt"
+if grep -q '^rc = 0$' "${raiz}" && ! grep -q 'ERRO' "${raiz}" \
+   && ! grep -q 'obsoleta' "${raiz}" && ! grep -q 'ausente, usando valores padrao' "${raiz}"; then
+  echo "  nuopc.input da raiz: lido sem erro, sem chave obsoleta e sem grupo ausente"
+else
+  echo "  nuopc.input da raiz: ERRO, chave obsoleta ou grupo ausente na leitura:"
+  grep -v ' = \|^==' "${raiz}" | sed 's/^/      /'
+  ndif=$((ndif + 1))
+fi
 if [[ ${ndif} -gt 0 ]]; then
-  echo "FALHOU: ${ndif} caso(s) diferem de ${REV}"
+  echo "FALHOU: ${ndif} caso(s) diferem de ${REV} ou o nuopc.input da raiz tem problema"
   exit 1
 fi
 echo "OK: a leitura da configuração é a mesma de ${REV} nos $(echo ${CASOS} | wc -w) casos"

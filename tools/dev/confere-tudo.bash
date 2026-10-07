@@ -28,6 +28,8 @@
 #               entre eles o da consistência do mapa de acoplamento
 #   mapa        docs/acoplamento.md em dia com o mapa de acoplamento
 #               (tools/dev/mapa-acoplamento.py -c)
+#   cabecalhos  rotinas com o cabeçalho Doxygen do README e nomes de @param
+#               que são argumentos (tools/dev/confere-cabecalhos.py)
 #   curtocircuito  nenhuma guarda que conte com o curto-circuito do .and.
 #               (tools/dev/confere-curto-circuito.py)
 #   exportacao  todo campo exportado pelo mediador tem preenchimento em
@@ -63,7 +65,7 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa curtocircuito exportacao dependencias camadas cplcheck config supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa cabecalhos curtocircuito exportacao dependencias camadas cplcheck config supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
@@ -223,6 +225,7 @@ quer malhas     && executa malhas tests/malhas/compara-malhas.bash "${REV}" "${S
 quer completar  && executa completar tests/completar/compara-completar.bash "${REV}" "${SAIDA}/completar"
 quer unitarios  && executa unitarios tests/unit/roda-unitarios.bash "${SAIDA}/unit"
 quer mapa       && executa mapa python3 tools/dev/mapa-acoplamento.py -c
+quer cabecalhos && executa cabecalhos python3 tools/dev/confere-cabecalhos.py
 quer curtocircuito && executa curtocircuito python3 tools/dev/confere-curto-circuito.py
 quer exportacao && executa exportacao python3 tools/dev/confere-exportacao.py
 quer dependencias && executa dependencias python3 tools/dev/dependencias.py gera -c

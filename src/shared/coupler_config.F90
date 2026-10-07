@@ -583,6 +583,9 @@ contains
       ' deve ser <= dt_coupling=', g%dt_coupling
     if (is_root .and. mod(g%dt_coupling, g%dt_atm) /= 0) &
       write(*,'(A)') TAG//'AVISO: dt_coupling nao e multiplo de dt_atm.'
+    if (is_root .and. len_trim(g%run_sequence_file) > 0) write(*,'(3A)') TAG// &
+      'AVISO: sequencia de execucao lida de ', trim(g%run_sequence_file), &
+      ' (run_sequence_file), fora da validacao do acoplador; use so em experimentos.'
   end subroutine warn_driver_group
 
   !> @brief Copia os valores de &nuopc_driver para as variáveis do módulo.

@@ -61,7 +61,7 @@ Modos de execução. O eixo espacial `split` dá a cada componente um bloco pró
 
 A chave `seq_repro = .true.` só tem efeito com `coupling_mode = 'sequential'`, `use_sis2_dynamic = .true.` e `pet_layout = 'split'`. Ela faz a RunSequence sequencial emitir o mesmo fluxo de dados do concorrente, tornando as duas rodadas comparáveis, sem alterar o modo concorrente. Fora desse contexto é ignorada, com aviso. O default `.false.` preserva o sequencial recomendado.
 
-A sequência de execução de cada passo (que componente avança e que conector roda, em que ordem) vem da tabela `RUN_SEQUENCES` (`src/driver/run_sequences.F90`): sete sequências escritas como texto, no formato do NUOPC, escolhidas por `coupling_mode`, `use_med_to_mpas`, `use_sis2_dynamic` e `seq_repro`. O nome da escolhida aparece no log (`RunSequence ...`). Para experimentar outra ordem sem recompilar, a chave `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência sob o rótulo `runSeq::` (exemplo no `nuopc.input` da raiz); o período da linha `@` deve ser `dt_coupling`. Uma sequência de arquivo não é conferida pelo acoplador: serve a experimentos, não à produção.
+A sequência de execução de cada passo (que componente avança e que conector roda, em que ordem) vem da tabela `RUN_SEQUENCES` (`src/driver/run_sequences.F90`): sete sequências escritas como texto, no formato do NUOPC, escolhidas por `coupling_mode`, `use_med_to_mpas`, `use_sis2_dynamic` e `seq_repro`. O nome da escolhida aparece no log (`RunSequence ...`). Para experimentar outra ordem sem recompilar, a chave `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência sob o rótulo `runSeq::` (exemplo no `nuopc.input` da raiz); o período da linha `@` deve ser `dt_coupling`. Uma sequência de arquivo não é conferida pelo acoplador: serve a experimentos, não à produção, e a leitura da configuração o lembra com um aviso na saída padrão (`esmApp_run.log`).
 
 Os componentes são escolhidos por quatro chaves: `use_datm`, `use_docn` e `use_med_to_mpas` (grupo `&nuopc_mode`) e `use_sis2_dynamic` (grupo `&nuopc_petlayout`). Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e SIS2, com o contorno da atmosfera pelo mediador. A tabela `COUPLER_MODES`, em `src/shared/coupler_config.F90`, diz o que acontece com cada combinação, e é a mesma que o mapa de acoplamento consulta:
 
@@ -130,7 +130,7 @@ Modelo dos cabeçalhos (Doxygen). O módulo começa por `!> @file nome.F90`, `!!
   subroutine nome(...)
 ```
 
-As rotinas internas (`contains` dentro de outra rotina) e as funções curtas podem ter só a linha `!>`. O nome depois de `@param` é o do argumento, como está na declaração da rotina.
+As rotinas internas (`contains` dentro de outra rotina) e as funções curtas podem ter só a linha `!>`. O nome depois de `@param` é o do argumento, como está na declaração da rotina. A conferência `cabecalhos` (`tools/dev/confere-cabecalhos.py`) confere as duas regras.
 
 O andamento da modernização do código está em [`docs/refatoracao-fase1.md`](docs/refatoracao-fase1.md).
 
@@ -199,7 +199,7 @@ Guias de uso das ferramentas:
 | [`uso-duplas-rodadas-repro.md`](docs/uso-duplas-rodadas-repro.md) | `roda-repro-reprodiag.sh`, `roda_repro_producao.sh`, `roda_repro_datm_mom6.sh`, `roda-repro-mpas-standalone.sh`, `set-nccmp-jaci.bash` |
 | [`uso-linha-base.md`](docs/uso-linha-base.md) | `cria-linha-base.bash`, `compara-linha-base.bash`, `anota-linha-base.bash` |
 | [`validacao-refatoracao.md`](docs/validacao-refatoracao.md) | `valida_rodada.bash` |
-| [`conferencias-locais.md`](docs/conferencias-locais.md) | `confere-tudo.bash`, `indicadores.py`, `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash`, `tests/unit/roda-unitarios.bash`, `tests/supergrid/compara-supergrid.bash`, `tests/docn/compara-docn.bash`, `mapa-acoplamento.py`, `confere-curto-circuito.py`, `confere-exportacao.py`, `dependencias.py`, `confere-camadas.py`, `tests/config/compara-config.bash`, `tests/cplcheck/confere-cplcheck.bash` |
+| [`conferencias-locais.md`](docs/conferencias-locais.md) | `confere-tudo.bash`, `indicadores.py`, `compila-local.bash`, `confere-literais.py`, `confere-instrucoes.py`, `tests/writers/compara-gravadores.bash`, `tests/bulk/compara-bulk.bash`, `tests/atmgrid/compara-grade-atm.bash`, `tests/unit/roda-unitarios.bash`, `tests/supergrid/compara-supergrid.bash`, `tests/docn/compara-docn.bash`, `mapa-acoplamento.py`, `confere-curto-circuito.py`, `confere-exportacao.py`, `dependencias.py`, `confere-camadas.py`, `confere-cabecalhos.py`, `tests/config/compara-config.bash`, `tests/cplcheck/confere-cplcheck.bash` |
 | [`historico-scripts.md`](docs/historico-scripts.md) | histórico das versões dos scripts Python de `tools/` |
 | [`roteiro-codigo-limpo.md`](docs/roteiro-codigo-limpo.md) | roteiro das fases 6 a 11 (código limpo), com indicadores e metas |
 | [`arquitetura-acoplamento.md`](docs/arquitetura-acoplamento.md) | arquitetura de acoplamento: as peças e como incluir um campo, um componente ou um esquema de interpolação |

@@ -14,8 +14,9 @@
 !!   arquivo      run_sequence_from_file lê a sequência sob o rótulo
 !!                runSeq:: de um arquivo e falha com um arquivo sem o rótulo
 !!   chave        run_sequence_file de &nuopc_driver: vazia por padrão;
-!!                aceita com um arquivo que existe; erro fatal, sem mudar o
-!!                valor, com um arquivo que não existe
+!!                aceita com um arquivo que existe (com aviso na saída
+!!                padrão: sequência fora da validação); erro fatal, sem
+!!                mudar o valor, com um arquivo que não existe
 !!
 !! Saída: uma linha PASSOU/FALHOU por caso e, no fim, "TODOS OS TESTES
 !! PASSARAM" ou o número de falhas; termina com código 1 se algum falhar.
