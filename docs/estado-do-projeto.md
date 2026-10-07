@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE12-07 (02/10/2026). A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-34 (07/10/2026), no fechamento da fase 13. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
 
 ## 1. O projeto
 
@@ -31,7 +31,8 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
 | 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
-| 13 | código de produção limpo e de fácil manutenção: defeitos C1 a C5, diagnósticos separados do cálculo, registro com níveis, comentários, mediador legível, estrutura | R-FASE13-01 a 24 (blocos 0 a C; bloco D depois da validação de DOCN e DATM), na NTC de análise da arquitetura, com a migração do registro dividida em duas etapas (11 e 12) | em execução; bloco 0 (01 a 05) validado; bloco A: 06 e 07 (P2) validadas (`fase13-07-validada`); 08 a 12 (P10: sondas encerradas retiradas e registro com níveis em todo o código) validadas (`fase13-12-validada`); 13 (P1: comentários do mediador) validada (`fase13-13-validada`); 14 (P1: comentários dos caps) validada (`fase13-14-validada`); 15 (P1: comentários de coupling, regrid, shared, driver e programa principal) validada (`fase13-15-validada`), bloco A concluído; bloco B: 16 (P7: dicionário com nome longo e nome CF, consultado pelos gravadores) validada (`fase13-16-validada`); 17 (P8: campos internos do mediador por nome) validada (`fase13-17-validada`); 18 (P8: exportação do mediador pelo mapa; fecha C5) validada (`fase13-18-validada`), bloco B concluído; bloco C: 19 (P3: leitor dos dados oceânicos em `src/shared`; `time_utils` com o `ChkErr` comum) validada (`fase13-19-validada`); 20 (P3: mapa e framework sem variáveis globais; conferência `camadas`; fecha D7) validada (`fase13-20-validada`, rodada R-FASE13-20b), P3 concluída; 21 (P11: configuração lida por grupo; conferência `config`) validada (`fase13-21-validada`); 22 (P5: sequência de execução como texto; chave `run_sequence_file`) validada (`fase13-22-validada`); 23 (P6: mapa por grupos de campos e passagens) validada (`fase13-23-validada`); 24 (P6: coluna `options` em `ROUTES`) validada (`fase13-24-validada`), bloco C concluído; blocos 0 a C concluídos (24 etapas); bloco D depois da validação do DOCN e do DATM; 25 (conferência `cabecalhos`, `submete` recusa logs antigos, `nuopc.input` da raiz conferido, aviso de `run_sequence_file`) validada (`fase13-25-validada`); 26 (resto da P5: registro dos modelos e divisão de PETs por blocos) validada (`fase13-26-validada`), P5 concluída; 27 (P9: anúncio comum, `cap_advertise`) validada (`fase13-27-validada`); 28 (P9: cap modelo em `src/caps/template/`) validada (`fase13-28-validada`), P9 concluída; 29 (P4a: tabela `COMPONENTS` e chaves por modelo, antes da validação do DOCN e do DATM, só como reorganização; com a correção 29-FIX01 do `run_esmApp.jaci`) validada (`fase13-29-validada`); 30 (migração para as chaves por modelo nos scripts e no `nuopc.input` da raiz, aviso de chave antiga, conferência `chaves`) validada (`fase13-30-validada`); 33 (limpezas: `EXPORTS` por grupos, textos antigos, importações, travessões) em validação |
+| 13 | código de produção limpo e de fácil manutenção (NTC de análise da arquitetura): defeitos C1 a C5, comentários, registro com níveis, dicionário com nomes longos e CF, campos internos do mediador por nome, exportação do mediador pelo mapa, camadas sem variáveis globais, configuração por grupo e por modelo (`COMPONENTS`), sequência de execução como texto, mapa por grupos, anúncio comum e cap modelo, limpezas finais | R-FASE13-01 a 30, 33 e 34 (com 29-FIX01); 31 e 32 adiadas | concluída (`fase13-34-validada`); etapa por etapa no [`CHANGELOG.md`](CHANGELOG.md) |
+| 14 | validação do DOCN e do DATM, com linhas de base próprias; em seguida, o bloco D da fase 13 (P6c, P6b e P4b) | 14-01 a 14-07 (NTC de análise da arquitetura, v5, capítulo 10) | aguardando as decisões do GT da seção 6 |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
 
@@ -80,6 +81,19 @@ bash tools/dev/valida_rodada.bash compara <nome>
 **Foco atual (decisão do GT, out/2026).** O esforço se concentra nos componentes de produção: MONAN-A (ATM), MOM6 com SIS2 (OCN) e SIS2 dinâmico (ICE). Os modos DOCN e DATM são mantidos (não serão removidos) e serão validados em momento oportuno; até lá, continuam compilados e conferidos pelos testes locais. Problemas conhecidos desses modos: o DOCN com o contorno direto para na inicialização (o MONAN-A importa `Sx_tsfc`, `Sf_albedo` e `Sx_omask`, que o DOCN não exporta); a combinação DOCN com contorno pelo mediador nunca foi executada; o DATM está no mapa, mas o driver não o registra. Desde a R-FASE13-01, essas combinações são aceitas com aviso no início da rodada, e as que nunca funcionam (MOM6 com contorno direto, SIS2 com DOCN) são recusadas na leitura; a regra está só na tabela `COUPLER_MODES` (`src/shared/coupler_config.F90`).
 
 Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um, se decidido, vira uma etapa própria da fase 10.
+
+**Decisões que abrem a fase 14.** A fase 14 (validação do DOCN e do DATM, no plano da NTC de análise da arquitetura, v5, capítulo 10) começa quando o GT decidir:
+
+| Decisão | Opções |
+| --- | --- |
+| quando validar o DOCN e o DATM | data da janela na Jaci; cada modo pede rodada de referência própria (linha de base nova) |
+| DOCN com contorno direto | exportar os três campos que faltam (`Sx_tsfc`, `Sf_albedo`, `Sx_omask`) ou recusar a combinação em `COUPLER_MODES` |
+| grade do OISST no mediador | manter o centro sem a meia célula ou corrigir (muda o campo do DOCN) |
+| época do arquivo JRA55 (DATM) | 01:30 ou 00:00 |
+| DATM no driver | registrá-lo (com a correção de `ReadJRAFieldInterp`) ou retirá-lo do mapa |
+| metadados dos diagnósticos | unificar pelo dicionário (`FIELDS`) os textos da importação do MONAN-A e do DOCN (tabela abaixo) |
+
+**Etapas adiadas.** R-FASE13-31 (física do mediador por índice em `MED_FIELDS`) e R-FASE13-32 (ligação automática dos campos internos) ficam para quando o primeiro campo novo do mediador for incluído: trocam o acesso por nome em cerca de 150 usos e pedem duas rodadas, sem ganho para o código de hoje. Enquanto isso, o procedimento de 9 lugares está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4.
 
 | Item | Situação |
 | --- | --- |

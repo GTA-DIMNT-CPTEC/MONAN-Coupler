@@ -62,6 +62,19 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 3. Se o campo sai de um modelo, o nome no grupo de exportação do modelo em `EXPORTS` (`EXPORT_*` ou, para o DATM e o SIS2, o próprio grupo da passagem para o mediador, que tem a mesma ordem), na posição em que o cap o anuncia. O cap (ou o adaptador) preenche os valores. Mudar um grupo de exportação muda a tabela congelada do teste do mapa (`tests/unit/exports_frozen.inc`), como em `EXCHANGES`.
 4. `tools/dev/mapa-acoplamento.py` e `tools/dev/confere-tudo.bash HEAD`. Na rodada, uma linha faltando ou sobrando aparece como `CPL-REL: DIFERENCA:` e interrompe a inicialização; uma diferença esperada vai para `GAPS`, com o motivo.
 
+**Campo calculado no mediador** (exemplo: `So_duu10n`, enviado ao oceano). Além da linha em `FIELDS` e do nome no grupo da passagem do mediador ao destino (itens 1 e 2; a exportação do mediador sai do mapa, sem código):
+
+| Lugar | O que fazer |
+| --- | --- |
+| `MED_FIELDS` (`med_cap_types`) | uma linha: nome de acoplamento, nome do campo ESMF e valor inicial; `create_internal_fields` (`med_init`) cria o campo na malha de fluxo, e os gravadores o encontram pelo nome |
+| tipo do assunto (`med_cap_types`) | o componente `ESMF_Field` (por exemplo, em `med_ocn_flux_fields_t`) e o ponteiro em `med_flux_t`, que a física usa |
+| `bind_internal_fields` (`med_init`) | a ligação do componente à entrada do registro: `call bind(is%ocn_flx%<nome>, '<Campo>')` |
+| `associate_fluxes` (`med_exchange`) | `call point_to(is%ocn_flx%<nome>, fluxes%<nome>)` |
+| zeragem no início do passo | em `ZeroOcnFluxFields` (`med_cap_methods`) ou `zero_med_fluxes` (`med_flux`), se o campo deve recomeçar de zero a cada passo |
+| a física (`med_bulk_ncar` ou outro módulo de cálculo) | o cálculo, por `fluxes%<nome>` |
+
+São 9 lugares em 7 arquivos. As etapas R-FASE13-31 e 32 (física por índice em `MED_FIELDS` e ligação automática) deixariam, no mediador, só a linha em `MED_FIELDS` com o índice do campo e o cálculo (5 lugares em 4 arquivos, contando `FIELDS` e o mapa); foram adiadas (out/2026) até o primeiro campo novo do mediador, porque trocam o acesso por nome (`fluxes%taux`) pelo acesso por índice em cerca de 150 usos e pedem duas rodadas de validação sem ganho para o código de hoje.
+
 ## 5. Como incluir um componente
 
 1. **Malha**: linha em `GRIDS`; o cap a constrói pelo catálogo (`cpl_grids`). Malha de tipo novo: função nova em `cpl_grids`.
@@ -76,7 +89,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 1. Copiar `src/regrid/regrid_idw.F90` (modelo comentado) para `regrid_<nome>.F90` e trocar `idw` pelo nome.
 2. Escrever `compute_weights(this, src_points, dst_points, factors, orig, dest, rc)`: recebe os pontos de origem (todos) e de destino (os do processo), com `lon`, `lat`, `valid` e `global_index`, e devolve peso, índice de origem e índice de destino de cada termo. A base `weights_regridder_t` cuida do ESMF e da reprodutibilidade com qualquer número de processos.
 3. Opções em texto (`'chave=valor,...'`) com `regrid_option_int`, `regrid_option_real` e `regrid_options_check`.
-4. Uma linha em `regrid_schemes.F90` (`call register('<nome>', new_<nome>, rc)`) e o arquivo no `Makefile`.
+4. Uma linha em `regrid_schemes.F90` (`call register('<nome>', new_<nome>, rc)`); o `Makefile` tira a lista de fontes de `src/dependencies.mk` (rodar `tools/dev/dependencias.py gera`).
 5. Comparar: `tests/regrid/compara-esquema.bash <nome> '<opções>'` (erro contra uma função analítica e o mesmo campo, bit a bit, com 1 e 4 processos).
 6. Usar: colunas `scheme` e `options` de `ROUTES` ou, sem recompilar, `regrid_scheme` e `regrid_options` em `&nuopc_regrid`. Trocar o esquema de uma rota da produção muda resultados e exige linha de base nova.
 
