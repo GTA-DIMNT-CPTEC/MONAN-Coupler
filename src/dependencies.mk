@@ -14,7 +14,8 @@ $(OBJDIR)/DATM_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR
 $(OBJDIR)/diag_bitsum.o: $(OBJDIR)/coupler_log.o
 $(OBJDIR)/DOCN_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/docn_cap_netcdf.o $(OBJDIR)/ocn_data_reader.o
 $(OBJDIR)/docn_cap_netcdf.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/nc_writer.o
-$(OBJDIR)/esm.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_check.o $(OBJDIR)/cpl_map.o $(OBJDIR)/DOCN_cap.o $(OBJDIR)/MED_cap.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/run_sequences.o $(OBJDIR)/sis_cap_MONAN.o
+$(OBJDIR)/driver_layout.o: $(OBJDIR)/coupler_utils.o
+$(OBJDIR)/esm.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_check.o $(OBJDIR)/cpl_map.o $(OBJDIR)/DOCN_cap.o $(OBJDIR)/driver_layout.o $(OBJDIR)/MED_cap.o $(OBJDIR)/mom_cap_MONAN.o $(OBJDIR)/mpas_cap_MONAN.o $(OBJDIR)/run_sequences.o $(OBJDIR)/sis_cap_MONAN.o
 $(OBJDIR)/esmApp.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/esm.o
 $(OBJDIR)/med_bulk_ncar.o: $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o
 $(OBJDIR)/MED_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_map.o $(OBJDIR)/med_cap_netcdf.o $(OBJDIR)/med_cap_types.o $(OBJDIR)/med_diag.o $(OBJDIR)/med_exchange.o $(OBJDIR)/med_flux.o $(OBJDIR)/med_init.o $(OBJDIR)/mom6_supergrid.o

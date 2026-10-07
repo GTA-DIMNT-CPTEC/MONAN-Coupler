@@ -5,11 +5,16 @@
 !! execução de cada passo de acoplamento (RunSequence). Tudo o que ele faz é
 !! decidido pela configuração lida de nuopc.input (coupler_config_mod).
 !!
-!! Componentes:
+!! Componentes (rótulo no driver, por posição):
 !!   MPAS  atmosfera MONAN-A 2.0 (MPAS-A 8.3.1)
 !!   MED   mediador: fluxos ar-mar por fórmulas bulk NCAR
 !!   OCN   oceano: MOM6 dinâmico, ou DOCN (SST lida de arquivo OISST)
 !!   ICE   gelo marinho SIS2 (opcional, use_sis2_dynamic)
+!! Os modelos que podem ocupar cada posição são registrados uma vez, com a
+!! rotina SetServices e os atributos de cada um (register_models); o driver
+!! percorre as posições de POSITIONS (driver_layout.F90), na ordem, e
+!! registra em cada uma o modelo escolhido pela configuração
+!! (chosen_model).
 !!
 !! Dois eixos independentes definem a execução:
 !!   pet_layout    (espaço)  shared: todos em todos os PETs;
@@ -51,6 +56,8 @@ module ESM_MONAN
   use coupler_utils_mod,  only : ChkErr, int_to_str
   use coupler_log_mod,    only : COMP_DRV, log_error, log_info
   use cpl_check_mod,      only : cpl_check_coupling, cpl_write_methods, cpl_nuopc_dictionary
+  use driver_layout_mod,  only : POSITIONS, N_POSITIONS, position_index, split_blocks, &
+                                 layout_split_line, layout_shared_line, idle_pets_line
   use run_sequences_mod,  only : RUN_SEQUENCES, RUN_SEQUENCE_LINE_LEN, MAX_RUN_SEQUENCE_LINES, &
                                  RUN_SEQUENCE_LABEL, run_sequence_name, run_sequence_index,     &
                                  run_sequence_lines, run_sequence_from_file
@@ -61,10 +68,28 @@ module ESM_MONAN
   private
   public :: SetServices
 
-  character(len=*), parameter :: MPAS_LABEL = 'MPAS'
-  character(len=*), parameter :: MED_LABEL  = 'MED'
-  character(len=*), parameter :: OCN_LABEL  = 'OCN'
-  character(len=*), parameter :: ICE_LABEL  = 'ICE'
+  !> Interface das rotinas SetServices dos caps.
+  abstract interface
+    subroutine set_services_iface(gcomp, rc)
+      import :: ESMF_GridComp
+      type(ESMF_GridComp)  :: gcomp
+      integer, intent(out) :: rc
+    end subroutine set_services_iface
+  end interface
+
+  !> Modelo que pode ocupar uma posição do acoplamento (register_model).
+  type :: model_t
+    character(len=4)  :: position = ''        !< posição (POSITIONS, em driver_layout)
+    character(len=8)  :: name     = ''        !< nome do modelo ('mpas', 'mom6', ...)
+    character(len=4)  :: label    = ''        !< rótulo do componente no driver
+    logical           :: check_time_stamps = .true.  !< timeStampValidation do NUOPC
+    character(len=64) :: note     = ''        !< mensagem no registro, depois do registro
+    procedure(set_services_iface), pointer, nopass :: set_services => null()
+  end type model_t
+
+  integer, parameter :: MAX_MODELS = 8
+  type(model_t) :: models(MAX_MODELS)
+  integer :: n_models = 0
 
 contains
 
@@ -86,19 +111,139 @@ contains
     if (ChkErr(rc, __LINE__, __FILE__)) return
   end subroutine SetServices
 
+  !> @brief Registra os modelos que podem ocupar cada posição (models), um por
+  !! chamada a register_model. O rótulo é o nome do componente no driver, na
+  !! sequência de execução, no registro e no relatório de acoplamento.
+  subroutine register_models()
+    n_models = 0
+    call register_model('ATM', 'mpas', 'MPAS', MPAS_SetServices)
+    call register_model('MED', 'med',  'MED',  MED_SetServices)
+    ! O FMS (MOM6 e SIS2) tem relógio próprio, e o DOCN segue o mesmo
+    ! tratamento do oceano: pequenas diferenças de carimbo de tempo são
+    ! esperadas e não devem abortar a rodada (check_time_stamps=.false.).
+    call register_model('OCN', 'mom6', 'OCN',  OCN_SetServices,  .false., &
+                        'OCN = MOM6+SIS2 dinamico (use_docn=F)')
+    call register_model('OCN', 'docn', 'OCN',  DOCN_SetServices, .false., &
+                        'OCN = DOCN OISST (use_docn=T)')
+    call register_model('ICE', 'sis2', 'ICE',  ICE_SetServices,  .false., &
+                        'componente ICE (SIS2) registrado')
+  end subroutine register_models
+
+  !> @brief Acrescenta um modelo à tabela models.
+  !!
+  !! @param[in] position           posição que o modelo pode ocupar (POSITIONS)
+  !! @param[in] name               nome do modelo, como o escolhe chosen_model
+  !! @param[in] label              rótulo do componente no driver
+  !! @param[in] set_services       rotina SetServices do cap
+  !! @param[in] check_time_stamps  se falso, timeStampValidation=false no componente
+  !! @param[in] note               mensagem no registro depois de registrar o componente
+  subroutine register_model(position, name, label, set_services, check_time_stamps, note)
+    character(len=*), intent(in) :: position, name, label
+    procedure(set_services_iface) :: set_services
+    logical,          intent(in), optional :: check_time_stamps
+    character(len=*), intent(in), optional :: note
+
+    if (n_models == MAX_MODELS) error stop 'register_model: MAX_MODELS insuficiente'
+    n_models = n_models + 1
+    models(n_models)%position = position
+    models(n_models)%name     = name
+    models(n_models)%label    = label
+    models(n_models)%set_services => set_services
+    if (present(check_time_stamps)) models(n_models)%check_time_stamps = check_time_stamps
+    if (present(note)) models(n_models)%note = note
+  end subroutine register_model
+
+  !> @brief Modelo escolhido para a posição pela configuração ('none': posição
+  !! vazia). A atmosfera é sempre o MONAN-A: o driver não registra o DATM.
+  !!
+  !! @param[in] position  nome da posição (POSITIONS)
+  function chosen_model(position) result(name)
+    character(len=*), intent(in) :: position
+    character(len=8) :: name
+
+    select case (trim(position))
+    case ('ATM')
+      name = 'mpas'
+    case ('MED')
+      name = 'med'
+    case ('OCN')
+      name = merge('docn', 'mom6', cfg_use_docn)
+    case ('ICE')
+      name = merge('sis2', 'none', cfg_use_sis2_dynamic)
+    case default
+      name = 'none'
+    end select
+  end function chosen_model
+
+  !> @brief Contagem de PETs pedida no nuopc.input para a posição (0 = automática).
+  !!
+  !! @param[in] position  nome da posição (POSITIONS)
+  integer function requested_pets(position) result(n)
+    character(len=*), intent(in) :: position
+
+    select case (trim(position))
+    case ('ATM')
+      n = cfg_atm_pet_count
+    case ('OCN')
+      n = cfg_ocn_pet_count
+    case ('ICE')
+      n = cfg_ice_pet_count
+    case default
+      n = 0
+    end select
+  end function requested_pets
+
+  !> @brief Índice em models do modelo name na posição (0 se não registrado).
+  !!
+  !! @param[in] position  nome da posição
+  !! @param[in] name      nome do modelo
+  integer function model_index(position, name) result(m)
+    character(len=*), intent(in) :: position, name
+    do m = 1, n_models
+      if (trim(models(m)%position) == trim(position) .and. trim(models(m)%name) == trim(name)) return
+    end do
+    m = 0
+  end function model_index
+
+  !> @brief Rótulo no driver do componente da posição (o do primeiro modelo
+  !! registrado para ela; os modelos de uma mesma posição têm o mesmo rótulo).
+  !!
+  !! @param[in] position  nome da posição ('ATM', 'MED', 'OCN', 'ICE')
+  function position_label(position) result(label)
+    character(len=*), intent(in) :: position
+    character(len=4) :: label
+    integer :: m
+
+    label = position
+    do m = 1, n_models
+      if (trim(models(m)%position) == trim(position)) then
+        label = models(m)%label
+        return
+      end if
+    end do
+  end function position_label
+
   !> @brief Registra componentes e conectores.
+  !!
+  !! Em cada posição de POSITIONS, na ordem, registra o modelo escolhido pela
+  !! configuração (chosen_model), com os atributos da tabela models. No
+  !! layout split, as posições com bloco próprio recebem PETs disjuntos
+  !! (split_blocks, em driver_layout); o mediador fica em todos os PETs.
   subroutine SetModelServices(driver, rc)
     type(ESMF_GridComp)  :: driver
     integer, intent(out) :: rc
 
-    type(ESMF_GridComp)  :: mpasComp, medComp, ocnComp, iceComp
+    type(ESMF_GridComp)  :: comp
     type(ESMF_Clock)     :: driverClock
-    integer              :: petCount, i, nAtm, nOcn, nIce
-    integer, allocatable :: allPets(:), atmPets(:), ocnPets(:), icePets(:)
-    logical              :: use_ice
+    integer              :: petCount, i, k, m, first
+    integer              :: chosen(N_POSITIONS), requested(N_POSITIONS), counts(N_POSITIONS)
+    logical              :: active(N_POSITIONS), split, ok
+    integer, allocatable :: allPets(:), pets(:)
+    character(len=4), allocatable :: labels(:)
+    character(len=:), allocatable :: exec
 
     rc = ESMF_SUCCESS
-    use_ice = cfg_use_sis2_dynamic
+    call register_models()
 
     ! Nomes de campo do acoplador (_mpas, Foxx_* etc.): os de FIELDS, no
     ! dicionário do NUOPC, sem acréscimo automático
@@ -108,48 +253,56 @@ contains
     call ESMF_GridCompGet(driver, petCount=petCount, clock=driverClock, rc=rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
+    do k = 1, N_POSITIONS
+      chosen(k) = model_index(POSITIONS(k)%name, chosen_model(POSITIONS(k)%name))
+      requested(k) = requested_pets(POSITIONS(k)%name)
+    end do
+    active = chosen > 0
+
     ! Divisão de PETs entre componentes
     allPets = [(i - 1, i = 1, petCount)]
-    if (trim(cfg_pet_layout) == 'split') then
-      call split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
-      if (rc /= ESMF_SUCCESS) return
-      atmPets = allPets(1:nAtm)
-      ocnPets = allPets(nAtm+1:nAtm+nOcn)
-      icePets = allPets(nAtm+nOcn+1:petCount)
+    split = trim(cfg_pet_layout) == 'split'
+    exec = merge('CONCURRENT', 'SEQUENTIAL', trim(cfg_coupling_mode) == 'concurrent')
+    if (split) then
+      call split_blocks(petCount, requested, active, counts, ok)
+      if (.not. ok) then
+        if (on_root()) call log_error(COMP_DRV, 'particao split invalida: nAtm='// &
+          int_to_str(counts(position_index('ATM')))//' nOcn='// &
+          int_to_str(counts(position_index('OCN')))//' nIce='// &
+          int_to_str(counts(position_index('ICE')))//' devem somar petCount='// &
+          int_to_str(petCount)//'.')
+        rc = ESMF_FAILURE
+        return
+      end if
+      call log_info(COMP_DRV, layout_split_line(exec, counts, active))
+      ! No sequential+split parte dos PETs fica parada em cada fase; registrar
+      ! quantos ajuda a interpretar o consumo de fila (nós x tempo de parede).
+      if (exec == 'SEQUENTIAL') call log_info(COMP_DRV, idle_pets_line(petCount, counts, active))
     else
-      nAtm = petCount; nOcn = petCount; nIce = merge(petCount, 0, use_ice)
-      atmPets = allPets; ocnPets = allPets; icePets = allPets(1:nIce)
+      labels = [character(len=4) :: (models(chosen(k))%label, k = 1, N_POSITIONS)]
+      labels = pack(labels, active)
+      call log_info(COMP_DRV, layout_shared_line(exec, labels))
     end if
-    call log_layout(petCount, nAtm, nOcn, nIce, use_ice)
 
-    ! Componentes
-    call add_model(driver, MPAS_LABEL, MPAS_SetServices, atmPets, driverClock, mpasComp, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    call add_model(driver, MED_LABEL, MED_SetServices, allPets, driverClock, medComp, rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    if (cfg_use_docn) then
-      call add_model(driver, OCN_LABEL, DOCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      call log_info(COMP_DRV, 'OCN = DOCN OISST (use_docn=T)')
-    else
-      call add_model(driver, OCN_LABEL, OCN_SetServices, ocnPets, driverClock, ocnComp, rc)
-      call log_info(COMP_DRV, 'OCN = MOM6+SIS2 dinamico (use_docn=F)')
-    end if
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    ! O FMS tem relógio próprio; pequenas diferenças de carimbo de tempo são
-    ! esperadas e não devem abortar a rodada.
-    call NUOPC_CompAttributeSet(ocnComp, name='timeStampValidation', value='false', rc=rc)
-    if (ChkErr(rc, __LINE__, __FILE__)) return
-
-    if (use_ice) then
-      call add_model(driver, ICE_LABEL, ICE_SetServices, icePets, driverClock, iceComp, rc)
+    ! Componentes, na ordem das posições
+    first = 0
+    do k = 1, N_POSITIONS
+      if (.not. active(k)) cycle
+      m = chosen(k)
+      if (split .and. POSITIONS(k)%own_block) then
+        pets = allPets(first+1:first+counts(k))
+        first = first + counts(k)
+      else
+        pets = allPets
+      end if
+      call add_model(driver, trim(models(m)%label), models(m)%set_services, pets, driverClock, comp, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
-      call NUOPC_CompAttributeSet(iceComp, name='timeStampValidation', value='false', rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-      call log_info(COMP_DRV, 'componente ICE (SIS2) registrado')
-    end if
+      if (.not. models(m)%check_time_stamps) then
+        call NUOPC_CompAttributeSet(comp, name='timeStampValidation', value='false', rc=rc)
+        if (ChkErr(rc, __LINE__, __FILE__)) return
+      end if
+      if (len_trim(models(m)%note) > 0) call log_info(COMP_DRV, trim(models(m)%note))
+    end do
 
     ! Conectores
     ! Escolhidos pelo mapa de acoplamento (EXCHANGES, coluna when), na ordem
@@ -159,87 +312,6 @@ contains
 
     call log_info(COMP_DRV, 'componentes e conectores registrados')
   end subroutine SetModelServices
-
-  !> @brief Calcula o tamanho dos blocos ATM | OCN | ICE no layout split.
-  !! Contagem zero em nuopc.input significa "automático": o que sobra é
-  !! dividido em partes aproximadamente iguais.
-  subroutine split_pets(petCount, use_ice, nAtm, nOcn, nIce, rc)
-    integer, intent(in)  :: petCount
-    logical, intent(in)  :: use_ice
-    integer, intent(out) :: nAtm, nOcn, nIce, rc
-
-    rc   = ESMF_SUCCESS
-    nAtm = cfg_atm_pet_count
-    nOcn = cfg_ocn_pet_count
-    nIce = merge(cfg_ice_pet_count, 0, use_ice)
-
-    if (use_ice .and. nIce <= 0) then
-      if (nAtm <= 0 .and. nOcn <= 0) then
-        nAtm = petCount / 3
-        nOcn = petCount / 3
-      else if (nAtm <= 0) then
-        nAtm = (petCount - nOcn) / 2
-      else if (nOcn <= 0) then
-        nOcn = (petCount - nAtm) / 2
-      end if
-      nIce = petCount - nAtm - nOcn
-    else if (nAtm <= 0 .and. nOcn <= 0) then
-      nAtm = (petCount - nIce + 1) / 2
-      nOcn = petCount - nAtm - nIce
-    else if (nAtm <= 0) then
-      nAtm = petCount - nOcn - nIce
-    else if (nOcn <= 0) then
-      nOcn = petCount - nAtm - nIce
-    end if
-
-    if (nAtm < 1 .or. nOcn < 1 .or. (use_ice .and. nIce < 1) .or. &
-        nAtm + nOcn + nIce /= petCount) then
-      if (on_root()) call log_error(COMP_DRV, 'particao split invalida: nAtm='//int_to_str(nAtm)// &
-        ' nOcn='//int_to_str(nOcn)//' nIce='//int_to_str(nIce)// &
-        ' devem somar petCount='//int_to_str(petCount)//'.')
-      rc = ESMF_FAILURE
-    end if
-  end subroutine split_pets
-
-  !> @brief Registra no log a divisão de PETs. O formato destas linhas é lido pelas
-  !! ferramentas de tools/coupler e tools/dev: não alterar sem ajustá-las.
-  subroutine log_layout(petCount, nAtm, nOcn, nIce, use_ice)
-    integer, intent(in) :: petCount, nAtm, nOcn, nIce
-    logical, intent(in) :: use_ice
-
-    character(len=:), allocatable :: exec, msg
-
-    exec = merge('CONCURRENT', 'SEQUENTIAL', trim(cfg_coupling_mode) == 'concurrent')
-
-    if (trim(cfg_pet_layout) /= 'split') then
-      if (use_ice) then
-        msg = 'MPAS, MED, OCN e ICE em todos os PETs'
-      else
-        msg = 'MPAS, MED e OCN em todos os PETs'
-      end if
-      call log_info(COMP_DRV, 'layout SHARED (execucao '//exec//'): '//msg)
-      return
-    end if
-
-    msg = 'layout SPLIT (execucao '//exec//'): ATM=PET[0..'//int_to_str(nAtm-1)// &
-          '] OCN=PET['//int_to_str(nAtm)//'..'//int_to_str(nAtm+nOcn-1)//']'
-    if (use_ice) then
-      msg = msg//' ICE=PET['//int_to_str(nAtm+nOcn)//'..'//int_to_str(petCount-1)// &
-            '] MED=todos'
-    else
-      msg = msg//' MED=todos (ICE desativado)'
-    end if
-    call log_info(COMP_DRV, msg)
-
-    ! No sequential+split parte dos PETs fica parada em cada fase; registrar
-    ! quantos ajuda a interpretar o consumo de fila (nós x tempo de parede).
-    if (exec == 'SEQUENTIAL') then
-      msg = 'sequential+split: PETs parados: '//int_to_str(petCount-nAtm)// &
-            ' durante o ATM, '//int_to_str(petCount-nOcn)//' durante o OCN'
-      if (use_ice) msg = msg//', '//int_to_str(petCount-nIce)//' durante o ICE'
-      call log_info(COMP_DRV, msg//' (de '//int_to_str(petCount)//').')
-    end if
-  end subroutine log_layout
 
   !> @brief Registra um componente de modelo e lhe entrega uma CÓPIA do relógio do
   !! driver. Motivos: (1) com três ou mais componentes em PETs disjuntos, o
@@ -299,20 +371,10 @@ contains
     end if
 
     do k = 1, n
-      call add_connector(driver, trim(comp_label(CONNECTOR_SRC(order(k)))), &
-                         trim(comp_label(CONNECTOR_DST(order(k)))), driverClock, rc)
+      call add_connector(driver, trim(position_label(CONNECTOR_SRC(order(k)))), &
+                         trim(position_label(CONNECTOR_DST(order(k)))), driverClock, rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
     end do
-
-  contains
-
-    !> Rótulo do componente no driver ('MPAS' para o ATM do mapa).
-    function comp_label(comp) result(label)
-      character(len=*), intent(in) :: comp
-      character(len=4) :: label
-      label = comp
-      if (comp == 'ATM') label = MPAS_LABEL
-    end function comp_label
 
   end subroutine add_connectors
 
@@ -395,14 +457,14 @@ contains
       ' entrada(s)')
 
     call cpl_write_methods(driver,                                                   &
-      [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
+      [position_label('ATM'), position_label('MED'), position_label('OCN'), position_label('ICE')],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], n_method, n_full_method, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
     call log_info(COMP_DRV, 'metodo dos conectores pelo mapa: remapmethod em '// &
       int_to_str(n_method)//' entrada(s)')
 
     call cpl_check_coupling(driver, cpl_current_config(),                            &
-      [character(len=4) :: MPAS_LABEL, MED_LABEL, OCN_LABEL, ICE_LABEL],             &
+      [position_label('ATM'), position_label('MED'), position_label('OCN'), position_label('ICE')],             &
       [character(len=4) :: 'ATM', 'MED', 'OCN', 'ICE'], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
 
