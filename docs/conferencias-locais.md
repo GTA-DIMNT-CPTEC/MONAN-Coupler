@@ -18,7 +18,7 @@ Leva cerca de onze minutos e termina com um resumo (OK, FALHOU ou PULADO por con
 
 | Conferência | Ferramenta | Falha quando |
 | --- | --- | --- |
-| `compilacao` | `tools/dev/compila-local.bash` | algum fonte não compila |
+| `compilacao` | `tools/dev/compila-local.bash` | algum fonte não compila (inclusive o cap modelo, `src/caps/template/template_cap.F90`, que não entra no executável e é compilado só aqui) |
 | `avisos` | compila também `REV` | algum fonte tem mais avisos que em `REV` |
 | `literais` | `tools/dev/confere-literais.py REV` | alguma constante de texto (mensagem, nome de campo, atributo, formato) mudou; um trecho que só mudou de arquivo conta pela soma |
 | `nomes` | `tools/dev/renomeia-identificadores.py confere REV` | há tabela nova em `tools/dev/nomes/` e a árvore não é `REV` com essas trocas de nome, ou uma troca colide com um nome visível |

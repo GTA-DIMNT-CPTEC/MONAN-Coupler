@@ -12,7 +12,8 @@ Três regras, conferidas nos 'use' entre módulos do próprio acoplador (os do
 ESMF, do MPAS, do MOM6, do FMS e do MPI ficam de fora):
   1. um fonte não usa módulo de camada de cima;
   2. um componente não usa módulo de outro componente (o cap do MOM6 e o
-     DOCN são componentes diferentes, embora no mesmo diretório);
+     DOCN são componentes diferentes, embora no mesmo diretório; o cap
+     modelo de src/caps/template conta como um componente);
   3. o framework de interpolação e a descrição do acoplamento não leem as
      variáveis globais de coupler_config (nomes cfg_*): recebem a
      configuração como argumento, e assim podem ser usados e testados sem
@@ -47,6 +48,7 @@ CAMADAS = [
     ('caps/ocean/docn_*',   3, 'componentes', 'DOCN'),
     ('caps/ocean/*',        3, 'componentes', 'MOM6'),
     ('caps/ice/*',          3, 'componentes', 'SIS2'),
+    ('caps/template/*',     3, 'componentes', 'cap modelo'),
     ('driver/*',            4, 'driver', ''),
     ('main/*',              5, 'programa principal', ''),
 ]

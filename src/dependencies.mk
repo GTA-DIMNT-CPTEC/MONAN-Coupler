@@ -56,4 +56,5 @@ $(OBJDIR)/regrid_weights.o: $(OBJDIR)/coupler_log.o $(OBJDIR)/regrid_base.o
 $(OBJDIR)/regrid_weights_base.o: $(OBJDIR)/coupler_log.o $(OBJDIR)/regrid_base.o
 $(OBJDIR)/sis_cap_fields.o: $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o
 $(OBJDIR)/sis_cap_MONAN.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_constants.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o $(OBJDIR)/mom6_supergrid.o $(OBJDIR)/sis_cap_fields.o $(OBJDIR)/time_utils.o
+$(OBJDIR)/template_cap.o: $(OBJDIR)/cap_common.o $(OBJDIR)/coupler_config.o $(OBJDIR)/coupler_log.o $(OBJDIR)/coupler_utils.o $(OBJDIR)/cpl_fields.o $(OBJDIR)/cpl_grids.o $(OBJDIR)/cpl_map.o
 $(OBJDIR)/time_utils.o: $(OBJDIR)/coupler_utils.o
