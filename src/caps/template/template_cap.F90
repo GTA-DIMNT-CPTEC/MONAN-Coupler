@@ -21,9 +21,12 @@
 !!      src/coupling/cpl_grids.F90 criam as grades usadas hoje);
 !!   5. troque os valores iniciais do passo 4 e, no passo 5, chame o modelo
 !!      e copie os campos dele para o exportState (cap_put_field);
-!!   6. registre o modelo no driver (register_model, em esm.F90), com a
-!!      posição, o rótulo e esta SetServices, e acrescente a posição à
-!!      tabela POSITIONS (driver_layout.F90), se for nova;
+!!   6. acrescente o modelo à tabela COMPONENTS (coupler_config.F90: posição,
+!!      nome, malha e rótulo no driver) e as combinações dele a
+!!      COUPLER_MODES; registre-o no driver (register_model, em esm.F90),
+!!      com a posição, o nome e esta SetServices (o rótulo vem de
+!!      COMPONENTS); uma posição nova vai também para a tabela POSITIONS
+!!      (driver_layout.F90);
 !!   7. acrescente o diretório ao Makefile (SRC_SUBDIRS) e à tabela CAMADAS
 !!      de tools/dev/confere-camadas.py, e gere as dependências
 !!      (tools/dev/dependencias.py gera).

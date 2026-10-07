@@ -11,9 +11,11 @@
 #                                                ou no regrid do mediador.
 #
 # O que este atalho faz:
-#   1. Confere que a nuopc.input atual e a de PRODUCAO (use_datm=.false.,
-#      use_docn=.false., use_med_to_mpas=.true., use_sis2_dynamic=.true.).
-#   2. Gera nuopc.input.datm_mom6 a partir dela, trocando SO use_datm p/ .true.
+#   1. Confere que a nuopc.input atual e a de PRODUCAO (atm_model=mpas,
+#      ocn_model=mom6, ice_model=sis2, atm_boundary=med, pelas chaves por
+#      modelo ou pelas antigas).
+#   2. Gera nuopc.input.datm_mom6 a partir dela, trocando SO o modelo da
+#      atmosfera para o DATM (atm_model='datm')
 #      (a combinacao "DATM + MOM6" da tabela do proprio nuopc.input).
 #   3. Faz backup da nuopc.input de producao e instala a datm_mom6 como ativa.
 #   4. Roda o orquestrador roda_repro_producao.sh (duas rodadas + comparacao),
@@ -48,45 +50,37 @@ info() { printf '   %s\n' "$*"; }
 [[ -f "${ORQ}" ]] || { echo "ERRO: nao encontrei o orquestrador em ${ORQ}." >&2; exit 2; }
 [[ -r "${NUOPC}" ]] || { echo "ERRO: nao encontrei nuopc.input em ${RUNDIR}. Rode de dentro do diretorio de experimento." >&2; exit 2; }
 
-# Le uma chave logica de um grupo namelist (ignora comentarios).
-nml_val() { sed 's/!.*//' "${NUOPC}" | grep -iE "^[[:space:]]*$1[[:space:]]*=" \
-            | head -1 | cut -d= -f2 | tr -d " '\"" ; }
+# Modelos e contorno, pelas chaves por modelo ou pelas antigas
+# shellcheck source=chaves_nuopc.bash
+source "${SCRIPT_DIR}/chaves_nuopc.bash"
+modelos() { echo "atm_model=$(nuopc_modelo "$1" ATM) ocn_model=$(nuopc_modelo "$1" OCN)" \
+                 "ice_model=$(nuopc_modelo "$1" ICE) atm_boundary=$(nuopc_modelo "$1" BND)"; }
 
 log "1. Conferindo que a nuopc.input atual e a de PRODUCAO"
-UD=$(nml_val use_datm); UO=$(nml_val use_docn)
-UM=$(nml_val use_med_to_mpas); US=$(nml_val use_sis2_dynamic)
-info "use_datm=${UD:-<ausente>}  use_docn=${UO:-<ausente>}  use_med_to_mpas=${UM:-<ausente>}  use_sis2_dynamic=${US:-<ausente>}"
-
-shopt -s nocasematch
-if [[ "${UD}" != *"false"* || "${UO}" != *"false"* || "${UM}" != *"true"* || "${US}" != *"true"* ]]; then
-  shopt -u nocasematch
+ATUAL=$(modelos "${NUOPC}")
+info "${ATUAL}"
+if [[ "${ATUAL}" != "atm_model=mpas ocn_model=mom6 ice_model=sis2 atm_boundary=med" ]]; then
   echo "" >&2
   echo "ERRO: a nuopc.input atual nao e a de producao esperada." >&2
-  echo "      Esperado: use_datm=.false., use_docn=.false., use_med_to_mpas=.true., use_sis2_dynamic=.true." >&2
+  echo "      Esperado: atm_model=mpas ocn_model=mom6 ice_model=sis2 atm_boundary=med" >&2
   echo "      Instale a nuopc.input de producao antes de rodar este atalho." >&2
   exit 3
 fi
-shopt -u nocasematch
 info "producao confirmada"
 
-log "2. Gerando ${VARIANTE} (troca so use_datm -> .true.)"
-# Troca APENAS a linha de atribuicao de use_datm (linhas de comentario comecam
-# com '!' e nao casam a ancora ^[[:space:]]*use_datm=).
-sed -E 's/^([[:space:]]*use_datm[[:space:]]*=[[:space:]]*)\.false\./\1.true./I' \
-    "${NUOPC}" > "${VARIANTE}"
+log "2. Gerando ${VARIANTE} (troca so o modelo da atmosfera para o DATM)"
+# Tira as linhas de atm_model e use_datm e escreve atm_model='datm' logo
+# depois de &nuopc_mode (nuopc_troca_modelo); o resto fica igual.
+nuopc_troca_modelo "${NUOPC}" "${VARIANTE}" ATM datm
 
 # Confere que a troca pegou e que o resto continua DATM+MOM6.
-NUOPC_CHECK="${VARIANTE}" \
-  && UD2=$(sed 's/!.*//' "${VARIANTE}" | grep -iE '^[[:space:]]*use_datm[[:space:]]*=' | head -1 | cut -d= -f2 | tr -d " '\"")
-shopt -s nocasematch
-if [[ "${UD2}" != *"true"* ]]; then
-  shopt -u nocasematch
-  echo "ERRO: nao consegui trocar use_datm para .true. em ${VARIANTE}." >&2
-  echo "      Confira manualmente a linha use_datm no &nuopc_mode." >&2
+GERADO=$(modelos "${VARIANTE}")
+if [[ "${GERADO}" != "atm_model=datm ocn_model=mom6 ice_model=sis2 atm_boundary=med" ]]; then
+  echo "ERRO: nao consegui trocar o modelo da atmosfera em ${VARIANTE} (${GERADO})." >&2
+  echo "      Confira manualmente o grupo &nuopc_mode." >&2
   exit 4
 fi
-shopt -u nocasematch
-info "gerado: use_datm=.true., use_docn=.false., use_med_to_mpas=.true., use_sis2_dynamic=.true."
+info "gerado: ${GERADO}"
 
 log "3. Backup da producao e instalacao da variante DATM como ativa"
 cp -p "${NUOPC}" "${BACKUP}"

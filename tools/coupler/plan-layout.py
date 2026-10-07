@@ -30,7 +30,7 @@
 #   binding. NÃO há modelo de memória por PET: nada de 'mem' por padrão.
 #
 # COMPONENTE DE GELO
-#   Com use_sis2_dynamic = .true. e ice_pet_count > 0, o layout tem TRÊS blocos
+#   Com o gelo ligado (ice_model = 'sis2') e ice_pet_count > 0, o layout tem TRÊS blocos
 #   disjuntos, e o run_esmApp.jaci gera um 'select' com três chunks. Até esta
 #   revisão o planejador conhecia apenas dois, e imprimia um 'select' diferente
 #   do que o script geraria. Informe o terceiro bloco com --ice K, ou com um
@@ -154,7 +154,7 @@ def clean_hint(count: int, cap: int) -> str:
 
 
 # ── Layout split (ATM + OCN [+ ICE]) ─────────────────────────────────────────
-# O bloco de gelo existe apenas com use_sis2_dynamic = .true. e ice_pet_count
+# O bloco de gelo existe apenas com ice_model = 'sis2' e ice_pet_count
 # maior que zero. Quando ice == 0, tudo abaixo recai exatamente no caso de dois
 # blocos que existia antes desta revisão: mesmo 'select', mesmos avisos.
 #
@@ -305,10 +305,10 @@ def print_single(r, cfg):
     print("    atm_pet_count = {}".format(r["atm"]))
     print("    ocn_pet_count = {}".format(r["ocn"]))
     if tem_ice:
-        print("    use_sis2_dynamic = .true.")
         print("    ice_pet_count = {}".format(r["ice"]))
+        print("  e, em &nuopc_mode: ice_model = 'sis2'")
     else:
-        print("    use_sis2_dynamic = .false.  ! sem bloco de gelo neste plano")
+        print("  e, em &nuopc_mode: ice_model = 'none'  ! sem bloco de gelo neste plano")
     print("  e submeter:  bash run_esmApp.jaci -n {}{}".format(
         r["npes"], "" if order == "atm-first" else " --pet-order ocn-first"))
     print("=" * 74)

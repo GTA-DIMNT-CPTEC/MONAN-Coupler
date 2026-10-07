@@ -138,7 +138,7 @@ Esta seção vale igualmente para `coupling_mode = 'sequential'` e para
 ele mora. O `select` é o mesmo.
 
 Em `pet_layout = 'split'`, o **ATM (MPAS-A)** e o **OCN (MOM6)** ocupam blocos
-disjuntos de PET (mais o **ICE (SIS2)**, quando `use_sis2_dynamic` está ligado). Se os blocos não coincidirem com as fronteiras de nó, um nó
+disjuntos de PET (mais o **ICE (SIS2)**, quando `ice_model = 'sis2'`). Se os blocos não coincidirem com as fronteiras de nó, um nó
 fica **misto** (ATM+OCN), o que piora a localidade e o *binding*.
 
 Com `atm_pet_count` e `ocn_pet_count` explícitos na `nuopc.input`, o script gera
@@ -178,7 +178,7 @@ Regras:
   custa de mais nós), ou reserve com `--mem`.
 - **Ordem** (`--pet-order`): `atm-first` (padrão) ou `ocn-first`; o PALS preenche
   o `PBS_NODEFILE` na ordem do `select`.
-- **Componente ICE**: com `use_sis2_dynamic = .true.` o `select` ganha um
+- **Componente ICE**: com `ice_model = 'sis2'` o `select` ganha um
   terceiro bloco, sempre por último, com teto ajustável por `--ppn-ice`. A soma
   das três parcelas de `mpiprocs` precisa fechar com o `-n` do job.
 
@@ -555,13 +555,13 @@ fila`** (NPES ou número de nós acima do `resources_max` da fila consultada com
 ```
 
 Com o gelo ativo, o passo 1 ganha `--ice K` e o passo 2 ganha
-`use_sis2_dynamic = .true.` e `ice_pet_count = K`:
+`ice_model = 'sis2'` (no `&nuopc_mode`) e `ice_pet_count = K`:
 
 ```
 1. PLANEJAR    python3 plan-layout.py --atm 64 --ocn 4 --ice 4 --queue longtime
 2. CONFIGURAR  nuopc.input: pet_layout=split, coupling_mode=concurrent,
                             atm_pet_count=64, ocn_pet_count=4,
-                            use_sis2_dynamic=.true., ice_pet_count=4
+                            ice_pet_count=4; &nuopc_mode: ice_model='sis2'
 3. VERIFICAR   bash run_esmApp.jaci -n 72 --check
 4. SUBMETER    bash run_esmApp.jaci -n 72
 ```
@@ -665,7 +665,7 @@ maiores, e repetir a medição do SMT sempre que a máquina ou o código mudarem
 | `sequential`  | Valor de `coupling_mode`: os componentes avançam um de cada vez dentro do passo. |
 | `concurrent`  | Valor de `coupling_mode`: os componentes avançam ao mesmo tempo. Exige blocos disjuntos para render tempo de parede. |
 | ATM/OCN/ICE/MED | Componentes: atmosfera (MPAS-A), oceano (MOM6), gelo marinho (SIS2) e mediador (fluxos *bulk*). |
-| `use_sis2_dynamic` | Liga o componente de gelo. Em `split` exige `ice_pet_count` explícito, e o `select` ganha um terceiro bloco. |
+| `ice_model` (`&nuopc_mode`; chave antiga `use_sis2_dynamic`) | `'sis2'` liga o componente de gelo. Em `split` exige `ice_pet_count` explícito, e o `select` ganha um terceiro bloco. |
 
 **Hardware da Jaci**
 

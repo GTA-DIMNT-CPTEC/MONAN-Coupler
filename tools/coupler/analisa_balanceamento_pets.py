@@ -153,7 +153,7 @@ _RE_MODE_SEQUENTIAL = re.compile(r"modo\s+SEQUENTIAL", re.IGNORECASE)
 _RE_PET_RANGE = re.compile(
     r"ATM=PET\[(\d+)\.\.(\d+)\]\s+OCN=PET\[(\d+)\.\.(\d+)\]"
 )
-# Com use_sis2_dynamic ligado, o esm.F90 acrescenta um terceiro bloco na MESMA
+# Com o gelo ligado (ice_model = 'sis2'), o esm.F90 acrescenta um terceiro bloco na MESMA
 # linha, depois do de oceano:
 #   "... ATM=PET[0..63] OCN=PET[64..67] ICE=PET[68..71] MED=todos"
 # Sem gelo, a linha termina com "MED=todos (ICE desativado)" e este padrão
@@ -203,7 +203,7 @@ class ParseResult:
     mode_announced: Optional[str] = None
     atm_range: Optional[Tuple[int, int]] = None    # (primeiro, último) PET do ATM
     ocn_range: Optional[Tuple[int, int]] = None
-    # Terceiro bloco, presente apenas com use_sis2_dynamic = .true. Fica em
+    # Terceiro bloco, presente apenas com ice_model = 'sis2'. Fica em
     # None quando o gelo está desativado, e essa distinção é usada adiante para
     # decidir se o componente entra ou não no relatório.
     ice_range: Optional[Tuple[int, int]] = None
@@ -811,7 +811,7 @@ def print_report(
         if comp in sugestao:
             print(f"    {chave} = {sugestao[comp]}")
     if "ICE" not in sugestao:
-        print("    use_sis2_dynamic = .false.   ! gelo ausente nesta medição")
+        print("    (em &nuopc_mode: ice_model = 'none'; gelo ausente nesta medição)")
     print("  (divisão proporcional ao trabalho medido, supondo escala linear)")
     avisos_sug = [(comp, a) for comp in sugestao
                   for a in avaliar_contagem(comp, sugestao[comp], geo, lim)]

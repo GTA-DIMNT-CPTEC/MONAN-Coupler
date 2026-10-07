@@ -41,7 +41,12 @@
 #   cplcheck    conferência do mapa num driver NUOPC com as listas de campos
 #               de hoje (tests/cplcheck/confere-cplcheck.bash)
 #   config      tests/config/compara-config.bash REV (leitura do nuopc.input:
-#               mensagens, código de retorno e valores em 29 casos)
+#               mensagens, código de retorno e valores em 45 casos, os
+#               erros só da versão atual e os avisos de chave antiga)
+#   chaves      os scripts leem a escolha dos modelos (chaves por modelo ou
+#               antigas) como config_read, em modo estrito
+#               (tests/scripts/confere-chaves-nuopc.bash; usa o test_config
+#               da conferência config, se ela rodou)
 #   supergrid   tests/supergrid/compara-supergrid.bash REV
 #   docn        tests/docn/compara-docn.bash REV (o mais demorado: compila
 #               as duas versões e roda o DOCN num driver NUOPC)
@@ -65,7 +70,7 @@
 set -uo pipefail
 
 RAIZ=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa cabecalhos curtocircuito exportacao dependencias camadas cplcheck config supergrid docn"
+TODAS="compilacao avisos literais nomes regrid esquemas gravadores bulk grade malhas completar unitarios mapa cabecalhos curtocircuito exportacao dependencias camadas cplcheck config chaves supergrid docn"
 LISTA=""
 EXIGE_INSTR=0
 SAIDA=""
@@ -232,6 +237,8 @@ quer dependencias && executa dependencias python3 tools/dev/dependencias.py gera
 quer camadas && executa camadas python3 tools/dev/confere-camadas.py
 quer cplcheck   && executa cplcheck tests/cplcheck/confere-cplcheck.bash "${SAIDA}/cplcheck"
 quer config     && executa config tests/config/compara-config.bash "${REV}" "${SAIDA}/config"
+quer chaves     && executa chaves env TEST_CONFIG="${SAIDA}/config/atual/test_config" \
+                     tests/scripts/confere-chaves-nuopc.bash "${SAIDA}/chaves"
 quer supergrid  && executa supergrid tests/supergrid/compara-supergrid.bash "${REV}" "${SAIDA}/supergrid"
 quer docn       && executa docn tests/docn/compara-docn.bash "${REV}" "${SAIDA}/docn"
 

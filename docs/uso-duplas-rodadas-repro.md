@@ -118,7 +118,7 @@ Separa duas hipóteses trocando o MPAS por uma atmosfera de dados (DATM), com o 
 
 ### 5.2 Como funciona e uso
 
-O script confere que o `nuopc.input` atual é o de produção, gera `nuopc.input.datm_mom6` trocando só `use_datm` para `.true.`, instala essa variante, roda o `roda_repro_producao.sh` com um rótulo próprio (`datm-reproA-...`) e **restaura o `nuopc.input` de produção no fim**, mesmo que algo falhe.
+O script confere que o `nuopc.input` atual é o de produção, gera `nuopc.input.datm_mom6` trocando só o modelo da atmosfera (`atm_model = 'datm'`, no lugar de `atm_model` ou `use_datm`), instala essa variante, roda o `roda_repro_producao.sh` com um rótulo próprio (`datm-reproA-...`) e **restaura o `nuopc.input` de produção no fim**, mesmo que algo falhe.
 
 ```bash
 cd <diretorio_do_experimento>

@@ -90,7 +90,7 @@ Confira que os logs de PET esperados estão lá. Com `split` e gelo devem ser tr
 ls baseline/L-10/logs/
 ```
 
-Confira também que `atm_pet_count`, `ocn_pet_count`, `ice_pet_count`, `coupling_mode`, `pet_layout`, `use_sis2_dynamic` e `use_med_to_mpas` são de fato o cenário que você queria congelar, e que o inventário da saída não está vazio do lado da importação. Se `mom6_import` e `monan2_import` estiverem ambos em zero, o MANIFEST traz um aviso: a causa provável é `write_import_diag` desligado, e a base cobrirá apenas o lado de exportação.
+Confira também que `atm_pet_count`, `ocn_pet_count`, `ice_pet_count`, `coupling_mode`, `pet_layout` e os modelos (`atm_model`, `ocn_model`, `ice_model` e `atm_boundary`, que o MANIFEST registra já traduzidos, com a lista das chaves antigas presentes) são de fato o cenário que você queria congelar, e que o inventário da saída não está vazio do lado da importação. Se `mom6_import` e `monan2_import` estiverem ambos em zero, o MANIFEST traz um aviso: a causa provável é `write_import_diag` desligado, e a base cobrirá apenas o lado de exportação.
 
 ### Anotar uma base já congelada
 

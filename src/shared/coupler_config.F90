@@ -25,10 +25,10 @@
 !! aceitas, na tabela COUPLER_MODES, ambas abaixo.
 !!
 !! Chaves antigas: use_datm, use_docn e use_med_to_mpas (&nuopc_mode) e
-!! use_sis2_dynamic (&nuopc_petlayout) continuam aceitas e são traduzidas
-!! para as chaves por modelo (OLD_KEYS, abaixo). Uma chave antiga e a nova
-!! correspondente podem vir juntas se disserem a mesma coisa; se se
-!! contradisserem, a leitura para com erro.
+!! use_sis2_dynamic (&nuopc_petlayout) continuam aceitas, com um aviso, e são
+!! traduzidas para as chaves por modelo (OLD_KEYS, abaixo). Uma chave
+!! antiga e a nova correspondente podem vir juntas se disserem a mesma
+!! coisa; se se contradisserem, a leitura para com erro.
 !!
 !! Regras de leitura:
 !!   - grupo ausente do arquivo: mantém os valores padrão, com aviso;
@@ -502,6 +502,7 @@ contains
     end if
 
     ! 5. Avisos (a rodada continua)
+    call warn_old_keys(mode_keys, petlayout, components, is_root)
     if (is_root .and. COUPLER_MODES(mode)%status == 'nao_validada') write(*,'(A)') TAG// &
       'AVISO: combinacao de componentes nao validada: '//trim(COUPLER_MODES(mode)%note)// &
       ' Ver docs/estado-do-projeto.md, secao 6.'
@@ -1090,6 +1091,34 @@ contains
     cfg = config_from_values(values)
     ok = .true.
   end function resolve_components
+
+  !> @brief Aviso para cada chave antiga dada no arquivo, com a chave por
+  !! modelo e o valor em que ela foi traduzida.
+  !!
+  !! @param[in] mode_keys  valores de &nuopc_mode
+  !! @param[in] petlayout  valores de &nuopc_petlayout (chave antiga do gelo)
+  !! @param[in] cfg        configuração escolhida (resolve_components)
+  !! @param[in] is_root    verdadeiro no processo 0
+  subroutine warn_old_keys(mode_keys, petlayout, cfg, is_root)
+    type(mode_group_t),      intent(in) :: mode_keys
+    type(petlayout_group_t), intent(in) :: petlayout
+    type(cpl_config_t),      intent(in) :: cfg
+    logical,                 intent(in) :: is_root
+    character(len=MODEL_NAME_LEN) :: values(4)
+    logical :: given(4)
+    integer :: k
+
+    if (.not. is_root) return
+    values = config_values(cfg)
+    given = mode_keys%old_given
+    given(3) = petlayout%sis2_given
+    do k = 1, size(CONFIG_KEYS)
+      if (.not. given(k)) cycle
+      write(*,'(A)') TAG//'AVISO: chave antiga '//trim(OLD_KEYS(k)%name)//' (&'// &
+        trim(OLD_KEYS(k)%group)//') traduzida para '//trim(CONFIG_KEYS(k))//'='// &
+        trim(values(k))//'; use a chave por modelo.'
+    end do
+  end subroutine warn_old_keys
 
   !> @brief Copia os modelos e o contorno escolhidos para as variáveis do módulo.
   !!

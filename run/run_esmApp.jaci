@@ -61,20 +61,15 @@ _nuopc_get() {
     | head -1 | sed "s/\s*!.*//; s/.*=\s*//; s/['\",]//g; s/[[:space:]]*$//"
 }
 
-# Escolha de um modelo, nas duas formas que config_read aceita: a chave por
-# modelo ($1: atm_model, ocn_model ou ice_model) ou, sem ela, a chave antiga
-# lógica ($3: use_datm, use_docn ou use_sis2_dynamic). Escreve .true. se o
-# modelo $2 ocupa a posição, .false. se não, e o valor da chave antiga (vazio
-# se ausente) quando a nova não está no arquivo. Como _nuopc_get, lê uma
-# chave por linha.
-_nuopc_uses() {
-  local v
-  v="$(_nuopc_get "$1" | tr '[:upper:]' '[:lower:]' || true)"
-  if [[ -z "${v}" ]]; then _nuopc_get "$3" || true   # ausente: vazio, sem parar o set -e
-  elif [[ "${v}" == "$2" ]]; then echo ".true."
-  else echo ".false."
-  fi
-}
+# Escolha dos modelos (chaves por modelo ou antigas, com os padrões de
+# produção): nuopc_modelo e nuopc_usa, comuns aos scripts.
+if [[ -f "${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash" ]]; then
+  # shellcheck source=../tools/coupler/chaves_nuopc.bash
+  source "${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash"
+else
+  echo "ERRO: ${COUPLER_ROOT}/tools/coupler/chaves_nuopc.bash não encontrado (COUPLER_ROOT certo?)" >&2
+  exit 1
+fi
 
 # Lê uma chave DENTRO de um grupo namelist específico. Necessário porque a busca
 # global acima casa a PRIMEIRA ocorrência no arquivo, que pode ser de um grupo
@@ -189,8 +184,8 @@ if [[ -n "${PBS_O_WORKDIR:-}" ]]; then
   NPES="${MPAS_NPES:-4}"
 
   # ── Detecção de modo ATM/OCN ────────────────────────────────────────────────
-  USE_DATM=$(_nuopc_uses atm_model datm use_datm)
-  USE_DOCN=$(_nuopc_uses ocn_model docn use_docn)
+  USE_DATM=$(nuopc_usa "${CONFIG_FILE}" ATM datm)
+  USE_DOCN=$(nuopc_usa "${CONFIG_FILE}" OCN docn)
   DOCN_MODE=$(_nuopc_get docn_mode)
   DOCN_MODE="${DOCN_MODE:-stub}"
   WRITE_DIAG=$(_nuopc_get write_import_diag)
@@ -808,8 +803,8 @@ _opt() {
 }
 
 # ── Detecção de modo ATM/OCN ─────────────────────────────────────────────────
-USE_DATM=$(_nuopc_uses atm_model datm use_datm)
-USE_DOCN=$(_nuopc_uses ocn_model docn use_docn)
+USE_DATM=$(nuopc_usa "${CONFIG_FILE}" ATM datm)
+USE_DOCN=$(nuopc_usa "${CONFIG_FILE}" OCN docn)
 DOCN_MODE=$(_nuopc_get docn_mode)
 DOCN_MODE="${DOCN_MODE:-stub}"
 
@@ -884,12 +879,7 @@ PET_LAYOUT=$(printf '%s' "${PET_LAYOUT}" | tr '[:upper:]' '[:lower:]')
 ATM_PET=$(_nuopc_pet atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
 OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
 ICE_PET=$(_nuopc_pet ice_pet_count || true); [[ "${ICE_PET}" =~ ^[0-9]+$ ]] || ICE_PET=0
-USE_SIS2=$(_nuopc_get ice_model | tr '[:upper:]' '[:lower:]' || true)   # ausente: grep devolve 1 (set -e)
-case "${USE_SIS2}" in
-  "")   USE_SIS2=$(_nuopc_pet use_sis2_dynamic || true) ;;   # chave antiga
-  sis2) USE_SIS2=".true." ;;
-  *)    USE_SIS2=".false." ;;
-esac
+USE_SIS2=$(nuopc_usa "${CONFIG_FILE}" ICE sis2)
 USE_SIS2=$(printf '%s' "${USE_SIS2}" | tr -d ". '\"" | tr '[:upper:]' '[:lower:]')
 # Ausente vale .true., o padrão de config_read (configuração de produção).
 case "${USE_SIS2}" in f|false) USE_SIS2=0 ;; *) USE_SIS2=1 ;; esac

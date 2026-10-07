@@ -23,7 +23,7 @@ alocar o mesmo numero de PETs:
 Este script le os logs de PET das duas configuracoes e responde se B e mais
 lento, igual ou mais rapido que A, e em qual componente a diferenca aparece.
 Os componentes reconhecidos sao MED, MPAS, OCN e ICE; o de gelo aparece apenas
-quando use_sis2_dynamic esta' ligado, e precisa estar ligado (ou desligado) nas
+quando o gelo esta' ligado (ice_model = 'sis2'), e precisa estar ligado (ou desligado) nas
 DUAS configuracoes.
 
 METODOLOGIA
@@ -501,7 +501,7 @@ def autoverifica(metas, petcount, args, comps_por_cfg=None):
             f"exige o mesmo numero de PETs nas duas configuracoes.")
 
     # 1b) Mesmo CONJUNTO DE COMPONENTES em A e B, e entre as repeticoes de cada
-    # configuracao. Sem isso, uma rodada com use_sis2_dynamic ligado e outra
+    # configuracao. Sem isso, uma rodada com o gelo ligado e outra
     # sem seriam comparadas assim mesmo: o ICE simplesmente nao apareceria na
     # tabela (as linhas so' saem quando o componente existe nas duas), e a
     # linha TOTAL, que soma os componentes, compararia somas de conjuntos

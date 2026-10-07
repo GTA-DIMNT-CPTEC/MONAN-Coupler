@@ -202,6 +202,10 @@ _sujo() {
   fi
 }
 
+# Escolha dos modelos, nas duas formas de chave (nuopc_modelo)
+# shellcheck source=../coupler/chaves_nuopc.bash
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../coupler/chaves_nuopc.bash"
+
 _nuopc_get() {
   # Lê um parâmetro do nuopc.input, ignorando comentários.
   sed 's/!.*//' nuopc.input \
@@ -243,17 +247,17 @@ _nuopc_get() {
   echo "stop_date       : $(_nuopc_get stop_date)"
   echo "dt_coupling     : $(_nuopc_get dt_coupling)"
   echo "dt_atm          : $(_nuopc_get dt_atm)"
-  echo "use_datm        : $(_nuopc_get use_datm)"
-  echo "use_docn        : $(_nuopc_get use_docn)"
-  echo "use_med_to_mpas : $(_nuopc_get use_med_to_mpas)"
+  # Modelo de cada posição e contorno, lidos das chaves por modelo ou das
+  # antigas (chaves_nuopc.bash); as antigas presentes ficam registradas
+  echo "atm_model       : $(nuopc_modelo nuopc.input ATM)"
+  echo "ocn_model       : $(nuopc_modelo nuopc.input OCN)"
+  echo "ice_model       : $(nuopc_modelo nuopc.input ICE)"
+  echo "atm_boundary    : $(nuopc_modelo nuopc.input BND)"
+  echo "chaves antigas  : $(nuopc_chaves_antigas nuopc.input | paste -sd' ' -)"
   echo "coupling_mode   : $(_nuopc_get coupling_mode)"
   echo "pet_layout      : $(_nuopc_get pet_layout)"
   echo "atm_pet_count   : $(_nuopc_get atm_pet_count)"
   echo "ocn_pet_count   : $(_nuopc_get ocn_pet_count)"
-  # Sem estas três linhas, duas linhas de base com e sem gelo ficariam
-  # indistinguíveis pelo manifesto, e o caminho OCN->ATM (direto ou pelo
-  # mediador) não seria registrado em lugar nenhum.
-  echo "use_sis2_dynamic: $(_nuopc_get use_sis2_dynamic)"
   echo "ice_pet_count   : $(_nuopc_get ice_pet_count)"
   echo "write_import_diag: $(_nuopc_get write_import_diag)"
   echo ""

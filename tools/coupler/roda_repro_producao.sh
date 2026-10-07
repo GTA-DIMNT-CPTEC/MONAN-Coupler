@@ -153,20 +153,27 @@ fi
 nml_val() { sed 's/!.*//' "${NUOPC}" | grep -iE "^[[:space:]]*$1[[:space:]]*=" \
             | head -1 | cut -d= -f2 | tr -d " '\"" ; }
 
-USE_DOCN=$(nml_val use_docn)
-USE_MED=$(nml_val use_med_to_mpas)
-USE_SIS2=$(nml_val use_sis2_dynamic)
+# Modelos e contorno, pelas chaves por modelo ou pelas antigas
+# shellcheck source=chaves_nuopc.bash
+source "${SCRIPT_DIR}/chaves_nuopc.bash"
+ATM_M=$(nuopc_modelo "${NUOPC}" ATM)
+OCN_M=$(nuopc_modelo "${NUOPC}" OCN)
+ICE_M=$(nuopc_modelo "${NUOPC}" ICE)
+BND_M=$(nuopc_modelo "${NUOPC}" BND)
 CMODE=$(nml_val coupling_mode)
 PLAYOUT=$(nml_val pet_layout)
 
-info "use_docn         = ${USE_DOCN:-<ausente>}   (esperado .false.)"
-info "use_med_to_mpas  = ${USE_MED:-<ausente>}   (esperado .true.)"
-info "use_sis2_dynamic = ${USE_SIS2:-<ausente>}   (esperado .true.)"
+info "atm_model        = ${ATM_M}   (mpas, ou datm pelo roda_repro_datm_mom6.sh)"
+info "ocn_model        = ${OCN_M}   (esperado mom6)"
+info "ice_model        = ${ICE_M}   (esperado sis2)"
+info "atm_boundary     = ${BND_M}   (esperado med)"
 info "coupling_mode    = ${CMODE:-<ausente>}   (esperado concurrent)"
 info "pet_layout       = ${PLAYOUT:-<ausente>}   (esperado split)"
 
 shopt -s nocasematch
-if [[ "${USE_DOCN}" != *"false"* || "${USE_MED}" != *"true"* || "${USE_SIS2}" != *"true"* ]]; then
+# A atmosfera não é conferida: roda_repro_datm_mom6.sh usa este script com
+# o DATM no lugar do MONAN-A.
+if [[ "${OCN_M}" != "mom6" || "${ICE_M}" != "sis2" || "${BND_M}" != "med" ]]; then
   shopt -u nocasematch
   echo "" >&2
   echo "ERRO: a nuopc.input ativa NAO e a de producao (MPAS+MOM6+SIS2)." >&2

@@ -28,7 +28,10 @@
 # a versão atual sabe ler (valor fora da tabela, chave antiga que contradiz
 # a nova) conferem o código de retorno e a mensagem esperada. As mensagens
 # que mudaram de propósito estão em tests/config/mensagens-mudadas.sed e são
-# traduzidas na saída da referência antes da comparação.
+# traduzidas na saída da referência antes da comparação. Os avisos de chave
+# antiga (desde a R-FASE13-30) ficam fora da comparação e são conferidos à
+# parte: um por chave antiga dada, nenhum com as chaves por modelo nem no
+# nuopc.input da raiz.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/config/compara-config.bash REV [SAIDA]
@@ -265,14 +268,41 @@ for caso in ${CASOS}; do
       | sed "s|${C}/||g" > "${SAIDA}/${caso}_${versao}.txt" 2>&1
   done
   sed -i -e 's|\.rev\.input|.input|g' -f "${MUDADAS}" "${SAIDA}/${caso}_rev.txt"
-  if cmp -s "${SAIDA}/${caso}_rev.txt" "${SAIDA}/${caso}_atual.txt"; then
+  # Os avisos de chave antiga (desde a R-FASE13-30) saem da comparação; a
+  # presença deles é conferida à parte, abaixo
+  for versao in rev atual; do
+    grep -v 'AVISO: chave antiga ' "${SAIDA}/${caso}_${versao}.txt" > "${SAIDA}/${caso}_${versao}.cmp" || true
+  done
+  if cmp -s "${SAIDA}/${caso}_rev.cmp" "${SAIDA}/${caso}_atual.cmp"; then
     printf '  %-24s iguais (rc %s)\n' "${caso}" "$(grep '^rc = ' "${SAIDA}/${caso}_atual.txt" | cut -d' ' -f3 | paste -sd,)"
   else
     printf '  %-24s DIFEREM\n' "${caso}"
-    diff "${SAIDA}/${caso}_rev.txt" "${SAIDA}/${caso}_atual.txt" | head -10 | sed 's/^/      /'
+    diff "${SAIDA}/${caso}_rev.cmp" "${SAIDA}/${caso}_atual.cmp" | head -10 | sed 's/^/      /'
     ndif=$((ndif + 1))
   fi
 done
+# Avisos de chave antiga na versão atual: um por chave antiga dada, com o
+# valor traduzido; nenhum com as chaves por modelo
+aviso() {   # aviso CASO TEXTO (TEXTO vazio: o caso não pode ter aviso)
+  local saida="${SAIDA}/$1_atual.txt"
+  if [[ -z "$2" ]] && ! grep -q 'AVISO: chave antiga ' "${saida}"; then
+    printf '  %-24s sem aviso de chave antiga\n' "$1"
+  elif [[ -n "$2" ]] && grep -qF "[coupler_config] AVISO: chave antiga $2" "${saida}"; then
+    printf '  %-24s aviso: %s\n' "$1" "$2"
+  else
+    printf '  %-24s AVISO DE CHAVE ANTIGA ERRADO (esperado: %s)\n' "$1" "${2:-nenhum}"
+    grep 'AVISO: chave antiga ' "${saida}" | sed 's/^/      /'
+    ndif=$((ndif + 1))
+  fi
+}
+aviso datm_docn 'use_datm (&nuopc_mode) traduzida para atm_model=datm; use a chave por modelo.'
+aviso datm_docn 'use_docn (&nuopc_mode) traduzida para ocn_model=docn; use a chave por modelo.'
+aviso datm_docn 'use_med_to_mpas (&nuopc_mode) traduzida para atm_boundary=ocn; use a chave por modelo.'
+aviso datm_docn 'use_sis2_dynamic (&nuopc_petlayout) traduzida para ice_model=none; use a chave por modelo.'
+aviso novas_docn ''
+aviso ambas_iguais 'use_docn (&nuopc_mode) traduzida para ocn_model=docn; use a chave por modelo.'
+aviso raiz ''
+
 # Casos que só a versão atual sabe ler: erro fatal com a mensagem esperada
 espera() {   # espera NOME MENSAGEM GRUPOS...
   local nome=$1 msg=$2 saida; shift 2

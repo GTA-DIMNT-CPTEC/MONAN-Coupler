@@ -87,7 +87,7 @@
 !-----------------------------------------------------------------------
 ! Grupo 2: Modelos de cada posição (&nuopc_mode)
 !
-! Desde a R-FASE13-29, a escolha pode ser escrita por modelo:
+! Cada posição recebe um modelo:
 !   atm_model     'mpas' (MONAN-A, PRODUÇÃO) | 'datm' (JRA55; o driver
 !                 ainda não registra o DATM)
 !   ocn_model     'mom6' (MOM6, PRODUÇÃO) | 'docn' (SST/gelo por dados)
@@ -98,14 +98,15 @@
 ! Os modelos possíveis estão na tabela COMPONENTS, em
 ! src/shared/coupler_config.F90.
 !
-! As chaves antigas, usadas abaixo, continuam aceitas e são traduzidas:
+! As chaves antigas continuam aceitas, com um aviso na leitura, e são
+! traduzidas:
 !   use_datm=T → atm_model='datm'      use_docn=T → ocn_model='docn'
 !   use_med_to_mpas=F → atm_boundary='ocn'
 !   use_sis2_dynamic=F (&nuopc_petlayout) → ice_model='none'
 ! Uma chave antiga e a nova podem vir juntas se concordarem; se se
-! contradisserem, a leitura para com erro. Este arquivo continua com as
-! chaves antigas porque scripts de tools/coupler ainda leem só elas
-! (run/run_esmApp.jaci já lê as duas formas).
+! contradisserem, a leitura para com erro. Os scripts (run/run_esmApp.jaci,
+! tools/coupler, cria-linha-base) leem as duas formas
+! (tools/coupler/chaves_nuopc.bash), uma chave por linha.
 !
 ! Os valores padrão (mpas, mom6, sis2, med) formam a configuração de
 ! produção. Que combinações são aceitas está numa tabela só, COUPLER_MODES
@@ -118,13 +119,14 @@
 !                 DOCN. A rodada para na leitura, com mensagem que diz o que
 !                 mudar.
 !
-! NOTA: &nuopc_docn é lido sempre, independentemente de use_docn. Em particular, write_import_diag em &nuopc_docn
+! NOTA: &nuopc_docn é lido sempre, independentemente de ocn_model. Em particular, write_import_diag em &nuopc_docn
 !       controla a escrita de mom6_import_*.nc nos dois modos OCN.
 !-----------------------------------------------------------------------
 &nuopc_mode
-  use_datm        = .false.   ! .true. → DATM JRA55 | .false. → MPAS-A real
-  use_docn        = .false.   ! .true. → DOCN SST   | .false. → MOM6+SIS2
-  use_med_to_mpas = .true.    ! .true. obrigatório com o MOM6 (use_docn=F)
+  atm_model       = 'mpas'    ! 'mpas' → MONAN-A real | 'datm' → DATM JRA55
+  ocn_model       = 'mom6'    ! 'mom6' → MOM6          | 'docn' → DOCN SST
+  ice_model       = 'sis2'    ! 'sis2' → SIS2 dinâmico | 'none' → sem gelo
+  atm_boundary    = 'med'     ! 'med' obrigatório com o MOM6; 'ocn' só DOCN
   use_docn_ice    = .false.   ! .true. → Si_ifrac do arquivo OISST
                               ! .false. → aproximação sigmoide pela SST
   !
@@ -198,10 +200,10 @@
 !-----------------------------------------------------------------------
 ! Grupo 6: Componente oceânico por dados (DOCN_cap)
 !
-! ATIVO como componente OCN quando use_docn=.true. em &nuopc_mode.
-! INATIVO (substituído por MOM6+SIS2) quando use_docn=.false.
+! ATIVO como componente OCN quando ocn_model='docn' em &nuopc_mode.
+! INATIVO (substituído por MOM6+SIS2) quando ocn_model='mom6'.
 !
-! IMPORTANTE: este grupo é lido sempre, independentemente de use_docn.
+! IMPORTANTE: este grupo é lido sempre, independentemente de ocn_model.
 ! Em particular:
 !   write_import_diag: grava diag_import/mom6_import_*.nc em modo DOCN
 !                      E em modo MOM6+SIS2 (mediador escreve o arquivo).
@@ -209,7 +211,7 @@
 !   docn_mode    Modo do componente oceânico por dados:
 !                    'stub'   — SST sintética constante (= sst_default)
 !                    'netcdf' — lê SST/gelo de arquivo NetCDF com interp.
-!                Usado apenas quando use_docn=.true.
+!                Usado apenas quando ocn_model='docn'.
 !
 !   docn_nx/ny   Dimensões da grade do dado oceânico:
 !                    1440 × 720  = OISST 0.25°  (padrão)
@@ -276,8 +278,8 @@
 !-----------------------------------------------------------------------
 ! Grupo 7: Componente oceânico MOM6+SIS2 (mom_cap_MONAN.F90)
 !
-! ATIVO quando use_docn=.false. em &nuopc_mode (padrão de produção).
-! Requer também use_med_to_mpas=.true.
+! ATIVO quando ocn_model='mom6' em &nuopc_mode (padrão de produção).
+! Requer também atm_boundary='med'.
 !
 !   mesh_ocn      Supergrade do MOM6 (ocean_hgrid.nc, formato FRE-NCtools).
 !                 O mediador e o cap do gelo leem dela as dimensões e as
@@ -358,13 +360,14 @@
 !
 ! COMPONENTE ICE (gelo marinho SIS2 dinâmico)
 !
-!   use_sis2_dynamic  .false. → nenhum componente ICE é criado; a
+!   ice_model (em &nuopc_mode; chave antiga use_sis2_dynamic, aqui)
+!                     'none' → nenhum componente ICE é criado; a
 !                     fração de gelo vem da aproximação pela SST.
-!                     .true. (padrão) → registra o cap do SIS2
+!                     'sis2' (padrão) → registra o cap do SIS2
 !                     (sis_cap_MONAN.F90) como componente NUOPC próprio,
 !                     com os conectores MED -> ICE e ICE -> MED.
 !   ice_pet_count     Nº de PETs do ICE quando pet_layout='split' e
-!                     use_sis2_dynamic=.true. 0 → auto: divide em três partes
+!                     ice_model='sis2'. 0 → auto: divide em três partes
 !                     aproximadamente iguais o que não tiver sido fixado.
 !
 ! O gelo segue os MESMOS dois eixos dos demais componentes:
@@ -376,11 +379,11 @@
 !
 ! REGRA (shared): as três contagens devem ser 0.
 !
-! REGRA: ice_pet_count > 0 com use_sis2_dynamic=.false. é ERRO, e não
+! REGRA: ice_pet_count > 0 com ice_model='none' é ERRO, e não
 !   descarte silencioso: sem o componente ICE a contagem não teria a quem se
 !   aplicar. Mesma lógica da regra de shared acima.
 !
-! REGRA: use_sis2_dynamic=.true. exige use_docn=.false. em &nuopc_mode. Com o
+! REGRA: ice_model='sis2' exige ocn_model='mom6' em &nuopc_mode. Com o
 !   DOCN o oceano é um arquivo OISST lido do disco e o Si_ifrac vem do próprio
 !   arquivo, então não há a quem o SIS2 se acoplar.
 !
@@ -408,13 +411,12 @@
   pet_layout    = 'split'        ! 'shared' | 'split'
   atm_pet_count = 128            ! split: nº PETs do ATM (0 = auto: metade)
   ocn_pet_count = 20             ! split: nº PETs do OCN (0 = auto: resto)
-  use_sis2_dynamic = .true.      ! .true. ativa o componente ICE (SIS2)
   ice_pet_count = 4              ! split + ICE: nº PETs do ICE (0 = auto)
   seq_repro     = .true.         ! .true. → sequential+split+SIS2 REPRODUTIVEL
                                  !   (fluxo de dados idêntico ao concurrent+split,
                                  !   bit-a-bit). Só efetivo com coupling_mode=
-                                 !   'sequential' + use_med_to_mpas + use_sis2_
-                                 !   dynamic + pet_layout='split'. Default .false.
+                                 !   'sequential' + atm_boundary='med' + ice_model=
+                                 !   'sis2' + pet_layout='split'. Default .false.
                                  !   preserva o arranque com SST real no passo 1.
                                  !   NÃO altera o modo concurrent.
 /
