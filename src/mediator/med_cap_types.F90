@@ -6,6 +6,8 @@
 !!   agrupado nos subtipos med_ocn_flux_fields_t, med_ocn_fields_t,
 !!   med_ice_fields_t, med_sfc_fields_t, med_par_t e med_diag_config_t
 !!   Constantes físicas Large & Yeager (2009); usadas pelo bulk NCAR
+!!   MED_FIELDS: campos internos do mediador; constantes F_* com a posição
+!!   de cada um, usada pela física em med_flux_t%p
 !!   MED_KEYS: chaves de configuração que escolhem os campos anunciados,
 !!   cujas listas saem do mapa de acoplamento (cpl_map)
 !!
@@ -32,7 +34,7 @@ module med_cap_types_mod
   public :: med_par_t, med_diag_config_t, med_run_flags_t
   ! Contagem dos pontos completados por vizinhança (relatório de acoplamento)
   public :: med_fill_count_t, N_FILL, FILL_NAMES
-  public :: med_flux_t
+  public :: med_flux_t, med_array_t
   public :: COMPL_SST, COMPL_ICE_IFRAC, COMPL_ICE_AVSDR, COMPL_ICE_AVSDF
   public :: COMPL_ICE_ANIDR, COMPL_ICE_ANIDF, COMPL_ICE_T, COMPL_IFRAC_EXP
   ! Constantes físicas de coupler_constants_mod, re-exportadas
@@ -45,6 +47,11 @@ module med_cap_types_mod
   ! Chaves de configuração que escolhem os campos do mediador
   public :: MED_KEYS
   public :: med_field_spec_t, MED_FIELDS, med_named_field_t, med_field_index
+  ! Posição de cada campo interno em MED_FIELDS e em med_flux_t%p
+  public :: F_TAUX, F_TAUY, F_SEN, F_EVAP, F_LWNET, F_SWVDR, F_SWVDF, F_SWIDR, F_SWIDF
+  public :: F_RAIN, F_SNOW, F_PSLV, F_IFRAC, F_OMASK, F_DUU10N, F_SST, F_UOCN, F_VOCN
+  public :: F_ZORL, F_ALB_VDR, F_ALB_VDF, F_ALB_IDR, F_ALB_IDF, F_COSZEN, F_ALBEDO, F_TICE, F_TSFC
+  public :: F_TAUX_ICE, F_TAUY_ICE, F_SEN_ICE, F_EVAP_ICE, F_LWNET_ICE, F_SWVDR_ICE, F_SWVDF_ICE, F_SWIDR_ICE, F_SWIDF_ICE
 
   ! Parâmetros do bulk e do balanço radiativo do mediador (Large & Yeager 2009).
   ! As constantes físicas vêm de coupler_constants_mod e são re-exportadas aqui.
@@ -64,6 +71,122 @@ module med_cap_types_mod
   real(ESMF_KIND_R8), parameter :: f_vis_dif = 0.215_ESMF_KIND_R8
   real(ESMF_KIND_R8), parameter :: f_nir_dir = 0.285_ESMF_KIND_R8
   real(ESMF_KIND_R8), parameter :: f_nir_dif = 0.215_ESMF_KIND_R8
+
+  !> Um campo interno do mediador, na malha de fluxo: nome de acoplamento
+  !! (o do campo em FIELDS e no mapa), nome do ESMF_Field, valor inicial e se
+  !! o campo é zerado no início de cada passo (zero_med_fluxes, med_flux).
+  type :: med_field_spec_t
+    character(len=CPL_NAME_LEN) :: name      = ''
+    character(len=16)           :: esmf_name = ''
+    real(ESMF_KIND_R8)          :: initial   = 0.0_ESMF_KIND_R8
+    logical                     :: zero_each_step = .false.
+  end type med_field_spec_t
+
+  !> Campos internos do mediador, na ordem de criação. create_internal_fields
+  !! (med_init) cria cada um na malha de fluxo, guarda-o no registro
+  !! is%fields com o nome de acoplamento e o preenche com o valor inicial;
+  !! zero_med_fluxes (med_flux) zera, no início de cada passo, os que têm a
+  !! última coluna .true.; associate_fluxes (med_exchange) dá à física o
+  !! array de cada um em med_flux_t%p, na posição do campo nesta tabela
+  !! (constantes F_*, abaixo). Para incluir um campo calculado no mediador:
+  !! uma linha aqui, a constante F_* da posição e o cálculo, por
+  !! fluxes%p(F_*)%a. Os componentes nomeados de is%ocn_flx, is%ocn, is%ice
+  !! e is%sfc (bind_internal_fields, em med_init) só existem para os campos
+  !! que o código fora da física usa pelo nome.
+  !!   colunas: nome de acoplamento, nome do ESMF_Field, valor inicial, zerado a cada passo
+  type(med_field_spec_t), parameter :: MED_FIELDS(*) = [                                    &
+    med_field_spec_t('Foxx_taux',       'med_taux',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_tauy',       'med_tauy',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_sen',        'med_sen',        0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_evap',       'med_evap',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_lwnet',      'med_lwnet',      0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_swnet_vdr',  'med_swvdr',      0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_swnet_vdf',  'med_swvdf',      0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_swnet_idr',  'med_swidr',      0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Foxx_swnet_idf',  'med_swidf',      0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Faxa_rain',       'med_rain',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Faxa_snow',       'med_snow',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Sa_pslv',         'med_pslv',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Si_ifrac',        'med_ifrac',      0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Sx_omask',        'med_omask',      1.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('So_duu10n',       'med_duu10n',     0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('So_t',            'med_sst',        SST_BULK_FALLBACK,  .false.),  &
+    med_field_spec_t('So_u',            'med_uocn',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('So_v',            'med_vocn',       0.0_ESMF_KIND_R8,   .true. ),  &
+    med_field_spec_t('Sf_zorl',         'med_zorl',       0.01_ESMF_KIND_R8,  .false.),  &
+    med_field_spec_t('Si_avsdr_sis2',   'med_albvdr_ice', ALB_ICE_DEFAULT,    .false.),  &
+    med_field_spec_t('Si_avsdf_sis2',   'med_albvdf_ice', ALB_ICE_DEFAULT,    .false.),  &
+    med_field_spec_t('Si_anidr_sis2',   'med_albidr_ice', ALB_ICE_DEFAULT,    .false.),  &
+    med_field_spec_t('Si_anidf_sis2',   'med_albidf_ice', ALB_ICE_DEFAULT,    .false.),  &
+    med_field_spec_t('Faxa_coszen',     'med_coszen',     0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Sf_albedo',       'med_albedo',     ALB_OCEAN_DEFAULT,  .false.),  &
+    med_field_spec_t('Si_t_sis2',       'med_tice',       T_FREEZE_SEAWATER,  .false.),  &
+    med_field_spec_t('Sx_tsfc',         'med_tsfc_comp',  T_FREEZE_SEAWATER,  .false.),  &
+    med_field_spec_t('Fioi_taux',       'med_taux_ice',   0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_tauy',       'med_tauy_ice',   0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_sen',        'med_sen_ice',    0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_evap',       'med_evap_ice',   0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_lwnet',      'med_lwnet_ice',  0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_swnet_vdr',  'med_swvdr_ice',  0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_swnet_vdf',  'med_swvdf_ice',  0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_swnet_idr',  'med_swidr_ice',  0.0_ESMF_KIND_R8,   .false.),  &
+    med_field_spec_t('Fioi_swnet_idf',  'med_swidf_ice',  0.0_ESMF_KIND_R8,   .false.) ]
+
+  !> Posição de cada campo em MED_FIELDS e em med_flux_t%p. Seguem a ordem
+  !! da tabela; tests/unit/test_med_fields.F90 confere cada constante contra
+  !! o nome do campo.
+  integer, parameter :: F_TAUX       =  1   !< Foxx_taux
+  integer, parameter :: F_TAUY       =  2   !< Foxx_tauy
+  integer, parameter :: F_SEN        =  3   !< Foxx_sen
+  integer, parameter :: F_EVAP       =  4   !< Foxx_evap
+  integer, parameter :: F_LWNET      =  5   !< Foxx_lwnet
+  integer, parameter :: F_SWVDR      =  6   !< Foxx_swnet_vdr
+  integer, parameter :: F_SWVDF      =  7   !< Foxx_swnet_vdf
+  integer, parameter :: F_SWIDR      =  8   !< Foxx_swnet_idr
+  integer, parameter :: F_SWIDF      =  9   !< Foxx_swnet_idf
+  integer, parameter :: F_RAIN       = 10   !< Faxa_rain
+  integer, parameter :: F_SNOW       = 11   !< Faxa_snow
+  integer, parameter :: F_PSLV       = 12   !< Sa_pslv
+  integer, parameter :: F_IFRAC      = 13   !< Si_ifrac
+  integer, parameter :: F_OMASK      = 14   !< Sx_omask
+  integer, parameter :: F_DUU10N     = 15   !< So_duu10n
+  integer, parameter :: F_SST        = 16   !< So_t
+  integer, parameter :: F_UOCN       = 17   !< So_u
+  integer, parameter :: F_VOCN       = 18   !< So_v
+  integer, parameter :: F_ZORL       = 19   !< Sf_zorl
+  integer, parameter :: F_ALB_VDR    = 20   !< Si_avsdr_sis2
+  integer, parameter :: F_ALB_VDF    = 21   !< Si_avsdf_sis2
+  integer, parameter :: F_ALB_IDR    = 22   !< Si_anidr_sis2
+  integer, parameter :: F_ALB_IDF    = 23   !< Si_anidf_sis2
+  integer, parameter :: F_COSZEN     = 24   !< Faxa_coszen
+  integer, parameter :: F_ALBEDO     = 25   !< Sf_albedo
+  integer, parameter :: F_TICE       = 26   !< Si_t_sis2
+  integer, parameter :: F_TSFC       = 27   !< Sx_tsfc
+  integer, parameter :: F_TAUX_ICE   = 28   !< Fioi_taux
+  integer, parameter :: F_TAUY_ICE   = 29   !< Fioi_tauy
+  integer, parameter :: F_SEN_ICE    = 30   !< Fioi_sen
+  integer, parameter :: F_EVAP_ICE   = 31   !< Fioi_evap
+  integer, parameter :: F_LWNET_ICE  = 32   !< Fioi_lwnet
+  integer, parameter :: F_SWVDR_ICE  = 33   !< Fioi_swnet_vdr
+  integer, parameter :: F_SWVDF_ICE  = 34   !< Fioi_swnet_vdf
+  integer, parameter :: F_SWIDR_ICE  = 35   !< Fioi_swnet_idr
+  integer, parameter :: F_SWIDF_ICE  = 36   !< Fioi_swnet_idf
+
+  !> Um array 2D da malha de fluxo, com os limites locais da DE.
+  type :: med_array_t
+    real(ESMF_KIND_R8), pointer :: a(:,:) => null()
+  end type med_array_t
+
+  !> Arrays da física bulk (med_bulk_ncar), na malha de fluxo, com os
+  !! limites locais da DE: p(k)%a aponta para os valores do campo interno k
+  !! de MED_FIELDS (constantes F_*), associado pela fase compute_fluxes
+  !! (med_exchange) a cada passo. Um ponteiro nulo é um campo indisponível.
+  !! A física lê e escreve só por aqui, sem conhecer o estado interno, os
+  !! campos do ESMF nem as rotas; por exemplo, fluxes%p(F_TAUX)%a é a
+  !! tensão zonal sobre a água aberta (Foxx_taux).
+  type :: med_flux_t
+    type(med_array_t) :: p(size(MED_FIELDS))
+  end type med_flux_t
 
   ! Estado interno do mediador, agrupado por assunto
   !
@@ -168,53 +291,6 @@ module med_cap_types_mod
   !! da faixa válida e quantos ficaram com o valor fixo. Só alimentam o
   !! relatório de acoplamento (med_diag, report_fills, chamada no último
   !! passo por mediatoradvancereport).
-  !> Arrays da física bulk (med_bulk_ncar), na malha de fluxo, com os
-  !! limites locais da DE: ponteiros para os valores dos campos internos,
-  !! associados pela fase compute_fluxes (med_exchange) a cada passo. Um
-  !! ponteiro nulo é um campo indisponível. A física lê e escreve só por aqui,
-  !! sem conhecer o estado interno, os campos do ESMF nem as rotas.
-  type :: med_flux_t
-    ! Entradas: oceano e gelo (is%ocn, is%ice)
-    real(ESMF_KIND_R8), pointer :: sst(:,:)     => null()
-    real(ESMF_KIND_R8), pointer :: uocn(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: vocn(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: omask(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: ifrac(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: tice(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: alb_vdr(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: alb_vdf(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: alb_idr(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: alb_idf(:,:) => null()
-    ! Saídas para o oceano: Foxx_* e Faxa_*, Sa_pslv, So_duu10n (is%ocn_flx)
-    real(ESMF_KIND_R8), pointer :: taux(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: tauy(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: sen(:,:)     => null()
-    real(ESMF_KIND_R8), pointer :: evap(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: lwnet(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: swvdr(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: swvdf(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: swidr(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: swidf(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: rain(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: snow(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: pslv(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: duu10n(:,:)  => null()
-    ! Saídas para o gelo: Fioi_* (is%ice)
-    real(ESMF_KIND_R8), pointer :: taux_ice(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: tauy_ice(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: sen_ice(:,:)   => null()
-    real(ESMF_KIND_R8), pointer :: evap_ice(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: lwnet_ice(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: swvdr_ice(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: swvdf_ice(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: swidr_ice(:,:) => null()
-    real(ESMF_KIND_R8), pointer :: swidf_ice(:,:) => null()
-    ! Saídas para a superfície: rugosidade, cosseno zenital e albedo (is%sfc)
-    real(ESMF_KIND_R8), pointer :: zorl(:,:)    => null()
-    real(ESMF_KIND_R8), pointer :: coszen(:,:)  => null()
-    real(ESMF_KIND_R8), pointer :: albedo(:,:)  => null()
-  end type med_flux_t
-
   type :: med_fill_count_t
     integer(ESMF_KIND_I8) :: n_applied = 0_ESMF_KIND_I8
     integer(ESMF_KIND_I8) :: n_invalid_pts = 0_ESMF_KIND_I8
@@ -250,59 +326,6 @@ module med_cap_types_mod
     !> pontos completados por vizinhança, por campo (índices COMPL_*)
     type(med_fill_count_t) :: fill_counts(N_FILL)
   end type med_run_flags_t
-
-  !> Um campo interno do mediador, na malha de fluxo: nome de acoplamento
-  !! (o do campo em FIELDS e no mapa), nome do ESMF_Field e valor inicial.
-  type :: med_field_spec_t
-    character(len=CPL_NAME_LEN) :: name      = ''
-    character(len=16)           :: esmf_name = ''
-    real(ESMF_KIND_R8)          :: initial   = 0.0_ESMF_KIND_R8
-  end type med_field_spec_t
-
-  !> Campos internos do mediador, na ordem de criação. create_internal_fields
-  !! (med_init) cria cada um na malha de fluxo, guarda-o no registro
-  !! is%fields com o nome de acoplamento e o preenche com o valor inicial;
-  !! os componentes de is%ocn_flx, is%ocn, is%ice e is%sfc apontam para as
-  !! entradas do registro. Para incluir um campo calculado no mediador:
-  !! uma linha aqui, o componente no tipo do assunto e a ligação em
-  !! bind_internal_fields (med_init).
-  type(med_field_spec_t), parameter :: MED_FIELDS(*) = [                    &
-    med_field_spec_t('Foxx_taux',      'med_taux',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_tauy',      'med_tauy',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_sen',       'med_sen',        0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_evap',      'med_evap',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_lwnet',     'med_lwnet',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_swnet_vdr', 'med_swvdr',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_swnet_vdf', 'med_swvdf',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_swnet_idr', 'med_swidr',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Foxx_swnet_idf', 'med_swidf',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Faxa_rain',      'med_rain',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Faxa_snow',      'med_snow',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Sa_pslv',        'med_pslv',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Si_ifrac',       'med_ifrac',      0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Sx_omask',       'med_omask',      1.0_ESMF_KIND_R8),   &
-    med_field_spec_t('So_duu10n',      'med_duu10n',     0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('So_t',           'med_sst',        SST_BULK_FALLBACK),  &
-    med_field_spec_t('So_u',           'med_uocn',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('So_v',           'med_vocn',       0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Sf_zorl',        'med_zorl',       0.01_ESMF_KIND_R8),  &
-    med_field_spec_t('Si_avsdr_sis2',  'med_albvdr_ice', ALB_ICE_DEFAULT),    &
-    med_field_spec_t('Si_avsdf_sis2',  'med_albvdf_ice', ALB_ICE_DEFAULT),    &
-    med_field_spec_t('Si_anidr_sis2',  'med_albidr_ice', ALB_ICE_DEFAULT),    &
-    med_field_spec_t('Si_anidf_sis2',  'med_albidf_ice', ALB_ICE_DEFAULT),    &
-    med_field_spec_t('Faxa_coszen',    'med_coszen',     0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Sf_albedo',      'med_albedo',     ALB_OCEAN_DEFAULT),  &
-    med_field_spec_t('Si_t_sis2',      'med_tice',       T_FREEZE_SEAWATER),  &
-    med_field_spec_t('Sx_tsfc',        'med_tsfc_comp',  T_FREEZE_SEAWATER),  &
-    med_field_spec_t('Fioi_taux',      'med_taux_ice',   0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_tauy',      'med_tauy_ice',   0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_sen',       'med_sen_ice',    0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_evap',      'med_evap_ice',   0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_lwnet',     'med_lwnet_ice',  0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_swnet_vdr', 'med_swvdr_ice',  0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_swnet_vdf', 'med_swvdf_ice',  0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_swnet_idr', 'med_swidr_ice',  0.0_ESMF_KIND_R8),   &
-    med_field_spec_t('Fioi_swnet_idf', 'med_swidf_ice',  0.0_ESMF_KIND_R8) ]
 
   !> Uma entrada do registro de campos internos: nome de acoplamento e campo.
   type :: med_named_field_t

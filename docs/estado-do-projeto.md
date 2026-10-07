@@ -31,7 +31,7 @@ O MONAN-Coupler acopla a atmosfera MONAN-A 2.0 (baseada no MPAS-A) ao oceano MOM
 | 10 | decisões que mudam resultados (seção 6) | uma etapa por decisão | aguardando decisões |
 | 11 | arquitetura de acoplamento: mapa, catálogo de malhas, mediador por fases, conferência, esquemas de pesos | R-FASE11-01 a 26 | concluída (`fase11-26-validada`) |
 | 12 | identificadores Fortran em inglês; tabelas em `tools/dev/nomes/`; documentação de trabalho mais curta | R-FASE12-01 a 07 | concluída (`fase12-07-validada`) |
-| 13 | código de produção limpo e de fácil manutenção (NTC de análise da arquitetura): defeitos C1 a C5, comentários, registro com níveis, dicionário com nomes longos e CF, campos internos do mediador por nome, exportação do mediador pelo mapa, camadas sem variáveis globais, configuração por grupo e por modelo (`COMPONENTS`), sequência de execução como texto, mapa por grupos, anúncio comum e cap modelo, limpezas finais | R-FASE13-01 a 30, 33 e 34 (com 29-FIX01); 31 e 32 adiadas | concluída (`fase13-34-validada`); etapa por etapa no [`CHANGELOG.md`](CHANGELOG.md) |
+| 13 | código de produção limpo e de fácil manutenção (NTC de análise da arquitetura): defeitos C1 a C5, comentários, registro com níveis, dicionário com nomes longos e CF, campos internos do mediador por nome, exportação do mediador pelo mapa, camadas sem variáveis globais, configuração por grupo e por modelo (`COMPONENTS`), sequência de execução como texto, mapa por grupos, anúncio comum e cap modelo, limpezas finais | R-FASE13-01 a 34 (com 29-FIX01); 31 e 32 retomadas depois do fechamento | concluída (`fase13-34-validada`); 31 e 32 em validação; etapa por etapa no [`CHANGELOG.md`](CHANGELOG.md) |
 | 14 | validação do DOCN e do DATM, com linhas de base próprias; em seguida, o bloco D da fase 13 (P6c, P6b e P4b) | 14-01 a 14-07 (NTC de análise da arquitetura, v5, capítulo 10) | aguardando as decisões do GT da seção 6 |
 
 O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`historico/CHANGELOG-ate-fase12.md`](historico/CHANGELOG-ate-fase12.md) (texto completo).
@@ -93,7 +93,7 @@ Nenhum foi corrigido porque todos mudariam resultados ou comportamento; cada um,
 | DATM no driver | registrá-lo (com a correção de `ReadJRAFieldInterp`) ou retirá-lo do mapa |
 | metadados dos diagnósticos | unificar pelo dicionário (`FIELDS`) os textos da importação do MONAN-A e do DOCN (tabela abaixo) |
 
-**Etapas adiadas.** R-FASE13-31 (física do mediador por índice em `MED_FIELDS`) e R-FASE13-32 (ligação automática dos campos internos) ficam para quando o primeiro campo novo do mediador for incluído: trocam o acesso por nome em cerca de 150 usos e pedem duas rodadas, sem ganho para o código de hoje. Enquanto isso, o procedimento de 9 lugares está em [`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4.
+**Etapas 31 e 32, retomadas (decisão do Daniel, out/2026).** Adiadas no fechamento da fase 13, foram retomadas antes da fase 14, que não depende delas. R-FASE13-31: a física do mediador acessa os campos internos pela posição em `MED_FIELDS` (`fluxes%p(F_TAUX)%a`), e a associação e a zeragem a cada passo são laços sobre a tabela; um campo calculado no mediador passa a 5 lugares ([`arquitetura-acoplamento.md`](arquitetura-acoplamento.md), seção 4). R-FASE13-32: o repasse pelo mediador sem cálculo, pelo mapa.
 
 | Item | Situação |
 | --- | --- |

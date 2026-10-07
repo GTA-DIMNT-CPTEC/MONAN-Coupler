@@ -696,63 +696,22 @@ contains
   end subroutine compute_fluxes
 
   !> @brief Associa cada array de med_flux_t aos valores do campo interno
-  !! correspondente, no DE local; um campo que o ESMF não entrega deixa o
-  !! array nulo, que a física trata como indisponível.
+  !! na mesma posição de MED_FIELDS (registro is%fields), no DE local; um
+  !! campo que o ESMF não entrega deixa o array nulo, que a física trata como
+  !! indisponível.
   !!
   !! @param[in]  is     estado interno do mediador
   !! @param[out] fluxes arrays da física
   subroutine associate_fluxes(is, fluxes)
     type(MED_InternalState), intent(in)  :: is
     type(med_flux_t),        intent(out) :: fluxes
+    integer :: k, rc_p
 
-    call point_to(is%ocn%sst,     fluxes%sst)
-    call point_to(is%ocn%u,       fluxes%uocn)
-    call point_to(is%ocn%v,       fluxes%vocn)
-    call point_to(is%ocn%omask,   fluxes%omask)
-    call point_to(is%ice%ifrac,   fluxes%ifrac)
-    call point_to(is%ice%tice,    fluxes%tice)
-    call point_to(is%ice%alb_vdr, fluxes%alb_vdr)
-    call point_to(is%ice%alb_vdf, fluxes%alb_vdf)
-    call point_to(is%ice%alb_idr, fluxes%alb_idr)
-    call point_to(is%ice%alb_idf, fluxes%alb_idf)
-    call point_to(is%ocn_flx%taux, fluxes%taux)
-    call point_to(is%ocn_flx%tauy, fluxes%tauy)
-    call point_to(is%ocn_flx%sen, fluxes%sen)
-    call point_to(is%ocn_flx%evap, fluxes%evap)
-    call point_to(is%ocn_flx%lwnet, fluxes%lwnet)
-    call point_to(is%ocn_flx%swvdr, fluxes%swvdr)
-    call point_to(is%ocn_flx%swvdf, fluxes%swvdf)
-    call point_to(is%ocn_flx%swidr, fluxes%swidr)
-    call point_to(is%ocn_flx%swidf, fluxes%swidf)
-    call point_to(is%ocn_flx%rain, fluxes%rain)
-    call point_to(is%ocn_flx%snow, fluxes%snow)
-    call point_to(is%ocn_flx%pslv, fluxes%pslv)
-    call point_to(is%ocn_flx%duu10n, fluxes%duu10n)
-    call point_to(is%ice%taux,    fluxes%taux_ice)
-    call point_to(is%ice%tauy,    fluxes%tauy_ice)
-    call point_to(is%ice%sen,     fluxes%sen_ice)
-    call point_to(is%ice%evap,    fluxes%evap_ice)
-    call point_to(is%ice%lwnet,   fluxes%lwnet_ice)
-    call point_to(is%ice%swvdr,   fluxes%swvdr_ice)
-    call point_to(is%ice%swvdf,   fluxes%swvdf_ice)
-    call point_to(is%ice%swidr,   fluxes%swidr_ice)
-    call point_to(is%ice%swidf,   fluxes%swidf_ice)
-    call point_to(is%sfc%zorl,    fluxes%zorl)
-    call point_to(is%sfc%coszen,  fluxes%coszen)
-    call point_to(is%sfc%albedo,  fluxes%albedo)
-
-  contains
-
-    !> Aponta p para os dados do campo; p fica nulo se o campo não tem dados locais.
-    subroutine point_to(field, p)
-      type(ESMF_Field),            intent(in)  :: field
-      real(ESMF_KIND_R8), pointer, intent(out) :: p(:,:)
-      integer :: rc_p
-      nullify(p)
-      call ESMF_FieldGet(field, farrayPtr=p, rc=rc_p)
-      if (rc_p /= ESMF_SUCCESS) nullify(p)
-    end subroutine point_to
-
+    do k = 1, size(fluxes%p)
+      nullify(fluxes%p(k)%a)
+      call ESMF_FieldGet(is%fields(k)%field, farrayPtr=fluxes%p(k)%a, rc=rc_p)
+      if (rc_p /= ESMF_SUCCESS) nullify(fluxes%p(k)%a)
+    end do
   end subroutine associate_fluxes
 
   !> @brief Fase logo depois da física, sem o SIS2 dinâmico: recalcula a fração de

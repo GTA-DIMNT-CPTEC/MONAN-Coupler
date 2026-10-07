@@ -18,7 +18,11 @@
 !!
 !! Desde a R-FASE11-20, a física recebe arrays (med_flux_t) em vez do estado
 !! interno; o programa chama a fase compute_fluxes, de med_exchange, que os
-!! associa aos mesmos campos e chama calc_bulk_ncar.
+!! associa aos mesmos campos e chama calc_bulk_ncar. A associação percorre
+!! o registro dos campos internos (is%fields, na ordem de MED_FIELDS); por
+!! isso o programa cria os campos no registro e liga a eles os componentes
+!! do estado interno com bind_internal_fields (med_init), como a
+!! inicialização do mediador.
 !!
 !! Sem o SIS2, calc_bulk_ncar terminava recalculando a
 !! fração de gelo pelo limiar de SST (legacy_ice_fraction). Desde a
@@ -34,13 +38,14 @@
 !! R-FASE13-08 vinha ligada por padrão.
 program test_bulk_ncar
   use ESMF
-  use med_cap_types_mod, only: MED_InternalState
+  use med_cap_types_mod, only: MED_InternalState, MED_FIELDS
+  use med_init_mod,      only: bind_internal_fields
   use med_exchange_mod,  only: compute_fluxes, ice_fraction_without_sis2
   use coupler_config_mod, only: config_read
   implicit none
 
   integer, parameter :: NX = 360, NY = 180, NCALLS = 3
-  type(MED_InternalState) :: is
+  type(MED_InternalState), pointer :: is
   type(ESMF_Grid)  :: grid
   type(ESMF_VM)    :: vm
   type(ESMF_State) :: importState
@@ -83,19 +88,15 @@ program test_bulk_ncar
     regDecomp=(/2, npet/2/), coordSys=ESMF_COORDSYS_SPH_DEG, &
     indexflag=ESMF_INDEX_GLOBAL, rc=rc)
 
-  ! Todos os campos que calc_bulk_ncar usa, entradas e saídas
-  call create_field(is%ocn_flx%taux); call create_field(is%ocn_flx%tauy); call create_field(is%ocn_flx%sen)
-  call create_field(is%ocn_flx%evap); call create_field(is%ocn_flx%lwnet); call create_field(is%ocn_flx%swvdr)
-  call create_field(is%ocn_flx%swvdf); call create_field(is%ocn_flx%swidr); call create_field(is%ocn_flx%swidf)
-  call create_field(is%ocn_flx%rain); call create_field(is%ocn_flx%snow); call create_field(is%ocn_flx%pslv)
-  call create_field(is%ice%ifrac); call create_field(is%ocn_flx%duu10n); call create_field(is%ocn%sst)
-  call create_field(is%ocn%u); call create_field(is%ocn%v); call create_field(is%sfc%zorl)
-  call create_field(is%sfc%coszen); call create_field(is%sfc%albedo); call create_field(is%ice%tice)
-  call create_field(is%ice%taux); call create_field(is%ice%tauy); call create_field(is%ice%sen)
-  call create_field(is%ice%evap); call create_field(is%ice%lwnet); call create_field(is%ice%swvdr)
-  call create_field(is%ice%swvdf); call create_field(is%ice%swidr); call create_field(is%ice%swidf)
-  call create_field(is%ocn%omask); call create_field(is%ice%alb_vdr); call create_field(is%ice%alb_vdf)
-  call create_field(is%ice%alb_idr); call create_field(is%ice%alb_idf)
+  ! Todos os campos internos do mediador, no registro, e os componentes do
+  ! estado interno ligados a eles
+  allocate(is)
+  do n = 1, size(MED_FIELDS)
+    is%fields(n)%name = MED_FIELDS(n)%name
+    call create_field(is%fields(n)%field)
+  end do
+  call bind_internal_fields(is)
+  ! Os campos que calc_bulk_ncar usa, entradas e saídas, na ordem de gravação
   all_fields = [is%ocn_flx%taux, is%ocn_flx%tauy, is%ocn_flx%sen, is%ocn_flx%evap, is%ocn_flx%lwnet, &
            is%ocn_flx%swvdr, is%ocn_flx%swvdf, is%ocn_flx%swidr, is%ocn_flx%swidf,           &
            is%ocn_flx%rain, is%ocn_flx%snow, is%ocn_flx%pslv, is%ice%ifrac,              &

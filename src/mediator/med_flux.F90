@@ -12,8 +12,8 @@ module med_flux_mod
   use mpi
   use coupler_constants_mod, only: ATM_NX, ATM_NY
   use coupler_config_mod, only: cfg_use_docn_ice, cfg_docn_ice_init_only
-  use med_cap_types_mod, only: MED_InternalState, L_evap, SHUM_OCEAN_DEFAULT
-  use med_cap_methods_mod, only: ZeroInternalField, ZeroOcnFluxFields, GetFieldPtr, GetFieldPtrOptional
+  use med_cap_types_mod, only: MED_InternalState, MED_FIELDS, L_evap, SHUM_OCEAN_DEFAULT
+  use med_cap_methods_mod, only: ZeroInternalField, GetFieldPtr, GetFieldPtrOptional
   use med_diag_mod, only: log_atm_forcing_summary
   use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
 
@@ -482,14 +482,19 @@ contains
     deallocate(sen_g2, lat_g2, taux_g2, tauy_g2, tmp2)
   end subroutine substitute_native_fluxes
 
-  !> @brief Zera os fluxos do mediador no início do passo (e a fração de
-  !! gelo, nos modos em que ela é preenchida de novo no passo).
+  !> @brief Zera os fluxos do mediador no início do passo: os campos de
+  !! MED_FIELDS marcados para isso (os fluxos para o oceano, So_duu10n e as
+  !! correntes, que não podem persistir de um passo ao outro) e a fração de
+  !! gelo, nos modos em que ela é preenchida de novo no passo.
   !! @param[in]    is  estado interno do mediador
   !! @param[inout] rc  código de retorno
   subroutine zero_med_fluxes(is, rc)
     type(MED_InternalState), pointer :: is
     integer, intent(inout) :: rc
-    call ZeroOcnFluxFields(is%ocn_flx, rc)
+    integer :: k
+    do k = 1, size(MED_FIELDS)
+      if (MED_FIELDS(k)%zero_each_step) call ZeroInternalField(is%fields(k)%field, rc)
+    end do
     ! NÃO zerar is%ice%ifrac incondicionalmente.
     ! Com use_docn_ice=T, init_only=T e is%run%ifrac_init_done=T,
     ! fill_ifrac_from_oisst é pulado após o primeiro passo; zerando aqui, o
@@ -501,10 +506,6 @@ contains
                cfg_docn_ice_init_only .and. is%run%ifrac_init_done)) then
       call ZeroInternalField(is%ice%ifrac, rc)
     end if
-    call ZeroInternalField(is%ocn_flx%duu10n, rc)
-    ! Zerar correntes para evitar persistência
-    call ZeroInternalField(is%ocn%u,   rc)
-    call ZeroInternalField(is%ocn%v,   rc)
     rc = ESMF_SUCCESS  ! ZeroInternalField pode retornar !=SUCCESS para PETs sem DE
   end subroutine zero_med_fluxes
 

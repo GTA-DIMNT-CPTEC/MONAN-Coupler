@@ -29,6 +29,7 @@ module med_init_mod
   public :: create_ocn_grid
   public :: realize_component_fields
   public :: create_internal_fields
+  public :: bind_internal_fields
 
 contains
 

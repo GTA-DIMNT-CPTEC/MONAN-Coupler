@@ -5,7 +5,6 @@
 !!
 !!   CreateInternalField        cria campo ESMF na grade interna
 !!   ZeroInternalField          zera campo, com proteção para PETs sem DE
-!!   ZeroOcnFluxFields          zera os fluxos enviados ao oceano
 !!   FillInternalField          preenche campo com valor constante
 !!   GetFieldPtr                obtém ponteiro de campo (falha se ausente)
 !!   GetFieldPtrOptional        obtém ponteiro sem erro de log para campos opcionais
@@ -22,7 +21,7 @@ module med_cap_methods_mod
   use regrid_base_mod,    only : regrid_spec_t, regrid_fill_t
   use cpl_map_mod,        only : ROUTES, cpl_route_index, CPL_UNSET
 
-  use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
+  use med_cap_types_mod, only: MED_InternalState
   use coupler_config_mod, only: MAX_REGRID_OVERRIDES,                                   &
                                 cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
                                 cfg_regrid_weights, cfg_regrid_class, cfg_regrid_options
@@ -34,7 +33,6 @@ module med_cap_methods_mod
 
   public :: CreateInternalField
   public :: ZeroInternalField
-  public :: ZeroOcnFluxFields
   public :: FillInternalField
   public :: GetFieldPtr
   public :: GetFieldPtrOptional
@@ -77,31 +75,6 @@ contains
     call FillInternalField(field, 0.0_ESMF_KIND_R8, rc)
 
   end subroutine ZeroInternalField
-
-  !> @brief Zera os doze fluxos enviados ao oceano, sempre na mesma ordem.
-  !!
-  !! Usada na criação dos campos internos (med_init) e no início de cada
-  !! passo (med_flux). O rc final é o do último campo.
-  !! @param[inout] flx  fluxos do mediador para o oceano
-  !! @param[out]   rc   código de retorno ESMF
-  subroutine ZeroOcnFluxFields(flx, rc)
-    type(med_ocn_flux_fields_t), intent(inout) :: flx
-    integer,                     intent(out)   :: rc
-
-    call ZeroInternalField(flx%taux,   rc)
-    call ZeroInternalField(flx%tauy,   rc)
-    call ZeroInternalField(flx%sen,    rc)
-    call ZeroInternalField(flx%evap,   rc)
-    call ZeroInternalField(flx%lwnet,  rc)
-    call ZeroInternalField(flx%swvdr,  rc)
-    call ZeroInternalField(flx%swvdf,  rc)
-    call ZeroInternalField(flx%swidr,  rc)
-    call ZeroInternalField(flx%swidf,  rc)
-    call ZeroInternalField(flx%rain,   rc)
-    call ZeroInternalField(flx%snow,   rc)
-    call ZeroInternalField(flx%pslv,   rc)
-
-  end subroutine ZeroOcnFluxFields
 
   !> @brief Preenche campo ESMF com valor constante.
   !! Guard PETs sem DE local não têm dados a preencher.

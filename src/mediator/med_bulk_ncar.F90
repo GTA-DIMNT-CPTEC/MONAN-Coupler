@@ -24,6 +24,12 @@ module med_bulk_ncar_mod
   use coupler_log_mod, only: COMP_MED, log_warning, log_debug, log_debug_enabled
   use med_diag_mod, only: log_ice_stability
   use med_cap_types_mod, only: med_flux_t,           &
+                                F_ALB_IDF, F_ALB_IDR, F_ALB_VDF, F_ALB_VDR, F_ALBEDO, F_COSZEN,  &
+                                F_DUU10N, F_EVAP, F_EVAP_ICE, F_IFRAC, F_LWNET, F_LWNET_ICE,  &
+                                F_OMASK, F_PSLV, F_RAIN, F_SEN, F_SEN_ICE, F_SNOW,  &
+                                F_SST, F_SWIDF, F_SWIDF_ICE, F_SWIDR, F_SWIDR_ICE, F_SWVDF,  &
+                                F_SWVDF_ICE, F_SWVDR, F_SWVDR_ICE, F_TAUX, F_TAUX_ICE, F_TAUY,  &
+                                F_TAUY_ICE, F_TICE, F_UOCN, F_VOCN, F_ZORL,  &
                                 rho_air,              &
                                 Cd_neut,              &
                                 Ch_neut,              &
@@ -131,11 +137,11 @@ contains
     call solar_time_and_declination(clock, utc_hour, decl, rc)
 
     ! SST na malha de fluxo (fase go_to_flux_grid, rota OCN→ATM)
-    sst => fluxes%sst
+    sst => fluxes%p(F_SST)%a
 
     ! Correntes oceânicas na malha de fluxo (fase go_to_flux_grid, ou zeros)
-    uocn => fluxes%uocn
-    vocn => fluxes%vocn
+    uocn => fluxes%p(F_UOCN)%a
+    vocn => fluxes%p(F_VOCN)%a
     rc = ESMF_SUCCESS
 
     ! Tensão, calor sensível, evaporação e balanco LW sobre água aberta
@@ -188,17 +194,17 @@ contains
     call compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
 
     ! Rain, snow, pslv: cópia direta (pass-through para o OCN)
-    fptr => fluxes%rain
+    fptr => fluxes%p(F_RAIN)%a
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(rain(i,j), 0.0_ESMF_KIND_R8)  ! clamp ≥ 0 (artefato bilinear)
     end do; end do
 
-    fptr => fluxes%snow
+    fptr => fluxes%p(F_SNOW)%a
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(snow_g(i,j), 0.0_ESMF_KIND_R8)
     end do; end do
 
-    fptr => fluxes%pslv
+    fptr => fluxes%p(F_PSLV)%a
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = psl(i,j)
     end do; end do
@@ -216,7 +222,7 @@ contains
     call compute_roughness_length(fluxes, j1, j2, i1, i2)
 
     ! duu10n = |V_atm − V_ocn|² (protocolo CMEPS)
-    fptr => fluxes%duu10n
+    fptr => fluxes%p(F_DUU10N)%a
     if (associated(uocn) .and. associated(vocn)) then
       do j=j1,j2; do i=i1,i2
         fptr(i,j) = (uas(i,j) - uocn(i,j))**2 + (vas(i,j) - vocn(i,j))**2
@@ -310,7 +316,7 @@ contains
     nullify(fptr)
 
     ! Taux = rho * Cd * |V| * u10
-    fptr => fluxes%taux
+    fptr => fluxes%p(F_TAUX)%a
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       ! clamp ±5 Pa (limite físico cat-5 ~3 Pa)
@@ -319,7 +325,7 @@ contains
     end do; end do
 
     ! Tauy = rho * Cd * |V| * v10
-    fptr => fluxes%tauy
+    fptr => fluxes%p(F_TAUY)%a
     do j=j1,j2; do i=i1,i2
       wspd = sqrt(uas(i,j)**2 + vas(i,j)**2) + 1.0e-10_ESMF_KIND_R8
       fptr(i,j) = max(-5.0_ESMF_KIND_R8, min(5.0_ESMF_KIND_R8, &
@@ -327,7 +333,7 @@ contains
     end do; end do
 
     ! Calor sensível = rho * Cp * Ch * |V| * (Tair - SST)
-    fptr => fluxes%sen
+    fptr => fluxes%p(F_SEN)%a
     do j=j1,j2; do i=i1,i2
       ! pular células sem tas físico (tas < 100 K = sem dado)
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
@@ -339,7 +345,7 @@ contains
     end do; end do
 
     ! Evaporação = rho * Ce * |V| * (qsat(SST) − qair)
-    fptr => fluxes%evap
+    fptr => fluxes%p(F_EVAP)%a
     do j=j1,j2; do i=i1,i2
       if (tas(i,j) < 100.0_ESMF_KIND_R8) cycle
       ! Pular células sem psl físico, simétrico as guardas de lwdn e de tas.
@@ -370,7 +376,7 @@ contains
     end do; end do
 
     ! Balanço LW = lwdn − emissividade·σ·SST⁴
-    fptr => fluxes%lwnet
+    fptr => fluxes%p(F_LWNET)%a
     do j=j1,j2; do i=i1,i2
       ! pular células sem lwdn real (lwdn=0 indica ausência)
       if (lwdn(i,j) < 1.0_ESMF_KIND_R8) cycle
@@ -423,13 +429,13 @@ contains
     real(ESMF_KIND_R8), pointer :: p_omask_z(:,:)
     real(ESMF_KIND_R8) :: tau_mag, ustar, z0_charnock, z0_smith, z0_total
 
-    p_taux => fluxes%taux
-    p_tauy => fluxes%tauy
-    p_zorl => fluxes%zorl
+    p_taux => fluxes%p(F_TAUX)%a
+    p_tauy => fluxes%p(F_TAUY)%a
+    p_zorl => fluxes%p(F_ZORL)%a
     ! máscara real (So_omask interpolada); uma heurística de SST~=T_FILL_LAND
     ! colidiria com água aberta no ponto de congelamento, perto da borda do
     ! gelo.
-    p_omask_z => fluxes%omask
+    p_omask_z => fluxes%p(F_OMASK)%a
 
     if (associated(p_taux) .and. associated(p_tauy) .and. associated(p_zorl)) then
       do j = j1, j2
@@ -484,33 +490,33 @@ contains
     real(ESMF_KIND_R8), pointer :: f_sen_ocn(:,:), f_evap_ocn(:,:)
     real(ESMF_KIND_R8), pointer :: f_lwnet_ocn(:,:)
 
-    tice        => fluxes%tice
-    ifr_g       => fluxes%ifrac
-    f_taux_ocn  => fluxes%taux
-    f_tauy_ocn  => fluxes%tauy
-    f_sen_ocn   => fluxes%sen
-    f_evap_ocn  => fluxes%evap
-    f_lwnet_ocn => fluxes%lwnet
+    tice        => fluxes%p(F_TICE)%a
+    ifr_g       => fluxes%p(F_IFRAC)%a
+    f_taux_ocn  => fluxes%p(F_TAUX)%a
+    f_tauy_ocn  => fluxes%p(F_TAUY)%a
+    f_sen_ocn   => fluxes%p(F_SEN)%a
+    f_evap_ocn  => fluxes%p(F_EVAP)%a
+    f_lwnet_ocn => fluxes%p(F_LWNET)%a
 
     if (associated(tice)) then
 
-      fptr_ice => fluxes%taux_ice
+      fptr_ice => fluxes%p(F_TAUX_ICE)%a
       call ice_wind_stress(fptr_ice, f_taux_ocn, ifr_g, tice, uas, vas, tas, uas, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxes%tauy_ice
+      fptr_ice => fluxes%p(F_TAUY_ICE)%a
       call ice_wind_stress(fptr_ice, f_tauy_ocn, ifr_g, tice, uas, vas, tas, vas, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxes%sen_ice
+      fptr_ice => fluxes%p(F_SEN_ICE)%a
       call ice_sensible_heat(fptr_ice, f_sen_ocn, ifr_g, tice, uas, vas, tas, &
                              i1, i2, j1, j2)
 
-      fptr_ice => fluxes%evap_ice
+      fptr_ice => fluxes%p(F_EVAP_ICE)%a
       call ice_evaporation(fptr_ice, f_evap_ocn, ifr_g, tice, uas, vas, tas, psl, shum, &
                            i1, i2, j1, j2)
 
-      fptr_ice => fluxes%lwnet_ice
+      fptr_ice => fluxes%p(F_LWNET_ICE)%a
       call ice_longwave(fptr_ice, f_lwnet_ocn, ifr_g, tice, lwdn, i1, i2, j1, j2)
 
       call log_debug(COMP_MED, 'Fioi_taux/tauy/sen/evap/lwnet calculados com a ' // &
@@ -740,24 +746,24 @@ contains
     real(ESMF_KIND_R8), pointer :: alb_idr(:,:), alb_idf(:,:)
     real(ESMF_KIND_R8), pointer :: fptr_alb(:,:)
 
-    ifr     => fluxes%ifrac
-    alb_vdr => fluxes%alb_vdr
-    alb_vdf => fluxes%alb_vdf
-    alb_idr => fluxes%alb_idr
-    alb_idf => fluxes%alb_idf
+    ifr     => fluxes%p(F_IFRAC)%a
+    alb_vdr => fluxes%p(F_ALB_VDR)%a
+    alb_vdf => fluxes%p(F_ALB_VDF)%a
+    alb_idr => fluxes%p(F_ALB_IDR)%a
+    alb_idf => fluxes%p(F_ALB_IDF)%a
 
     if (associated(ifr) .and. associated(alb_vdr) .and. associated(alb_vdf) &
         .and. associated(alb_idr) .and. associated(alb_idf)) then
       ! Ordem das bandas: a primeira atribui o albedo de banda larga, as
       ! demais somam; a última deixa em fluxo%albedo o albedo efetivo
       ! completo (soma das 4 contribuições ponderadas).
-      call sw_band(fluxes, fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%p(F_SWVDR)%a, fluxes%p(F_SWVDR_ICE)%a, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdr, f_vis_dir, .true., .true., utc_hour, decl, rc)
-      call sw_band(fluxes, fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%p(F_SWVDF)%a, fluxes%p(F_SWVDF_ICE)%a, j1, j2, i1, i2, swdn, ifr, &
                    alb_vdf, f_vis_dif, .false., .false., utc_hour, decl, rc)
-      call sw_band(fluxes, fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%p(F_SWIDR)%a, fluxes%p(F_SWIDR_ICE)%a, j1, j2, i1, i2, swdn, ifr, &
                    alb_idr, f_nir_dir, .true., .false., utc_hour, decl, rc)
-      call sw_band(fluxes, fluxes%swidf, fluxes%swidf_ice, j1, j2, i1, i2, swdn, ifr, &
+      call sw_band(fluxes, fluxes%p(F_SWIDF)%a, fluxes%p(F_SWIDF_ICE)%a, j1, j2, i1, i2, swdn, ifr, &
                    alb_idf, f_nir_dif, .false., .false., utc_hour, decl, rc)
     else
       ! Sem dado real de gelo: albedo_ocn constante em Foxx_swnet_*, e o
@@ -765,13 +771,13 @@ contains
       ! diferente).
       call log_warning(COMP_MED, 'f_ifrac_atm/f_alb_*_ice nao associados: ' // &
         'onda curta com albedo_ocn constante')
-      call sw_band_fallback(fluxes%swvdr, fluxes%swvdr_ice, j1, j2, i1, i2, swdn, f_vis_dir)
-      call sw_band_fallback(fluxes%swvdf, fluxes%swvdf_ice, j1, j2, i1, i2, swdn, f_vis_dif)
-      call sw_band_fallback(fluxes%swidr, fluxes%swidr_ice, j1, j2, i1, i2, swdn, f_nir_dir)
-      call sw_band_fallback(fluxes%swidf, fluxes%swidf_ice, j1, j2, i1, i2, swdn, f_nir_dif)
+      call sw_band_fallback(fluxes%p(F_SWVDR)%a, fluxes%p(F_SWVDR_ICE)%a, j1, j2, i1, i2, swdn, f_vis_dir)
+      call sw_band_fallback(fluxes%p(F_SWVDF)%a, fluxes%p(F_SWVDF_ICE)%a, j1, j2, i1, i2, swdn, f_vis_dif)
+      call sw_band_fallback(fluxes%p(F_SWIDR)%a, fluxes%p(F_SWIDR_ICE)%a, j1, j2, i1, i2, swdn, f_nir_dir)
+      call sw_band_fallback(fluxes%p(F_SWIDF)%a, fluxes%p(F_SWIDF_ICE)%a, j1, j2, i1, i2, swdn, f_nir_dif)
       ! Sem dado de gelo nem de zênite, exporta a constante também como
       ! albedo de banda larga (degrada de forma consistente).
-      fptr_alb => fluxes%albedo
+      fptr_alb => fluxes%p(F_ALBEDO)%a
       if (associated(fptr_alb)) fptr_alb(i1:i2,j1:j2) = albedo_ocn
     end if
     rc = ESMF_SUCCESS
@@ -816,8 +822,8 @@ contains
 
     nullify(fptr_cz)
     fptr => f_sw
-    if (direct .and. first) fptr_cz => fluxes%coszen
-    fptr_alb => fluxes%albedo
+    if (direct .and. first) fptr_cz => fluxes%p(F_COSZEN)%a
+    fptr_alb => fluxes%p(F_ALBEDO)%a
     fptr_ice2 => f_sw_ice
     do j=j1,j2; do i=i1,i2
       fi = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, ifr(i,j)))

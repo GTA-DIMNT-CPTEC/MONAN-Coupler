@@ -66,14 +66,11 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 
 | Lugar | O que fazer |
 | --- | --- |
-| `MED_FIELDS` (`med_cap_types`) | uma linha: nome de acoplamento, nome do campo ESMF e valor inicial; `create_internal_fields` (`med_init`) cria o campo na malha de fluxo, e os gravadores o encontram pelo nome |
-| tipo do assunto (`med_cap_types`) | o componente `ESMF_Field` (por exemplo, em `med_ocn_flux_fields_t`) e o ponteiro em `med_flux_t`, que a física usa |
-| `bind_internal_fields` (`med_init`) | a ligação do componente à entrada do registro: `call bind(is%ocn_flx%<nome>, '<Campo>')` |
-| `associate_fluxes` (`med_exchange`) | `call point_to(is%ocn_flx%<nome>, fluxes%<nome>)` |
-| zeragem no início do passo | em `ZeroOcnFluxFields` (`med_cap_methods`) ou `zero_med_fluxes` (`med_flux`), se o campo deve recomeçar de zero a cada passo |
-| a física (`med_bulk_ncar` ou outro módulo de cálculo) | o cálculo, por `fluxes%<nome>` |
+| `MED_FIELDS` (`med_cap_types`) | uma linha: nome de acoplamento, nome do campo ESMF, valor inicial e se é zerado no início de cada passo; `create_internal_fields` (`med_init`) cria o campo na malha de fluxo, `zero_med_fluxes` (`med_flux`) o zera se for o caso, e os gravadores o encontram pelo nome |
+| constante `F_*` (`med_cap_types`) | a posição do campo na tabela (`integer, parameter :: F_DUU10N = 15`); `associate_fluxes` (`med_exchange`) dá à física o array de cada campo em `fluxes%p(k)%a`, sem código por campo |
+| a física (`med_bulk_ncar` ou outro módulo de cálculo) | o cálculo, por `fluxes%p(F_DUU10N)%a` |
 
-São 9 lugares em 7 arquivos. As etapas R-FASE13-31 e 32 (física por índice em `MED_FIELDS` e ligação automática) deixariam, no mediador, só a linha em `MED_FIELDS` com o índice do campo e o cálculo (5 lugares em 4 arquivos, contando `FIELDS` e o mapa); foram adiadas (out/2026) até o primeiro campo novo do mediador, porque trocam o acesso por nome (`fluxes%taux`) pelo acesso por índice em cerca de 150 usos e pedem duas rodadas de validação sem ganho para o código de hoje.
+São 5 lugares em 4 arquivos, contando `FIELDS` e o mapa. O teste `tests/unit/test_med_fields.F90` confere cada constante `F_*` contra o nome do campo: incluir um campo inclui uma chamada a `check` ali. Os componentes nomeados do estado interno (`is%ocn_flx`, `is%ocn`, `is%ice`, `is%sfc`, ligados em `bind_internal_fields`) só são necessários quando o código fora da física (as fases de interpolação, a exportação explícita, os diagnósticos) precisa do `ESMF_Field` pelo nome.
 
 ## 5. Como incluir um componente
 
