@@ -61,12 +61,12 @@ module DOCN_cap_mod
   use coupler_log_mod,     only: COMP_DOCN, log_info, log_warning
   use cap_common_mod,      only: cap_initialize_p0, cap_realize_fields, cap_put_field, &
                                  cap_fill_export_initial, cap_set_data_complete, &
-                                 cap_stamp_export
+                                 cap_stamp_export, cap_advertise, ADVERTISE_DEFAULT
   use cpl_fields_mod,      only: CPL_NAME_LEN
   use cpl_map_mod,         only: cpl_arrivals, cpl_exports
 
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
-  use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
+  use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
   use NUOPC_Model, &
     model_routine_SS           => SetServices,          &
@@ -194,7 +194,6 @@ contains
     type(ESMF_Clock)     :: clock
     integer,              intent(out)   :: rc
 
-    integer :: i
     character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
 
     rc = ESMF_SUCCESS
@@ -203,16 +202,12 @@ contains
     call cpl_exports(POINT_OCN, cpl_current_config(), '', exp)
 
     ! Anuncia todos os campos importados do mediador (MED→OCN).
-    do i = 1, size(imp)
-      call NUOPC_Advertise(importState, StandardName=trim(imp(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(importState, imp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Anuncia campos exportados para MED e para OCN→MPAS.
-    do i = 1, size(exp)
-      call NUOPC_Advertise(exportState, StandardName=trim(exp(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(exportState, exp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call log_info(COMP_DOCN, 'InitializeAdvertise concluido (' &
       //int_to_str(size(exp))//' exp, ' &

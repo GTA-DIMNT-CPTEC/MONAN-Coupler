@@ -47,7 +47,7 @@ module MOM_cap_MONAN_mod
   use ESMF
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
-                           NUOPC_Advertise,         NUOPC_Realize,           &
+                           NUOPC_Realize,                                     &
                            NUOPC_CompAttributeSet,                           &
                            NUOPC_GetTimestamp
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
@@ -70,7 +70,8 @@ module MOM_cap_MONAN_mod
   use MOM_cap_methods, only : mom_import, mom_export, mom_set_geomtype,   &
                                mod2med_areacor, med2mod_areacor,          &
                                state_diagnose, ChkErr
-  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_stamp_export
+  use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_stamp_export, &
+                             cap_advertise, ADVERTISE_SHARED, ADVERTISE_PROVIDES_GRID
   use coupler_log_mod, only : COMP_OCN, log_error, log_warning, log_info, log_debug
   use cpl_fields_mod, only : CPL_NAME_LEN
   use cpl_map_mod,    only : cpl_arrivals, cpl_exports
@@ -213,29 +214,19 @@ contains
     type(ESMF_State)     :: importState, exportState
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
-    integer :: n
     character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
     ! Anuncia campos importados (fluxos do mediador → OCN)
     call cpl_arrivals(POINT_OCN, .true., cpl_current_config(), '', names)
-    do n = 1, size(names)
-      call NUOPC_Advertise(importState,                              &
-           StandardName=trim(names(n)),                              &
-           TransferOfferGeomObject="cannot provide",                 &
-           SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(importState, names, ADVERTISE_SHARED, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     ! Anuncia campos exportados (SST real, correntes → MED e MPAS)
     call cpl_exports(POINT_OCN, cpl_current_config(), '', names)
-    do n = 1, size(names)
-      call NUOPC_Advertise(exportState,                              &
-           StandardName=trim(names(n)),                              &
-           TransferOfferGeomObject="will provide", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(exportState, names, ADVERTISE_PROVIDES_GRID, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call log_info(COMP_OCN, 'InitializeAdvertise concluido')
 

@@ -25,7 +25,7 @@ module sis_cap_MONAN_mod
   use ESMF
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompAttributeGet, &
-                           NUOPC_Advertise,         NUOPC_Realize,          &
+                           NUOPC_Realize,                                    &
                            NUOPC_CompAttributeSet,  NUOPC_IsUpdated,        &
                            NUOPC_CompFilterPhaseMap
   ! model_label_CheckImport: o CheckImport tolerante (CheckImportTolerant)
@@ -65,7 +65,8 @@ module sis_cap_MONAN_mod
 
   use coupler_utils_mod, only : ChkErr
   use coupler_log_mod, only : COMP_ICE, log_info, log_warning, log_debug
-  use cap_common_mod, only : cap_initialize_p0
+  use cap_common_mod, only : cap_initialize_p0, cap_advertise, ADVERTISE_SHARED, &
+                             ADVERTISE_PROVIDES_GRID
 
   ! Estado interno do componente e troca de campos com o mediador
   ! (importação dos forçantes e exportação de fração, albedos e temperatura
@@ -174,33 +175,19 @@ contains
     type(ESMF_State)     :: importState, exportState
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
-    integer :: n
     character(len=CPL_NAME_LEN), allocatable :: names(:)
 
     rc = ESMF_SUCCESS
 
+    ! A exportação é realizada numa grade própria (is%ice_grid, criada em
+    ! InitializeRealize), oferecida ao conector; as políticas e os motivos
+    ! estão em cap_common.
     call cpl_arrivals(POINT_ICE, .true., cpl_current_config(), '', names)
-    do n = 1, size(names)
-      call NUOPC_Advertise(importState, StandardName=trim(names(n)), &
-        TransferOfferGeomObject="cannot provide", SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(importState, names, ADVERTISE_SHARED, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
     call cpl_exports(POINT_ICE, cpl_current_config(), '', names)
-    do n = 1, size(names)
-      ! O campo de export do ICE é realizado numa grade PRÓPRIA (is%ice_grid,
-      ! criada em InitializeRealize) e oferece essa geometria ao conector como
-      ! "will provide". Os imports usam "cannot provide", como o import do MED;
-      ! se o export também usasse, nenhum lado ofereceria geometria e o conector
-      ! travaria na inicialização ("Neither side able to provide geom object",
-      ! fase IPDv05p3).
-      ! Sem SharePolicyField="share" nesta EXPORTAÇÃO, como no cap do OCN
-      ! (mom_cap_MONAN.F90), que usa share apenas nas IMPORTAÇÕES. Com share
-      ! aqui, Si_ifrac sai correto do cap (max=0.997) mas chega zerado ao
-      ! mediador (min=max=0): o conector não faz a transferência real.
-      call NUOPC_Advertise(exportState, StandardName=trim(names(n)), &
-        TransferOfferGeomObject="will provide", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(exportState, names, ADVERTISE_PROVIDES_GRID, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call log_info(COMP_ICE, 'InitializeAdvertise concluido')
 

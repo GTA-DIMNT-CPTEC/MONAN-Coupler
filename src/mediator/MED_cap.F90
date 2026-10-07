@@ -24,7 +24,8 @@ module MED_cap_MONAN_mod
   use ESMF
   use coupler_constants_mod, only : ATM_NX, ATM_NY
   use coupler_utils_mod, only: ChkErr
-  use cap_common_mod, only: cap_initialize_p0
+  use cap_common_mod, only: cap_initialize_p0, cap_advertise, ADVERTISE_SHARED, &
+                            ADVERTISE_PROVIDES_GRID
   use mom6_supergrid_mod, only : mom6_supergrid_dims
   use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
@@ -36,7 +37,7 @@ module MED_cap_MONAN_mod
                                   cfg_stop_date, config_parse_date, &
                                   cpl_current_config
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
-  use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise
+  use NUOPC, only: NUOPC_CompFilterPhaseMap
   use NUOPC_Mediator, only: med_routine_SS          => SetServices
   use NUOPC_Mediator, only: med_label_DataInitialize => label_DataInitialize
   use NUOPC_Mediator, only: med_label_Advance        => label_Advance
@@ -174,7 +175,6 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
 
-    integer :: n
     type(MED_InternalStateWrapper) :: iswrap
     type(MED_InternalState), pointer :: is
     character(len=CPL_NAME_LEN), allocatable :: names(:)
@@ -206,22 +206,15 @@ contains
     !     máscara real do MOM6, usada no lugar de um limiar de SST;
     !   - com o SIS2, os seis campos *_sis2. O sufixo evita que os conectores
     !     OCN -> MED e ICE -> MED cheguem ao mesmo nome (Si_ifrac).
-    ! A importação usa SharePolicyField="share"; a exportação
-    ! oferece a grade ("will provide").
+    ! Políticas de anúncio: ADVERTISE_SHARED na importação e
+    ! ADVERTISE_PROVIDES_GRID na exportação (ver cap_common).
     call cpl_arrivals('MED', .true., cpl_current_config(), MED_KEYS, names)
-    do n = 1, size(names)
-      call NUOPC_Advertise(importState, StandardName=trim(names(n)), &
-        TransferOfferGeomObject="cannot provide", &
-        SharePolicyField="share", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(importState, names, ADVERTISE_SHARED, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call cpl_arrivals('MED@ocn_med', .false., cpl_current_config(), '', names)
-    do n = 1, size(names)
-      call NUOPC_Advertise(exportState, StandardName=trim(names(n)), &
-        TransferOfferGeomObject="will provide", rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(exportState, names, ADVERTISE_PROVIDES_GRID, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call log_info(COMP_MED, 'InitializeAdvertise concluido')
   end subroutine InitializeAdvertise

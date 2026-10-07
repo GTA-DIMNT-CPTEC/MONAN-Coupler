@@ -18,7 +18,7 @@ module mpas_cap_MONAN_mod
   use coupler_constants_mod, only : RAD2DEG, ALB_OCEAN_DEFAULT
   use NUOPC,       only : NUOPC_CompDerive,        NUOPC_CompSpecialize,   &
                            NUOPC_CompSetEntryPoint, NUOPC_CompFilterPhaseMap, &
-                           NUOPC_Advertise,         NUOPC_Realize,           &
+                           NUOPC_Realize,                                     &
                            NUOPC_CompAttributeGet,  NUOPC_CompAttributeSet,  &
                            NUOPC_IsConnected
   use NUOPC_Model, only : model_routine_SS           => SetServices,          &
@@ -57,7 +57,8 @@ module mpas_cap_MONAN_mod
 
   use coupler_utils_mod,   only : ChkErr, int_to_str
   use coupler_log_mod,     only : COMP_ATM, log_error, log_info
-  use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields
+  use cap_common_mod,      only : cap_initialize_p0, cap_realize_fields, cap_advertise, &
+                                  ADVERTISE_DEFAULT
   use cpl_fields_mod,      only : CPL_NAME_LEN
   use cpl_map_mod,         only : cpl_arrivals, cpl_exports
 
@@ -200,19 +201,14 @@ contains
     type(ESMF_State)    :: importState, exportState
     type(ESMF_Clock)    :: clock
     integer,             intent(out) :: rc
-    integer :: i
     character(len=CPL_NAME_LEN), allocatable :: imp(:), exp(:)
     rc = ESMF_SUCCESS
     call cpl_arrivals(POINT_ATM, .true., cpl_current_config(), '', imp)
     call cpl_exports(POINT_ATM, cpl_current_config(), '', exp)
-    do i = 1, size(imp)
-      call NUOPC_Advertise(importState, StandardName=trim(imp(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
-    do i = 1, size(exp)
-      call NUOPC_Advertise(exportState, StandardName=trim(exp(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, u_FILE_u)) return
-    end do
+    call cap_advertise(importState, imp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
+    call cap_advertise(exportState, exp, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, u_FILE_u)) return
     call log_info(COMP_ATM, 'InitializeAdvertise: anunciados '// &
          int_to_str(size(imp))//' imp + '// &
          int_to_str(size(exp))//' exp')

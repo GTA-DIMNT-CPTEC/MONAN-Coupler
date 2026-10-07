@@ -42,7 +42,7 @@ module DATM_cap_mod
 
   use coupler_log_mod, only: COMP_DATM, log_error, log_info, log_warning, log_debug
   use NUOPC, only: NUOPC_CompDerive, NUOPC_CompSpecialize, NUOPC_CompSetEntryPoint
-  use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Advertise, NUOPC_Realize
+  use NUOPC, only: NUOPC_CompFilterPhaseMap, NUOPC_Realize
   use NUOPC, only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet
   use NUOPC_Model, &
     model_routine_SS           => SetServices,         &
@@ -54,7 +54,7 @@ module DATM_cap_mod
   use coupler_utils_mod, only : ChkErr
   use cap_common_mod, only : cap_initialize_p0, cap_realize_fields, cap_put_field, &
                              cap_fill_export_initial, cap_set_data_complete, &
-                             cap_stamp_export
+                             cap_stamp_export, cap_advertise, ADVERTISE_DEFAULT
   use cpl_fields_mod, only : CPL_NAME_LEN
   use cpl_map_mod,    only : cpl_exports
   use coupler_config_mod, only : cpl_current_config
@@ -140,7 +140,6 @@ contains
     type(ESMF_Clock)     :: clock
     integer, intent(out) :: rc
     character(len=CPL_NAME_LEN), allocatable :: names(:)
-    integer :: i
 
     rc = ESMF_SUCCESS
 
@@ -148,10 +147,8 @@ contains
     ! umidade e pressão; radiação descendente (sem decomposição em bandas, o
     ! MED faz isso) e precipitação.
     call cpl_exports(POINT_DATM, cpl_current_config(), '', names)
-    do i = 1, size(names)
-      call NUOPC_Advertise(exportState, StandardName=trim(names(i)), rc=rc)
-      if (ChkErr(rc, __LINE__, __FILE__)) return
-    end do
+    call cap_advertise(exportState, names, ADVERTISE_DEFAULT, rc)
+    if (ChkErr(rc, __LINE__, __FILE__)) return
 
     call log_info(COMP_DATM, 'InitializeAdvertise concluido (campos brutos JRA55)')
   end subroutine InitializeAdvertise
