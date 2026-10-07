@@ -257,6 +257,7 @@ contains
     ok = k > 0
     if (.not. ok) return
     spec = regrid_spec(trim(ROUTES(k)%methods), scheme=trim(ROUTES(k)%scheme), &
+                       options=trim(ROUTES(k)%options),                     &
                        mask_src=len_trim(ROUTES(k)%mask) > 0, &
                        zero_total=ROUTES(k)%no_value == 'zerar')
     if (ROUTES(k)%nan_to /= CPL_UNSET) then

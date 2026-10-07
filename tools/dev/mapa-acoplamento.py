@@ -308,8 +308,11 @@ def le_mapa(raiz):
             raise ErroMapa('não foi possível ler {}: {}'.format(caminho, e))
         params = parametros_inteiros(instrs)
         if arquivo.endswith('cpl_map.F90'):
-            # CPL_NAME_LEN vem de cpl_fields
+            # CPL_NAME_LEN vem de cpl_fields; OPTIONS_LEN, de regrid_base
             params.setdefault('CPL_NAME_LEN', tabelas['_params_fields']['CPL_NAME_LEN'])
+            with open(os.path.join(raiz, 'src/regrid/regrid_base.F90'), encoding='utf-8') as f:
+                params.setdefault('OPTIONS_LEN',
+                                  parametros_inteiros(instrucoes(f.read()))['OPTIONS_LEN'])
         elif arquivo.endswith('cpl_fields.F90'):
             tabelas['_params_fields'] = params
         for tipo, nome in itens:
@@ -514,12 +517,13 @@ def gera(t):
         if r['nan_to'] != 'CPL_UNSET':
             limites.append('NaN para {}'.format(numero(r['nan_to'])))
         linhas.append([codigo(r['name']), '{} para {}'.format(r['src'], r['dst']),
-                       r['methods'].replace(',', ', '), codigo(r['mask']),
+                       r['methods'].replace(',', ', '), codigo(r['options']), codigo(r['mask']),
                        codigo(r['fallback']), r['no_value'], preenchimento(r['fill']),
                        ', '.join(limites), r['create'], len(usos)])
-    out += md_tabela(['Rota', 'Malhas', 'Métodos', 'Máscara', 'Reserva', 'Sem valor',
+    out += md_tabela(['Rota', 'Malhas', 'Métodos', 'Opções', 'Máscara', 'Reserva', 'Sem valor',
                       'Completar', 'Limitar', 'Criar', 'Campos'], linhas)
-    out += ['', 'Esquema de todas as rotas: `{}` (trocável no grupo `&nuopc_regrid`).'.format(
+    out += ['', 'Esquema de todas as rotas: `{}`. Esquema, métodos e opções de uma rota podem '
+            'ser trocados no grupo `&nuopc_regrid`, sem recompilar.'.format(
         '`, `'.join(sorted({r['scheme'] for r in rotas}))), '',
         '## 6. Malhas', '']
     out += md_tabela(['Malha', 'Componente', 'Tipo', 'Descrição'],

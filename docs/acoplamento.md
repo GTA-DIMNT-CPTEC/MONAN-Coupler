@@ -339,16 +339,16 @@ interpolar (métodos, reserva, esquema), completar (preenchimento por
 vizinhança) e limitar (troca de NaN). Coluna vazia: etapa desligada.
 "Campos" é o número de campos que passam pela rota em EXCHANGES.
 
-| Rota | Malhas | Métodos | Máscara | Reserva | Sem valor | Completar | Limitar | Criar | Campos |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `atm2ocn` | atm_med para ocn_med | nearest_stod |   |   | zerar |   | NaN para 0 | inicio | 30 |
-| `ocn2atm` | ocn_med para atm_med | bilinear |   |   | zerar |   |   | inicio | 2 |
-| `ocn2atm_sst` | ocn_med para atm_med | conserve, bilinear | `So_omask` | `ocn2atm` | zerar | faixa 270 a 310, valor `T_FREEZE_SEAWATER`; 40 passadas; fração 1; acima da faixa vira o valor |   | mascara_mista | 1 |
-| `ocn2atm_ice` | ocn_med para atm_med | conserve, bilinear | `So_omask` | `ocn2atm` | sentinela |   |   | primeiro_uso | 6 |
-| `ocn2atm_landmask` | ocn_med para atm_med | nearest_stod |   |   | manter |   |   | primeiro_uso | 1 |
-| `atm2ocn_ice` | atm_med para ocn_med | conserve, nearest_stod |   | `atm2ocn` | sentinela | faixa 0 a 1, valor 0; 15 passadas |   | primeiro_uso | 1 |
+| Rota | Malhas | Métodos | Opções | Máscara | Reserva | Sem valor | Completar | Limitar | Criar | Campos |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `atm2ocn` | atm_med para ocn_med | nearest_stod |   |   |   | zerar |   | NaN para 0 | inicio | 30 |
+| `ocn2atm` | ocn_med para atm_med | bilinear |   |   |   | zerar |   |   | inicio | 2 |
+| `ocn2atm_sst` | ocn_med para atm_med | conserve, bilinear |   | `So_omask` | `ocn2atm` | zerar | faixa 270 a 310, valor `T_FREEZE_SEAWATER`; 40 passadas; fração 1; acima da faixa vira o valor |   | mascara_mista | 1 |
+| `ocn2atm_ice` | ocn_med para atm_med | conserve, bilinear |   | `So_omask` | `ocn2atm` | sentinela |   |   | primeiro_uso | 6 |
+| `ocn2atm_landmask` | ocn_med para atm_med | nearest_stod |   |   |   | manter |   |   | primeiro_uso | 1 |
+| `atm2ocn_ice` | atm_med para ocn_med | conserve, nearest_stod |   |   | `atm2ocn` | sentinela | faixa 0 a 1, valor 0; 15 passadas |   | primeiro_uso | 1 |
 
-Esquema de todas as rotas: `esmf` (trocável no grupo `&nuopc_regrid`).
+Esquema de todas as rotas: `esmf`. Esquema, métodos e opções de uma rota podem ser trocados no grupo `&nuopc_regrid`, sem recompilar.
 
 ## 6. Malhas
 

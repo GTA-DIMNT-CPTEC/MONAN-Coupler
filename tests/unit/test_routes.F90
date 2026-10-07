@@ -16,7 +16,8 @@
 !! vizinhança. O teste confere, para cada uma das seis rotas, que a
 !! configuração lida da tabela é a mesma, campo a campo do regrid_spec_t
 !! (esquema, métodos, máscara na origem, zero_total, arquivo de pesos,
-!! classe do campo, preenchimento e troca de NaN), e que a rota de reserva é
+!! classe do campo, preenchimento, troca de NaN e, desde a R-FASE13-24, as
+!! opções do esquema, da coluna options de ROUTES), e que a rota de reserva é
 !! a mesma. Confere também que uma rota fora de ROUTES é recusada e que
 !! route_fill devolve o preenchimento da rota (o que a SST usa
 !! enquanto a rota ocn2atm_sst não existe) ou nenhum, fora de ROUTES.
@@ -100,7 +101,7 @@ contains
             (a%mask_src .eqv. b%mask_src) .and. (a%zero_total .eqv. b%zero_total) .and. &
             a%weights_file == b%weights_file .and. a%field_class == b%field_class .and. &
             same_fill(a%fill, b%fill) .and. (a%nan_replace .eqv. b%nan_replace) .and. &
-            a%nan_value == b%nan_value
+            a%nan_value == b%nan_value .and. a%options == b%options
   end function same
 
   logical function same_fill(a, b)

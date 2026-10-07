@@ -95,8 +95,11 @@
 !!                  interpolação e ficam com ele, fora de qualquer faixa
 !!                  válida, como em med_ice e med_export)
 !!   2. interpolar  methods (em ordem de preferência), fallback (rota usada
-!!                  se nenhum método servir) e scheme (padrão 'esmf',
-!!                  trocável no grupo &nuopc_regrid do nuopc.input)
+!!                  se nenhum método servir), scheme (padrão 'esmf') e
+!!                  options (opções do esquema, 'chave=valor,...', no
+!!                  formato de regrid_options do nuopc.input; vazio: as
+!!                  do esquema); methods, scheme e options são trocáveis
+!!                  no grupo &nuopc_regrid do nuopc.input
 !!   3. completar   fill: preenchimento por vizinhança (regrid_fill_t)
 !!   4. limitar     nan_to, o valor que substitui NaN no destino; CPL_UNSET
 !!                  desliga
@@ -113,7 +116,7 @@ module cpl_map_mod
   use ESMF,                  only : ESMF_KIND_R8
   use coupler_constants_mod, only : T_FREEZE_SEAWATER
   use coupler_config_mod,    only : cpl_config_t, COUPLER_MODES, coupler_mode_index
-  use regrid_base_mod,       only : regrid_fill_t
+  use regrid_base_mod,       only : regrid_fill_t, OPTIONS_LEN
   use cpl_fields_mod,        only : CPL_NAME_LEN
 
   implicit none
@@ -202,6 +205,7 @@ module cpl_map_mod
     character(len=12)            :: dst        = ''       !< malha de destino
     character(len=48)            :: methods    = ''
     character(len=16)            :: scheme     = 'esmf'
+    character(len=OPTIONS_LEN)   :: options    = ''       !< opções do esquema, 'chave=valor,...'
     character(len=CPL_NAME_LEN)  :: mask       = ''
     character(len=CPL_VIA_LEN)   :: fallback   = ''
     character(len=12)            :: no_value   = 'zerar'

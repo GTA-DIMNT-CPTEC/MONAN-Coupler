@@ -38,7 +38,7 @@ Um **ponto** é um componente numa malha, `COMPONENTE@malha` (ex.: `OCN@ocn_mom6
 | `GRIDS` | malha citada no mapa | `name`, `component`, `grid_type`, `description` |
 | `EXCHANGES` | passagem de um campo de um ponto a outro, escrita por grupo de campos (`GROUP_*`: uma passagem leva um grupo inteiro) ou, para um campo só, numa linha | `field`, `src`, `dst`, `via` (`'conector'`, `'cap'` ou nome de rota), `when`, `method` (só nos conectores) |
 | `EXPORTS` | campo que um modelo exporta, na ordem do anúncio | `field`, `point`, `when` |
-| `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` |
+| `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `options`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` |
 | `GAPS` | lacuna conhecida, que não interrompe a rodada | `field`, `point`, `when`, `reason` |
 
 Exemplo, o caminho da SST até a malha de fluxo. O MOM6 envia ao mediador o grupo `GROUP_OCN_STATE` (So_t, So_u e So_v) por conector, e a SST segue sozinha pela rota `ocn2atm_sst`:
@@ -78,7 +78,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 3. Opções em texto (`'chave=valor,...'`) com `regrid_option_int`, `regrid_option_real` e `regrid_options_check`.
 4. Uma linha em `regrid_schemes.F90` (`call register('<nome>', new_<nome>, rc)`) e o arquivo no `Makefile`.
 5. Comparar: `tests/regrid/compara-esquema.bash <nome> '<opções>'` (erro contra uma função analítica e o mesmo campo, bit a bit, com 1 e 4 processos).
-6. Usar: coluna `scheme` de `ROUTES` ou, sem recompilar, `regrid_scheme` e `regrid_options` em `&nuopc_regrid`. Trocar o esquema de uma rota da produção muda resultados e exige linha de base nova.
+6. Usar: colunas `scheme` e `options` de `ROUTES` ou, sem recompilar, `regrid_scheme` e `regrid_options` em `&nuopc_regrid`. Trocar o esquema de uma rota da produção muda resultados e exige linha de base nova.
 
 Um esquema que não é só de pesos (como o `mpassit`) estende `regridder_t` e implementa `setup`, `execute` e `release`; `tests/regrid/identity_scheme.F90` tem um exemplo mínimo dos dois tipos. Detalhes do framework em [`interpolacao-plugavel.md`](interpolacao-plugavel.md).
 

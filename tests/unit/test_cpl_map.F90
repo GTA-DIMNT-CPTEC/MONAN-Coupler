@@ -13,7 +13,7 @@
 !!               meio coerente com os componentes (conector entre dois
 !!               componentes, cap dentro de um, rota dentro do mediador,
 !!               entre as malhas da rota); rotas com reserva, máscara,
-!!               no_value e criar válidos; toda rota usada
+!!               no_value, criar e options válidos; toda rota usada
 !!   origem      em cada configuração, cada campo importado por um
 !!               componente tem uma única origem, e cada campo chega por
 !!               rota ou cap a um ponto por um só caminho
@@ -401,8 +401,15 @@ contains
         nerr = nerr + 1
         call fail_at('rota sem troca: '//trim(ROUTES(i)%name))
       end if
+      if (.not. options_format_ok(ROUTES(i)%options)) then
+        nerr = nerr + 1
+        call fail_at('options fora do formato chave=valor,...: '//trim(ROUTES(i)%name))
+      end if
     end do
-    call outcome('ROTAS: nomes, malhas, reservas, mascaras, sem_valor e criar', nerr == 0)
+    call outcome('ROTAS: nomes, malhas, reservas, mascaras, sem_valor, criar e options', nerr == 0)
+    call outcome('options: formato aceito', options_format_ok('vizinhos=4,expoente=2') .and. &
+                 options_format_ok('') .and. .not. options_format_ok('vizinhos') .and.   &
+                 .not. options_format_ok('vizinhos=4,') .and. .not. options_format_ok('=4'))
     ! A ordem de ROUTES é a ordem em que a reserva precisa existir.
     call outcome('ROTAS: seis rotas (Apendice A)', size(ROUTES) == 6)
   end subroutine check_grids_and_routes
@@ -614,6 +621,35 @@ contains
     call outcome(trim(CFG_NAME(k))//': cadeia completa, exceto as lacunas conhecidas', &
                    nerr == 0 .and. nmissing == nexpected)
   end subroutine check_chain
+
+  !> Coluna options de ROUTES: vazia, ou itens 'chave=valor' separados por
+  !! vírgula, com chave e valor não vazios (o formato de regrid_options).
+  logical function options_format_ok(text) result(ok)
+    character(len=*), intent(in) :: text
+    integer :: start, p, eq, last
+
+    ok = .true.
+    last = len_trim(text)
+    start = 1
+    do while (start <= last)
+      p = index(text(start:last), ',')
+      if (p == 0) then
+        p = last + 1
+      else
+        p = start + p - 1
+      end if
+      eq = index(text(start:p-1), '=')
+      if (eq <= 1 .or. start + eq - 1 >= p - 1) then
+        ok = .false.
+        return
+      end if
+      if (p == last) then
+        ok = .false.
+        return
+      end if
+      start = p + 1
+    end do
+  end function options_format_ok
 
   !> EXCHANGES expandida das passagens igual, linha a linha, à cópia congelada.
   subroutine check_frozen_exchanges()
