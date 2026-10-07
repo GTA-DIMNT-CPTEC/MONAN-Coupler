@@ -120,7 +120,7 @@ contains
     dx = 360.0_ESMF_KIND_R8 / real(nx, ESMF_KIND_R8)
     dy = 180.0_ESMF_KIND_R8 / real(ny, ESMF_KIND_R8)
 
-    ! ReadOcnFieldInterp exige pointer — alocar com bounds globais (1:nx, 1:ny).
+    ! ReadOcnFieldInterp exige pointer: alocar com bounds globais (1:nx, 1:ny).
     ! PET0 lê e interpola; ESMF_VMBroadcast distribui ice_global para todos.
     allocate(ice_global(nx, ny))
     ice_global = 0.0_ESMF_KIND_R8
@@ -257,7 +257,7 @@ contains
     !
     ! DT_TRANS = 2.0 K: Si_ifrac > 0.01 para SST < 271.35 + 2.0·ln(99) ≈ 280.6 K.
     ! Com 0.5 K, Si_ifrac > 0.01 só para SST < 273.7 K, e a SST polar, que
-    ! sobe para 278–282 K logo após o primeiro passo de acoplamento, zeraria
+    ! sobe para 278 a 282 K logo após o primeiro passo de acoplamento, zeraria
     ! o proxy em quase todo o oceano polar. A sigmoide continua monotônica e
     ! contínua.
     !
@@ -294,7 +294,7 @@ contains
     if (.not. ocean_public%is_ocean_pe) return
 
     ! ocean_grid é necessário para acessar mask2dT.
-    ! Se não foi passado, retorna zeros — comportamento seguro.
+    ! Se não foi passado, retorna zeros; comportamento seguro.
     if (.not. associated(ocean_grid)) then
       call log_warning(COMP_OCN, 'Si_ifrac sem ocean_grid: zeros')
       return

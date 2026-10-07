@@ -83,7 +83,9 @@
 !! conector que parte de um modelo parte de uma linha desta tabela; um campo
 !! exportado sem troca (So_s e Fioo_q do MOM6, por exemplo) só aparece aqui.
 !! A exportação do mediador não está nesta tabela: ela é o que chega a
-!! MED@ocn_med pelas rotas atm2ocn e atm2ocn_ice (ver cpl_arrivals).
+!! MED@ocn_med pelas rotas atm2ocn e atm2ocn_ice (ver cpl_arrivals). Como
+!! EXCHANGES, é escrita por grupos de campos (EXPORT_* ou, quando a ordem é
+!! a mesma, o grupo da passagem do modelo para o mediador).
 !!
 !! ROUTES: uma linha por interpolação do mediador, de src para dst (malhas).
 !! Toda rota tem as mesmas quatro etapas, na mesma ordem; a coluna com o
@@ -329,55 +331,32 @@ module cpl_map_mod
       i_group = 1, size(GROUP_ATM_SURFACE)) ]
 
   ! EXPORTS
-  type(cpl_export_t), parameter :: EXPORTS(*) = [                               &
-    !             field             point           when
+  !> Exportação de cada modelo, na ordem do anúncio do cap. Os grupos do
+  !! DATM e do SIS2 são os mesmos das passagens deles para o mediador
+  !! (GROUP_DATM_ATM, GROUP_ICE_SIS2); os do MONAN-A, do MOM6 e do DOCN têm
+  !! ordem ou campos próprios.
+  character(len=CPL_NAME_LEN), parameter :: EXPORT_MPAS(*) = [character(len=CPL_NAME_LEN) ::               &
+    'Sa_pslv_mpas', 'Sa_tbot_mpas', 'Sa_u10m_mpas', 'Sa_v10m_mpas', 'Faxa_swdn_mpas',  &
+    'Faxa_lwdn_mpas', 'Faxa_rain_mpas', 'Sa_shum_mpas', 'Faxa_snow_mpas',               &
+    'Faxa_sen_mpas', 'Faxa_lat_mpas', 'Faxa_taux_mpas', 'Faxa_tauy_mpas']
+  character(len=CPL_NAME_LEN), parameter :: EXPORT_MOM6(*) = [character(len=CPL_NAME_LEN) ::               &
+    'So_t', 'So_s', 'So_u', 'So_v', 'So_omask', 'Fioo_q', 'Si_ifrac']
+  character(len=CPL_NAME_LEN), parameter :: EXPORT_DOCN(*) = [character(len=CPL_NAME_LEN) ::               &
+    'So_t', 'Si_ifrac', 'Sf_zorl', 'So_s', 'So_u', 'So_v']
+
+  type(cpl_export_t), parameter :: EXPORTS(*) = [                                         &
+    !              field / grupo          point           when
     ! MONAN-A (mpas_cap_MONAN)
-    cpl_export_t('Sa_pslv_mpas',   'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Sa_tbot_mpas',   'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Sa_u10m_mpas',   'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Sa_v10m_mpas',   'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_swdn_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_lwdn_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_rain_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Sa_shum_mpas',   'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_snow_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_sen_mpas',  'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_lat_mpas',  'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_taux_mpas', 'ATM@atm_cap',  'mpas'),                     &
-    cpl_export_t('Faxa_tauy_mpas', 'ATM@atm_cap',  'mpas'),                     &
+    (cpl_export_t(EXPORT_MPAS(i_group),    'ATM@atm_cap',  'mpas'), i_group = 1, size(EXPORT_MPAS)),       &
     ! DATM (DATM_cap)
-    cpl_export_t('Sa_u10m',        'ATM@datm',     'datm'),                     &
-    cpl_export_t('Sa_v10m',        'ATM@datm',     'datm'),                     &
-    cpl_export_t('Sa_tbot',        'ATM@datm',     'datm'),                     &
-    cpl_export_t('Sa_shum',        'ATM@datm',     'datm'),                     &
-    cpl_export_t('Sa_pslv',        'ATM@datm',     'datm'),                     &
-    cpl_export_t('Faxa_swdn',      'ATM@datm',     'datm'),                     &
-    cpl_export_t('Faxa_lwdn',      'ATM@datm',     'datm'),                     &
-    cpl_export_t('Faxa_rain',      'ATM@datm',     'datm'),                     &
-    cpl_export_t('Faxa_snow',      'ATM@datm',     'datm'),                     &
+    (cpl_export_t(GROUP_DATM_ATM(i_group), 'ATM@datm',     'datm'), i_group = 1, size(GROUP_DATM_ATM)),    &
     ! MOM6 (mom_cap_MONAN); So_s e Fioo_q não têm consumidor, e Si_ifrac só
     ! vai ao MONAN-A com atm_boundary=ocn.
-    cpl_export_t('So_t',           'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('So_s',           'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('So_u',           'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('So_v',           'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('So_omask',       'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('Fioo_q',         'OCN@ocn_mom6', 'mom6'),                     &
-    cpl_export_t('Si_ifrac',       'OCN@ocn_mom6', 'mom6'),                     &
+    (cpl_export_t(EXPORT_MOM6(i_group),    'OCN@ocn_mom6', 'mom6'), i_group = 1, size(EXPORT_MOM6)),       &
     ! DOCN (DOCN_cap)
-    cpl_export_t('So_t',           'OCN@docn',     'docn'),                     &
-    cpl_export_t('Si_ifrac',       'OCN@docn',     'docn'),                     &
-    cpl_export_t('Sf_zorl',        'OCN@docn',     'docn'),                     &
-    cpl_export_t('So_s',           'OCN@docn',     'docn'),                     &
-    cpl_export_t('So_u',           'OCN@docn',     'docn'),                     &
-    cpl_export_t('So_v',           'OCN@docn',     'docn'),                     &
+    (cpl_export_t(EXPORT_DOCN(i_group),    'OCN@docn',     'docn'), i_group = 1, size(EXPORT_DOCN)),       &
     ! SIS2 (sis_cap_MONAN)
-    cpl_export_t('Si_ifrac_sis2',  'ICE@ice_sis2', 'sis2'),                     &
-    cpl_export_t('Si_avsdr_sis2',  'ICE@ice_sis2', 'sis2'),                     &
-    cpl_export_t('Si_avsdf_sis2',  'ICE@ice_sis2', 'sis2'),                     &
-    cpl_export_t('Si_anidr_sis2',  'ICE@ice_sis2', 'sis2'),                     &
-    cpl_export_t('Si_anidf_sis2',  'ICE@ice_sis2', 'sis2'),                     &
-    cpl_export_t('Si_t_sis2',      'ICE@ice_sis2', 'sis2') ]
+    (cpl_export_t(GROUP_ICE_SIS2(i_group), 'ICE@ice_sis2', 'sis2'), i_group = 1, size(GROUP_ICE_SIS2)) ]
 
   ! GAPS
   type(cpl_gap_t), parameter :: GAPS(*) = [                                                            &

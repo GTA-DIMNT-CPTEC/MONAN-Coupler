@@ -6,7 +6,7 @@
 !!   EXTERNAL do padrão MPI-2). O backend gfortran do Cray ftn compara
 !!   os tipos de sendbuf/recvbuf entre TODAS as chamadas ao mesmo símbolo
 !!   externo visíveis no arquivo de compilação. Ter allreduce_r8 (REAL(8))
-!!   e allreduce_i4 (INTEGER(4)) no mesmo arquivo — ou no mesmo módulo —
+!!   e allreduce_i4 (INTEGER(4)) no mesmo arquivo, ou no mesmo módulo,
 !!   faz o compilador cruzar os tipos e emitir type-mismatch espúrio, mesmo
 !!   que cada chamada individualmente esteja correta.
 !!

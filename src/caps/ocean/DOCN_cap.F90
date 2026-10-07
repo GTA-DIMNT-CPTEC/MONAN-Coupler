@@ -29,7 +29,7 @@
 !!
 !! Arquivo NetCDF esperado (compatível com OISST v2.1, CF-1.8): dimensões
 !! lon(1440), lat(720), time(N); variáveis sst(lon,lat,time) [°C] e
-!! aice(lon,lat,time) [0–1]. A SST é convertida de °C para K (+273.15); se
+!! aice(lon,lat,time) [0 a 1]. A SST é convertida de °C para K (+273.15); se
 !! o arquivo já estiver em K, ajuste SST_CELSIUS_TO_K = 0.0.
 !!
 !! INPE / CGCT / DIMNT, GT Acoplamento de Modelos.
@@ -299,7 +299,7 @@ contains
       call ESMF_GridAddCoord(grid, staggerloc=ESMF_STAGGERLOC_CENTER, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
 
-      ! loop sobre DEs locais — com regDecomp 2D e DEs>petCount,
+      ! loop sobre DEs locais: com regDecomp 2D e DEs>petCount,
       ! 17 PETs a 512 PETs têm localDeCount=2; GridGetCoord exige localDE=.
       call ESMF_GridGet(grid, localDeCount=localDeCount_docn, rc=rc)
       if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -550,7 +550,7 @@ contains
       currTime, cfg_docn_nx, cfg_docn_ny, is%aice, rc)
     if (ESMF_LogFoundError(rcToCheck=rc, msg="DOCN: falha ao ler aice", &
       line=__LINE__, file=__FILE__)) return
-    ! Conversão % → fração: cfg_docn_ice_pct=.true. para arquivos em (0–100).
+    ! Conversão % → fração: cfg_docn_ice_pct=.true. para arquivos em (0 a 100).
     if (cfg_docn_ice_pct) is%aice = is%aice / 100.0_ESMF_KIND_R8
     ! Clamping físico: fração de gelo em [0,1]
     is%aice = max(0.0_ESMF_KIND_R8, min(1.0_ESMF_KIND_R8, is%aice))
@@ -586,8 +586,8 @@ contains
         call log_warning(COMP_DOCN, 'falha uo: corrente zonal = 0')
         is%uocn = 0.0_ESMF_KIND_R8; rc = ESMF_SUCCESS
       else
-        ! Fill value OSCAR = -999.0 — limiar |v|>10 m/s captura fills oceânicos
-        ! e valores fisicamente impossíveis (correntes reais: 0.01–3 m/s).
+        ! Fill value OSCAR = -999.0; limiar |v|>10 m/s captura fills oceânicos
+        ! e valores fisicamente impossíveis (correntes reais: 0.01 a 3 m/s).
         where (abs(is%uocn) >= 10.0_ESMF_KIND_R8) is%uocn = 0.0_ESMF_KIND_R8
       end if
       call ReadOcnFieldInterp(gcomp, trim(cfg_docn_cur_file), &

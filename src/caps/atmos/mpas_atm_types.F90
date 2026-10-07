@@ -1,5 +1,5 @@
 !> @file mpas_atm_types.F90
-!! @brief Tipos públicos do cap MONAN-A 2.0 — sem dependência direta do ESMF.
+!! @brief Tipos públicos do cap MONAN-A 2.0; sem dependência direta do ESMF.
 !!
 !! mpas_atm_public_type: campos que o MONAN-A exporta ao mediador, entre
 !!   eles q2m (-> Sa_shum_mpas), prec_rain (-> Faxa_rain_mpas) e prec_snow
@@ -135,29 +135,29 @@ module mpas_atm_types_mod
   ! Campos importados do mediador (conector MED→MPAS) e membro que cada um
   ! preenche (mpas_import, em mpas_adapter):
   !   Sx_tsfc   → sst           temperatura de pele composta [K]
-  !   Si_ifrac  → ice_fraction  fração de gelo [0–1]
+  !   Si_ifrac  → ice_fraction  fração de gelo [0 a 1]
   !   So_u      → uocn          corrente zonal      a 0 m [m/s]
   !   So_v      → vocn          corrente meridional a 0 m [m/s]
   !   Sf_zorl   → zorl          rugosidade [m] (Charnock no mediador)
-  !   Sf_albedo → alb           albedo de superfície [0–1]
-  !   Sx_omask  → omask         máscara terra/oceano [0–1]
+  !   Sf_albedo → alb           albedo de superfície [0 a 1]
+  !   Sx_omask  → omask         máscara terra/oceano [0 a 1]
   !
   ! uocn/vocn permitem o vento relativo ao oceano nos esquemas de
   !   superfície do MPAS-A.
   type, public :: atm_ocean_boundary_type
     real(MPAS_RKIND), allocatable :: sst(:)          !< SST                      [K]
-    real(MPAS_RKIND), allocatable :: ice_fraction(:) !< fração de gelo           [0–1]
+    real(MPAS_RKIND), allocatable :: ice_fraction(:) !< fração de gelo           [0 a 1]
     real(MPAS_RKIND), allocatable :: uocn(:)         !< corrente zonal      0 m  [m/s]
     real(MPAS_RKIND), allocatable :: vocn(:)         !< corrente meridional 0 m  [m/s]
     real(MPAS_RKIND), allocatable :: zorl(:)         !< rugosidade               [m]
-    real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície [0–1]
+    real(MPAS_RKIND), allocatable :: alb(:)          !< albedo de superfície [0 a 1]
     !> Máscara terra/oceano REAL do MOM6
     !! (ocean_grid%mask2dT), recebida do mediador como Sx_omask. Chega
     !! fracionária, porque atravessou dois regrids (OCN→ATM no MED e
     !! ATM→Voronoi no conector); o corte binário fica no consumidor final.
     !! Usada apenas para mascarar continentes em monan2_import_*.nc;
     !! NÃO alimenta a física do MONAN-A, que tem a própria landmask.
-    real(MPAS_RKIND), allocatable :: omask(:)        !< 1=oceano, 0=terra       [0–1]
+    real(MPAS_RKIND), allocatable :: omask(:)        !< 1=oceano, 0=terra       [0 a 1]
   end type atm_ocean_boundary_type
 
 end module mpas_atm_types_mod

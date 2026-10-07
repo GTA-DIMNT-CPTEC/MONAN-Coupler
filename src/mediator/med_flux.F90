@@ -111,10 +111,10 @@ contains
     if (mpas_available) then
       call GetFieldPtrOptional(importState, "Sa_shum_mpas",   shum_mpas, rc)
       call GetFieldPtrOptional(importState, "Faxa_snow_mpas", snow_mpas, rc)
-      ! rc pode ser ESMF_FAILURE se os campos opcionais estiverem ausentes — não e erro
+      ! rc pode ser ESMF_FAILURE se os campos opcionais estiverem ausentes; não e erro
     end if
 
-    ! 1c. FIELDS OPCIONAIS — fluxos nativos do PBL do MONAN-A.
+    ! 1c. FIELDS OPCIONAIS: fluxos nativos do PBL do MONAN-A.
     !     Ausência (modo DATM, ou cap MPAS sem esses campos) NÃO desabilita
     !     mpas_available; apenas mantém sen/evap/taux/tauy vindos do bulk
     !     NCAR (calc_bulk_ncar) mais abaixo.
@@ -202,7 +202,7 @@ contains
     real(ESMF_KIND_R8), pointer, intent(inout) :: shum(:,:), snow(:,:)
     real(ESMF_KIND_R8), pointer, intent(inout) :: shum_local(:,:), snow_local(:,:)
 
-    ! shum opcional — usar SHUM_OCEAN_DEFAULT quando ausente
+    ! shum opcional: usar SHUM_OCEAN_DEFAULT quando ausente
     if (associated(shum_mpas)) then
       shum => shum_mpas
     else
@@ -212,7 +212,7 @@ contains
       call log_info(COMP_MED, 'Sa_shum_mpas ausente: umidade SHUM_OCEAN_DEFAULT')
     end if
 
-    ! snow opcional — zero quando ausente
+    ! snow opcional: zero quando ausente
     if (associated(snow_mpas)) then
       snow => snow_mpas
     else
@@ -337,7 +337,7 @@ contains
       i1 = max(1, i1); i2 = min(ATM_NX, i2)
       j1 = max(1, j1); j2 = min(ATM_NY, j2)
     else
-      ! PET sem DE local — bounds vazios → loops não executam
+      ! PET sem DE local: bounds vazios → loops não executam
       i1 = 1; i2 = 0
       j1 = 1; j2 = 0
     end if
@@ -353,24 +353,24 @@ contains
   !! Motivação: o MONAN-A já fecha seu próprio balanco de PBL usando
   !! hfx/lh/ust internos (ver mpas_atm_fluxes.F90/mpas_adapter.F90).
   !! Deixar o MED recalcular via bulk NCAR a partir de T/q/vento de 10 m
-  !! produz um fluxo DIFERENTE do que a atmosfera usou internamente —
+  !! produz um fluxo DIFERENTE do que a atmosfera usou internamente;
   !! inconsistência entre o balanco de energia do MONAN-A e o forçante
   !! entregue ao MOM6/SIS2.
   !!
   !! CONFIRMADO: sinal de hfx/lh é POSITIVO PARA CIMA (convenção
-  !!  usual WRF/MPAS/GFS), verificado com a equipe de física do MONAN-A —
+  !!  usual WRF/MPAS/GFS), verificado com a equipe de física do MONAN-A;
   !!  por isso invertido (-sen_g2, -lat_g2) abaixo, para bater com a
   !!  convenção Foxx_sen/Foxx_evap (positivo = aquece o oceano). Este item
   !!  NÃO se aplica a Fioi_sen/Fioi_evap (fluxos do gelo, calculados a
-  !!  parte em med_bulk_ncar.F90 com T_gelo, não com hfx/lh nativos) — ver
+  !!  parte em med_bulk_ncar.F90 com T_gelo, não com hfx/lh nativos); ver
   !!  sis_cap_fields.F90 para o sinal desses.
   !!
   !!  taux_sfc/tauy_sfc (de mpas_atm_fluxes.F90) usam a mesma forma
-  !!     rho*Cd*|V|*V do bulk NCAR — não invertidos aqui, mas confirme
+  !!     rho*Cd*|V|*V do bulk NCAR: não invertidos aqui, mas confirme
   !!     que a rotação de referencial (Terra vs. grade) já e tratada
   !!     antes de exportar (deve ser, pois MPAS já roda em lat/lon).
   !!  3) Faxa_lat_mpas vem em W/m^2 (energia); Foxx_evap e fluxo de MASSA
-  !!     (kg/m^2/s) — por isso a divisão por L_evap abaixo.
+  !!     (kg/m^2/s): por isso a divisão por L_evap abaixo.
   !!
   !! @param[in]    is          estado interno do mediador
   !! @param[in]    sen_mpas, lat_mpas, taux_mpas, tauy_mpas  fluxos nativos
@@ -467,7 +467,7 @@ contains
         do ii = lbound(fptr_sen,1), ubound(fptr_sen,1)
           if (ii >= 1 .and. ii <= ATM_NX .and. jj >= 1 .and. jj <= ATM_NY) then
             ! só sobrescreve onde há dado nativo real (fora do fill=0
-            ! dos PETs sem tile MONAN-A local — mesmo critério)
+            ! dos PETs sem tile MONAN-A local; mesmo critério)
             if (abs(sen_g2(ii,jj)) > 1.0e-10_ESMF_KIND_R8) then
               fptr_sen(ii,jj)  = -sen_g2(ii,jj)          ! VERIFICAR sinal (ver acima)
               fptr_evap(ii,jj) = -lat_g2(ii,jj) / L_evap ! W/m^2 -> kg/m^2/s

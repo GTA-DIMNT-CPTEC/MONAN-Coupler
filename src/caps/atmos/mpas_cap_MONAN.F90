@@ -280,7 +280,7 @@ contains
       return
     end if
 
-    ! 4. Coordenadas NetCDF (MPI_Allgather após SMIOL — seguro)
+    ! 4. Coordenadas NetCDF (MPI_Allgather após SMIOL; seguro)
       ! usar nCellsSolve (células próprias sem halos) para que a soma
       ! global em netcdf_init_coords seja exatamente 40962 (não 83897 com halos).
       n_local = st%atm_public%nCellsSolve
@@ -596,7 +596,7 @@ contains
       ! nestes PETs gera "localDe is out of range". Verificar antes de acessar.
       call ESMF_FieldGet(field, localDeCount=localDeCount_imp, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return
-      if (localDeCount_imp == 0) cycle   ! PET sem dados locais — nada a inicializar
+      if (localDeCount_imp == 0) cycle   ! PET sem dados locais: nada a inicializar
       ! Consultar rank antes de chamar farrayPtr (evita erro rank mismatch)
       call ESMF_FieldGet(field, dimCount=fld_rank, rc=rc)
       if (ChkErr(rc, __LINE__, u_FILE_u)) return

@@ -12,21 +12,18 @@ module docn_cap_netcdf_mod
 
   use ESMF
   use ESMF, only: ESMF_GridComp
-  use ESMF, only: ESMF_Clock, ESMF_ClockGet
   use ESMF, only: ESMF_Time, ESMF_TimeGet, ESMF_TimeSet
-  use ESMF, only: ESMF_TimeInterval, ESMF_TimeIntervalSet, ESMF_TimeIntervalGet
+  use ESMF, only: ESMF_TimeInterval, ESMF_TimeIntervalGet
   use ESMF, only: ESMF_KIND_R8, ESMF_KIND_I8
-  use ESMF, only: ESMF_SUCCESS, ESMF_FAILURE, ESMF_LOGERR_PASSTHRU
-  use ESMF, only: ESMF_LogFoundError
-  use ESMF, only: ESMF_VM, ESMF_VMGetGlobal, ESMF_VMGetCurrent, ESMF_VMGet, ESMF_VMBroadcast, ESMF_GridCompGet
-  use ESMF, only: ESMF_CALKIND_GREGORIAN
+  use ESMF, only: ESMF_SUCCESS
+  use ESMF, only: ESMF_VM, ESMF_VMGetCurrent, ESMF_VMGet
 
   use netcdf
   use nc_writer_mod, only : nc_create, nc_global_header, nc_def_latlon, nc_def_field2d
   use mpi
   use coupler_constants_mod, only: T0_KELVIN
-  use coupler_utils_mod, only: ChkErr, int_to_str, real_to_str
-  use coupler_log_mod, only: COMP_DOCN, log_error, log_warning, log_info, log_debug
+  use coupler_utils_mod, only: int_to_str, real_to_str
+  use coupler_log_mod, only: COMP_DOCN, log_warning, log_info
 
   use coupler_config_mod, only: cfg_docn_mode,           &
                                   cfg_docn_sst_file,       &
@@ -93,7 +90,7 @@ contains
     call ESMF_VMGet(vm, localPet=localPet, mpiCommunicator=mpiComm, rc=rc)
     if (rc /= ESMF_SUCCESS) return
 
-    ! Sincronizar — todos os PETs chegam aqui antes da escrita do PET0
+    ! Sincronizar: todos os PETs chegam aqui antes da escrita do PET0
     call MPI_Barrier(mpiComm, mpiErr)
     if (localPet /= 0) return   ! apenas PET0 executa o restante
 

@@ -159,7 +159,7 @@ contains
     real(MPAS_RKIND), parameter :: p0 = 101325.0_MPAS_RKIND
 
     ! Umidade específica a 2m: q2 [kg/kg]
-    ! atm_state%pool_q2 é ponteiro direto para o pool — sem buffer de incremento.
+    ! atm_state%pool_q2 é ponteiro direto para o pool; sem buffer de incremento.
     ! Valor instantâneo → válido para o instante corrente.
     if (associated(atm_state%pool_q2)) then
       atm_state%q2m_buf(1:n) = atm_state%pool_q2(1:n)
@@ -209,7 +209,7 @@ contains
           z_sfc = max(z_sfc, 2.0_MPAS_RKIND)  ! mínimo 2 m
           ! Fator de perfil logarítmico neutro
           scale_fac = log(Z10 / Z0) / log(z_sfc / Z0)
-          ! u10 = u_sfc × fator (nível 1 do MPAS = índice nv — top-down storage)
+          ! u10 = u_sfc × fator (nível 1 do MPAS = índice nv; top-down storage)
           ! O MPAS armazena nVertLevels de cima para baixo: nível 1 = topo, nv = superfície
           atm_state%u10_buf(k) = atm_state%pool_uZonal(nv, k) * scale_fac
           atm_state%v10_buf(k) = atm_state%pool_vMerid(nv, k) * scale_fac

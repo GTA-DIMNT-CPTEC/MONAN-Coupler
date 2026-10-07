@@ -111,7 +111,7 @@ contains
         associated(p_ifrac_comp) .and. associated(p_tsfc_out)) then
       do jj_c = lbound(p_sst_src,2), ubound(p_sst_src,2)
         do ii_c = lbound(p_sst_src,1), ubound(p_sst_src,1)
-          ! Clamp defensivo local — não confia cegamente nas extrapolações
+          ! Clamp defensivo local: não confia cegamente nas extrapolações
           ! upstream, mesma filosofia dos guards de NaN/faixa física
           ! usados no resto do arquivo (ex. clamp de Sf_albedo, So_t).
           ifrac_c = p_ifrac_comp(ii_c,jj_c)
@@ -124,7 +124,7 @@ contains
                                      + ifrac_c * p_tice_comp(ii_c,jj_c)
           else
             ! Si_t_sis2 não regridou/extrapolou para um valor físico
-            ! nesta célula — mantém SST pura em vez de contaminar com
+            ! nesta célula: mantém SST pura em vez de contaminar com
             ! um valor suspeito, mesma lógica defensiva do fallback de
             ! Sf_albedo.
             p_tsfc_out(ii_c,jj_c) = p_sst_src(ii_c,jj_c)
@@ -132,7 +132,7 @@ contains
         end do
       end do
     else
-      ! Sem dado para compor — Sx_tsfc degrada para SST pura.
+      ! Sem dado para compor: Sx_tsfc degrada para SST pura.
       if (associated(p_sst_src) .and. associated(p_tsfc_out)) &
         p_tsfc_out(:,:) = p_sst_src(:,:)
       call log_warning(COMP_MED, 'ponteiros de So_t/Si_t_sis2/Si_ifrac ' // &

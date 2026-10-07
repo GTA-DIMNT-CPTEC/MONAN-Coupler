@@ -57,7 +57,7 @@ contains
   !!   (albedo do gelo puro, sem blend);
   !!   Faxa_rain/snow → lprec/fprec; Sa_pslv → p; Faxa_coszen → coszen.
   !!   Os campos 2D do mediador são REPLICADOS (broadcast) para todas as
-  !!   categorias de espessura de gelo na 3a dimensão de is%aib — o mediador
+  !!   categorias de espessura de gelo na 3a dimensão de is%aib; o mediador
   !!   não distingue por categoria.
   !!
   !! t_flux é o ÚNICO campo desta lista que precisa de inversão de sinal.
@@ -404,7 +404,7 @@ contains
     integer :: ii, jj, k_lo, k_hi
     ! Fallback: ponto de congelamento típico da água do mar (~-1,8 C),
     ! usado só onde a fração de gelo é desprezível ou o campo não está
-    ! associado — o peso do termo de gelo no blend a jusante torna esse
+    ! associado: o peso do termo de gelo no blend a jusante torna esse
     ! valor quase irrelevante nesses casos.
 
     rc = ESMF_SUCCESS

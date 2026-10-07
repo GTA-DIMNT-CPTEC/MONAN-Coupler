@@ -94,7 +94,7 @@ done
 retirado() { grep -vEf "${RAIZ}/tests/log-retirado.txt"; }
 traduzido() { sed -Ef "${RAIZ}/tests/log-traduzido.sed" "$1"; }
 mensagem() { sed -E 's/^[0-9]+ +[0-9.]+ +[A-Z]+ +//'; }
-padrao='AVISO|mascara do diagnostico|mascara So_omask|nao tem mapeamento|escrito|ERRO NetCDF|erro NetCDF|WriteDOCNDiag'
+padrao='AVISO|mascara do diagnostico|mascara So_omask|nao tem mapeamento|fora dos campos internos|escrito|ERRO NetCDF|erro NetCDF|WriteDOCNDiag'
 for pet in "${SAIDA}"/antiga/run/PET*.ESMF_LogFile; do
   nome=$(basename "${pet}")
   if diff -q <(traduzido "${pet}" | grep -E "${padrao}" | retirado | mensagem) \

@@ -105,7 +105,7 @@ contains
   !! Deve ser chamada em InitializeRealize antes de netcdf_init_coords.
   !! @param[in] res_deg   Resolução da grade em graus (ex: 1.0, 0.5, 0.25)
   !! @param[in] out_dir   Diretório de saída para os arquivos NetCDF
-  !! @param[in] localPet PET local do ESMF — suprime impressão em PETs > 0
+  !! @param[in] localPet PET local do ESMF; suprime impressão em PETs > 0
   subroutine netcdf_config_set(diag, res_deg, out_dir, localPet)
     type(mpas_diag_export_t), intent(inout) :: diag
     real,             intent(in) :: res_deg
@@ -178,7 +178,7 @@ contains
       displs(i) = displs(i-1) + allCounts(i-1)
     end do
 
-    ! Alocar buffers (PETs >0 recebem array mínimo — argumento inativo)
+    ! Alocar buffers (PETs >0 recebem array mínimo; argumento inativo)
     if (localPet == 0) then
       allocate(diag%lon_global(nGlobal))
       allocate(diag%lat_global(nGlobal))
@@ -300,7 +300,7 @@ contains
                     mpiCommunicator=mpiComm, rc=rc)
     if (ChkErr(rc, __LINE__, u_FILE_u)) return
 
-    ! Coordenadas requeridas — preenchidas por netcdf_init_coords em InitializeRealize
+    ! Coordenadas requeridas: preenchidas por netcdf_init_coords em InitializeRealize
     if (.not. diag%coords_ready) then
       if (localPet == 0) call log_error(COMP_ATM, subname// &
         ': netcdf_init_coords nao foi chamado em InitializeRealize')
@@ -443,7 +443,7 @@ contains
                'time: seconds since startTime (CF-1.8).')
 
       ! Dimensões
-      ! lat e lon — sem dimensão time (1 arquivo por passo)
+      ! lat e lon: sem dimensão time (1 arquivo por passo)
       ! Variáveis de coordenada
       if (.not. nc_def_latlon(ncid, diag%nlon, diag%nlat, dimid_lon, dimid_lat, &
                               varid_lon, varid_lat, subname)) then
@@ -542,7 +542,7 @@ contains
           diag%lat_local(1:diag%nlocal),    &
           diag%nlocal, acc_local, cnt_local, othr)
       else
-        ! Fallback ESMF field — cobertura parcial
+        ! Fallback ESMF field: cobertura parcial
         call read_export_field_local(exportState, fldnames(i), nLocal, sendBuf, rc)
         if (allocated(diag%lon_local) .and. nLocal>0) &
           call voronoi_accum_local(diag, sendBuf(1:nLocal), diag%lon_local(1:nLocal), &
@@ -652,7 +652,7 @@ contains
 
   !> @brief Limiar de outlier por campo (filtra lixo de memória e fill values).
   !!
-  !! Faxa_taux/tauy: stress superficial máximo físico ≈ 3–5 N/m² (furacão Cat.5);
+  !! Faxa_taux/tauy: stress superficial máximo físico ≈ 3 a 5 N/m² (furacão Cat.5);
   !!   limiar = 10 N/m² com margem de segurança.
   !!
   !! Sa_u10m_mpas / Sa_v10m_mpas: vento 10 m. Valores > 10 m/s são NORMAIS

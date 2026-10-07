@@ -37,7 +37,7 @@ Um **ponto** é um componente numa malha, `COMPONENTE@malha` (ex.: `OCN@ocn_mom6
 | --- | --- | --- |
 | `GRIDS` | malha citada no mapa | `name`, `component`, `grid_type`, `description` |
 | `EXCHANGES` | passagem de um campo de um ponto a outro, escrita por grupo de campos (`GROUP_*`: uma passagem leva um grupo inteiro) ou, para um campo só, numa linha | `field`, `src`, `dst`, `via` (`'conector'`, `'cap'` ou nome de rota), `when`, `method` (só nos conectores) |
-| `EXPORTS` | campo que um modelo exporta, na ordem do anúncio | `field`, `point`, `when` |
+| `EXPORTS` | campo que um modelo exporta, na ordem do anúncio; escrita por grupos, como `EXCHANGES` | `field`, `point`, `when` |
 | `ROUTES` | interpolação do mediador | `name`, `src`, `dst`, `methods`, `scheme`, `options`, `mask`, `fallback`, `no_value`, `fill`, `nan_to`, `create` |
 | `GAPS` | lacuna conhecida, que não interrompe a rodada | `field`, `point`, `when`, `reason` |
 
@@ -59,7 +59,7 @@ Os componentes perguntam ao mapa: `cpl_arrivals(ponto, ...)` devolve a lista de 
 
 1. Uma linha em `FIELDS` (sem ela, o anúncio do campo para a rodada).
 2. Em `EXCHANGES`, o nome no grupo (`GROUP_*`) de cada caminho que o campo segue, na posição em que deve ser anunciado; um caminho novo é uma passagem nova (um grupo novo ou uma linha). A passagem por conector faz o destino anunciar o campo e o driver escrever o método; a passagem por rota registra o caminho para a conferência, e a chamada que aplica a rota fica numa fase do mediador. Mudar um grupo muda a tabela congelada do teste do mapa: atualizar `tests/unit/exchanges_frozen.inc` é uma decisão do GT, registrada no CHANGELOG.
-3. Se o campo sai de um modelo, uma linha em `EXPORTS`. O cap (ou o adaptador) preenche os valores.
+3. Se o campo sai de um modelo, o nome no grupo de exportação do modelo em `EXPORTS` (`EXPORT_*` ou, para o DATM e o SIS2, o próprio grupo da passagem para o mediador, que tem a mesma ordem), na posição em que o cap o anuncia. O cap (ou o adaptador) preenche os valores. Mudar um grupo de exportação muda a tabela congelada do teste do mapa (`tests/unit/exports_frozen.inc`), como em `EXCHANGES`.
 4. `tools/dev/mapa-acoplamento.py` e `tools/dev/confere-tudo.bash HEAD`. Na rodada, uma linha faltando ou sobrando aparece como `CPL-REL: DIFERENCA:` e interrompe a inicialização; uma diferença esperada vai para `GAPS`, com o motivo.
 
 ## 5. Como incluir um componente

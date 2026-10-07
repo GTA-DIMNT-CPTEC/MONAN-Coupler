@@ -298,7 +298,7 @@ contains
     dt_coupling = esmf2fms_time(timeStep)
 
     ! Converte stopTime aqui (usado pelo diag_manager_set_time_end_infra
-    ! logo ABAIXO de ice_model_init — ver comentário lá para o motivo da
+    ! logo ABAIXO de ice_model_init: ver comentário lá para o motivo da
     ! ordem).
     call ESMF_TimeGet(stopTime, yy=syy_ice, mm=smm_ice, dd=sdd_ice, &
       h=shh_ice, m=smn_ice, s=sss_ice, rc=rc)

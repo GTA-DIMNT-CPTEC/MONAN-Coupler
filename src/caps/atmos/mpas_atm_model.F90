@@ -205,7 +205,7 @@ contains
   !!
   !! mpas_atm_core.F, linha 605:
   !!   function atm_core_run(domain) result(ierr)
-  !! core_run é INTEGER FUNCTION — retorna código de erro MPAS.
+  !! core_run é INTEGER FUNCTION: retorna código de erro MPAS.
   !!
   !! I/O (history/restart) via SMIOL/smiolf ocorre automaticamente
   !! conforme alarmes definidos em streams.atmosphere.

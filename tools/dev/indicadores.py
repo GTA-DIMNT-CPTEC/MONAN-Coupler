@@ -167,7 +167,11 @@ def acoplamento(caminho, instr, res):
         if re.match(r'\s*use\b', cod, re.I):
             continue
         nomes = RE_NOME_CAMPO.findall(s)
-        if '/coupling/' not in caminho and (
+        # Uma tabela de tipo derivado (type(...), parameter :: T(*) = [...]),
+        # como MED_FIELDS no mediador, descreve os campos, não os anuncia;
+        # as listas à mão que o indicador procura são vetores de texto.
+        tabela = re.match(r'\s*type\s*\(\s*\w+\s*\)\s*,\s*parameter\b', cod, re.I)
+        if '/coupling/' not in caminho and not tabela and (
                 len(nomes) >= 3
                 or nomes and re.search(r'\bNUOPC_(Advertise|Realize)\s*\(', cod, re.I)
                 or realiza and re.search(r'\bESMF_FieldCreate\s*\(', cod, re.I)

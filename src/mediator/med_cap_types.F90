@@ -2,10 +2,10 @@
 !! @brief Tipos derivados, constantes físicas e listas de campos do mediador NUOPC.
 !!
 !! Contém as definições compartilhadas entre os módulos do mediador:
-!!   MED_InternalState, MED_InternalStateWrapper — estado interno ESMF,
+!!   MED_InternalState, MED_InternalStateWrapper: estado interno ESMF,
 !!   agrupado nos subtipos med_ocn_flux_fields_t, med_ocn_fields_t,
 !!   med_ice_fields_t, med_sfc_fields_t, med_par_t e med_diag_config_t
-!!   Constantes físicas Large & Yeager (2009) — usadas pelo bulk NCAR
+!!   Constantes físicas Large & Yeager (2009); usadas pelo bulk NCAR
 !!   MED_KEYS: chaves de configuração que escolhem os campos anunciados,
 !!   cujas listas saem do mapa de acoplamento (cpl_map)
 !!
@@ -54,7 +54,7 @@ module med_cap_types_mod
   real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.06_ESMF_KIND_R8    !< Albedo médio do oceano
   !real(ESMF_KIND_R8), parameter :: albedo_ocn = 0.26_ESMF_KIND_R8    !< Albedo médio do oceano
   !> SST de segurança para bulk quando o valor recebido está fora de [271, 308] K.
-  !! NÃO é fonte de dado — guard para evitar instabilidade numérica.
+  !! NÃO é fonte de dado; guard para evitar instabilidade numérica.
   real(ESMF_KIND_R8), parameter :: SST_BULK_FALLBACK = 290.0_ESMF_KIND_R8
   !> Umidade específica padrão ~80% UR a 290 K (Sa_shum_mpas ausente).
   real(ESMF_KIND_R8), parameter :: SHUM_OCEAN_DEFAULT = 0.010_ESMF_KIND_R8

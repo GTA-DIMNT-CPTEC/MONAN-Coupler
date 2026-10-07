@@ -6,7 +6,9 @@
 !!
 !!   congelada   EXCHANGES, escrita por grupos de campos e passagens desde a
 !!               R-FASE13-23, reproduz linha a linha e na mesma ordem a
-!!               tabela de antes (exchanges_frozen.inc), em todas as colunas
+!!               tabela de antes (exchanges_frozen.inc), em todas as colunas;
+!!               EXPORTS, escrita por grupos desde a R-FASE13-33, reproduz a
+!!               de antes (exports_frozen.inc) do mesmo modo
 !!   estrutura   nomes únicos; todo campo de EXCHANGES e de EXPORTS está
 !!               em FIELDS e todo campo de FIELDS é usado; pontos 'COMPONENTE@malha' com
 !!               malha conhecida e componente certo; condições válidas;
@@ -82,7 +84,7 @@ program test_cpl_map
   use cpl_map_mod,       only : GRIDS, EXCHANGES, ROUTES, cpl_config_t, cpl_exchange_applies, &
                                 cpl_valid_conditions, cpl_route_index, cpl_grid_index, &
                                 cpl_point_component, cpl_point_grid, cpl_exchange_t
-  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_route_fields
+  use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_route_fields, cpl_export_t
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
   use cpl_map_mod,       only : GAPS, cpl_is_gap, cpl_config_is_valid
   use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index, cpl_current_config, &
@@ -95,6 +97,7 @@ program test_cpl_map
   include 'listas_mediador.inc'
   include 'listas_caps.inc'
   include 'exchanges_frozen.inc'
+  include 'exports_frozen.inc'
 
   integer, parameter :: NCFG = 5
   character(len=16), parameter :: CFG_NAME(NCFG) = [character(len=16) :: &
@@ -118,6 +121,7 @@ program test_cpl_map
   nfailures = 0
 
   call check_frozen_exchanges()
+  call check_frozen_exports()
   call check_fields()
   call check_field_attributes()
   call check_components()
@@ -826,6 +830,28 @@ contains
     call outcome('congelada: EXCHANGES igual, linha a linha, as 151 de antes', &
                  ndiff == 0 .and. size(FROZEN_EXCHANGES) == 151)
   end subroutine check_frozen_exchanges
+
+  !> EXPORTS, escrita por grupos, reproduz linha a linha a tabela de antes.
+  subroutine check_frozen_exports()
+    integer :: e, ndiff
+
+    ndiff = 0
+    if (size(EXPORTS) /= size(FROZEN_EXPORTS)) then
+      ndiff = 1
+    else
+      do e = 1, size(EXPORTS)
+        if (EXPORTS(e)%field /= FROZEN_EXPORTS(e)%field .or. &
+            EXPORTS(e)%point /= FROZEN_EXPORTS(e)%point .or. &
+            EXPORTS(e)%when  /= FROZEN_EXPORTS(e)%when) then
+          write(*,'(A,I0,3(1X,A))') '  linha ', e, trim(EXPORTS(e)%field), trim(EXPORTS(e)%point), &
+            trim(EXPORTS(e)%when)
+          ndiff = ndiff + 1
+        end if
+      end do
+    end if
+    call outcome('congelada: EXPORTS igual, linha a linha, as 41 de antes', &
+                 ndiff == 0 .and. size(FROZEN_EXPORTS) == 41)
+  end subroutine check_frozen_exports
 
   !> Campos por conector na produção, como no Apêndice A.
   subroutine check_counts()

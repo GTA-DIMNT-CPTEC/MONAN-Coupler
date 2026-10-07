@@ -171,3 +171,5 @@ s/ESM: ([0-9]+) entrada\(s\) de CplList sem espaco para as opcoes/ESM: \1 entrad
 s/para o metodo do mapa; aumentar len em cpl_escreve_metodos/para o metodo do mapa; aumentar len em cpl_write_methods/
 s/(PET[0-9]+ +)cpl_check: conferencia do mapa com /\1ESM: cpl_check: conferencia do mapa com /
 s/(PET[0-9]+ +)mpas_mesh_create: /\1regrid: mpas_mesh_create: /
+# R-FASE13-33: aviso de internal_field_ptr (med_cap_netcdf) sem a referência ao select case antigo
+s/nao tem mapeamento no select case; /fora dos campos internos do mediador (MED_FIELDS); /

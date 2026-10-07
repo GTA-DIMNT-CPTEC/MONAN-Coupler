@@ -337,7 +337,7 @@ contains
     ! med_write_import_fields. No modo concurrent o MED tem seu próprio
     ! comunicador de componente; substituí-lo silenciosamente por
     ! MPI_COMM_WORLD (todos os ranks) num coletivo sobre o comunicador do
-    ! componente causaria mismatch / deadlock. Falhar cedo é o correto —
+    ! componente causaria mismatch / deadlock. Falhar cedo é o correto;
     ! um erro de VM é excepcional e deve abortar, não ser mascarado.
       call ESMF_VMGetCurrent(med_vm, rc=rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
@@ -416,7 +416,7 @@ contains
     real(ESMF_KIND_R8), pointer :: uas(:,:), vas(:,:), tas(:,:), shum(:,:)
     real(ESMF_KIND_R8), pointer :: psl(:,:), swdn(:,:), lwdn(:,:)
     real(ESMF_KIND_R8), pointer :: rain(:,:), snow(:,:)
-    ! fluxos nativos do PBL do MONAN-A (opcionais — ausência mantém
+    ! fluxos nativos do PBL do MONAN-A (opcionais; ausência mantém
     ! o fallback bulk NCAR via calc_bulk_ncar, ex. modo DATM)
     real(ESMF_KIND_R8), pointer :: sen_mpas(:,:)  => null()
     real(ESMF_KIND_R8), pointer :: lat_mpas(:,:)  => null()
@@ -498,7 +498,7 @@ contains
     ! go_to_flux_grid (med_exchange)
     call go_to_flux_grid(is, importState, clock, rc)
 
-    ! 4. CALCULAR BULK NCAR — delegado ao módulo med_bulk_ncar_mod
+    ! 4. CALCULAR BULK NCAR: delegado ao módulo med_bulk_ncar_mod
     call compute_fluxes(is, &
                         uas_g, vas_g, tas_g, psl_g, swdn_g, lwdn_g, rain_g, shum_g, snow_g, &
                         i1, i2, j1, j2, clock, rc)
@@ -598,7 +598,7 @@ contains
   !! seq_repro: na variante REPRODUTÍVEL do sequential+split+SIS2 o elemento
   !! 'MED' roda no FIM do passo (mesma coreografia do concurrent), portanto os
   !! campos importados descrevem o estado em t+dt e o rótulo correto é
-  !! nextTime — não currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
+  !! nextTime: não currTime. Sem o '.and. .not. cfg_seq_repro' o carimbo
   !! sairia adiantado de um dt e quebraria a comparação bit-a-bit contra o
   !! concurrent. O sequential clássico (cfg_seq_repro=.false.) usa
   !! 'MED' cedo -> currTime; o concurrent usa nextTime.

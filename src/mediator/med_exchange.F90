@@ -450,7 +450,7 @@ contains
         call ESMF_StateGet(exportState, itemName=trim(fieldNameList(i)), &
           field=exp_field, rc=rc)
         call ESMF_FieldGet(exp_field, localDeCount=localDeCount_exp, rc=localrc)
-        if (localDeCount_exp == 0) cycle   ! PET sem DE local — nada a inicializar
+        if (localDeCount_exp == 0) cycle   ! PET sem DE local: nada a inicializar
         call ESMF_FieldGet(exp_field, farrayPtr=fptr, rc=rc)
         select case(trim(fieldNameList(i)))
           case('Sa_pslv')
@@ -857,7 +857,7 @@ contains
     ! Estampilar timestamp no exportState (MPAS usa para validação)
     call NUOPC_SetTimestamp(exportState, clock, rc=rc)
     if (ESMF_LogFoundError(rcToCheck=rc, &
-      msg='MED RouteOcnToAtm: falha NUOPC_SetTimestamp', &
+      msg='MED: carimbo do relogio no exportState falhou (NUOPC_SetTimestamp)', &
       line=__LINE__, file=__FILE__)) return
 
     call log_debug(COMP_MED, 'exportState carimbado com o tempo do relogio')

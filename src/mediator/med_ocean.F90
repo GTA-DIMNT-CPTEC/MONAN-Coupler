@@ -268,7 +268,7 @@ contains
       end if
     end if
 
-    ! Fallback: limiar de SST (.5.2 — condição mais restritiva)
+    ! Fallback: limiar de SST (.5.2; condição mais restritiva)
     if (.not. regrid_ok) then
       call ESMF_FieldGet(is%ice%ifrac, farrayPtr=fptr, rc=rc_if)
       if (rc_if == ESMF_SUCCESS .and. associated(fptr) .and. associated(sst)) then
@@ -381,7 +381,7 @@ contains
     end if
 
     ! Distribuir campo OISST para todos os PETs.
-    ! ESMF_VMBroadcast tem sobrecarga para real(ESMF_KIND_R8) array — uso direto.
+    ! ESMF_VMBroadcast tem sobrecarga para real(ESMF_KIND_R8) array; uso direto.
     call ESMF_VMBroadcast(vm, bcstData=buf, count=nx_o*ny_o, rootPet=0, rc=rc)
     if (rc /= ESMF_SUCCESS) then
       deallocate(f0, f1, buf); return

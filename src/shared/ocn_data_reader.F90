@@ -72,7 +72,7 @@ contains
 
     ! verificar ordem dos eixos do arquivo NetCDF.
     ! DOCN espera (lon, lat, time) em ordem Fortran = (time, lat, lon) em C/NetCDF.
-    ! Se dim1_size /= nx, os eixos estão incompatíveis — abortar com mensagem clara.
+    ! Se dim1_size /= nx, os eixos estão incompatíveis; abortar com mensagem clara.
       nc_rc_dim = nf90_inquire_variable(ncid, varid, ndims=ndims_var, dimids=dimids)
       if (nc_rc_dim == NF90_NOERR .and. ndims_var >= 2) then
         nc_rc_dim = nf90_inquire_dimension(ncid, dimids(1), name=dim1_name, len=dim1_size)

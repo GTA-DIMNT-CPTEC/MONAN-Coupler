@@ -1,10 +1,10 @@
 !> @file med_cap_netcdf.F90
-!! @brief Diagnóstico NetCDF do mediador MED — leitura de configuração e escrita de campos.
+!! @brief Diagnóstico NetCDF do mediador MED; leitura de configuração e escrita de campos.
 !!
 !! Rotinas:
 !!
-!!   med_read_import_config    — lê mom6_output.nml → configura diagnóstico
-!!   med_write_import_fields   — escreve mom6_import_YYYYMMDD_HHMMSS.nc
+!!   med_read_import_config:     lê mom6_output.nml → configura diagnóstico
+!!   med_write_import_fields:    escreve mom6_import_YYYYMMDD_HHMMSS.nc
 !!
 !! Diagnóstico de saída, fora da lógica do mediador NUOPC.
 
@@ -88,7 +88,7 @@ contains
   !! para montar o campo global completo, e PET0 cria o NetCDF.
   !!
   !! Características do arquivo:
-  !! MPI gather global (Allreduce MAX) — campo completo no NetCDF.
+  !! MPI gather global (Allreduce MAX); campo completo no NetCDF.
   !! Coordenadas lat/lon variáveis CF com eixo centrado em células.
   !! Variável 'time' CF com units="hours since...".
   !! Centros de célula: lon_k = (k-0.5)*dx, dx=360/NX.
@@ -206,7 +206,7 @@ contains
       end where
 
       ! continentes saem como _FillValue. A própria
-      ! máscara é a exceção óbvia — máscara-la apagaria a informação de
+      ! máscara é a exceção óbvia; máscara-la apagaria a informação de
       ! onde a terra fica, que é o único conteúdo dela.
       if (mask_ok .and. trim(fieldNameList(n)) /= 'Sx_omask') then
         where (mask_global < 0.5_ESMF_KIND_R8) grid_global = FILL_VALUE_R8
@@ -292,7 +292,7 @@ contains
     integer,           intent(in)  :: pet_count
     logical,           intent(out) :: ok
 
-    ! _FillValue NC_FLOAT deve ser real(4) — tipo deve bater com NF90_FLOAT.
+    ! _FillValue NC_FLOAT deve ser real(4); tipo deve bater com NF90_FLOAT.
     real(4), parameter :: FILL_IMP4 = -9.99e+20_4
     real(ESMF_KIND_R8), allocatable :: lat_global(:), lon_global(:)
     character(len=19) :: iso_time
@@ -335,7 +335,7 @@ contains
     ios = nf90_enddef(ncid)
     if (ios /= NF90_NOERR) return
 
-    ! Coordenadas uniformes — centros de célula
+    ! Coordenadas uniformes: centros de célula
     ! lat(k) = (k-0.5)*dy - 90, dy=180/ny_global
     allocate(lat_global(ny_global), lon_global(nx_global))
     do n = 1, ny_global
@@ -395,7 +395,7 @@ contains
     mask_ok    = .false.
     nullify(pmask2d)
     ! ESMF_FieldGet(farrayPtr) falha em PET sem DE local. Verificar
-    ! antes de acessar, como já é feito no resto do mediador — senão o
+    ! antes de acessar, como já é feito no resto do mediador; senão o
     ! ERROR do ESMF poluiria o log a cada passo nesses PETs.
     ldec_mask = 0
     call ESMF_FieldGet(is%ocn%omask, localDeCount=ldec_mask, rc=rc_mask)
@@ -458,10 +458,8 @@ contains
     if (k > 0) then
       call ESMF_FieldGet(is%fields(k)%field, farrayPtr=fptr2d, rc=rc)
     else
-      ! O texto da mensagem é o de antes do registro, lido nas comparações
-      ! de log.
       call log_warning(COMP_MED, ROUTINE//': campo "'// &
-        trim(name)//'" nao tem mapeamento no select case; '// &
+        trim(name)//'" fora dos campos internos do mediador (MED_FIELDS); '// &
         'a variavel sera gravada apenas com _FillValue')
       nullify(fptr2d)
       rc = ESMF_SUCCESS

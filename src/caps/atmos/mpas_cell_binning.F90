@@ -321,7 +321,7 @@ contains
 
   !> @brief Cobertura e duplicação das células na grade regular (PET 0, campo
   !! Sa_pslv_mpas), linha "DIAG cell_binning coverage" de depuração.
-  !! Formato: A,A,A,I0 (3 strings + 1 int) — não A,I0 (Fortran é estrito).
+  !! Formato: A,A,A,I0 (3 strings + 1 int); não A,I0 (Fortran é estrito).
   subroutine log_dup_diag(vm_local, fldname, n, count_global, rc)
     type(ESMF_VM), intent(in) :: vm_local
     character(len=*), intent(in) :: fldname

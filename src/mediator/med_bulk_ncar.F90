@@ -6,8 +6,8 @@
 !! mediador.
 !!
 !! Formulações:
-!!   Large & Yeager (2009) — taux, tauy, fluxo sensível, evaporação, LW, SW
-!!   Smith (1988) — rugosidade Charnock + viscosa
+!!   Large & Yeager (2009): taux, tauy, fluxo sensível, evaporação, LW, SW
+!!   Smith (1988): rugosidade Charnock + viscosa
 !!
 !! A sub-rotina recebe os campos ATM globais reunidos por MPI_Allreduce e lê e
 !! escreve só arrays (med_flux_t), associados pela fase compute_fluxes de
@@ -67,14 +67,14 @@ contains
   !! Os resultados são escritos nos arrays de `fluxo` (med_flux_t).
   !!
   !! Inputs atmosféricos (grade ATM global 360×180, após MPI_Allreduce):
-  !!   uas, vas  — vento zonal/meridional a 10 m  [m/s]
-  !!   tas       — temperatura do ar a 2 m        [K]
-  !!   psl       — pressão ao nível do mar        [Pa]
-  !!   swdn      — onda curta incidente            [W/m²]
-  !!   lwdn      — onda longa incidente            [W/m²]
-  !!   rain      — precipitação líquida            [kg/m²/s]
-  !!   shum      — umidade específica              [kg/kg]
-  !!   snow_g    — precipitação sólida (opcional) [kg/m²/s]
+  !!   uas, vas:   vento zonal/meridional a 10 m  [m/s]
+  !!   tas:        temperatura do ar a 2 m        [K]
+  !!   psl:        pressão ao nível do mar        [Pa]
+  !!   swdn:       onda curta incidente            [W/m²]
+  !!   lwdn:       onda longa incidente            [W/m²]
+  !!   rain:       precipitação líquida            [kg/m²/s]
+  !!   shum:       umidade específica              [kg/kg]
+  !!   snow_g:     precipitação sólida (opcional) [kg/m²/s]
   !!
   !! Saídas escritas nos arrays de `fluxo`:
   !!   fluxo%taux, fluxo%tauy: tensão de cisalhamento [Pa]
@@ -148,7 +148,7 @@ contains
     ! uma média ponderada pela fração de gelo real (fluxo%ifrac,
     ! interpolada de Si_ifrac_sis2) entre a constante de água aberta
     ! (albedo_ocn = 0,06) e o albedo real do gelo por banda vindo do SIS2
-    ! (fluxo%alb_*, interpolado de Si_a*sdr/f_sis2 — ver export_si_albedo
+    ! (fluxo%alb_*, interpolado de Si_a*sdr/f_sis2: ver export_si_albedo
     ! em sis_cap_fields.F90). Com albedo_ocn = 0,06 em toda célula, a absorção
     ! de SW sob gelo/neve (albedo real tipicamente 0,5-0,85) seria fortemente
     ! superestimada.
@@ -163,8 +163,8 @@ contains
     !
     ! Coeficientes de transferência: reusa Cd_neut/Ch_neut/Ce_neut (mesmos
     ! da água aberta) como base, MODULADOS por um fator de estabilidade
-    ! (Louis, 1979 — "A parametric model of vertical eddy fluxes in the
-    ! atmosphere", Boundary-Layer Meteorology 17, constantes b=c=d=5) —
+    ! (Louis, 1979: "A parametric model of vertical eddy fluxes in the
+    ! atmosphere", Boundary-Layer Meteorology 17, constantes b=c=d=5);
     ! necessário porque o ar sobre gelo frio tipicamente forma uma camada
     ! ESTAVELMENTE estratificada (T_ar > T_gelo), onde a troca turbulenta
     ! REAL é bem menor que a que os coeficientes "neutros" (calibrados
@@ -173,8 +173,8 @@ contains
     ! sinal de superestimativa sistemática, não de evento físico isolado.
     !
     ! Ambos os ramos de Louis (1979) estão implementados: Rib>0 (estável,
-    ! amortece) e Rib<0 (INSTÁVEL — superfície mais quente que o ar, ex.
-    ! polínias/gelo fino sob ar frio — REFORÇA a troca turbulenta em vez de
+    ! amortece) e Rib<0 (INSTÁVEL: superfície mais quente que o ar, ex.
+    ! polínias/gelo fino sob ar frio; REFORÇA a troca turbulenta em vez de
     ! amortecer). STAB_FAC_MAX=3,0 é um teto de segurança numérico
     ! (não vem do artigo original) para evitar crescimento sem limite do
     ! fator de reforço em Rib muito negativo.
@@ -183,11 +183,11 @@ contains
     ! gelo (ex. Andreas et al.), ainda não implementado.
     !
     ! Emissividade do gelo/neve (0,99) é ligeiramente maior que a de água
-    ! aberta (0,97) usada acima — valor padrão bem estabelecido na
+    ! aberta (0,97) usada acima: valor padrão bem estabelecido na
     ! literatura, não é erro de digitação.
     call compute_ice_fluxes(fluxes, j1, j2, i1, i2, uas, vas, tas, psl, shum, lwdn, rc)
 
-    ! Rain, snow, pslv — cópia direta (pass-through para o OCN)
+    ! Rain, snow, pslv: cópia direta (pass-through para o OCN)
     fptr => fluxes%rain
     do j=j1,j2; do i=i1,i2
       fptr(i,j) = max(rain(i,j), 0.0_ESMF_KIND_R8)  ! clamp ≥ 0 (artefato bilinear)
@@ -206,7 +206,7 @@ contains
     ! rugosidade superficial via Charnock + Smith (1988)
     !
     ! z0 = alpha * u*² / g  +  beta * nu / u*
-    !       (Charnock)              (Smith — termo viscoso)
+    !       (Charnock)              (Smith: termo viscoso)
     !
     ! alpha = 0.018   (constante de Charnock)
     ! beta  = 0.11    (Smith 1988)
@@ -269,7 +269,7 @@ contains
     end if
     if (rc /= ESMF_SUCCESS) then
       ! Fallback seguro: meio-dia do equinócio (decl~0, zênite só por
-      ! latitude) — nunca deixa a formula indefinida se o clock falhar.
+      ! latitude): nunca deixa a formula indefinida se o clock falhar.
       doy = 80; utc_hour = 12.0_ESMF_KIND_R8
       rc = ESMF_SUCCESS
     else
@@ -277,7 +277,7 @@ contains
                  + real(ss, ESMF_KIND_R8)/3600.0_ESMF_KIND_R8
     end if
 
-    ! Declinação solar — aproximação de Spencer (1971), erro típico < 0,1
+    ! Declinação solar: aproximação de Spencer (1971), erro típico < 0,1
     ! grau. gamma = ângulo fracionário do ano [rad].
     gamma_doy = 2.0_ESMF_KIND_R8 * PI_ZEN * real(doy-1, ESMF_KIND_R8) / 365.0_ESMF_KIND_R8
     decl = 0.006918_ESMF_KIND_R8 &
@@ -348,7 +348,7 @@ contains
       ! divisão por zero mas produz um resultado fisicamente absurdo em vez de
       ! pular a célula: com psl=0 o divisor vira 1 Pa em lugar de ~101325 Pa, e
       ! qsat sai cinco ordens de grandeza alto. A evaporação então satura no
-      ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro — e esse fluxo
+      ! clamp de +1e-4 kg/m²/s (~8,6 mm/d) no globo inteiro; e esse fluxo
       ! saturado é entregue ao oceano, não fica só no diagnóstico.
       !
       ! Isso aparecia no passo 1 de coupling_mode='sequential': ali o mediador

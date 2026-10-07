@@ -1,25 +1,25 @@
 !> @file mom_cap_MONAN.F90
-!! @brief Cap NUOPC/ESMF para o componente oceânico — MOM6+SIS2 dinâmico.
+!! @brief Cap NUOPC/ESMF para o componente oceânico; MOM6+SIS2 dinâmico.
 !!
 !! Acopla o MOM6 pela interface NUOPC de produção (MOM_cap_methods,
 !! MOM_ocean_model_nuopc).
 !!
 !! Fluxo de execução por passo de acoplamento (ModelAdvance):
-!!   1. mom_import  — traduz importState ESMF → ice_ocean_boundary_type MOM6
+!!   1. mom_import:   traduz importState ESMF → ice_ocean_boundary_type MOM6
 !!                    (rotação de tensões lat-lon → grade tripolar interna)
-!!   2. update_ocean_model — avança MOM6+SIS2 por dt_coupling segundos
-!!   3. mom_export  — traduz ocean_public_type MOM6 → exportState ESMF
+!!   2. update_ocean_model: avança MOM6+SIS2 por dt_coupling segundos
+!!   3. mom_export:   traduz ocean_public_type MOM6 → exportState ESMF
 !!                    (rotação de correntes tripolar → lat-lon, SST real)
 !!
 !! Campos exportados (conectores OCN→MED e OCN→MPAS):
-!!   So_t      SST real [K]           — ocean_public%t_surf
-!!   So_s      salinidade [psu]       — ocean_public%s_surf
-!!   So_u      corrente zonal [m/s]   — ocean_public%u_surf (rotacionado)
-!!   So_v      corrente meridional    — ocean_public%v_surf (rotacionado)
-!!   So_omask  máscara oceânica       — ocean_grid%mask2dT
-!!   Fioo_q    pot. fusão/frazil W/m² — (frazil - melt_potential) / dt
+!!   So_t      SST real [K]:            ocean_public%t_surf
+!!   So_s      salinidade [psu]:        ocean_public%s_surf
+!!   So_u      corrente zonal [m/s]:    ocean_public%u_surf (rotacionado)
+!!   So_v      corrente meridional:     ocean_public%v_surf (rotacionado)
+!!   So_omask  máscara oceânica:        ocean_grid%mask2dT
+!!   Fioo_q    pot. fusão/frazil W/m²: (frazil - melt_potential) / dt
 !!
-!! Campos importados (conector MED→OCN) — 14 fluxos bulk NCAR:
+!! Campos importados (conector MED→OCN): 14 fluxos bulk NCAR:
 !!   Foxx_taux, Foxx_tauy, Foxx_sen, Foxx_evap, Foxx_lwnet,
 !!   Foxx_swnet_vdr, Foxx_swnet_vdf, Foxx_swnet_idr, Foxx_swnet_idf,
 !!   Faxa_rain, Faxa_snow, Sa_pslv, Si_ifrac, So_duu10n
@@ -282,7 +282,7 @@ contains
 
     ! 5b. Alocar arrays internos de ice_ocean_boundary
     ! Apenas em PETs oceânicos (isc<=iec). PETs land-only não alocam
-    ! porque não têm domínio — mom_import/mom_export não os acessam.
+    ! porque não têm domínio: mom_import/mom_export não os acessam.
     if (is%ocean_public%is_ocean_pe) then
       call alloc_ice_ocean_boundary(is%ice_ocn_bnd, isc, iec, jsc, jec)
     end if
@@ -291,7 +291,7 @@ contains
       isc, iec, jsc, jec
     call log_info(COMP_OCN, trim(logmsg))
 
-    ! 6–8. Criar ESMF_Grid e realizar campos do OCN
+    ! 6 a 8. Criar ESMF_Grid e realizar campos do OCN
     ! Grade 2D com deBlockList igual à decomposição do MOM6 (mesma solução
     ! do ramo GEOMTYPE_GRID do mom_cap.F90 oficial). ESMF_Mesh e DistGrid
     ! com arbSeqIndexList não servem aqui: o ESMF 8.9.1 exige ids de nó
@@ -378,9 +378,9 @@ contains
     ! 5. Obter grade MOM6 e limites do domínio computacional
     ! NÃO retornar prematuramente em PETs land-only.
     ! O NUOPC exige que TODOS os PETs participem das fases IPDv de forma
-    ! coletiva — PETs que pulam NUOPC_Realize causam deadlock nos conectores.
+    ! coletiva: PETs que pulam NUOPC_Realize causam deadlock nos conectores.
     ! PETs land-only (is_ocean_pe=.false.) usam isc=iec=jsc=jec=0 e criam
-    ! uma malha ESMF com 0 elementos — válido no ESMF 8.9.x.
+    ! uma malha ESMF com 0 elementos; válido no ESMF 8.9.x.
     ! O mpp_get_compute_domain só é chamado em PETs oceânicos.
     if (is%ocean_public%is_ocean_pe) then
       call get_ocean_grid(is%ocean_state, ocean_grid)
@@ -427,7 +427,7 @@ contains
     allocate(bnd%p              (isc:iec,jsc:jec))
     allocate(bnd%lrunoff        (isc:iec,jsc:jec))
     allocate(bnd%frunoff        (isc:iec,jsc:jec))
-    ! Inicializar a zero — atribuição explícita é tipo-segura (real=real(4))
+    ! Inicializar a zero: atribuição explícita é tipo-segura (real=real(4))
     bnd%u_flux          = 0.0
     bnd%v_flux          = 0.0
     bnd%t_flux          = 0.0
@@ -452,7 +452,7 @@ contains
     ! acoplamento; sem esta atribuição ele conteria lixo de memória. Se esse
     ! lixo for > 0, a guarda 'if (ice_ncat > 0)' em mom_import (mom_cap_methods
     ! .F90, linha 432) passaria e o código acessaria afracr/swnet_afracr/
-    ! swpen_ifrac_n/ifrac_n — arrays por categoria de gelo NUNCA alocados aqui —
+    ! swpen_ifrac_n/ifrac_n, arrays por categoria de gelo NUNCA alocados aqui,
     ! causando SIGSEGV. O acoplamento MOM6+SIS2 usa campos AGREGADOS (ice_fraction,
     ! t_flux, etc.), não o esquema por categoria do CICE/CESM; logo ice_ncat = 0
     ! é o valor correto e desativa esse ramo de forma determinística.
@@ -542,7 +542,7 @@ contains
     deallocate(bounds, petMap)
 
     ! 5. Coordenadas lon/lat nos centróides, as do MOM6
-    ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios —
+    ! farrayPtr 2D: o ESMF aloca o ponteiro com bounds locais próprios;
     ! não necessariamente coincidentes com (isc..iec, jsc..jec).
     ! Usar lbound() para calcular o offset correto, exatamente como faz
     ! o mom_cap.F90 oficial (linhas 1500-1531): i1 = i + lbnd1 - isc.
@@ -752,7 +752,7 @@ contains
     ! Converter ESMF_Time -> FMS para update_ocean_model, via ESMF_TimeGet + set_date
     call ESMF_TimeGet(currTime, yy=yr, mm=mo, dd=dy, h=hr, m=mn, s=sc, rc=rc)
     fms_curr = set_date(yr, mo, dy, hr, mn, sc)
-    ! fms_dt via esmf2fms_time(timeStep) — sem operador '-' de time_type
+    ! fms_dt via esmf2fms_time(timeStep): sem operador '-' de time_type
     fms_dt = esmf2fms_time(timeStep)
 
     ! Log de tempo via ESMF_TimeGet(timestring=)
@@ -809,7 +809,7 @@ contains
         line=__LINE__, file=__FILE__)) return
     else
       ! init_only=T ou use_docn_ice=F:
-      ! Si_ifrac derivado da SST dinâmica do MOM6 — campo evolui.
+      ! Si_ifrac derivado da SST dinâmica do MOM6; campo evolui.
       call compute_si_ifrac_proxy(is%ocean_public, ocean_grid, exportState, is%ifrac_mem, rc)
       if (ESMF_LogFoundError(rcToCheck=rc, &
         msg='OCN: falha compute_si_ifrac_proxy', &

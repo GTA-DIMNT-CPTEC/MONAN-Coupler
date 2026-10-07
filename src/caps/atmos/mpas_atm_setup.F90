@@ -93,7 +93,7 @@ contains
 
     ! 1. mpas_allocate_domain: aloca configs, packages, clock,
     !    streamManager, ioContext e faz nullify(blocklist).
-    !    Também faz allocate(dom%dminfo) — mas phase1 vai re-alocar.
+    !    Também faz allocate(dom%dminfo): mas phase1 vai re-alocar.
     call mpas_allocate_domain(atm_state%domain)
 
     ! 2. Inicializa timekeeping do MONAN-A com calendário gregoriano.
@@ -107,11 +107,11 @@ contains
 
     ! 3. Registra procedure pointers do núcleo (APÓS phase1, conforme
     !    mpas_subdriver.F). atm_setup_core recebe atm_state%domain%core que é
-    !    do tipo core_type — já alocado acima.
+    !    do tipo core_type: já alocado acima.
     call atm_setup_core(atm_state%domain%core)
 
     ! 4. atm_setup_domain: registra campos adicionais no domain_type
-    !    (nomes de variáveis, streams, etc.) — chamado por mpas_subdriver
+    !    (nomes de variáveis, streams, etc.); chamado por mpas_subdriver
     !    após atm_setup_core e antes de phase2.
     call atm_setup_domain(atm_state%domain)
 
@@ -323,7 +323,7 @@ contains
     n = nCells_ptr
 
     ! merge avalia AMBOS os argumentos (tsource e fsource) antes de
-    ! aplicar a máscara — comportamento mandatório do padrão Fortran (7.1.5.2).
+    ! aplicar a máscara: comportamento mandatório do padrão Fortran (7.1.5.2).
     ! Se nCellsSolve_ptr for null(), a referência implícita ao ponteiro em tsource
     ! gera SIGSEGV independentemente do valor de mask=associated(...).
     ! Por isso usa-se if/else, sem nenhuma referência ao ponteiro nulo.
@@ -377,10 +377,10 @@ contains
     !
     !  No MONAN-A 2.0 os campos estão distribuídos em dois subpools:
     !
-    !  subpool 'diag'         — variáveis termodinâmicas e de radiação:
+    !  subpool 'diag':          variáveis termodinâmicas e de radiação:
     !    mslp, acswdnb, aclwdnb, rainnc, u10, v10
     !
-    !  subpool 'diag_physics' — saídas de pacotes de CLP/superfície
+    !  subpool 'diag_physics': saídas de pacotes de CLP/superfície
     !    (ativo com bl_mynn_in=T ou bl_ysu_in=T):
     !    t2m, lh, hfx
     !
@@ -396,7 +396,7 @@ contains
       call mpas_pool_get_array(diagPool, 'mslp',    atm_public%pslv)     ! PSLV [Pa]
       call mpas_pool_get_array(diagPool, 'u10',     atm_public%u10)      ! U 10m [m/s]
       call mpas_pool_get_array(diagPool, 'v10',     atm_public%v10)      ! V 10m [m/s]
-      ! Ponteiros privados para pools acumulados — não expostos diretamente
+      ! Ponteiros privados para pools acumulados; não expostos diretamente
       call mpas_pool_get_array(diagPool, 'acswdnb', atm_state%pool_acswdnb)      ! J/m² acum.
       call mpas_pool_get_array(diagPool, 'aclwdnb', atm_state%pool_aclwdnb)      ! J/m² acum.
       call mpas_pool_get_array(diagPool, 'rainnc',  atm_state%pool_rainnc)       ! mm acum. (estrat.)
@@ -410,7 +410,7 @@ contains
       call log_warning(COMP_ATM, 'mpas_atm_init: subpool diag nao encontrado em structs')
     end if
 
-    ! Passada 2: subpool 'diag_physics' — fallback para campos de CLP/superfície
+    ! Passada 2: subpool 'diag_physics': fallback para campos de CLP/superfície
     ! No MONAN-A 2.0 com suíte mesoscale_reference_monan, t2m/lh/hfx/ust estão aqui.
     call mpas_pool_get_subpool(atm_state%domain%blocklist%structs, 'diag_physics', diagPhysPool)
 
@@ -438,7 +438,7 @@ contains
         call mpas_pool_get_array(diagPhysPool, 'lh',      atm_public%lhflx)
       if (.not. associated(atm_public%shflx))  &
         call mpas_pool_get_array(diagPhysPool, 'hfx',     atm_public%shflx)
-      ! Velocidade de atrito — necessária para calcular stress superficial
+      ! Velocidade de atrito: necessária para calcular stress superficial
       call mpas_pool_get_array(diagPhysPool, 'ust', atm_state%pool_ust)
     end if
 
@@ -520,9 +520,9 @@ contains
     !
     !  Os campos acumulados do MPAS (acswdnb, aclwdnb, rainnc, rainc)
     !  NÃO podem ser expostos diretamente como Faxa_swdn/lwdn/prec porque:
-    !    1. São acumulados desde t=0 — não representam o intervalo de acoplamento.
+    !    1. São acumulados desde t=0; não representam o intervalo de acoplamento.
     !    2. Dividir pelo tempo total (÷ elapsed_s) dá a média desde t=0, não
-    !       a média do último intervalo — divergência crescente ao longo do dia.
+    !       a média do último intervalo; divergência crescente ao longo do dia.
     !
     !  Solução: em cada mpas_atm_run, computar:
     !    swdn_inst = (acswdnb_N − acswdnb_{N-1}) / dt_coupling  [W/m²]

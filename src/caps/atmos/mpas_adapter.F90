@@ -218,7 +218,7 @@ contains
     ! Vindo do mediador: média ponderada por banda entre albedo dinâmico de
     ! água aberta (Briegleb 1986, dependente do zênite solar) e albedo real
     ! do gelo (SIS2), ponderados por Si_ifrac. Substitui a climatologia
-    ! mensal (albedo12m) do MONAN-A sobre água/gelo — requer
+    ! mensal (albedo12m) do MONAN-A sobre água/gelo; requer
     ! config_sfc_albedo=.false. no namelist (ver log_albedo_feedback em
     ! mpas_atm_model.F90, que confere se o NOAH LSM sobrescreve o valor
     ! depois de core_run).
@@ -236,7 +236,7 @@ contains
     ! Máscara terra/oceano Sx_omask [0-1]
     ! Máscara REAL do MOM6 (ocean_grid%mask2dT), vinda do mediador. Chega
     ! fracionaria porque atravessou dois regrids (OCN->ATM no MED, ATM->
-    ! Voronoi no conector); NÃO é binarizada aqui de propósito — o corte
+    ! Voronoi no conector); NÃO é binarizada aqui de propósito; o corte
     ! fica no consumidor final (write_mpas_import_diag), depois do binning
     ! para a grade regular. Binarizar no meio do caminho produz escadinha
     ! na linha de costa.
@@ -262,9 +262,9 @@ contains
     ! Diagnóstico de importação MED→MPAS
     ! Escrito quando write_import_diag=.true. em &nuopc_docn do nuopc.input
     ! (mesmo flag usado pelo MED). Ativa a escrita dos 3 campos OCN→ATM:
-    !   So_t     (SST [K])            — atm_bnd%sst
-    !   Si_ifrac (fração de gelo)     — atm_bnd%ice_fraction
-    !   Sf_zorl  (rugosidade [m])     — atm_bnd%zorl
+    !   So_t     (SST [K]):             atm_bnd%sst
+    !   Si_ifrac (fração de gelo):      atm_bnd%ice_fraction
+    !   Sf_zorl  (rugosidade [m]):      atm_bnd%zorl
     ! Arquivo: <cfg_import_diag_dir>/monan2_import_YYYYMMDD_HHMMSS.nc
     if (cfg_write_import_diag) then
       call write_mpas_import_diag(diag_clock, atm_bnd, nCells, lonCell, latCell, rc)
@@ -310,7 +310,7 @@ contains
       deallocate(lat_deg, frac)
     else
       ! Sem coordenadas disponíveis: mantém o fallback tropical único,
-      ! por segurança — não deveria ocorrer em uso normal, já que
+      ! por segurança: não deveria ocorrer em uso normal, já que
       ! lonCell/latCell são sempre passados por quem chama.
       t_fallback = t_fill_tropical
     end if
@@ -577,7 +577,7 @@ contains
       ! Cópia posicional (i-ésimo OCN → i-ésima MPAS) é geograficamente
       ! incorreta e zeraria as células não cobertas, sobrepondo o default.
       ! Por isso: copiar apenas o mínimo necessário e NÃO alterar o restante
-      ! de data() — mantém cfg_zorl_default (ou valor já inicializado)
+      ! de data(): mantém cfg_zorl_default (ou valor já inicializado)
       ! nas células sem mapeamento. O padrão 0.01 m é preferível a 0.0 m
       ! (que seria clampeado para 1e-5 m, valor fisicamente irreal).
       call ESMF_FieldGet(field, farrayPtr=fptr1d, rc=rc)
@@ -586,7 +586,7 @@ contains
       end if
       n_esmf = min(size(fptr1d), n)
       data(1:n_esmf) = real(fptr1d(1:n_esmf), MPAS_RKIND)
-      ! data(n_esmf+1:n) mantido inalterado — preserva valor inicial
+      ! data(n_esmf+1:n) mantido inalterado: preserva valor inicial
       nullify(fptr1d)
     else
       ! Campo rank-2: ESMF_Grid regular 360×180 (INDEX_GLOBAL)
@@ -603,9 +603,9 @@ contains
       ! difundi-lo a todos os PETs (ESMF_VMBroadcast). Com a cópia global
       ! disponível localmente, cada PET mapeia QUALQUER célula MPAS para o
       ! ponto de grade correto. Custo: 1 gather + 1 broadcast de NLON·NLAT
-      ! reais R8 (~0,5 MB) por campo/passo — desprezível frente ao MPAS.
+      ! reais R8 (~0,5 MB) por campo/passo; desprezível frente ao MPAS.
       !
-      ! Segurança coletiva: FieldGather/VMBroadcast são coletivas — todos os
+      ! Segurança coletiva: FieldGather/VMBroadcast são coletivas; todos os
       ! PETs devem alcançá-las. mpas_create_grid usa regDecomp que cobre
       ! petCount, garantindo ≥1 DE por PET; logo o guard (localDeCount==0)
       ! acima não dispara para estes campos e não há risco de deadlock.
@@ -640,7 +640,7 @@ contains
             ! Convenção de longitude da grade
             ! A grade do cap é criada em mpas_create_grid com longitudes de CENTRO
             ! coordX(ig) = -180 + (ig - 0.5)*DLON, ou seja ig=1 ↔ -179,5° e
-            ! ig=360 ↔ +179,5° — convenção [-180, +180).
+            ! ig=360 ↔ +179,5°: convenção [-180, +180).
             ! Normalizar lon_d para [0, 360) e fazer ig = int(lon_d/DLON)+1
             ! deslocaria TODA a atribuição em 180° (dado do Atlântico no índice do
             ! Pacífico). Por isso lon é normalizada para [-180, +180) e indexada na
@@ -650,7 +650,7 @@ contains
             jg = index_trunc(lat_d +    90.0_ESMF_KIND_R8, DLAT, ATM_NY)
             val = buf2d(ig, jg)
             ! Só sobrescreve com valor VÁLIDO (oceano). Pontos de fill (terra,
-            ! ou sem cobertura do regrid MED) preservam o default já em data() —
+            ! ou sem cobertura do regrid MED) preservam o default já em data();
             ! fallback seguro consumido pela física do MPAS sobre o oceano.
             if (abs(val) < FILL_THR .and. val == val) then
               data(icell) = real(val, MPAS_RKIND)
@@ -658,7 +658,7 @@ contains
           end do
         else
           ! Fallback sem coordenadas: ordem global linear (válido só sem halos).
-          ! Não zera o restante — preserva o default (evita clamp irreal).
+          ! Não zera o restante: preserva o default (evita clamp irreal).
           n_esmf = min(ATM_NX*ATM_NY, n)
           data(1:n_esmf) = real(buf1d(1:n_esmf), MPAS_RKIND)
         end if

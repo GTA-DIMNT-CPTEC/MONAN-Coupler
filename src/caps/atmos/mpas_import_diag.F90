@@ -79,15 +79,15 @@ contains
   !! Grava um arquivo NetCDF por passo de acoplamento em cfg_import_diag_dir,
   !! no mesmo formato dos arquivos monan_export_*.nc (grade lat/lon regular).
   !!
-  !! Campos escritos — os 7 campos OCN→ATM do conector MED→MPAS, um por membro
+  !! Campos escritos: os 7 campos OCN→ATM do conector MED→MPAS, um por membro
   !! de atm_ocean_boundary_type:
-  !!   So_t       — temp. de pele [K]        — atm_bnd%sst
-  !!   Si_ifrac   — fração de gelo [0–1]     — atm_bnd%ice_fraction
-  !!   So_u       — corrente zonal [m/s]     — atm_bnd%uocn
-  !!   So_v       — corrente meridional      — atm_bnd%vocn
-  !!   Sf_zorl    — rugosidade [m]           — atm_bnd%zorl
-  !!   Sf_albedo  — albedo de superfície     — atm_bnd%alb
-  !!   Sx_omask   — máscara oceano/terra     — atm_bnd%omask
+  !!   So_t:        temp. de pele [K]        → atm_bnd%sst
+  !!   Si_ifrac:    fração de gelo [0 a 1]     → atm_bnd%ice_fraction
+  !!   So_u:        corrente zonal [m/s]     → atm_bnd%uocn
+  !!   So_v:        corrente meridional      → atm_bnd%vocn
+  !!   Sf_zorl:     rugosidade [m]           → atm_bnd%zorl
+  !!   Sf_albedo:   albedo de superfície     → atm_bnd%alb
+  !!   Sx_omask:    máscara oceano/terra     → atm_bnd%omask
   !!
   !! INVARIANTE A PRESERVAR: uma variável NetCDF por membro de
   !!   atm_ocean_boundary_type. Ao acrescentar um membro ao tipo (em
@@ -577,7 +577,7 @@ contains
   !! Fill value -9.99e+20 para células sem contribuição.
   !!
   !! Parâmetro opcional ocean_frac_min: fração mínima de células válidas
-  !! (oceano) por bin. Recomendado 0.5 — elimina artefatos de arquipélagos.
+  !! (oceano) por bin. Recomendado 0.5; elimina artefatos de arquipélagos.
   subroutine voronoi_to_grid(data_v, lon_v, lat_v, npts, &
                               grid_out, nlon, nlat, dlon, dlat, &
                               vmin, vmax, ocean_frac_min)
