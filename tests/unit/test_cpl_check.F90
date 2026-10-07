@@ -38,10 +38,8 @@ program test_cpl_check
 
   include 'listas_mediador.inc'
 
-  type(cpl_config_t), parameter :: PRODUCTION = cpl_config_t(datm=.false., docn=.false., &
-                                                            med_to_mpas=.true., sis2=.true.)
-  type(cpl_config_t), parameter :: MPAS_DOCN = cpl_config_t(datm=.false., docn=.true.,  &
-                                                            med_to_mpas=.false., sis2=.false.)
+  type(cpl_config_t), parameter :: PRODUCTION = cpl_config_t('mpas', 'mom6', 'sis2', 'med')
+  type(cpl_config_t), parameter :: MPAS_DOCN  = cpl_config_t('mpas', 'docn', 'none', 'ocn')
 
   ! Listas anunciadas pelos caps (mpas_cap_MONAN, mom_cap_MONAN, sis_cap_MONAN, MED_cap)
   character(len=24), parameter :: ATM_IMP(7) = [character(len=24) :: &
@@ -159,17 +157,18 @@ contains
       do io = 0, 1
         do im = 0, 1
           do is = 0, 1
-            c = cpl_config_t(ia == 1, io == 1, im == 1, is == 1)
+            c = cpl_config_t(merge('datm', 'mpas', ia == 1), merge('docn', 'mom6', io == 1), &
+                             merge('sis2', 'none', is == 1), merge('med', 'ocn', im == 1))
             if (.not. cpl_config_is_valid(c)) cycle
-            ocn = merge('OCN@docn    ', 'OCN@ocn_mom6', c%docn)
+            ocn = merge('OCN@docn    ', 'OCN@ocn_mom6', c%ocn_model == 'docn')
             nimp = 0; nexp = 0
             call cpl_arrivals('ATM@atm_cap', .true., c, '', nn);          call store_names(imp, nimp, 1, nn)
             call cpl_exports('ATM@atm_cap', c, '', nn);               call store_names(exp, nexp, 1, nn)
-            call cpl_arrivals('MED', .true., c, 'datm,sis2', nn);          call store_names(imp, nimp, 2, nn)
+            call cpl_arrivals('MED', .true., c, 'atm_model,ice_model', nn);          call store_names(imp, nimp, 2, nn)
             call cpl_arrivals('MED@ocn_med', .false., c, '', nn);         call store_names(exp, nexp, 2, nn)
             call cpl_arrivals(trim(ocn), .true., c, '', nn);              call store_names(imp, nimp, 3, nn)
             call cpl_exports(trim(ocn), c, '', nn);                   call store_names(exp, nexp, 3, nn)
-            if (c%sis2) then
+            if (c%ice_model == 'sis2') then
               call cpl_arrivals('ICE@ice_sis2', .true., c, '', nn);       call store_names(imp, nimp, 4, nn)
               call cpl_exports('ICE@ice_sis2', c, '', nn);            call store_names(exp, nexp, 4, nn)
             end if
@@ -187,7 +186,7 @@ contains
               deallocate(list)
             end do
             do i = 1, 4
-              if (i == 4 .and. .not. c%sis2) cycle
+              if (i == 4 .and. c%ice_model /= 'sis2') cycle
               call cpl_check_state(c, COMPS(i), .true.,     imp(i, 1:nimp(i)), msgs, ndif, nwarn)
               call cpl_check_state(c, COMPS(i), .false., exp(i, 1:nexp(i)), msgs, ndif, nwarn)
             end do
@@ -199,13 +198,13 @@ contains
             do m = 1, size(msgs)
               if (index(msgs(m), 'AVISO: lacuna conhecida') > 0) ngap_warnings = ngap_warnings + 1
             end do
-            if (c%datm) then
+            if (c%atm_model == 'datm') then
               ok_datm = ok_datm .and. ndif > 0
             else
               if (ndif /= 0 .or. ngap_warnings /= ngaps) then
-                write(*, '(4(A,L1),2(A,I0))') '   datm=', c%datm, ' docn=', c%docn, &
-                  ' med_to_mpas=', c%med_to_mpas, ' sis2=', c%sis2, ': diferencas ', ndif, &
-                  ', lacunas avisadas ', ngap_warnings
+                write(*, '(8A,2(A,I0))') '   atm=', trim(c%atm_model), ' ocn=', trim(c%ocn_model), &
+                  ' ice=', trim(c%ice_model), ' contorno=', trim(c%atm_boundary), ': diferencas ', &
+                  ndif, ', lacunas avisadas ', ngap_warnings
               end if
               ok_without_datm = ok_without_datm .and. ndif == 0 .and. ngap_warnings == ngaps
             end if

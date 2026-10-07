@@ -242,7 +242,7 @@ contains
 
     ! Valores de partida, substituídos pelos campos do JRA55 no primeiro
     ! ModelAdvance: pressão padrão e Sa_tbot de 290 K (ativo APENAS quando
-    ! use_datm=.true.); os demais campos começam em zero.
+    ! atm_model=datm); os demais campos começam em zero.
     call cap_fill_export_initial(exportState, [character(len=7) :: 'Sa_pslv', 'Sa_tbot'], &
       [101325.0_ESMF_KIND_R8, 290.0_ESMF_KIND_R8], rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return

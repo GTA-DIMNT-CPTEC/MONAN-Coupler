@@ -572,14 +572,16 @@ contains
     counter = counter + 1
   end subroutine append_msg
 
-  !> @brief As condições do mapa que valem na configuração, para o log.
+  !> @brief As condições do mapa que valem na configuração, para o log: os
+  !! modelos da atmosfera e do oceano, a condição do contorno e o modelo do
+  !! gelo, se houver.
   function describe_config(cfg) result(txt)
     type(cpl_config_t), intent(in) :: cfg
     character(len=:), allocatable :: txt
 
-    txt = merge('datm', 'mpas', cfg%datm)//', '//merge('docn', 'mom6', cfg%docn)//', '// &
-          trim(merge('med_to_mpas', 'ocn_to_mpas', cfg%med_to_mpas))
-    if (cfg%sis2) txt = txt//', sis2'
+    txt = trim(cfg%atm_model)//', '//trim(cfg%ocn_model)//', '// &
+          trim(merge('med_to_mpas', 'ocn_to_mpas', cfg%atm_boundary == 'med'))
+    if (trim(cfg%ice_model) /= 'none') txt = txt//', '//trim(cfg%ice_model)
   end function describe_config
 
   !> @brief Grava uma linha do relatório no log (log_report, prefixo CPL-REL:).

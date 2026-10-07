@@ -42,19 +42,27 @@
 !!               configuração é exportado por ele nessa configuração; as
 !!               exportações de cada modelo iguais, nome a nome e na mesma
 !!               ordem, às listas dos caps (listas_caps.inc)
+!!   componentes a tabela COMPONENTS (coupler_config): posições conhecidas,
+!!               modelos com nome único, malha de GRIDS do mesmo
+!!               componente e rótulo, 'none' só no gelo; as condições
+!!               aceitas na coluna when são os nomes dos modelos e as duas
+!!               de contorno; e cada condição vale exatamente nas mesmas
+!!               configurações que valia com as chaves lógicas de antes da
+!!               R-FASE13-29 (cópia da regra de antes neste teste)
 !!   modos       a tabela COUPLER_MODES (coupler_config) tem as 16
-!!               combinações das quatro chaves, uma vez cada, com situação
-!!               conhecida e nota; as suportadas são exatamente as duas de
-!!               produção; as configurações conferidas aqui são aceitas; e
-!!               toda linha de EXCHANGES, EXPORTS e GAPS vale em alguma
-!!               combinação aceita (desde a R-FASE13-01)
+!!               combinações dos modelos de COMPONENTS e dos contornos,
+!!               uma vez cada, com situação conhecida e nota; as suportadas
+!!               são exatamente as duas de produção; as configurações
+!!               conferidas aqui são aceitas; e toda linha de EXCHANGES,
+!!               EXPORTS e GAPS vale em alguma combinação aceita (desde a
+!!               R-FASE13-01)
 !!   caps        as listas que os caps dos modelos anunciam, geradas por
 !!               cpl_arrivals e cpl_exports sem chaves (MOM6 e SIS2 desde
 !!               a R-FASE11-06; MONAN-A, DATM e DOCN desde a R-FASE11-07),
 !!               iguais nome a nome e na mesma ordem às de antes, em toda
 !!               configuração
 !!
-!! Configurações conferidas (chaves de &nuopc_mode):
+!! Configurações conferidas (modelos e contorno, de &nuopc_mode):
 !!   producao       MONAN-A, MOM6, SIS2, contorno pelo mediador
 !!   mom6_sem_sis2  idem, sem o SIS2
 !!   mpas_docn      MONAN-A e DOCN, contorno direto do oceano
@@ -77,7 +85,9 @@ program test_cpl_map
   use cpl_map_mod,       only : cpl_arrivals, cpl_exports, EXPORTS, cpl_route_fields
   use cpl_map_mod,       only : CONNECTOR_METHODS, cpl_connector_method
   use cpl_map_mod,       only : GAPS, cpl_is_gap, cpl_config_is_valid
-  use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index, cpl_current_config
+  use coupler_config_mod, only : COUPLER_MODES, coupler_mode_index, cpl_current_config, &
+                                 COMPONENTS, MODEL_POSITIONS, ATM_BOUNDARIES,          &
+                                 BOUNDARY_CONDITIONS, config_from_values, MODEL_NAME_LEN
   use cpl_fields_mod,    only : CPL_NAME_LEN
   use med_cap_types_mod, only : MED_KEYS, MED_FIELDS
   implicit none
@@ -89,12 +99,13 @@ program test_cpl_map
   integer, parameter :: NCFG = 5
   character(len=16), parameter :: CFG_NAME(NCFG) = [character(len=16) :: &
     'producao', 'mom6_sem_sis2', 'mpas_docn', 'datm_mom6', 'datm_docn']
-  type(cpl_config_t), parameter :: CFG(NCFG) = [                                       &
-    cpl_config_t(datm=.false., docn=.false., med_to_mpas=.true.,  sis2=.true.),         &
-    cpl_config_t(datm=.false., docn=.false., med_to_mpas=.true.,  sis2=.false.),        &
-    cpl_config_t(datm=.false., docn=.true.,  med_to_mpas=.false., sis2=.false.),        &
-    cpl_config_t(datm=.true.,  docn=.false., med_to_mpas=.true.,  sis2=.false.),        &
-    cpl_config_t(datm=.true.,  docn=.true.,  med_to_mpas=.false., sis2=.false.) ]
+  type(cpl_config_t), parameter :: CFG(NCFG) = [            &
+    !            atm     ocn     gelo    contorno
+    cpl_config_t('mpas', 'mom6', 'sis2', 'med'),             &
+    cpl_config_t('mpas', 'mom6', 'none', 'med'),             &
+    cpl_config_t('mpas', 'docn', 'none', 'ocn'),             &
+    cpl_config_t('datm', 'mom6', 'none', 'med'),             &
+    cpl_config_t('datm', 'docn', 'none', 'ocn') ]
 
 
   !> Malhas onde um modelo produz campos, e a malha de fluxo do mediador,
@@ -109,6 +120,7 @@ program test_cpl_map
   call check_frozen_exchanges()
   call check_fields()
   call check_field_attributes()
+  call check_components()
   call check_modes()
   call check_grids_and_routes()
   call check_exchanges()
@@ -231,26 +243,168 @@ contains
                  u == '1' .and. l == 'Sa_ubot' .and. s == 'unknown')
   end subroutine check_field_attributes
 
+  !> Todas as combinações dos modelos de cada posição de COMPONENTS e dos
+  !! contornos de ATM_BOUNDARIES, aceitas ou não.
+  function all_configs() result(cs)
+    type(cpl_config_t), allocatable :: cs(:)
+    integer :: ia, io, ii, ib
+
+    allocate(cs(0))
+    do ia = 1, size(COMPONENTS)
+      if (COMPONENTS(ia)%position /= MODEL_POSITIONS(1)) cycle
+      do io = 1, size(COMPONENTS)
+        if (COMPONENTS(io)%position /= MODEL_POSITIONS(2)) cycle
+        do ii = 1, size(COMPONENTS)
+          if (COMPONENTS(ii)%position /= MODEL_POSITIONS(3)) cycle
+          do ib = 1, size(ATM_BOUNDARIES)
+            cs = [cs, config_from_values([character(len=MODEL_NAME_LEN) :: COMPONENTS(ia)%model, &
+                  COMPONENTS(io)%model, COMPONENTS(ii)%model, ATM_BOUNDARIES(ib)])]
+          end do
+        end do
+      end do
+    end do
+  end function all_configs
+
+  !> Uma condição da coluna when com a regra de antes da R-FASE13-29, pelas
+  !! quatro chaves lógicas (use_datm, use_docn, use_med_to_mpas,
+  !! use_sis2_dynamic), copiada de condition_holds (cpl_map) daquela versão.
+  logical function old_condition(cond, datm, docn, med_to_mpas, sis2) result(applies)
+    character(len=*), intent(in) :: cond
+    logical,          intent(in) :: datm, docn, med_to_mpas, sis2
+
+    select case (trim(cond))
+    case ('mpas');        applies = .not. datm
+    case ('datm');        applies = datm
+    case ('mom6');        applies = .not. docn
+    case ('docn');        applies = docn
+    case ('med_to_mpas'); applies = med_to_mpas
+    case ('ocn_to_mpas'); applies = .not. med_to_mpas
+    case ('sis2');        applies = sis2
+    case default;         applies = .false.
+    end select
+  end function old_condition
+
+  !> COMPONENTS: posições de MODEL_POSITIONS, cada uma com ao menos um modelo;
+  !! nomes de modelo únicos; malha de GRIDS do componente da posição e
+  !! rótulo, menos em 'none', que só o gelo tem. Condições: as aceitas na
+  !! coluna when são as sete de antes (os modelos e as duas de contorno), e
+  !! cada uma vale nas 16 combinações exatamente onde valia pela regra das
+  !! chaves lógicas.
+  subroutine check_components()
+    character(len=12), parameter :: OLD_CONDITIONS(7) = [character(len=12) :: &
+      'mpas', 'datm', 'mom6', 'docn', 'med_to_mpas', 'ocn_to_mpas', 'sis2']
+    type(cpl_config_t), allocatable :: cs(:)
+    integer :: i, j, g, nerr
+    logical :: datm, docn, med_to_mpas, sis2
+
+    nerr = 0
+    do i = 1, size(COMPONENTS)
+      if (.not. any(MODEL_POSITIONS == COMPONENTS(i)%position)) then
+        nerr = nerr + 1
+        call fail_at('posicao desconhecida: '//trim(COMPONENTS(i)%position))
+      end if
+      do j = i + 1, size(COMPONENTS)
+        if (COMPONENTS(j)%model == COMPONENTS(i)%model) then
+          nerr = nerr + 1
+          call fail_at('modelo repetido: '//trim(COMPONENTS(i)%model))
+        end if
+      end do
+      if (trim(COMPONENTS(i)%model) == 'none') then
+        if (trim(COMPONENTS(i)%position) /= 'ICE' .or. len_trim(COMPONENTS(i)%grid) > 0 .or. &
+            len_trim(COMPONENTS(i)%label) > 0) then
+          nerr = nerr + 1
+          call fail_at('none fora do gelo, ou com malha ou rotulo')
+        end if
+        cycle
+      end if
+      g = cpl_grid_index(COMPONENTS(i)%grid)
+      if (g == 0) then
+        nerr = nerr + 1
+        call fail_at('malha fora de GRIDS: '//trim(COMPONENTS(i)%grid))
+      else if (GRIDS(g)%component /= COMPONENTS(i)%position) then
+        nerr = nerr + 1
+        call fail_at('malha de outro componente: '//trim(COMPONENTS(i)%grid))
+      end if
+      if (len_trim(COMPONENTS(i)%label) == 0) then
+        nerr = nerr + 1
+        call fail_at('modelo sem rotulo: '//trim(COMPONENTS(i)%model))
+      end if
+    end do
+    do i = 1, size(MODEL_POSITIONS)
+      if (.not. any(COMPONENTS%position == MODEL_POSITIONS(i))) then
+        nerr = nerr + 1
+        call fail_at('posicao sem modelo: '//trim(MODEL_POSITIONS(i)))
+      end if
+    end do
+    call outcome('COMPONENTES: posicoes, nomes unicos, malhas, rotulos e none', nerr == 0)
+
+    nerr = 0
+    do i = 1, size(OLD_CONDITIONS)
+      if (.not. cpl_valid_conditions(OLD_CONDITIONS(i))) then
+        nerr = nerr + 1
+        call fail_at('condicao recusada: '//trim(OLD_CONDITIONS(i)))
+      end if
+    end do
+    do i = 1, size(COMPONENTS)
+      if (trim(COMPONENTS(i)%model) == 'none') cycle
+      if (.not. any(OLD_CONDITIONS == COMPONENTS(i)%model)) then
+        nerr = nerr + 1
+        call fail_at('condicao nova: '//trim(COMPONENTS(i)%model))
+      end if
+    end do
+    if (.not. all([(any(OLD_CONDITIONS == BOUNDARY_CONDITIONS(i)), i = 1, size(BOUNDARY_CONDITIONS))])) then
+      nerr = nerr + 1
+      call fail_at('condicao de contorno nova')
+    end if
+    if (cpl_valid_conditions('none') .or. cpl_valid_conditions('med') .or. &
+        cpl_valid_conditions('mom6,ocn')) then
+      nerr = nerr + 1
+      call fail_at('condicao invalida aceita')
+    end if
+    call outcome('COMPONENTES: condicoes aceitas = as sete de antes', nerr == 0)
+
+    nerr = 0
+    cs = all_configs()
+    do j = 1, size(cs)
+      datm = cs(j)%atm_model == 'datm'
+      docn = cs(j)%ocn_model == 'docn'
+      med_to_mpas = cs(j)%atm_boundary == 'med'
+      sis2 = cs(j)%ice_model == 'sis2'
+      do i = 1, size(OLD_CONDITIONS)
+        if (cpl_exchange_applies(cpl_exchange_t(when=OLD_CONDITIONS(i)), cs(j)) .neqv. &
+            old_condition(OLD_CONDITIONS(i), datm, docn, med_to_mpas, sis2)) then
+          nerr = nerr + 1
+          call fail_at('condicao '//trim(OLD_CONDITIONS(i))//' difere em '//trim(cs(j)%atm_model)// &
+                       ','//trim(cs(j)%ocn_model)//','//trim(cs(j)%ice_model)//','//trim(cs(j)%atm_boundary))
+        end if
+      end do
+    end do
+    call outcome('COMPONENTES: 16 combinacoes; cada condicao vale onde valia antes', &
+                 size(cs) == 16 .and. nerr == 0)
+  end subroutine check_components
+
   !> COUPLER_MODES: as 16 combinações, uma vez cada, com situação e nota;
   !! as suportadas são as duas de produção (com e sem o SIS2); as
   !! configurações deste teste são aceitas; toda linha de EXCHANGES, EXPORTS
   !! e GAPS vale em alguma combinação aceita.
   subroutine check_modes()
-    type(cpl_config_t) :: c
+    type(cpl_config_t), allocatable :: cs(:)
     integer :: i, j, k, nerr, nsupported
     logical :: used
 
     nerr = 0
-    if (size(COUPLER_MODES) /= 16) then
+    cs = all_configs()
+    if (size(COUPLER_MODES) /= size(cs)) then
       nerr = nerr + 1
-      call fail_at('COUPLER_MODES nao tem 16 linhas')
+      call fail_at('COUPLER_MODES nao tem uma linha por combinacao')
     end if
-    do k = 0, 15
+    do k = 1, size(cs)
       j = 0
       do i = 1, size(COUPLER_MODES)
-        if ((COUPLER_MODES(i)%datm .eqv. btest(k, 0)) .and. (COUPLER_MODES(i)%docn .eqv. btest(k, 1)) &
-            .and. (COUPLER_MODES(i)%med_to_mpas .eqv. btest(k, 2))                                  &
-            .and. (COUPLER_MODES(i)%sis2 .eqv. btest(k, 3))) j = j + 1
+        if (COUPLER_MODES(i)%atm_model == cs(k)%atm_model .and.        &
+            COUPLER_MODES(i)%ocn_model == cs(k)%ocn_model .and.        &
+            COUPLER_MODES(i)%ice_model == cs(k)%ice_model .and.        &
+            COUPLER_MODES(i)%atm_boundary == cs(k)%atm_boundary) j = j + 1
       end do
       if (j /= 1) then
         nerr = nerr + 1
@@ -262,8 +416,8 @@ contains
       select case (trim(COUPLER_MODES(i)%status))
       case ('suportada')
         nsupported = nsupported + 1
-        if (COUPLER_MODES(i)%datm .or. COUPLER_MODES(i)%docn .or. &
-            .not. COUPLER_MODES(i)%med_to_mpas) then
+        if (COUPLER_MODES(i)%atm_model /= 'mpas' .or. COUPLER_MODES(i)%ocn_model /= 'mom6' .or. &
+            COUPLER_MODES(i)%atm_boundary /= 'med') then
           nerr = nerr + 1
           call fail_at('suportada fora da producao: '//trim(COUPLER_MODES(i)%note))
         end if
@@ -287,19 +441,17 @@ contains
         call fail_at('configuracao do teste recusada: '//trim(CFG_NAME(k)))
       end if
     end do
-    if (trim(COUPLER_MODES(coupler_mode_index(.false., .false., .true., .true.))%status) /= &
-        'suportada') then
+    if (trim(COUPLER_MODES(coupler_mode_index(cpl_config_t()))%status) /= 'suportada') then
       nerr = nerr + 1
-      call fail_at('producao nao suportada')
+      call fail_at('producao (valores padrao) nao suportada')
     end if
     call outcome('MODOS: configuracoes do teste aceitas; producao suportada', nerr == 0)
 
     nerr = 0
     do i = 1, size(EXCHANGES)
       used = .false.
-      do k = 0, 15
-        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
-        if (cpl_config_is_valid(c)) used = used .or. cpl_exchange_applies(EXCHANGES(i), c)
+      do k = 1, size(cs)
+        if (cpl_config_is_valid(cs(k))) used = used .or. cpl_exchange_applies(EXCHANGES(i), cs(k))
       end do
       if (.not. used) then
         nerr = nerr + 1
@@ -308,10 +460,9 @@ contains
     end do
     do i = 1, size(EXPORTS)
       used = .false.
-      do k = 0, 15
-        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
-        if (cpl_config_is_valid(c)) used = used .or. &
-          cpl_exchange_applies(cpl_exchange_t(when=EXPORTS(i)%when), c)
+      do k = 1, size(cs)
+        if (cpl_config_is_valid(cs(k))) used = used .or. &
+          cpl_exchange_applies(cpl_exchange_t(when=EXPORTS(i)%when), cs(k))
       end do
       if (.not. used) then
         nerr = nerr + 1
@@ -320,10 +471,9 @@ contains
     end do
     do i = 1, size(GAPS)
       used = .false.
-      do k = 0, 15
-        c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), sis2=btest(k, 3))
-        if (cpl_config_is_valid(c)) used = used .or. &
-          cpl_exchange_applies(cpl_exchange_t(when=GAPS(i)%when), c)
+      do k = 1, size(cs)
+        if (cpl_config_is_valid(cs(k))) used = used .or. &
+          cpl_exchange_applies(cpl_exchange_t(when=GAPS(i)%when), cs(k))
       end do
       if (.not. used) then
         nerr = nerr + 1
@@ -709,12 +859,12 @@ contains
     character(len=CPL_NAME_LEN), allocatable :: atm(:), ocn(:), all_names(:), exp(:)
     character(len=32), allocatable :: want_atm(:), want_ocn(:)
 
-    if (CFG(k)%datm) then
+    if (CFG(k)%atm_model == 'datm') then
       want_atm = import_datm_names
     else
       want_atm = import_mpas_names
     end if
-    if (CFG(k)%sis2) then
+    if (CFG(k)%ice_model == 'sis2') then
       want_ocn = [character(len=32) :: MED_IMP_OCN, MED_IMP_SIS2]
     else
       want_ocn = MED_IMP_OCN

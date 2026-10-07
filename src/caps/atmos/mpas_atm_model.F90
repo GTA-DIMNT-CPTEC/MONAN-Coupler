@@ -56,8 +56,7 @@ module mpas_atm_model_mod
   use mpas_log,           only : mpas_log_write, mpas_log_info
   use coupler_log_mod,    only : COMP_ATM, log_error, log_warning, log_info
 
-  use coupler_config_mod,  only : cfg_use_datm,&
-                                    cfg_use_docn
+  use coupler_config_mod,  only : cfg_atm_model, cfg_ocn_model
 
   ! Etapas da inicialização e fluxos instantâneos
   use mpas_atm_setup_mod,  only : setup_mpas_domain, setup_mpas_streams,  &
@@ -302,7 +301,7 @@ contains
               'sst/skintemp/ice/zorl da condicao inicial do MONAN-A (nao ' // &
               'aplicando atm_bnd)')
          end if
-         if(.not. cfg_use_docn .and. .not. cfg_use_datm) then
+         if (trim(cfg_ocn_model) == 'mom6' .and. trim(cfg_atm_model) == 'mpas') then
            ! só quando não há SST prescrita (DOCN/DATM).
             ! O laço vai até nCellsSolve (células PRÓPRIAS),
             ! não até nCells (que inclui os halos). O motivo está em

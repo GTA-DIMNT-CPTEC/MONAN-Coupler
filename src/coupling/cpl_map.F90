@@ -38,29 +38,31 @@
 !!
 !! Condições (coluna when): lista separada por vírgulas; a troca vale se
 !! todas as condições da lista valem. Lista vazia: vale sempre.
-!!   mpas / datm               componente atmosférico (use_datm)
-!!   mom6 / docn               componente oceânico (use_docn)
+!!   nome de um modelo de COMPONENTS (coupler_config), menos 'none': o
+!!                             modelo ocupa a posição dele (mpas, datm,
+!!                             mom6, docn, sis2; 'mom6' vale com
+!!                             ocn_model=mom6)
 !!   med_to_mpas / ocn_to_mpas contorno oceânico da atmosfera pelo mediador
-!!                             ou direto do oceano (use_med_to_mpas)
-!!   sis2                      gelo dinâmico (use_sis2_dynamic)
+!!                             ou direto do oceano (atm_boundary=med ou ocn)
 !! As consultas que percorrem configurações (cpl_arrivals, cpl_exports)
-!! consideram só as combinações aceitas pela tabela COUPLER_MODES
-!! (coupler_config), a mesma que config_read consulta.
+!! combinam os modelos de cada posição listados em COMPONENTS e os dois
+!! contornos, e consideram só as combinações aceitas pela tabela
+!! COUPLER_MODES (coupler_config), a mesma que config_read consulta.
 !!
-!! Configuração (cpl_config_t, de coupler_config): toda consulta a recebe
-!! como argumento (cfg); o mapa não lê as chaves do nuopc.input. Quem chama
-!! passa a configuração da rodada (cpl_current_config, em coupler_config)
-!! ou outra qualquer, como fazem os testes e a conferência das cinco
-!! configurações.
+!! Configuração (cpl_config_t, de coupler_config): o modelo de cada posição
+!! e o contorno. Toda consulta a recebe como argumento (cfg); o mapa não lê
+!! as chaves do nuopc.input. Quem chama passa a configuração da rodada
+!! (cpl_current_config, em coupler_config) ou outra qualquer, como fazem os
+!! testes e a conferência das cinco configurações.
 !!
 !! O DATM está descrito como o cap dele anuncia os campos, mas o driver
-!! (esm.F90) não o registra hoje: com use_datm=.true. o componente ATM
+!! (esm.F90) não o registra hoje: com atm_model=datm o componente ATM
 !! continua sendo o MONAN-A. O destino do DATM é uma decisão pendente do GT.
 !!
 !! Listas de campos (cpl_arrivals): o que um componente anuncia e realiza
 !! sai do mapa, como os campos que chegam a um ponto. Cada componente decide
-!! o que anuncia por algumas chaves de &nuopc_mode, não por todas (o
-!! mediador, por exemplo, só por use_datm e use_sis2_dynamic, e anuncia
+!! o que anuncia por algumas chaves da configuração, não por todas (o
+!! mediador, por exemplo, só por atm_model e ice_model, e anuncia
 !! So_omask mesmo com o DOCN, que não a exporta); as demais chaves ficam
 !! livres, e a lista é a união das configurações válidas que concordam com
 !! a atual nas chaves pedidas, na ordem de EXCHANGES, sem repetição. O
@@ -115,7 +117,10 @@ module cpl_map_mod
 
   use ESMF,                  only : ESMF_KIND_R8
   use coupler_constants_mod, only : T_FREEZE_SEAWATER
-  use coupler_config_mod,    only : cpl_config_t, COUPLER_MODES, coupler_mode_index
+  use coupler_config_mod,    only : cpl_config_t, COUPLER_MODES, coupler_mode_index, &
+                                    COMPONENTS, MODEL_POSITIONS, ATM_BOUNDARIES,      &
+                                    BOUNDARY_CONDITIONS, CONFIG_KEYS, config_value,   &
+                                    config_from_values, MODEL_NAME_LEN
   use regrid_base_mod,       only : regrid_fill_t, OPTIONS_LEN
   use cpl_fields_mod,        only : CPL_NAME_LEN
 
@@ -123,7 +128,7 @@ module cpl_map_mod
   private
 
   public :: cpl_grid_ref_t, cpl_exchange_t, cpl_route_t, cpl_config_t
-  public :: GRIDS, EXCHANGES, ROUTES, CONDITIONS
+  public :: GRIDS, EXCHANGES, ROUTES
   public :: CPL_UNSET, CPL_POINT_LEN, CPL_VIA_LEN, CPL_WHEN_LEN, CPL_METHOD_LEN
   public :: CONNECTOR_METHODS, cpl_connector_method
   public :: cpl_exchange_applies, cpl_valid_conditions
@@ -150,10 +155,6 @@ module cpl_map_mod
 
   !> Valor que desliga a coluna nan_to.
   real(r8), parameter :: CPL_UNSET = huge(1.0_r8)
-
-  !> Condições aceitas na coluna when.
-  character(len=12), parameter :: CONDITIONS(*) = [character(len=12) ::             &
-    'mpas', 'datm', 'mom6', 'docn', 'med_to_mpas', 'ocn_to_mpas', 'sis2' ]
 
   !> Malha citada no mapa: nome, componente em que existe, tipo.
   type :: cpl_grid_ref_t
@@ -316,7 +317,7 @@ module cpl_map_mod
     !    MONAN-A
     (cpl_exchange_t(GROUP_ATM_SURFACE(i_group),   'MED@ocn_med',  'ATM@atm_cap',  'conector',         'mpas,med_to_mpas',       'bilinear'),  &
       i_group = 1, size(GROUP_ATM_SURFACE)),                                                                                                  &
-    ! 10. Contorno oceânico direto do DOCN (use_med_to_mpas=.false.): só
+    ! 10. Contorno oceânico direto do DOCN (atm_boundary=ocn): só
     !     os nomes que o DOCN exporta e o MONAN-A importa. Sx_tsfc,
     !     Sf_albedo e Sx_omask ficam sem origem, e o cap atmosférico
     !     interrompe a rodada (verify_import_connected). Com o MOM6, o
@@ -355,7 +356,7 @@ module cpl_map_mod
     cpl_export_t('Faxa_rain',      'ATM@datm',     'datm'),                     &
     cpl_export_t('Faxa_snow',      'ATM@datm',     'datm'),                     &
     ! MOM6 (mom_cap_MONAN); So_s e Fioo_q não têm consumidor, e Si_ifrac só
-    ! vai ao MONAN-A com use_med_to_mpas=.false.
+    ! vai ao MONAN-A com atm_boundary=ocn.
     cpl_export_t('So_t',           'OCN@ocn_mom6', 'mom6'),                     &
     cpl_export_t('So_s',           'OCN@ocn_mom6', 'mom6'),                     &
     cpl_export_t('So_u',           'OCN@ocn_mom6', 'mom6'),                     &
@@ -383,7 +384,7 @@ module cpl_map_mod
     !            field        point          when                    reason
     ! O mediador anuncia So_omask também com o DOCN, que não o exporta
     cpl_gap_t('So_omask',  'MED@ocn_med', 'docn',                 'o DOCN nao exporta So_omask'),       &
-    ! Contorno direto do DOCN (use_med_to_mpas=.false.; com o MOM6 é
+    ! Contorno direto do DOCN (atm_boundary=ocn; com o MOM6 é
     ! recusado): o DOCN não exporta estes campos; o cap atmosférico
     ! interrompe a rodada
     cpl_gap_t('Sx_tsfc',   'ATM@atm_cap', 'mpas,ocn_to_mpas',     'o oceano nao exporta Sx_tsfc'),      &
@@ -431,7 +432,7 @@ module cpl_map_mod
   !! relatório de acoplamento), com os componentes como o mapa os chama.
   !! Cada um é registrado se EXCHANGES tem troca por conector entre os dois
   !! componentes na configuração (cpl_driver_connectors); MED->ATM e
-  !! OCN->ATM se excluem pela chave use_med_to_mpas. Esta ordem não é a de
+  !! OCN->ATM se excluem pela chave atm_boundary. Esta ordem não é a de
   !! EXCHANGES, que define a ordem do anúncio dos campos.
   integer, parameter :: N_CONNECTORS = 7
   character(len=3), parameter :: CONNECTOR_SRC(N_CONNECTORS) = &
@@ -441,21 +442,23 @@ module cpl_map_mod
 
 contains
 
-  !> @brief Combinação de chaves aceita por config_read: não recusada na tabela
-  !! COUPLER_MODES (coupler_config), suportada ou não validada.
+  !> @brief Configuração aceita por config_read: está na tabela COUPLER_MODES
+  !! (coupler_config) e não é recusada (é suportada ou não validada).
   pure logical function cpl_config_is_valid(cfg) result(ok)
     type(cpl_config_t), intent(in) :: cfg
     integer :: k
 
-    k = coupler_mode_index(cfg%datm, cfg%docn, cfg%med_to_mpas, cfg%sis2)
-    ok = COUPLER_MODES(k)%status /= 'recusada'
+    k = coupler_mode_index(cfg)
+    ok = k > 0
+    if (ok) ok = COUPLER_MODES(k)%status /= 'recusada'
   end function cpl_config_is_valid
 
   !> @brief Campos que chegam a um ponto, na ordem de EXCHANGES e sem repetição.
   !!
   !! A troca conta se vale em alguma configuração válida que concorda com
-  !! cfg nas chaves listadas em keys ('datm', 'docn', 'med_to_mpas',
-  !! 'sis2', separadas por vírgula; '' deixa todas livres).
+  !! cfg nas chaves listadas em keys (de CONFIG_KEYS: 'atm_model',
+  !! 'ocn_model', 'ice_model', 'atm_boundary', separadas por vírgula; ''
+  !! deixa todas livres).
   !!
   !! @param[in]  point         'COMPONENTE@malha', ou só 'COMPONENTE' (qualquer malha)
   !! @param[in]  by_connector  .true.: chegadas por conector (importação);
@@ -545,29 +548,41 @@ contains
   end function point_matches
 
   !> @brief A lista de condições when vale em alguma configuração válida que
-  !! concorda com cfg nas chaves listadas.
+  !! concorda com cfg nas chaves listadas. As configurações percorridas são
+  !! as combinações dos modelos de cada posição de COMPONENTS e dos
+  !! contornos de ATM_BOUNDARIES.
   logical function applies_in_some(when, cfg, keys) result(applies)
     character(len=*),   intent(in) :: when, keys
     type(cpl_config_t), intent(in) :: cfg
     type(cpl_config_t) :: c
     type(cpl_exchange_t) :: t
-    integer :: k
+    integer :: ia, io, ii, ib
 
     t%when = when
     applies = .false.
-    do k = 0, 15
-      c = cpl_config_t(datm=btest(k, 0), docn=btest(k, 1), med_to_mpas=btest(k, 2), &
-                       sis2=btest(k, 3))
-      if (.not. cpl_config_is_valid(c)) cycle
-      if (.not. agrees(c, cfg, keys)) cycle
-      if (cpl_exchange_applies(t, c)) then
-        applies = .true.
-        return
-      end if
+    do ia = 1, size(COMPONENTS)
+      if (COMPONENTS(ia)%position /= MODEL_POSITIONS(1)) cycle
+      do io = 1, size(COMPONENTS)
+        if (COMPONENTS(io)%position /= MODEL_POSITIONS(2)) cycle
+        do ii = 1, size(COMPONENTS)
+          if (COMPONENTS(ii)%position /= MODEL_POSITIONS(3)) cycle
+          do ib = 1, size(ATM_BOUNDARIES)
+            c = config_from_values([character(len=MODEL_NAME_LEN) :: COMPONENTS(ia)%model, &
+                                    COMPONENTS(io)%model, COMPONENTS(ii)%model, ATM_BOUNDARIES(ib)])
+            if (.not. cpl_config_is_valid(c)) cycle
+            if (.not. agrees(c, cfg, keys)) cycle
+            if (cpl_exchange_applies(t, c)) then
+              applies = .true.
+              return
+            end if
+          end do
+        end do
+      end do
     end do
   end function applies_in_some
 
-  !> @brief c e cfg têm o mesmo valor em cada chave listada.
+  !> @brief c e cfg têm o mesmo valor em cada chave listada (de CONFIG_KEYS;
+  !! uma chave desconhecida nunca concorda).
   pure logical function agrees(c, cfg, keys) result(ok)
     type(cpl_config_t), intent(in) :: c, cfg
     character(len=*),   intent(in) :: keys
@@ -577,13 +592,8 @@ contains
     rest = adjustl(keys)
     do while (len_trim(rest) > 0 .and. ok)
       call next_condition(rest, key)
-      select case (trim(key))
-      case ('datm');        ok = c%datm .eqv. cfg%datm
-      case ('docn');        ok = c%docn .eqv. cfg%docn
-      case ('med_to_mpas'); ok = c%med_to_mpas .eqv. cfg%med_to_mpas
-      case ('sis2');        ok = c%sis2 .eqv. cfg%sis2
-      case default;         ok = .false.
-      end select
+      ok = any(CONFIG_KEYS == key)
+      if (ok) ok = config_value(c, trim(key)) == config_value(cfg, trim(key))
     end do
   end function agrees
 
@@ -670,8 +680,8 @@ contains
   !> @brief Conectores que o driver registra na configuração cfg: ordem(1:n) são os
   !! índices em CONNECTOR_SRC/CONNECTOR_DST, na ordem de registro. O
   !! componente atmosférico registrado é sempre o MONAN-A, também com
-  !! use_datm (o DATM está no mapa, mas o driver não o registra); por isso o
-  !! mapa é consultado com a chave datm desligada. t_unlisted é a primeira troca
+  !! atm_model=datm (o DATM está no mapa, mas o driver não o registra); por
+  !! isso o mapa é consultado com atm_model=mpas. t_unlisted é a primeira troca
   !! por conector válida que não tem lugar na lista (0 se não há).
   !!
   !! @param[in]  cfg     configuração (por exemplo, cpl_current_config)
@@ -686,7 +696,7 @@ contains
     integer :: k
 
     c = cfg
-    c%datm = .false.
+    c%atm_model = 'mpas'
     order = 0
     n = 0
     t_unlisted = cpl_unlisted_connector(CONNECTOR_SRC, CONNECTOR_DST, c)
@@ -722,7 +732,8 @@ contains
     end do
   end function cpl_unlisted_connector
 
-  !> @brief Verdadeiro se todas as condições da lista estão em CONDITIONS.
+  !> @brief Verdadeiro se todas as condições da lista são nomes de modelo de
+  !! COMPONENTS (menos 'none') ou condições de contorno (BOUNDARY_CONDITIONS).
   pure logical function cpl_valid_conditions(when) result(ok)
     character(len=*), intent(in) :: when
     character(len=CPL_WHEN_LEN) :: rest, cond
@@ -731,7 +742,8 @@ contains
     rest = adjustl(when)
     do while (len_trim(rest) > 0)
       call next_condition(rest, cond)
-      if (.not. any(CONDITIONS == cond)) then
+      if (trim(cond) == 'none' .or. .not. (any(COMPONENTS%model == cond) .or. &
+                                           any(BOUNDARY_CONDITIONS == cond))) then
         ok = .false.
         return
       end if
@@ -805,21 +817,25 @@ contains
     end if
   end subroutine next_condition
 
-  !> @brief Uma condição da coluna when, na configuração cfg.
+  !> @brief Uma condição da coluna when, na configuração cfg: o nome de um
+  !! modelo vale se ele ocupa uma posição; uma condição de contorno
+  !! (BOUNDARY_CONDITIONS) vale com o contorno correspondente de
+  !! ATM_BOUNDARIES. 'none' e nomes desconhecidos não valem.
   pure logical function condition_holds(cond, cfg) result(applies)
     character(len=*),   intent(in) :: cond
     type(cpl_config_t), intent(in) :: cfg
+    integer :: k
 
-    select case (trim(cond))
-    case ('mpas');        applies = .not. cfg%datm
-    case ('datm');        applies = cfg%datm
-    case ('mom6');        applies = .not. cfg%docn
-    case ('docn');        applies = cfg%docn
-    case ('med_to_mpas'); applies = cfg%med_to_mpas
-    case ('ocn_to_mpas'); applies = .not. cfg%med_to_mpas
-    case ('sis2');        applies = cfg%sis2
-    case default;         applies = .false.
-    end select
+    applies = .false.
+    if (trim(cond) == 'none') return
+    do k = 1, size(BOUNDARY_CONDITIONS)
+      if (trim(cond) == trim(BOUNDARY_CONDITIONS(k))) then
+        applies = trim(cfg%atm_boundary) == trim(ATM_BOUNDARIES(k))
+        return
+      end if
+    end do
+    applies = trim(cond) == trim(cfg%atm_model) .or. trim(cond) == trim(cfg%ocn_model) .or. &
+              trim(cond) == trim(cfg%ice_model)
   end function condition_holds
 
 end module cpl_map_mod

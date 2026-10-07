@@ -16,8 +16,19 @@
 # cada regra de erro fatal sozinha; os avisos (combinação não validada,
 # multi_on_error, passos, grid_res_deg, sst_default e as três formas de
 # seq_repro ser ignorado); valores em maiúsculas; substituições do
-# &nuopc_regrid; e duas leituras seguidas (a segunda parte dos valores da
-# primeira; uma leitura com erro não muda nenhum valor).
+# &nuopc_regrid; as combinações com o DOCN e com o DATM; e duas leituras
+# seguidas (a segunda parte dos valores da primeira; uma leitura com erro
+# não muda nenhum valor).
+#
+# Chaves por modelo (desde a R-FASE13-29): um caso NOME pode ter um arquivo
+# NOME.rev.input, lido pela versão de referência no lugar de NOME.input. É
+# assim que um arquivo com as chaves novas (atm_model, ocn_model,
+# ice_model, atm_boundary) é comparado com o mesmo arquivo escrito com as
+# chaves antigas: a leitura tem de dar os mesmos valores. Os casos que só
+# a versão atual sabe ler (valor fora da tabela, chave antiga que contradiz
+# a nova) conferem o código de retorno e a mensagem esperada. As mensagens
+# que mudaram de propósito estão em tests/config/mensagens-mudadas.sed e são
+# traduzidas na saída da referência antes da comparação.
 #
 # Uso (na raiz do repositório):
 #   ESMFMKFILE=/caminho/esmf.mk tests/config/compara-config.bash REV [SAIDA]
@@ -52,8 +63,11 @@ compila() {
       # shellcheck disable=SC2086
       ${FC} ${EINC} -cpp -ffree-line-length-none -O2 -ffp-contract=off -c "${f}" -o "${o}" || exit 2
     done
+    # Saída na forma das chaves lógicas também na versão com chaves por modelo
+    local def=""
+    grep -q 'cfg_atm_model' "${src}/src/shared/coupler_config.F90" && def="-DCOM_CHAVES_POR_MODELO"
     # shellcheck disable=SC2086
-    ${FC} ${EINC} -ffree-line-length-none -c "${PROG}" -o test_config.o &&
+    ${FC} ${EINC} -cpp ${def} -ffree-line-length-none -c "${PROG}" -o test_config.o &&
     # shellcheck disable=SC2086
     ${FC} -o test_config test_config.o \
       $(python3 "${RAIZ}/tools/dev/dependencias.py" objetos -s "${src}" "${PROG}") ${ELIB}
@@ -177,30 +191,80 @@ caso docn_completo "&nuopc_driver start_date='2025-01-01', stop_date='2025-01-03
 &nuopc_mode use_docn=.true., use_med_to_mpas=.false., use_docn_ice=.true., docn_ice_init_only=.true. /
 &nuopc_petlayout use_sis2_dynamic=.false. /"
 
+# Combinações com o DOCN e com o DATM, pelas chaves antigas
+caso datm_mom6 "$(grupos 'mode=use_datm=.true.' 'petlayout=use_sis2_dynamic=.false.')"
+caso datm_mom6_sis2 "$(grupos 'mode=use_datm=.true.')"
+caso datm_docn "$(grupos 'mode=use_datm=.true., use_docn=.true., use_med_to_mpas=.false.' \
+                         'petlayout=use_sis2_dynamic=.false.')"
+caso docn_mediador "$(grupos 'mode=use_docn=.true.' 'petlayout=use_sis2_dynamic=.false.')"
+caso sis2_docn "$(grupos 'mode=use_docn=.true.')"
+
+# Chaves por modelo (NOME.input), comparadas com as antigas (NOME.rev.input)
+par() { caso "$1" "$2"; caso "$1.rev" "$3"; }
+par novas_producao "$(grupos "mode=atm_model='mpas', ocn_model='mom6', ice_model='sis2', atm_boundary='med'")" \
+  "$(grupos)"
+par novas_docn "$(grupos "mode=ocn_model='docn', ice_model='none', atm_boundary='ocn'")" \
+  "$(grupos 'mode=use_docn=.true., use_med_to_mpas=.false.' 'petlayout=use_sis2_dynamic=.false.')"
+par novas_datm_docn "$(grupos "mode=atm_model='datm', ocn_model='docn', ice_model='none'")" \
+  "$(grupos 'mode=use_datm=.true., use_docn=.true.' 'petlayout=use_sis2_dynamic=.false.')"
+par novas_sem_gelo "$(grupos "mode=ice_model='none'")" \
+  "$(grupos 'petlayout=use_sis2_dynamic=.false.')"
+par novas_maiusculas "$(grupos "mode=OCN_MODEL='DOCN', Ice_Model='None', ATM_BOUNDARY='OCN'")" \
+  "$(grupos 'mode=use_docn=.true., use_med_to_mpas=.false.' 'petlayout=use_sis2_dynamic=.false.')"
+par novas_recusada "$(grupos "mode=atm_boundary='ocn'")" \
+  "$(grupos 'mode=use_med_to_mpas=.false.')"
+par novas_sis2_docn "$(grupos "mode=ocn_model='docn'")" \
+  "$(grupos 'mode=use_docn=.true.')"
+par novas_gelo_sem_sis2 "$(grupos "mode=ice_model='none'" "petlayout=pet_layout='split', ice_pet_count=2")" \
+  "$(grupos "petlayout=pet_layout='split', ice_pet_count=2, use_sis2_dynamic=.false.")"
+par novas_seq_repro "$(grupos "mode=ice_model='none'" "petlayout=pet_layout='split', seq_repro=.true.")" \
+  "$(grupos "petlayout=pet_layout='split', seq_repro=.true., use_sis2_dynamic=.false.")"
+par ambas_iguais "$(grupos "mode=use_docn=.true., ocn_model='docn', use_med_to_mpas=.false., atm_boundary='ocn', ice_model='none'" \
+                           'petlayout=use_sis2_dynamic=.false.')" \
+  "$(grupos 'mode=use_docn=.true., use_med_to_mpas=.false.' 'petlayout=use_sis2_dynamic=.false.')"
+
 # Casos: NOME = arquivos lidos em sequência
 CASOS="raiz vazio ausente sintaxe_driver sintaxe_regrid obsoletas log_kind_invalido
 log_level_invalido dt_coupling_zero dt_atm_negativo docn_mode_invalido coupling_mode_invalido
 pet_layout_invalido concurrent_shared contagem_negativa shared_com_contagem gelo_sem_sis2
 combinacao_recusada gelo_docn_sem_arquivo so_inicio_sem_gelo avisos seq_repro_shared
 seq_repro_sem_sis2 seq_repro_valido maiusculas regrid docn_completo
-seguidas_ok seguidas_erro"
+datm_mom6 datm_mom6_sis2 datm_docn docn_mediador sis2_docn
+novas_producao novas_docn novas_datm_docn novas_sem_gelo novas_maiusculas novas_recusada
+novas_sis2_docn novas_gelo_sem_sis2 novas_seq_repro ambas_iguais
+seguidas_ok seguidas_erro seguidas_novas"
+# arquivos CASO VERSAO: os arquivos lidos; a referência lê NOME.rev.input
+# quando ele existe
 arquivos() {
+  local f lista
   case "$1" in
-    ausente)       echo "${C}/nao_existe.input" ;;
-    seguidas_ok)   echo "${C}/docn_completo.input ${C}/vazio.input" ;;
-    seguidas_erro) echo "${C}/regrid.input ${C}/dt_coupling_zero.input ${C}/vazio.input" ;;
-    *)             echo "${C}/$1.input" ;;
+    ausente)        lista="nao_existe" ;;
+    seguidas_ok)    lista="docn_completo vazio" ;;
+    seguidas_erro)  lista="regrid dt_coupling_zero vazio" ;;
+    seguidas_novas) lista="novas_docn vazio" ;;
+    *)              lista="$1" ;;
   esac
+  for f in ${lista}; do
+    if [[ "$2" == rev && -f "${C}/${f}.rev.input" ]]; then
+      echo "${C}/${f}.rev.input"
+    else
+      echo "${C}/${f}.input"
+    fi
+  done
 }
+# Na saída da referência: o nome do arquivo .rev.input como o do caso, e as
+# mensagens que mudaram de propósito com o texto novo
+MUDADAS="${RAIZ}/tests/config/mensagens-mudadas.sed"
 
 ndif=0
 for caso in ${CASOS}; do
   for versao in rev atual; do
     # shellcheck disable=SC2046
     ( cd "${C}" && env -u PALS_RANKID -u PMI_RANK -u PMIX_RANK -u OMPI_COMM_WORLD_RANK \
-        "${SAIDA}/${versao}/test_config" $(arquivos "${caso}") ) \
+        "${SAIDA}/${versao}/test_config" $(arquivos "${caso}" "${versao}") ) \
       | sed "s|${C}/||g" > "${SAIDA}/${caso}_${versao}.txt" 2>&1
   done
+  sed -i -e 's|\.rev\.input|.input|g' -f "${MUDADAS}" "${SAIDA}/${caso}_rev.txt"
   if cmp -s "${SAIDA}/${caso}_rev.txt" "${SAIDA}/${caso}_atual.txt"; then
     printf '  %-24s iguais (rc %s)\n' "${caso}" "$(grep '^rc = ' "${SAIDA}/${caso}_atual.txt" | cut -d' ' -f3 | paste -sd,)"
   else
@@ -209,6 +273,30 @@ for caso in ${CASOS}; do
     ndif=$((ndif + 1))
   fi
 done
+# Casos que só a versão atual sabe ler: erro fatal com a mensagem esperada
+espera() {   # espera NOME MENSAGEM GRUPOS...
+  local nome=$1 msg=$2 saida; shift 2
+  caso "${nome}" "$(grupos "$@")"
+  saida="${SAIDA}/${nome}_atual.txt"
+  ( cd "${C}" && env -u PALS_RANKID -u PMI_RANK -u PMIX_RANK -u OMPI_COMM_WORLD_RANK \
+      "${SAIDA}/atual/test_config" "${C}/${nome}.input" ) > "${saida}" 2>&1
+  if grep -q '^rc = 2$' "${saida}" && grep -qF "[coupler_config] ERRO: ${msg}" "${saida}"; then
+    printf '  %-24s erro esperado (rc 2)\n' "${nome}"
+  else
+    printf '  %-24s SEM O ERRO ESPERADO: %s\n' "${nome}" "${msg}"
+    grep -v ' = \|^==' "${saida}" | sed 's/^/      /'
+    ndif=$((ndif + 1))
+  fi
+}
+espera modelo_invalido 'ocn_model="hycom" invalido; use mom6|docn.' "mode=ocn_model='hycom'"
+espera gelo_invalido 'ice_model="cice" invalido; use sis2|none.' "mode=ice_model='cice'"
+espera contorno_invalido 'atm_boundary="mediador" invalido; use med|ocn.' "mode=atm_boundary='mediador'"
+espera contradiz 'ocn_model="mom6" contradiz a chave antiga use_docn=.true.; use so ocn_model.' \
+  "mode=use_docn=.true., ocn_model='mom6'"
+espera contradiz_gelo 'ice_model="sis2" contradiz a chave antiga use_sis2_dynamic=.false.; use so ice_model.' \
+  "mode=ice_model='sis2'" 'petlayout=use_sis2_dynamic=.false.'
+NESPERA=5
+
 # O nuopc.input da raiz, na versão de hoje: lido sem erro, sem chave
 # obsoleta e com todos os grupos obrigatórios (outros avisos, como o de
 # seq_repro ignorado no modo concorrente, são permitidos)
@@ -225,4 +313,5 @@ if [[ ${ndif} -gt 0 ]]; then
   echo "FALHOU: ${ndif} caso(s) diferem de ${REV} ou o nuopc.input da raiz tem problema"
   exit 1
 fi
-echo "OK: a leitura da configuração é a mesma de ${REV} nos $(echo ${CASOS} | wc -w) casos"
+echo "OK: a leitura da configuração é a mesma de ${REV} nos $(echo ${CASOS} | wc -w) casos," \
+  "e os ${NESPERA} erros só da versão atual saem como esperado"

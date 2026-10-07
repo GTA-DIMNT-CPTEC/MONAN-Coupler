@@ -23,7 +23,7 @@ module med_cap_methods_mod
   use cpl_map_mod,        only : ROUTES, cpl_route_index, CPL_UNSET
 
   use med_cap_types_mod, only: MED_InternalState, med_ocn_flux_fields_t
-  use coupler_config_mod, only: cfg_use_sis2_dynamic, MAX_REGRID_OVERRIDES,             &
+  use coupler_config_mod, only: MAX_REGRID_OVERRIDES,                                   &
                                 cfg_regrid_route, cfg_regrid_scheme, cfg_regrid_methods, &
                                 cfg_regrid_weights, cfg_regrid_class, cfg_regrid_options
 

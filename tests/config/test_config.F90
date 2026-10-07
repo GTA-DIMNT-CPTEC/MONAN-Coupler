@@ -9,6 +9,12 @@
 !! de um arquivo, cada leitura parte dos valores deixados pela anterior,
 !! como em config_read. compara-config.bash roda este programa com a versão
 !! de um commit e com a da árvore de trabalho e compara as saídas.
+!!
+!! A escolha dos modelos sai na forma das quatro chaves lógicas de antes da
+!! R-FASE13-29 (use_datm, use_docn, use_med_to_mpas, use_sis2_dynamic),
+!! que diz o mesmo, porque cada posição tem dois valores possíveis: assim
+!! a saída das duas versões pode ser comparada. compara-config.bash define
+!! COM_CHAVES_POR_MODELO ao compilar uma versão que tem cfg_atm_model.
 program test_config
 
   use coupler_config_mod
@@ -71,11 +77,19 @@ contains
     call put_i('atm_pet_count', cfg_atm_pet_count)
     call put_i('ocn_pet_count', cfg_ocn_pet_count)
     call put_i('ice_pet_count', cfg_ice_pet_count)
+#ifdef COM_CHAVES_POR_MODELO
+    call put_l('use_sis2_dynamic', cfg_ice_model == 'sis2')
+    call put_l('seq_repro', cfg_seq_repro)
+    call put_l('use_datm', cfg_atm_model == 'datm')
+    call put_l('use_docn', cfg_ocn_model == 'docn')
+    call put_l('use_med_to_mpas', cfg_atm_boundary == 'med')
+#else
     call put_l('use_sis2_dynamic', cfg_use_sis2_dynamic)
     call put_l('seq_repro', cfg_seq_repro)
     call put_l('use_datm', cfg_use_datm)
     call put_l('use_docn', cfg_use_docn)
     call put_l('use_med_to_mpas', cfg_use_med_to_mpas)
+#endif
     call put_l('use_docn_ice', cfg_use_docn_ice)
     call put_l('docn_ice_init_only', cfg_docn_ice_init_only)
     do i = 1, MAX_REGRID_OVERRIDES

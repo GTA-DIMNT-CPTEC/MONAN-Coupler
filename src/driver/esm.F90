@@ -9,7 +9,7 @@
 !!   MPAS  atmosfera MONAN-A 2.0 (MPAS-A 8.3.1)
 !!   MED   mediador: fluxos ar-mar por fórmulas bulk NCAR
 !!   OCN   oceano: MOM6 dinâmico, ou DOCN (SST lida de arquivo OISST)
-!!   ICE   gelo marinho SIS2 (opcional, use_sis2_dynamic)
+!!   ICE   gelo marinho SIS2 (opcional: ice_model=sis2 ou none)
 !! Os modelos que podem ocupar cada posição são registrados uma vez, com a
 !! rotina SetServices e os atributos de cada um (register_models); o driver
 !! percorre as posições de POSITIONS (driver_layout.F90), na ordem, e
@@ -47,8 +47,9 @@ module ESM_MONAN
   use MOM_cap_MONAN_mod,  only : OCN_SetServices  => SetServices
   use DOCN_cap_mod,       only : DOCN_SetServices => SetServices
   use sis_cap_MONAN_mod,  only : ICE_SetServices  => SetServices
-  use coupler_config_mod, only : cfg_use_docn, cfg_use_med_to_mpas,     &
-                                 cfg_use_sis2_dynamic, cfg_seq_repro,   &
+  use coupler_config_mod, only : cfg_ocn_model, cfg_ice_model,          &
+                                 cfg_atm_boundary, cfg_seq_repro,       &
+                                 COMPONENTS,                            &
                                  cfg_coupling_mode, cfg_pet_layout,     &
                                  cfg_atm_pet_count, cfg_ocn_pet_count,  &
                                  cfg_ice_pet_count, cpl_current_config, &
@@ -112,20 +113,22 @@ contains
   end subroutine SetServices
 
   !> @brief Registra os modelos que podem ocupar cada posição (models), um por
-  !! chamada a register_model. O rótulo é o nome do componente no driver, na
-  !! sequência de execução, no registro e no relatório de acoplamento.
+  !! chamada a register_model. O rótulo, nome do componente no driver, na
+  !! sequência de execução, no registro e no relatório de acoplamento, vem da
+  !! tabela COMPONENTS (coupler_config); o do mediador, que não é escolhido
+  !! pela configuração, é dado aqui.
   subroutine register_models()
     n_models = 0
-    call register_model('ATM', 'mpas', 'MPAS', MPAS_SetServices)
-    call register_model('MED', 'med',  'MED',  MED_SetServices)
+    call register_model('ATM', 'mpas', MPAS_SetServices)
+    call register_model('MED', 'med',  MED_SetServices, label='MED')
     ! O FMS (MOM6 e SIS2) tem relógio próprio, e o DOCN segue o mesmo
     ! tratamento do oceano: pequenas diferenças de carimbo de tempo são
     ! esperadas e não devem abortar a rodada (check_time_stamps=.false.).
-    call register_model('OCN', 'mom6', 'OCN',  OCN_SetServices,  .false., &
+    call register_model('OCN', 'mom6', OCN_SetServices,  .false., &
                         'OCN = MOM6+SIS2 dinamico (use_docn=F)')
-    call register_model('OCN', 'docn', 'OCN',  DOCN_SetServices, .false., &
+    call register_model('OCN', 'docn', DOCN_SetServices, .false., &
                         'OCN = DOCN OISST (use_docn=T)')
-    call register_model('ICE', 'sis2', 'ICE',  ICE_SetServices,  .false., &
+    call register_model('ICE', 'sis2', ICE_SetServices,  .false., &
                         'componente ICE (SIS2) registrado')
   end subroutine register_models
 
@@ -133,28 +136,40 @@ contains
   !!
   !! @param[in] position           posição que o modelo pode ocupar (POSITIONS)
   !! @param[in] name               nome do modelo, como o escolhe chosen_model
-  !! @param[in] label              rótulo do componente no driver
   !! @param[in] set_services       rotina SetServices do cap
   !! @param[in] check_time_stamps  se falso, timeStampValidation=false no componente
   !! @param[in] note               mensagem no registro depois de registrar o componente
-  subroutine register_model(position, name, label, set_services, check_time_stamps, note)
-    character(len=*), intent(in) :: position, name, label
+  !! @param[in] label              rótulo do componente no driver; ausente, o
+  !!                               da linha de COMPONENTS com a posição e o modelo
+  subroutine register_model(position, name, set_services, check_time_stamps, note, label)
+    character(len=*), intent(in) :: position, name
     procedure(set_services_iface) :: set_services
     logical,          intent(in), optional :: check_time_stamps
     character(len=*), intent(in), optional :: note
+    character(len=*), intent(in), optional :: label
+    integer :: k
 
     if (n_models == MAX_MODELS) error stop 'register_model: MAX_MODELS insuficiente'
     n_models = n_models + 1
     models(n_models)%position = position
     models(n_models)%name     = name
-    models(n_models)%label    = label
+    if (present(label)) then
+      models(n_models)%label = label
+    else
+      do k = 1, size(COMPONENTS)
+        if (trim(COMPONENTS(k)%position) == trim(position) .and. &
+            trim(COMPONENTS(k)%model) == trim(name)) models(n_models)%label = COMPONENTS(k)%label
+      end do
+      if (len_trim(models(n_models)%label) == 0) error stop 'register_model: modelo fora de COMPONENTS'
+    end if
     models(n_models)%set_services => set_services
     if (present(check_time_stamps)) models(n_models)%check_time_stamps = check_time_stamps
     if (present(note)) models(n_models)%note = note
   end subroutine register_model
 
-  !> @brief Modelo escolhido para a posição pela configuração ('none': posição
-  !! vazia). A atmosfera é sempre o MONAN-A: o driver não registra o DATM.
+  !> @brief Modelo escolhido para a posição pela configuração (cfg_ocn_model,
+  !! cfg_ice_model; 'none': posição vazia). A atmosfera é sempre o MONAN-A:
+  !! o driver não registra o DATM.
   !!
   !! @param[in] position  nome da posição (POSITIONS)
   function chosen_model(position) result(name)
@@ -167,9 +182,9 @@ contains
     case ('MED')
       name = 'med'
     case ('OCN')
-      name = merge('docn', 'mom6', cfg_use_docn)
+      name = cfg_ocn_model
     case ('ICE')
-      name = merge('sis2', 'none', cfg_use_sis2_dynamic)
+      name = cfg_ice_model
     case default
       name = 'none'
     end select
@@ -510,7 +525,7 @@ contains
   !!   sequential  MOM6       sim    não         seq_mom6_ice
   !!   sequential  MOM6       não    -           seq_mom6
   !!   sequential  DOCN       -      -           seq_docn
-  !! ("MOM6" aqui significa use_med_to_mpas=.true.). Com a chave
+  !! ("MOM6" aqui significa atm_boundary=med). Com a chave
   !! run_sequence_file, vem do arquivo dado (run_sequence_from_file).
   subroutine SetRunSequence(driver, rc)
     type(ESMF_GridComp)  :: driver
@@ -524,7 +539,7 @@ contains
     type(ESMF_Clock)        :: driverClock
     type(ESMF_TimeInterval) :: timeStep
     integer(ESMF_KIND_I8)   :: dt_s
-    logical :: ice
+    logical :: ice, med_to_mpas
     integer :: i
 
     rc = ESMF_SUCCESS
@@ -546,9 +561,10 @@ contains
       end if
       title = 'do arquivo '//trim(cfg_run_sequence_file)
     else
-      ice = cfg_use_sis2_dynamic .and. cfg_use_med_to_mpas
+      med_to_mpas = trim(cfg_atm_boundary) == 'med'
+      ice = trim(cfg_ice_model) /= 'none' .and. med_to_mpas
       k = run_sequence_index(run_sequence_name(trim(cfg_coupling_mode) == 'concurrent', &
-                                               cfg_use_med_to_mpas, ice, cfg_seq_repro))
+                                               med_to_mpas, ice, cfg_seq_repro))
       call run_sequence_lines(RUN_SEQUENCES(k)%text, steps, n)
       title = trim(RUN_SEQUENCES(k)%title)
 

@@ -29,9 +29,8 @@ module MED_cap_MONAN_mod
   use mom6_supergrid_mod, only : mom6_supergrid_dims
   use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
   use coupler_config_mod, only: cfg_docn_nx, cfg_docn_ny,         &
-                                  cfg_use_docn, cfg_mom6_mesh_ocn,  &
-                                  cfg_use_datm, cfg_use_med_to_mpas, &
-                                  cfg_use_sis2_dynamic,             & ! gelo dinâmico do SIS2
+                                  cfg_ocn_model, cfg_mom6_mesh_ocn, &
+                                  cfg_atm_model, cfg_atm_boundary,  &
                                   cfg_coupling_mode,                &
                                   cfg_seq_repro,                    & ! seq_repro (reprodutibilidade)
                                   cfg_stop_date, config_parse_date, &
@@ -183,8 +182,8 @@ contains
 
     allocate(iswrap%wrap)
     is => iswrap%wrap
-    is%use_mpas_atm    = .not. cfg_use_datm
-    is%use_med_to_mpas = cfg_use_med_to_mpas
+    is%use_mpas_atm    = trim(cfg_atm_model) == 'mpas'
+    is%use_med_to_mpas = trim(cfg_atm_boundary) == 'med'
 
     call ESMF_GridCompSetInternalState(gcomp, iswrap, rc)
     if (ChkErr(rc, __LINE__, __FILE__)) return
@@ -271,7 +270,7 @@ contains
     ny_atm = ATM_NY
     ! cfg_docn_nx/ny (1440x720) são a grade do
     ! DOCN/OISST (0.25 grau, regular). Quando o OCN real é o MOM6+SIS2
-    ! dinâmico (cfg_use_docn=.false., modo de produção), a grade T real do
+    ! dinâmico (ocn_model=mom6, modo de produção), a grade T real do
     ! MOM6 é definida por NIGLOBAL/NJGLOBAL no MOM_input e normalmente NÃO
     ! coincide com a grade DOCN (ex.: 180x155 vs 1440x720 observado em
     ! produção). Usar cfg_docn_nx/ny nesse caso faz o mediador declarar uma
@@ -282,7 +281,7 @@ contains
     ! entrar em ação. Por isso, em modo MOM6 lemos a dimensão real da grade T
     ! diretamente do supergrid ocean_hgrid.nc (nx/ny do arquivo / 2, convenção
     ! FRE-NCtools) em vez de reutilizar a config do DOCN.
-    if (cfg_use_docn) then
+    if (trim(cfg_ocn_model) == 'docn') then
       nx_ocn = cfg_docn_nx  ! Grade DOCN de nuopc.input (ex: OISST 0.25° = 1440)
       ny_ocn = cfg_docn_ny  ! Grade DOCN de nuopc.input (ex: OISST 0.25° =  720)
     else

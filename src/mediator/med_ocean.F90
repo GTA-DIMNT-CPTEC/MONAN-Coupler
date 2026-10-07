@@ -16,7 +16,7 @@ module med_ocean_mod
                                 cfg_docn_ice_file, cfg_docn_ice_varname, &
                                 cfg_docn_ice_pct, cfg_docn_dt_data, &
                                 cfg_docn_epoch_year, cfg_docn_epoch_month, &
-                                cfg_docn_epoch_day, cfg_use_sis2_dynamic
+                                cfg_docn_epoch_day, cfg_ice_model
   use med_cap_types_mod, only: MED_InternalState, med_fill_count_t, COMPL_SST, SST_BULK_FALLBACK
   use med_diag_mod, only: record_fill, log_sst_raw
   use coupler_log_mod, only: COMP_MED, log_info, log_debug, log_debug_enabled
@@ -94,7 +94,7 @@ contains
       ! SST ('ocn2atm_sst'). A rota genérica 'ocn2atm' (sem máscara nem
       ! extrapolação) daria artefatos justamente onde o gelo se concentra, na
       ! região de deformação da malha tripolar (alta latitude).
-      if (cfg_use_sis2_dynamic) then
+      if (trim(cfg_ice_model) == 'sis2') then
         call update_ice_fields_on_atm_grid(is, importState)
       end if
     else

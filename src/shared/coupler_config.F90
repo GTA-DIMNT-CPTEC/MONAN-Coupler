@@ -9,7 +9,8 @@
 !! Grupos do namelist e o que controlam:
 !!   &nuopc_driver     datas, passo de acoplamento, diretório, tipo e nível de log,
 !!                     sequência de execução lida de arquivo (opcional)
-!!   &nuopc_mode       quais componentes de dados (DATM/DOCN) substituem modelos
+!!   &nuopc_mode       que modelo ocupa cada posição (atm_model, ocn_model,
+!!                     ice_model) e o contorno da atmosfera (atm_boundary)
 !!   &nuopc_atm        malha e diretório de configuração do MONAN-A
 !!   &nuopc_netcdf     escrita dos NetCDF exportados pelo cap ATM
 !!   &nuopc_atm_bnd    valores padrão de contorno da atmosfera
@@ -19,8 +20,15 @@
 !!   &nuopc_regrid     (opcional) esquema de interpolação por rota
 !!
 !! Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e
-!! SIS2, com o contorno da atmosfera pelo mediador. Que combinações de
-!! componentes são aceitas está na tabela COUPLER_MODES, abaixo.
+!! SIS2, com o contorno da atmosfera pelo mediador. Que modelos podem ocupar
+!! cada posição está na tabela COMPONENTS, e que combinações deles são
+!! aceitas, na tabela COUPLER_MODES, ambas abaixo.
+!!
+!! Chaves antigas: use_datm, use_docn e use_med_to_mpas (&nuopc_mode) e
+!! use_sis2_dynamic (&nuopc_petlayout) continuam aceitas e são traduzidas
+!! para as chaves por modelo (OLD_KEYS, abaixo). Uma chave antiga e a nova
+!! correspondente podem vir juntas se disserem a mesma coisa; se se
+!! contradisserem, a leitura para com erro.
 !!
 !! Regras de leitura:
 !!   - grupo ausente do arquivo: mantém os valores padrão, com aviso;
@@ -107,13 +115,15 @@ module coupler_config_mod
   integer,            public, protected :: cfg_atm_pet_count    = 0
   integer,            public, protected :: cfg_ocn_pet_count    = 0
   integer,            public, protected :: cfg_ice_pet_count    = 0
-  logical,            public, protected :: cfg_use_sis2_dynamic = .true.
   logical,            public, protected :: cfg_seq_repro        = .false.
 
-  ! &nuopc_mode
-  logical,            public, protected :: cfg_use_datm           = .false.
-  logical,            public, protected :: cfg_use_docn           = .false.
-  logical,            public, protected :: cfg_use_med_to_mpas    = .true.
+  ! &nuopc_mode: modelo de cada posição (COMPONENTS) e contorno da atmosfera
+  ! (ATM_BOUNDARIES); 'none' deixa a posição vazia
+  integer, parameter, public :: MODEL_NAME_LEN = 8
+  character(len=MODEL_NAME_LEN), public, protected :: cfg_atm_model    = 'mpas'
+  character(len=MODEL_NAME_LEN), public, protected :: cfg_ocn_model    = 'mom6'
+  character(len=MODEL_NAME_LEN), public, protected :: cfg_ice_model    = 'sis2'
+  character(len=3),              public, protected :: cfg_atm_boundary = 'med'
   logical,            public, protected :: cfg_use_docn_ice       = .false.
   logical,            public, protected :: cfg_docn_ice_init_only = .false.
 
@@ -127,12 +137,84 @@ module coupler_config_mod
   character(len=32),  public, protected :: cfg_regrid_class(MAX_REGRID_OVERRIDES)   = ''
   character(len=128), public, protected :: cfg_regrid_options(MAX_REGRID_OVERRIDES) = ''
 
-  ! Configurações de componentes
-  ! As quatro chaves que escolhem os componentes (use_datm, use_docn e
-  ! use_med_to_mpas, de &nuopc_mode, e use_sis2_dynamic, de
-  ! &nuopc_petlayout) formam 16 combinações. Esta tabela diz o que acontece
-  ! com cada uma, e é o único lugar onde essa regra está escrita: config_read
-  ! a consulta para aceitar ou recusar a rodada, o mapa de acoplamento
+  ! Componentes
+  ! Uma posição do acoplamento (atmosfera, oceano, gelo) é ocupada por um
+  ! modelo, escolhido no nuopc.input pela chave <posição>_model (atm_model,
+  ! ocn_model, ice_model). COMPONENTS diz que modelos podem ocupar cada
+  ! posição, em que malha do mapa de acoplamento (GRIDS, em cpl_map) o
+  ! componente troca campos e com que rótulo ele aparece no driver, no
+  ! registro e no relatório de acoplamento. O modelo 'none' deixa a posição
+  ! vazia (só o gelo pode ficar vazio). O nome do modelo é também a
+  ! condição da coluna when do mapa: 'mom6' vale quando ocn_model='mom6'.
+  ! Um modelo novo numa posição existente é uma linha aqui, mais o cap e o
+  ! registro no driver (esm.F90).
+
+  !> Um modelo que pode ocupar uma posição do acoplamento.
+  type, public :: component_t
+    character(len=4)              :: position   !< 'ATM', 'OCN' ou 'ICE'
+    character(len=MODEL_NAME_LEN) :: model      !< valor de <posição>_model
+    character(len=12)             :: grid       !< malha do mapa (vazia para 'none')
+    character(len=4)              :: label      !< rótulo no driver (vazio para 'none')
+  end type component_t
+
+  type(component_t), parameter, public :: COMPONENTS(*) = [  &
+    !           posição modelo  malha        rótulo
+    component_t('ATM',  'mpas', 'atm_cap',   'MPAS'),        &
+    component_t('ATM',  'datm', 'datm',      'DATM'),        &
+    component_t('OCN',  'mom6', 'ocn_mom6',  'OCN'),         &
+    component_t('OCN',  'docn', 'docn',      'OCN'),         &
+    component_t('ICE',  'sis2', 'ice_sis2',  'ICE'),         &
+    component_t('ICE',  'none', '',          '') ]
+
+  !> Posições com modelo escolhido no nuopc.input, na ordem das chaves.
+  character(len=3), parameter, public :: MODEL_POSITIONS(3) = ['ATM', 'OCN', 'ICE']
+
+  !> Contorno oceânico da atmosfera (atm_boundary): 'med', pelo mediador, ou
+  !! 'ocn', direto do oceano. No mapa, as condições correspondentes são
+  !! 'med_to_mpas' e 'ocn_to_mpas' (BOUNDARY_CONDITIONS, na mesma ordem).
+  character(len=3),  parameter, public :: ATM_BOUNDARIES(2) = ['med', 'ocn']
+  character(len=12), parameter, public :: BOUNDARY_CONDITIONS(2) = &
+    [character(len=12) :: 'med_to_mpas', 'ocn_to_mpas']
+
+  !> Chaves que escolhem a configuração, na ordem dos valores de
+  !! config_values: o modelo de cada posição de MODEL_POSITIONS e o contorno.
+  character(len=12), parameter, public :: CONFIG_KEYS(4) = &
+    [character(len=12) :: 'atm_model', 'ocn_model', 'ice_model', 'atm_boundary']
+
+  !> Chave antiga, lógica, e a chave por modelo que ela substitui.
+  type :: old_key_t
+    character(len=16)             :: name      !< chave antiga
+    character(len=16)             :: group     !< grupo do nuopc.input
+    character(len=MODEL_NAME_LEN) :: if_true   !< valor da chave nova com .true.
+    character(len=MODEL_NAME_LEN) :: if_false  !< valor da chave nova com .false.
+  end type old_key_t
+
+  !> Chaves antigas, na ordem de CONFIG_KEYS (a k-ésima substitui CONFIG_KEYS(k)).
+  type(old_key_t), parameter :: OLD_KEYS(4) = [                           &
+    old_key_t('use_datm',         'nuopc_mode',      'datm', 'mpas'),    &
+    old_key_t('use_docn',         'nuopc_mode',      'docn', 'mom6'),    &
+    old_key_t('use_sis2_dynamic', 'nuopc_petlayout', 'sis2', 'none'),    &
+    old_key_t('use_med_to_mpas',  'nuopc_mode',      'med',  'ocn') ]
+
+  !> Configuração de componentes: o modelo de cada posição e o contorno da
+  !! atmosfera. O mapa de acoplamento (cpl_map) recebe a configuração como
+  !! argumento em todas as consultas; cpl_current_config dá a lida do
+  !! nuopc.input. Os valores padrão são os da produção.
+  type, public :: cpl_config_t
+    character(len=MODEL_NAME_LEN) :: atm_model    = 'mpas'
+    character(len=MODEL_NAME_LEN) :: ocn_model    = 'mom6'
+    character(len=MODEL_NAME_LEN) :: ice_model    = 'sis2'
+    character(len=3)              :: atm_boundary = 'med'
+  end type cpl_config_t
+
+  public :: cpl_current_config, config_values, config_from_values, config_value
+  public :: position_models, coupler_mode_index
+
+  ! Configurações aceitas
+  ! As escolhas de modelo e de contorno formam 16 combinações (dois modelos
+  ! por posição e dois contornos). Esta tabela diz o que acontece com cada
+  ! uma, e é o único lugar onde essa regra está escrita: config_read a
+  ! consulta para aceitar ou recusar a rodada, o mapa de acoplamento
   ! (cpl_config_is_valid) só considera as combinações aceitas, e
   ! tools/dev/mapa-acoplamento.py a lê para a documentação.
   !
@@ -144,57 +226,45 @@ module coupler_config_mod
   !   'recusada'      a rodada para na leitura; a nota é a mensagem de erro e
   !                   diz o que mudar
   type, public :: coupler_mode_t
-    logical            :: datm
-    logical            :: docn
-    logical            :: med_to_mpas
-    logical            :: sis2
-    character(len=16)  :: status
-    character(len=128) :: note
+    character(len=MODEL_NAME_LEN) :: atm_model
+    character(len=MODEL_NAME_LEN) :: ocn_model
+    character(len=MODEL_NAME_LEN) :: ice_model
+    character(len=3)              :: atm_boundary
+    character(len=16)             :: status
+    character(len=128)            :: note
   end type coupler_mode_t
 
   character(len=*), parameter :: NOTE_MOM6_DIRECT = &
-    'use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera.'
+    'ocn_model=mom6 (use_docn=.false.) exige atm_boundary=med (use_med_to_mpas=.true.); ' // &
+    'o MOM6 nao exporta o contorno da atmosfera.'
   character(len=*), parameter :: NOTE_SIS2_DOCN = &
-    'use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6).'
+    'ice_model=sis2 (use_sis2_dynamic=.true.) exige ocn_model=mom6 (use_docn=.false.); ' // &
+    'o SIS2 precisa do MOM6.'
   character(len=*), parameter :: NOTE_DATM = &
     'o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A.'
 
-  type(coupler_mode_t), parameter, public :: COUPLER_MODES(*) = [                                      &
-    !              datm     docn     med_to_mpas sis2   situação        nota
-    coupler_mode_t(.false., .false., .true.,  .true.,  'suportada',    'producao: MONAN-A, MOM6 e SIS2, ' // &
-                                                                       'contorno pelo mediador'),           &
-    coupler_mode_t(.false., .false., .true.,  .false., 'suportada',    'MONAN-A e MOM6 sem o SIS2, ' //     &
-                                                                       'contorno pelo mediador'),           &
-    coupler_mode_t(.false., .true.,  .false., .false., 'nao_validada', 'o DOCN nao exporta Sx_tsfc, ' //    &
-                                                                       'Sf_albedo e Sx_omask, que o MONAN-A importa.'), &
-    coupler_mode_t(.false., .true.,  .true.,  .false., 'nao_validada', 'DOCN com contorno pelo mediador ' // &
-                                                                       'nunca foi executado.'),             &
-    coupler_mode_t(.true.,  .false., .true.,  .true.,  'nao_validada', NOTE_DATM),                          &
-    coupler_mode_t(.true.,  .false., .true.,  .false., 'nao_validada', NOTE_DATM),                          &
-    coupler_mode_t(.true.,  .true.,  .false., .false., 'nao_validada', NOTE_DATM),                          &
-    coupler_mode_t(.true.,  .true.,  .true.,  .false., 'nao_validada', NOTE_DATM),                          &
-    coupler_mode_t(.false., .false., .false., .true.,  'recusada',     NOTE_MOM6_DIRECT),                   &
-    coupler_mode_t(.false., .false., .false., .false., 'recusada',     NOTE_MOM6_DIRECT),                   &
-    coupler_mode_t(.true.,  .false., .false., .true.,  'recusada',     NOTE_MOM6_DIRECT),                   &
-    coupler_mode_t(.true.,  .false., .false., .false., 'recusada',     NOTE_MOM6_DIRECT),                   &
-    coupler_mode_t(.false., .true.,  .false., .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
-    coupler_mode_t(.false., .true.,  .true.,  .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
-    coupler_mode_t(.true.,  .true.,  .false., .true.,  'recusada',     NOTE_SIS2_DOCN),                     &
-    coupler_mode_t(.true.,  .true.,  .true.,  .true.,  'recusada',     NOTE_SIS2_DOCN) ]
-
-  public :: coupler_mode_index
-
-  !> Chaves de &nuopc_mode que escolhem as trocas do mapa de acoplamento
-  !! (cpl_map). O mapa recebe a configuração como argumento em todas as
-  !! consultas; cpl_current_config dá a lida do nuopc.input.
-  type, public :: cpl_config_t
-    logical :: datm        = .false.
-    logical :: docn        = .false.
-    logical :: med_to_mpas = .true.
-    logical :: sis2        = .true.
-  end type cpl_config_t
-
-  public :: cpl_current_config
+  type(coupler_mode_t), parameter, public :: COUPLER_MODES(*) = [                               &
+    !              atm     ocn     ice     contorno situação        nota
+    coupler_mode_t('mpas', 'mom6', 'sis2', 'med',   'suportada',    'producao: MONAN-A, MOM6 e SIS2, ' // &
+                                                                    'contorno pelo mediador'),           &
+    coupler_mode_t('mpas', 'mom6', 'none', 'med',   'suportada',    'MONAN-A e MOM6 sem o SIS2, ' //     &
+                                                                    'contorno pelo mediador'),           &
+    coupler_mode_t('mpas', 'docn', 'none', 'ocn',   'nao_validada', 'o DOCN nao exporta Sx_tsfc, ' //    &
+                                                                    'Sf_albedo e Sx_omask, que o MONAN-A importa.'), &
+    coupler_mode_t('mpas', 'docn', 'none', 'med',   'nao_validada', 'DOCN com contorno pelo mediador ' // &
+                                                                    'nunca foi executado.'),             &
+    coupler_mode_t('datm', 'mom6', 'sis2', 'med',   'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t('datm', 'mom6', 'none', 'med',   'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t('datm', 'docn', 'none', 'ocn',   'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t('datm', 'docn', 'none', 'med',   'nao_validada', NOTE_DATM),                          &
+    coupler_mode_t('mpas', 'mom6', 'sis2', 'ocn',   'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t('mpas', 'mom6', 'none', 'ocn',   'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t('datm', 'mom6', 'sis2', 'ocn',   'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t('datm', 'mom6', 'none', 'ocn',   'recusada',     NOTE_MOM6_DIRECT),                   &
+    coupler_mode_t('mpas', 'docn', 'sis2', 'ocn',   'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t('mpas', 'docn', 'sis2', 'med',   'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t('datm', 'docn', 'sis2', 'ocn',   'recusada',     NOTE_SIS2_DOCN),                     &
+    coupler_mode_t('datm', 'docn', 'sis2', 'med',   'recusada',     NOTE_SIS2_DOCN) ]
 
   ! Valores de cada grupo durante a leitura, com os nomes das chaves. A
   ! leitura preenche estes registros e só os copia para as variáveis cfg_*
@@ -247,17 +317,23 @@ module coupler_config_mod
     integer            :: restart_n                 !< chave obsoleta, sem efeito
   end type ocn_group_t
 
-  !> Valores de &nuopc_mode durante a leitura.
+  !> Valores de &nuopc_mode durante a leitura. As chaves da configuração
+  !! ficam na ordem de CONFIG_KEYS: value(k) é o valor dado à chave nova
+  !! (vazio se ausente); old_given(k) diz se a chave antiga OLD_KEYS(k) foi
+  !! dada, e old_value(k), o valor dela. A chave antiga do gelo
+  !! (use_sis2_dynamic) é de &nuopc_petlayout e fica em petlayout_group_t.
   type :: mode_group_t
-    logical :: use_datm, use_docn, use_med_to_mpas
-    logical :: use_docn_ice, docn_ice_init_only
+    character(len=16) :: value(4)
+    logical           :: old_given(4), old_value(4)
+    logical           :: use_docn_ice, docn_ice_init_only
   end type mode_group_t
 
   !> Valores de &nuopc_petlayout durante a leitura.
   type :: petlayout_group_t
     character(len=16) :: coupling_mode, pet_layout
     integer           :: atm_pet_count, ocn_pet_count, ice_pet_count
-    logical           :: use_sis2_dynamic, seq_repro
+    logical           :: sis2_given, use_sis2_dynamic   !< chave antiga do gelo
+    logical           :: seq_repro
   end type petlayout_group_t
 
   !> Valores de &nuopc_regrid durante a leitura.
@@ -271,29 +347,75 @@ module coupler_config_mod
 
 contains
 
-  !> @brief Configuração do mapa correspondente às chaves de &nuopc_mode lidas do
-  !! nuopc.input.
+  !> @brief Configuração de componentes lida do nuopc.input.
   function cpl_current_config() result(cfg)
     type(cpl_config_t) :: cfg
 
-    cfg%datm        = cfg_use_datm
-    cfg%docn        = cfg_use_docn
-    cfg%med_to_mpas = cfg_use_med_to_mpas
-    cfg%sis2        = cfg_use_sis2_dynamic
+    cfg = cpl_config_t(cfg_atm_model, cfg_ocn_model, cfg_ice_model, cfg_atm_boundary)
   end function cpl_current_config
 
-  !> @brief Posição em COUPLER_MODES da combinação das quatro chaves. A tabela tem
-  !! as 16 combinações (conferido por tests/unit/test_cpl_map.F90), então o
-  !! resultado nunca é 0.
-  pure integer function coupler_mode_index(datm, docn, med_to_mpas, sis2) result(k)
-    logical, intent(in) :: datm, docn, med_to_mpas, sis2
+  !> @brief Valores da configuração, na ordem de CONFIG_KEYS.
+  pure function config_values(cfg) result(values)
+    type(cpl_config_t), intent(in) :: cfg
+    character(len=MODEL_NAME_LEN) :: values(4)
+
+    values = [character(len=MODEL_NAME_LEN) :: cfg%atm_model, cfg%ocn_model, &
+              cfg%ice_model, cfg%atm_boundary]
+  end function config_values
+
+  !> @brief Configuração com os valores dados, na ordem de CONFIG_KEYS.
+  pure function config_from_values(values) result(cfg)
+    character(len=*), intent(in) :: values(4)
+    type(cpl_config_t) :: cfg
+
+    cfg = cpl_config_t(values(1), values(2), values(3), values(4))
+  end function config_from_values
+
+  !> @brief Valor de uma chave da configuração ('atm_model', 'ocn_model',
+  !! 'ice_model' ou 'atm_boundary'); vazio se a chave não existe.
+  pure function config_value(cfg, key) result(value)
+    type(cpl_config_t), intent(in) :: cfg
+    character(len=*),   intent(in) :: key
+    character(len=MODEL_NAME_LEN) :: value
+    character(len=MODEL_NAME_LEN) :: values(4)
+    integer :: k
+
+    values = config_values(cfg)
+    value = ''
+    do k = 1, size(CONFIG_KEYS)
+      if (trim(CONFIG_KEYS(k)) == trim(key)) value = values(k)
+    end do
+  end function config_value
+
+  !> @brief Modelos que podem ocupar a posição, na ordem de COMPONENTS,
+  !! separados por '|' (para as mensagens: 'mpas|datm').
+  pure function position_models(position) result(txt)
+    character(len=*), intent(in) :: position
+    character(len=:), allocatable :: txt
+    integer :: k
+
+    txt = ''
+    do k = 1, size(COMPONENTS)
+      if (trim(COMPONENTS(k)%position) /= trim(position)) cycle
+      if (len(txt) > 0) txt = txt//'|'
+      txt = txt//trim(COMPONENTS(k)%model)
+    end do
+  end function position_models
+
+  !> @brief Posição em COUPLER_MODES da configuração (0 se ela não está na
+  !! tabela). A tabela tem todas as combinações dos modelos de COMPONENTS e
+  !! dos contornos (conferido por tests/unit/test_cpl_map.F90); só uma
+  !! configuração com um valor fora delas dá 0.
+  pure integer function coupler_mode_index(cfg) result(k)
+    type(cpl_config_t), intent(in) :: cfg
     integer :: i
 
     k = 0
     do i = 1, size(COUPLER_MODES)
-      if ((COUPLER_MODES(i)%datm .eqv. datm) .and. (COUPLER_MODES(i)%docn .eqv. docn) .and. &
-          (COUPLER_MODES(i)%med_to_mpas .eqv. med_to_mpas) .and.                            &
-          (COUPLER_MODES(i)%sis2 .eqv. sis2)) then
+      if (COUPLER_MODES(i)%atm_model == cfg%atm_model .and.          &
+          COUPLER_MODES(i)%ocn_model == cfg%ocn_model .and.          &
+          COUPLER_MODES(i)%ice_model == cfg%ice_model .and.          &
+          COUPLER_MODES(i)%atm_boundary == cfg%atm_boundary) then
         k = i
         return
       end if
@@ -306,9 +428,10 @@ contains
   !! grupo, partindo dos valores atuais do módulo (os padrões, na primeira
   !! leitura), e <grupo>_group_valid confere as regras do grupo. Esta rotina
   !! localiza o arquivo, chama as dos grupos em ordem, confere as regras que
-  !! envolvem mais de um grupo (a tabela COUPLER_MODES, o gelo do DOCN e
-  !! seq_repro) e, se nada estiver errado, publica os valores nas variáveis
-  !! cfg_* (publish_<grupo>_group).
+  !! envolvem mais de um grupo (a escolha dos modelos, com a tradução das
+  !! chaves antigas, a tabela COUPLER_MODES, o gelo do DOCN e seq_repro) e,
+  !! se nada estiver errado, publica os valores nas variáveis cfg_*
+  !! (publish_<grupo>_group e publish_components).
   !!
   !! @param[out] rc         0 sucesso, 1 arquivo ausente, 2 erro fatal
   !! @param[in]  file_path  caminho opcional; senão usa a variável de
@@ -326,6 +449,7 @@ contains
     type(mode_group_t)      :: mode_keys
     type(petlayout_group_t) :: petlayout
     type(regrid_group_t)    :: regrid
+    type(cpl_config_t)      :: components   ! modelos escolhidos e contorno
 
     character(len=512) :: fpath
     logical :: exists, is_root
@@ -372,8 +496,6 @@ contains
 
     ! 4. Validar (erro fatal): primeiro as regras de cada grupo, depois as que
     !    envolvem mais de um
-    mode = coupler_mode_index(mode_keys%use_datm, mode_keys%use_docn, &
-                              mode_keys%use_med_to_mpas, petlayout%use_sis2_dynamic)
     if (.not. valid_config()) then
       rc = CFG_FATAL
       return
@@ -396,6 +518,7 @@ contains
     call publish_docn_group(docn)
     call publish_ocn_group(ocn)
     call publish_mode_group(mode_keys)
+    call publish_components(components)
     call publish_petlayout_group(petlayout)
     call publish_regrid_group(regrid)
 
@@ -453,7 +576,12 @@ contains
       if (.not. driver_group_valid(driver, is_root)) return
       if (.not. docn_group_valid(docn, is_root)) return
       if (.not. petlayout_group_valid(petlayout, is_root)) return
-      if (COUPLER_MODES(mode)%status == 'recusada') then
+      if (.not. resolve_components(mode_keys, petlayout, is_root, components)) return
+      mode = coupler_mode_index(components)
+      if (trim(components%ice_model) == 'none' .and. petlayout%ice_pet_count > 0) then
+        call config_error(is_root, 'ice_pet_count > 0 exige um modelo de gelo (ice_model=sis2; ' // &
+                          'chave antiga use_sis2_dynamic=.true.).')
+      else if (COUPLER_MODES(mode)%status == 'recusada') then
         call config_error(is_root, trim(COUPLER_MODES(mode)%note))
       else if (mode_keys%use_docn_ice .and. len_trim(docn%docn_ice_file) == 0) then
         call config_error(is_root, 'use_docn_ice=.true. exige docn_ice_file em &nuopc_docn.')
@@ -469,8 +597,8 @@ contains
 
       if (trim(petlayout%coupling_mode) /= 'sequential') then
         reason = 'coupling_mode=sequential'
-      else if (.not. (mode_keys%use_med_to_mpas .and. petlayout%use_sis2_dynamic)) then
-        reason = 'use_med_to_mpas=.true. e use_sis2_dynamic=.true.'
+      else if (trim(components%atm_boundary) /= 'med' .or. trim(components%ice_model) /= 'sis2') then
+        reason = 'atm_boundary=med e ice_model=sis2'
       else if (trim(petlayout%pet_layout) /= 'split') then
         reason = 'pet_layout=split'
       else
@@ -837,7 +965,13 @@ contains
 
   ! &nuopc_mode
 
-  !> @brief Lê &nuopc_mode, a partir dos valores atuais do módulo.
+  !> @brief Lê &nuopc_mode, a partir dos valores atuais do módulo, e passa as
+  !! chaves por modelo a minúsculas.
+  !!
+  !! As chaves por modelo vazias estão ausentes. Para saber se uma chave
+  !! antiga (lógica) foi dada, o grupo é lido duas vezes, com as chaves
+  !! antigas iniciadas com .false. e depois com .true.: uma chave dada tem o
+  !! mesmo valor nas duas leituras.
   !!
   !! @param[in]  unit  unidade do arquivo aberto
   !! @param[out] g     valores do grupo
@@ -847,21 +981,40 @@ contains
     type(mode_group_t), intent(out) :: g
     integer,            intent(out) :: ios
 
+    character(len=16) :: atm_model, ocn_model, ice_model, atm_boundary
     logical :: use_datm, use_docn, use_med_to_mpas
     logical :: use_docn_ice, docn_ice_init_only
-    namelist /nuopc_mode/ use_datm, use_docn, use_med_to_mpas, &
+    logical :: first(3)
+    integer :: pass
+    namelist /nuopc_mode/ atm_model, ocn_model, ice_model, atm_boundary, &
+                          use_datm, use_docn, use_med_to_mpas,           &
                           use_docn_ice, docn_ice_init_only
 
-    use_datm = cfg_use_datm;  use_docn = cfg_use_docn
-    use_med_to_mpas = cfg_use_med_to_mpas
-    use_docn_ice = cfg_use_docn_ice;  docn_ice_init_only = cfg_docn_ice_init_only
-    rewind(unit); read(unit, nml=nuopc_mode, iostat=ios)
-    g = mode_group_t(use_datm, use_docn, use_med_to_mpas, use_docn_ice, docn_ice_init_only)
+    do pass = 1, 2
+      atm_model = '';  ocn_model = '';  ice_model = '';  atm_boundary = ''
+      use_datm = pass == 2;  use_docn = pass == 2;  use_med_to_mpas = pass == 2
+      use_docn_ice = cfg_use_docn_ice;  docn_ice_init_only = cfg_docn_ice_init_only
+      rewind(unit); read(unit, nml=nuopc_mode, iostat=ios)
+      if (pass == 1) first = [use_datm, use_docn, use_med_to_mpas]
+    end do
+
+    call str_lower(atm_model)
+    call str_lower(ocn_model)
+    call str_lower(ice_model)
+    call str_lower(atm_boundary)
+    g%value = [character(len=16) :: atm_model, ocn_model, ice_model, atm_boundary]
+    ! na ordem de CONFIG_KEYS; a terceira (gelo) é de &nuopc_petlayout
+    g%old_given = [first(1) .eqv. use_datm, first(2) .eqv. use_docn, .false., &
+                   first(3) .eqv. use_med_to_mpas]
+    g%old_value = [use_datm, use_docn, .false., use_med_to_mpas]
+    g%use_docn_ice = use_docn_ice
+    g%docn_ice_init_only = docn_ice_init_only
   end subroutine read_mode_group
 
-  !> @brief Regras de &nuopc_mode; escreve a primeira violada. As combinações
-  !! de componentes, que envolvem também use_sis2_dynamic, ficam em
-  !! config_read (COUPLER_MODES).
+  !> @brief Regras de &nuopc_mode; escreve a primeira violada. A escolha dos
+  !! modelos, que envolve também a chave antiga use_sis2_dynamic, de
+  !! &nuopc_petlayout, fica em resolve_components, e as combinações de
+  !! modelos, em config_read (COUPLER_MODES).
   !!
   !! @param[in] g        valores do grupo
   !! @param[in] is_root  verdadeiro no processo 0
@@ -878,16 +1031,82 @@ contains
   !! @param[in] g  valores do grupo
   subroutine publish_mode_group(g)
     type(mode_group_t), intent(in) :: g
-    cfg_use_datm = g%use_datm;  cfg_use_docn = g%use_docn
-    cfg_use_med_to_mpas = g%use_med_to_mpas
     cfg_use_docn_ice = g%use_docn_ice;  cfg_docn_ice_init_only = g%docn_ice_init_only
   end subroutine publish_mode_group
+
+  !> @brief Modelos e contorno da rodada: os valores atuais do módulo, com as
+  !! chaves dadas no arquivo. Uma chave antiga é traduzida pela tabela
+  !! OLD_KEYS; se a chave nova correspondente também foi dada, as duas têm
+  !! de concordar. Escreve o primeiro erro: valor fora de COMPONENTS (ou de
+  !! ATM_BOUNDARIES) ou chave antiga que contradiz a nova.
+  !!
+  !! @param[in]  mode_keys  valores de &nuopc_mode
+  !! @param[in]  petlayout  valores de &nuopc_petlayout (chave antiga do gelo)
+  !! @param[in]  is_root    verdadeiro no processo 0
+  !! @param[out] cfg        configuração escolhida
+  logical function resolve_components(mode_keys, petlayout, is_root, cfg) result(ok)
+    type(mode_group_t),      intent(in)  :: mode_keys
+    type(petlayout_group_t), intent(in)  :: petlayout
+    logical,                 intent(in)  :: is_root
+    type(cpl_config_t),      intent(out) :: cfg
+
+    character(len=16)             :: values(4)   ! valores de CONFIG_KEYS
+    character(len=MODEL_NAME_LEN) :: translated
+    character(len=:), allocatable :: allowed
+    logical :: given(4), old(4)
+    integer :: k
+
+    ok = .false.
+    values = config_values(cpl_current_config())
+    given = mode_keys%old_given
+    old = mode_keys%old_value
+    given(3) = petlayout%sis2_given
+    old(3) = petlayout%use_sis2_dynamic
+    do k = 1, size(CONFIG_KEYS)
+      translated = merge(OLD_KEYS(k)%if_true, OLD_KEYS(k)%if_false, old(k))
+      if (len_trim(mode_keys%value(k)) == 0) then
+        if (given(k)) values(k) = translated
+        cycle
+      end if
+      if (k <= size(MODEL_POSITIONS)) then
+        allowed = position_models(MODEL_POSITIONS(k))
+      else
+        allowed = ATM_BOUNDARIES(1)//'|'//ATM_BOUNDARIES(2)
+      end if
+      if (index('|'//allowed//'|', '|'//trim(mode_keys%value(k))//'|') == 0) then
+        call config_error(is_root, trim(CONFIG_KEYS(k))//'="'//trim(mode_keys%value(k))// &
+                          '" invalido; use '//allowed//'.')
+        return
+      end if
+      if (given(k) .and. trim(mode_keys%value(k)) /= trim(translated)) then
+        call config_error(is_root, trim(CONFIG_KEYS(k))//'="'//trim(mode_keys%value(k))// &
+                          '" contradiz a chave antiga '//trim(OLD_KEYS(k)%name)//'='// &
+                          trim(merge('.true. ', '.false.', old(k)))//'; use so '// &
+                          trim(CONFIG_KEYS(k))//'.')
+        return
+      end if
+      values(k) = mode_keys%value(k)
+    end do
+    cfg = config_from_values(values)
+    ok = .true.
+  end function resolve_components
+
+  !> @brief Copia os modelos e o contorno escolhidos para as variáveis do módulo.
+  !!
+  !! @param[in] cfg  configuração escolhida (resolve_components)
+  subroutine publish_components(cfg)
+    type(cpl_config_t), intent(in) :: cfg
+    cfg_atm_model = cfg%atm_model;  cfg_ocn_model = cfg%ocn_model
+    cfg_ice_model = cfg%ice_model;  cfg_atm_boundary = cfg%atm_boundary
+  end subroutine publish_components
 
   ! &nuopc_petlayout
 
   !> @brief Lê &nuopc_petlayout, a partir dos valores atuais do módulo; passa
   !! coupling_mode e pet_layout a minúsculas e, sem pet_layout, o deduz de
-  !! coupling_mode (concurrent: split; sequential: shared).
+  !! coupling_mode (concurrent: split; sequential: shared). A chave antiga
+  !! use_sis2_dynamic é lida como as de &nuopc_mode (read_mode_group): duas
+  !! leituras, para saber se foi dada.
   !!
   !! @param[in]  unit  unidade do arquivo aberto
   !! @param[out] g     valores do grupo
@@ -899,18 +1118,21 @@ contains
 
     character(len=16) :: coupling_mode, pet_layout
     integer           :: atm_pet_count, ocn_pet_count, ice_pet_count
-    logical           :: use_sis2_dynamic, seq_repro
+    logical           :: use_sis2_dynamic, seq_repro, first
+    integer           :: pass
     namelist /nuopc_petlayout/ coupling_mode, pet_layout, atm_pet_count, &
                                ocn_pet_count, ice_pet_count, use_sis2_dynamic, &
                                seq_repro
 
-    coupling_mode = cfg_coupling_mode
-    pet_layout = ''            ! vazio = chave ausente; derivado de coupling_mode
-    atm_pet_count = cfg_atm_pet_count;  ocn_pet_count = cfg_ocn_pet_count
-    ice_pet_count = cfg_ice_pet_count
-    use_sis2_dynamic = cfg_use_sis2_dynamic;  seq_repro = cfg_seq_repro
-
-    rewind(unit); read(unit, nml=nuopc_petlayout, iostat=ios)
+    do pass = 1, 2
+      coupling_mode = cfg_coupling_mode
+      pet_layout = ''            ! vazio = chave ausente; derivado de coupling_mode
+      atm_pet_count = cfg_atm_pet_count;  ocn_pet_count = cfg_ocn_pet_count
+      ice_pet_count = cfg_ice_pet_count
+      use_sis2_dynamic = pass == 2;  seq_repro = cfg_seq_repro
+      rewind(unit); read(unit, nml=nuopc_petlayout, iostat=ios)
+      if (pass == 1) first = use_sis2_dynamic
+    end do
 
     call str_lower(coupling_mode)
     call str_lower(pet_layout)
@@ -922,7 +1144,8 @@ contains
       end if
     end if
     g = petlayout_group_t(coupling_mode, pet_layout, atm_pet_count, ocn_pet_count, &
-                          ice_pet_count, use_sis2_dynamic, seq_repro)
+                          ice_pet_count, first .eqv. use_sis2_dynamic, use_sis2_dynamic, &
+                          seq_repro)
   end subroutine read_petlayout_group
 
   !> @brief Regras de &nuopc_petlayout; escreve a primeira violada.
@@ -948,8 +1171,6 @@ contains
              max(g%atm_pet_count, g%ocn_pet_count, g%ice_pet_count) > 0) then
       call config_error(is_root, 'pet_layout=shared nao aceita contagens de PET; ' // &
                         'use pet_layout=split ou zere as contagens.')
-    else if (.not. g%use_sis2_dynamic .and. g%ice_pet_count > 0) then
-      call config_error(is_root, 'ice_pet_count > 0 exige use_sis2_dynamic=.true.')
     else
       ok = .true.
     end if
@@ -962,8 +1183,7 @@ contains
     type(petlayout_group_t), intent(in) :: g
     cfg_coupling_mode = g%coupling_mode;  cfg_pet_layout = g%pet_layout
     cfg_atm_pet_count = g%atm_pet_count;  cfg_ocn_pet_count = g%ocn_pet_count
-    cfg_ice_pet_count = g%ice_pet_count
-    cfg_use_sis2_dynamic = g%use_sis2_dynamic;  cfg_seq_repro = g%seq_repro
+    cfg_ice_pet_count = g%ice_pet_count;  cfg_seq_repro = g%seq_repro
   end subroutine publish_petlayout_group
 
   ! &nuopc_regrid

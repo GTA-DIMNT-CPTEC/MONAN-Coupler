@@ -36,7 +36,7 @@ module med_exchange_mod
   use ESMF
   use NUOPC,               only: NUOPC_SetTimestamp, NUOPC_CompAttributeSet, NUOPC_IsAtTime
   use coupler_utils_mod,   only: ChkErr
-  use coupler_config_mod,  only: cfg_use_sis2_dynamic
+  use coupler_config_mod,  only: cfg_ice_model
   use coupler_log_mod,     only: COMP_MED, log_info, log_warning, log_debug, log_debug_enabled
   use cpl_map_mod,         only: ROUTES
   use med_cap_types_mod,   only: MED_InternalState, med_flux_t
@@ -531,7 +531,7 @@ contains
     if (.not. is%regrid%has('ocn2atm_sst')) &
       call set_ocean_mask_for_sst(is, importState, sst_ocn, rc_route)
 
-    if (cfg_use_sis2_dynamic) then
+    if (trim(cfg_ice_model) == 'sis2') then
       call ESMF_StateGet(importState, itemName="Si_ifrac_sis2", &
         field=f_ifrac_src, rc=rc_route)
       if (.not. is%regrid%has('ocn2atm_ice') .and. rc_route == ESMF_SUCCESS) &
@@ -771,7 +771,7 @@ contains
     real(ESMF_KIND_R8), pointer :: sst(:,:)
     integer :: rc
 
-    if (cfg_use_sis2_dynamic) return
+    if (trim(cfg_ice_model) == 'sis2') return
     nullify(fptr, sst)
     call ESMF_FieldGet(is%ocn%sst, farrayPtr=sst, rc=rc)
     if (rc /= ESMF_SUCCESS) nullify(sst)

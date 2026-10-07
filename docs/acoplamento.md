@@ -14,41 +14,56 @@ das linhas de `EXCHANGES` (importação) e de `EXPORTS` (exportação).
 
 ## 1. Configurações
 
-Cada troca vale numa lista de condições (coluna `when`), escolhidas
-pelas chaves do grupo `&nuopc_mode` do `nuopc.input`:
+O grupo `&nuopc_mode` do `nuopc.input` escolhe o modelo de cada posição
+(`atm_model`, `ocn_model`, `ice_model`) e o contorno oceânico da
+atmosfera (`atm_boundary`). Os modelos possíveis estão na tabela
+`COMPONENTS` (`src/shared/coupler_config.F90`); `none` deixa a posição
+vazia:
+
+| Posição | Modelo | Malha | Rótulo no driver |
+| --- | --- | --- | --- |
+| ATM | `mpas` | `atm_cap` | MPAS |
+| ATM | `datm` | `datm` | DATM |
+| OCN | `mom6` | `ocn_mom6` | OCN |
+| OCN | `docn` | `docn` | OCN |
+| ICE | `sis2` | `ice_sis2` | ICE |
+| ICE | `none` |   |   |
+
+As chaves antigas (`use_datm`, `use_docn`, `use_med_to_mpas` e
+`use_sis2_dynamic`) continuam aceitas e são traduzidas para estas.
+Cada troca vale numa lista de condições (coluna `when`):
 
 | Condição | Vale quando |
 | --- | --- |
-| `mpas` / `datm` | componente atmosférico é o MONAN-A / o DATM (`use_datm`) |
-| `mom6` / `docn` | componente oceânico é o MOM6 / o DOCN (`use_docn`) |
-| `med_to_mpas` / `ocn_to_mpas` | contorno oceânico da atmosfera pelo mediador / direto do oceano (`use_med_to_mpas`) |
-| `sis2` | gelo dinâmico (`use_sis2_dynamic`) |
+| nome de um modelo (`mpas`, `datm`, `mom6`, `docn`, `sis2`) | o modelo ocupa a posição dele (`mom6`: `ocn_model = mom6`) |
+| `med_to_mpas` / `ocn_to_mpas` | contorno oceânico da atmosfera pelo mediador / direto do oceano (`atm_boundary = med` / `ocn`) |
 
-As quatro chaves formam 16 combinações. A tabela `COUPLER_MODES`
-(`src/shared/coupler_config.F90`) diz o que acontece com cada uma, e é
-consultada pela leitura do `nuopc.input` e pelo mapa: `suportada` é a
-produção, com ou sem o SIS2; `nao_validada` é aceita com aviso no início
-da rodada; `recusada` para a rodada na leitura, e a nota é a mensagem.
-Os valores padrão das chaves formam a configuração de produção.
+Os modelos de cada posição e os dois contornos formam 16 combinações. A
+tabela `COUPLER_MODES` (`src/shared/coupler_config.F90`) diz o que
+acontece com cada uma, e é consultada pela leitura do `nuopc.input` e
+pelo mapa: `suportada` é a produção, com ou sem o SIS2; `nao_validada` é
+aceita com aviso no início da rodada; `recusada` para a rodada na
+leitura, e a nota é a mensagem. Os valores padrão das chaves formam a
+configuração de produção.
 
-| `use_datm` | `use_docn` | `use_med_to_mpas` | `use_sis2_dynamic` | Situação | Nota |
+| `atm_model` | `ocn_model` | `ice_model` | `atm_boundary` | Situação | Nota |
 | --- | --- | --- | --- | --- | --- |
-| F | F | T | T | `suportada` | producao: MONAN-A, MOM6 e SIS2, contorno pelo mediador |
-| F | F | T | F | `suportada` | MONAN-A e MOM6 sem o SIS2, contorno pelo mediador |
-| F | T | F | F | `nao_validada` | o DOCN nao exporta Sx_tsfc, Sf_albedo e Sx_omask, que o MONAN-A importa. |
-| F | T | T | F | `nao_validada` | DOCN com contorno pelo mediador nunca foi executado. |
-| T | F | T | T | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
-| T | F | T | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
-| T | T | F | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
-| T | T | T | F | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
-| F | F | F | T | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
-| F | F | F | F | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
-| T | F | F | T | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
-| T | F | F | F | `recusada` | use_docn=.false. (MOM6) exige use_med_to_mpas=.true.; o MOM6 nao exporta o contorno da atmosfera. |
-| F | T | F | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
-| F | T | T | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
-| T | T | F | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
-| T | T | T | T | `recusada` | use_sis2_dynamic=.true. exige use_docn=.false. (SIS2 precisa do MOM6). |
+| `mpas` | `mom6` | `sis2` | `med` | `suportada` | producao: MONAN-A, MOM6 e SIS2, contorno pelo mediador |
+| `mpas` | `mom6` | `none` | `med` | `suportada` | MONAN-A e MOM6 sem o SIS2, contorno pelo mediador |
+| `mpas` | `docn` | `none` | `ocn` | `nao_validada` | o DOCN nao exporta Sx_tsfc, Sf_albedo e Sx_omask, que o MONAN-A importa. |
+| `mpas` | `docn` | `none` | `med` | `nao_validada` | DOCN com contorno pelo mediador nunca foi executado. |
+| `datm` | `mom6` | `sis2` | `med` | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| `datm` | `mom6` | `none` | `med` | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| `datm` | `docn` | `none` | `ocn` | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| `datm` | `docn` | `none` | `med` | `nao_validada` | o driver nao registra o DATM; o componente ATM continua sendo o MONAN-A. |
+| `mpas` | `mom6` | `sis2` | `ocn` | `recusada` | ocn_model=mom6 (use_docn=.false.) exige atm_boundary=med (use_med_to_mpas=.true.); o MOM6 nao exporta o contorno da atmosfera. |
+| `mpas` | `mom6` | `none` | `ocn` | `recusada` | ocn_model=mom6 (use_docn=.false.) exige atm_boundary=med (use_med_to_mpas=.true.); o MOM6 nao exporta o contorno da atmosfera. |
+| `datm` | `mom6` | `sis2` | `ocn` | `recusada` | ocn_model=mom6 (use_docn=.false.) exige atm_boundary=med (use_med_to_mpas=.true.); o MOM6 nao exporta o contorno da atmosfera. |
+| `datm` | `mom6` | `none` | `ocn` | `recusada` | ocn_model=mom6 (use_docn=.false.) exige atm_boundary=med (use_med_to_mpas=.true.); o MOM6 nao exporta o contorno da atmosfera. |
+| `mpas` | `docn` | `sis2` | `ocn` | `recusada` | ice_model=sis2 (use_sis2_dynamic=.true.) exige ocn_model=mom6 (use_docn=.false.); o SIS2 precisa do MOM6. |
+| `mpas` | `docn` | `sis2` | `med` | `recusada` | ice_model=sis2 (use_sis2_dynamic=.true.) exige ocn_model=mom6 (use_docn=.false.); o SIS2 precisa do MOM6. |
+| `datm` | `docn` | `sis2` | `ocn` | `recusada` | ice_model=sis2 (use_sis2_dynamic=.true.) exige ocn_model=mom6 (use_docn=.false.); o SIS2 precisa do MOM6. |
+| `datm` | `docn` | `sis2` | `med` | `recusada` | ice_model=sis2 (use_sis2_dynamic=.true.) exige ocn_model=mom6 (use_docn=.false.); o SIS2 precisa do MOM6. |
 
 Campos por conector em cada configuração conferida pelo teste:
 
@@ -65,7 +80,7 @@ Campos por conector em cada configuração conferida pelo teste:
 `producao` é a configuração de validação (MONAN-A, MOM6 e SIS2, contorno
 pelo mediador). O driver não registra o DATM: as trocas com `datm`
 descrevem o que o cap do DATM anuncia, e a conferência do mapa
-interrompe uma rodada com `use_datm`.
+interrompe uma rodada com `atm_model = datm`.
 
 Lacunas conhecidas (tabela `GAPS`): campos que um componente anuncia
 na importação e que, na configuração indicada, não têm origem. A

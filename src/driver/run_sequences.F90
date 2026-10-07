@@ -50,7 +50,7 @@ module run_sequences_mod
     character(len=200) :: text
   end type run_sequence_t
 
-  ! "MOM6", nos nomes e títulos, quer dizer use_med_to_mpas=.true.: o
+  ! "MOM6", nos nomes e títulos, quer dizer atm_boundary=med: o
   ! contorno da atmosfera vem do mediador. Sem ele (DOCN), vem direto do
   ! oceano pelo conector OCN -> MPAS.
   type(run_sequence_t), parameter :: RUN_SEQUENCES(*) = [                                          &
@@ -77,8 +77,8 @@ contains
   !> @brief Nome da sequência para a configuração.
   !!
   !! @param[in] concurrent  coupling_mode='concurrent'
-  !! @param[in] mom6        use_med_to_mpas (contorno da atmosfera pelo mediador)
-  !! @param[in] ice         SIS2 dinâmico (use_sis2_dynamic e use_med_to_mpas)
+  !! @param[in] mom6        atm_boundary=med (contorno da atmosfera pelo mediador)
+  !! @param[in] ice         gelo (ice_model diferente de none, com atm_boundary=med)
   !! @param[in] seq_repro   ordem reprodutível no modo sequencial
   pure function run_sequence_name(concurrent, mom6, ice, seq_repro) result(name)
     logical, intent(in) :: concurrent, mom6, ice, seq_repro

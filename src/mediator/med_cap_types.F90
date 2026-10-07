@@ -332,8 +332,8 @@ module med_cap_types_mod
     !! Cada rota pode ser trocada em nuopc.input, grupo &nuopc_regrid.
     type(regrid_manager_t) :: regrid
 
-    logical :: use_mpas_atm     = .false.   !< .true. = MPAS, .false. = DATM (de use_datm)
-    logical :: use_med_to_mpas  = .false.   !< cópia de cfg_use_med_to_mpas
+    logical :: use_mpas_atm     = .false.   !< .true. = MPAS, .false. = DATM (de atm_model)
+    logical :: use_med_to_mpas  = .false.   !< atm_boundary=med (cfg_atm_boundary)
 
     type(med_par_t)         :: par    !< comunicador e PETs
     type(med_diag_config_t) :: diag   !< diagnóstico de importação
@@ -348,8 +348,8 @@ module med_cap_types_mod
   ! Campos anunciados e realizados pelo mediador
 
   !> Chaves de &nuopc_mode que o mediador consulta para anunciar e realizar
-  !! os campos: a fonte atmosférica (use_datm) e o gelo do SIS2
-  !! (use_sis2_dynamic). As listas saem do mapa de acoplamento, com
+  !! os campos: o modelo da atmosfera (atm_model) e o do gelo (ice_model).
+  !! As listas saem do mapa de acoplamento, com
   !! cpl_arrivals (src/coupling/cpl_map.F90):
   !!   importação, malha de fluxo (MED@atm_med): forçantes do MONAN-A
   !!     (sufixo _mpas) ou do DATM;
@@ -361,7 +361,7 @@ module med_cap_types_mod
   !! Sx_omask é a máscara do MOM6 interpolada para a malha de fluxo, com nome
   !! próprio para não formar um par importação e exportação homônimo com
   !! So_omask; vai para o diagnóstico mom6_import_*.nc e para o MONAN-A.
-  character(len=*), parameter :: MED_KEYS = 'datm,sis2'
+  character(len=*), parameter :: MED_KEYS = 'atm_model,ice_model'
 
 contains
 

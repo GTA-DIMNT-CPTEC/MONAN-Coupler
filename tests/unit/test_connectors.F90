@@ -9,6 +9,7 @@
 !!
 !!   sempre:          MPAS->MED, OCN->MED, MED->OCN
 !!   use_med_to_mpas: MED->MPAS; senão, OCN->MPAS
+!!   (desde a R-FASE13-29, atm_boundary=med e ice_model=sis2)
 !!   SIS2:            MED->ICE, ICE->MED
 !!
 !! O teste confere, em todas as configurações válidas do mapa (com o DATM
@@ -35,18 +36,16 @@ program test_connectors
     do io = 0, 1
       do im = 0, 1
         do is = 0, 1
-          cfg%datm        = ia == 1
-          cfg%docn        = io == 1
-          cfg%med_to_mpas = im == 1
-          cfg%sis2        = is == 1
+          cfg = cpl_config_t(merge('datm', 'mpas', ia == 1), merge('docn', 'mom6', io == 1), &
+                             merge('sis2', 'none', is == 1), merge('med', 'ocn', im == 1))
           if (.not. cpl_config_is_valid(cfg)) cycle
           ncases = ncases + 1
           call cpl_driver_connectors(cfg, order, n, t_unlisted)
           call connectors_before(cfg, before, n_before)
           ok = n == n_before .and. t_unlisted == 0
           if (ok) ok = all(order(1:n) == before(1:n))
-          write(name, '(4(A,L1))') 'datm=', cfg%datm, ' docn=', cfg%docn, &
-            ' med_to_mpas=', cfg%med_to_mpas, ' sis2=', cfg%sis2
+          write(name, '(8A)') 'atm=', trim(cfg%atm_model), ' ocn=', trim(cfg%ocn_model), &
+            ' ice=', trim(cfg%ice_model), ' contorno=', trim(cfg%atm_boundary)
           call outcome(trim(name)//': conectores iguais aos de antes', ok)
           if (.not. ok) then
             write(*, '(A,7(1X,A))') '   pelo mapa:', &
@@ -80,12 +79,12 @@ contains
     call put_connector('ATM', 'MED', list, n)
     call put_connector('OCN', 'MED', list, n)
     call put_connector('MED', 'OCN', list, n)
-    if (cfg%med_to_mpas) then
+    if (cfg%atm_boundary == 'med') then
       call put_connector('MED', 'ATM', list, n)
     else
       call put_connector('OCN', 'ATM', list, n)
     end if
-    if (cfg%sis2) then
+    if (cfg%ice_model == 'sis2') then
       call put_connector('MED', 'ICE', list, n)
       call put_connector('ICE', 'MED', list, n)
     end if

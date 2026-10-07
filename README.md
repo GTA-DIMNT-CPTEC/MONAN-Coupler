@@ -11,7 +11,7 @@ Para o estado atual da refatoração, as linhas de base e como validar uma alter
 
 ## Arquitetura
 
-Quatro componentes NUOPC orquestrados por um driver único sob um relógio ESMF global. O componente de gelo (ICE, cap do SIS2) é opcional e só é criado com `use_sis2_dynamic = .true.`.
+Quatro componentes NUOPC orquestrados por um driver único sob um relógio ESMF global. O componente de gelo (ICE, cap do SIS2) é opcional e só é criado com `ice_model = 'sis2'` (chave antiga: `use_sis2_dynamic = .true.`).
 
 ```text
         esmApp.F90  (programa principal)
@@ -53,23 +53,32 @@ O modo de execução é escolhido no grupo `&nuopc_petlayout` do `nuopc.input`:
 | --- | --- | --- |
 | `coupling_mode` | `sequential`, `concurrent` | ordem temporal de execução dos componentes |
 | `pet_layout` | `split`, `shared` | ocupação espacial de PETs (blocos próprios ou compartilhados) |
-| `use_sis2_dynamic` | `.true.`, `.false.` | ativa o componente de gelo SIS2 |
+| `use_sis2_dynamic` | `.true.`, `.false.` | chave antiga, traduzida para `ice_model` (`sis2` ou `none`, no `&nuopc_mode`) |
 | `atm_pet_count`, `ocn_pet_count`, `ice_pet_count` | inteiros | número de PETs por componente no `split` (0 = automático) |
 | `seq_repro` | `.true.`, `.false.` | variante reprodutível do `sequential+split+SIS2` (ver abaixo) |
 
 Modos de execução. O eixo espacial `split` dá a cada componente um bloco próprio de PETs, e o `shared` faz todos ocuparem todos os PETs. O eixo temporal `sequential` roda os componentes um após o outro, e o `concurrent` os avança ao mesmo tempo em blocos disjuntos. O `concurrent+split` é o modo de produção; o `sequential+split` serve de referência e de recuo. A combinação `concurrent+shared` é proibida e barrada na leitura da configuração.
 
-A chave `seq_repro = .true.` só tem efeito com `coupling_mode = 'sequential'`, `use_sis2_dynamic = .true.` e `pet_layout = 'split'`. Ela faz a RunSequence sequencial emitir o mesmo fluxo de dados do concorrente, tornando as duas rodadas comparáveis, sem alterar o modo concorrente. Fora desse contexto é ignorada, com aviso. O default `.false.` preserva o sequencial recomendado.
+A chave `seq_repro = .true.` só tem efeito com `coupling_mode = 'sequential'`, `ice_model = 'sis2'`, `atm_boundary = 'med'` e `pet_layout = 'split'`. Ela faz a RunSequence sequencial emitir o mesmo fluxo de dados do concorrente, tornando as duas rodadas comparáveis, sem alterar o modo concorrente. Fora desse contexto é ignorada, com aviso. O default `.false.` preserva o sequencial recomendado.
 
-A sequência de execução de cada passo (que componente avança e que conector roda, em que ordem) vem da tabela `RUN_SEQUENCES` (`src/driver/run_sequences.F90`): sete sequências escritas como texto, no formato do NUOPC, escolhidas por `coupling_mode`, `use_med_to_mpas`, `use_sis2_dynamic` e `seq_repro`. O nome da escolhida aparece no log (`RunSequence ...`). Para experimentar outra ordem sem recompilar, a chave `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência sob o rótulo `runSeq::` (exemplo no `nuopc.input` da raiz); o período da linha `@` deve ser `dt_coupling`. Uma sequência de arquivo não é conferida pelo acoplador: serve a experimentos, não à produção, e a leitura da configuração o lembra com um aviso na saída padrão (`esmApp_run.log`).
+A sequência de execução de cada passo (que componente avança e que conector roda, em que ordem) vem da tabela `RUN_SEQUENCES` (`src/driver/run_sequences.F90`): sete sequências escritas como texto, no formato do NUOPC, escolhidas por `coupling_mode`, `atm_boundary`, `ice_model` e `seq_repro`. O nome da escolhida aparece no log (`RunSequence ...`). Para experimentar outra ordem sem recompilar, a chave `run_sequence_file` do `&nuopc_driver` dá um arquivo com a sequência sob o rótulo `runSeq::` (exemplo no `nuopc.input` da raiz); o período da linha `@` deve ser `dt_coupling`. Uma sequência de arquivo não é conferida pelo acoplador: serve a experimentos, não à produção, e a leitura da configuração o lembra com um aviso na saída padrão (`esmApp_run.log`).
 
-Os componentes são escolhidos por quatro chaves: `use_datm`, `use_docn` e `use_med_to_mpas` (grupo `&nuopc_mode`) e `use_sis2_dynamic` (grupo `&nuopc_petlayout`). Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e SIS2, com o contorno da atmosfera pelo mediador. A tabela `COUPLER_MODES`, em `src/shared/coupler_config.F90`, diz o que acontece com cada combinação, e é a mesma que o mapa de acoplamento consulta:
+Os componentes são escolhidos no grupo `&nuopc_mode`, pelo modelo de cada posição e pelo contorno da atmosfera:
+
+| Chave | Valores | Chave antiga, ainda aceita |
+| --- | --- | --- |
+| `atm_model` | `mpas` (padrão), `datm` | `use_datm` |
+| `ocn_model` | `mom6` (padrão), `docn` | `use_docn` |
+| `ice_model` | `sis2` (padrão), `none` | `use_sis2_dynamic` (no `&nuopc_petlayout`) |
+| `atm_boundary` | `med` (padrão: pelo mediador), `ocn` (direto do oceano) | `use_med_to_mpas` |
+
+Os modelos que podem ocupar cada posição estão na tabela `COMPONENTS` (`src/shared/coupler_config.F90`), com a malha do mapa e o rótulo no driver de cada um. As chaves antigas são traduzidas na leitura; uma chave antiga e a nova correspondente podem vir juntas se disserem o mesmo, e a leitura para se se contradisserem. O `nuopc.input` da raiz continua com as chaves antigas, porque scripts de `tools/coupler` ainda leem só elas (o `run/run_esmApp.jaci` lê as duas formas). Os valores padrão formam a configuração de produção: MONAN-A, MOM6 e SIS2, com o contorno da atmosfera pelo mediador. A tabela `COUPLER_MODES`, no mesmo fonte, diz o que acontece com cada combinação, e é a mesma que o mapa de acoplamento consulta:
 
 | Situação | Combinações | Efeito na leitura |
 | --- | --- | --- |
 | suportada | MONAN-A e MOM6 com o contorno pelo mediador, com ou sem o SIS2 | aceita |
 | não validada | as que usam o DOCN ou o DATM | aceita, com aviso que diz o problema conhecido |
-| recusada | MOM6 com `use_med_to_mpas = .false.`; SIS2 com o DOCN | erro fatal, com mensagem que diz o que mudar |
+| recusada | MOM6 com `atm_boundary = 'ocn'`; SIS2 com o DOCN | erro fatal, com mensagem que diz o que mudar |
 
 A lista completa, combinação por combinação, está na seção 1 de [`docs/acoplamento.md`](docs/acoplamento.md).
 
@@ -106,7 +115,7 @@ Convenções para código novo:
 | Erros ESMF | `if (ChkErr(rc, __LINE__, __FILE__)) return`, de `coupler_utils_mod` |
 | Texto | `int_to_str`, `real_to_str` e `str_lower` de `coupler_utils_mod`; não criar cópias locais |
 | Configuração | nova chave em `coupler_config.F90`, nas rotinas do seu grupo: a variável `cfg_*`, o campo no tipo do grupo (`<grupo>_group_t`), a leitura em `read_<grupo>_group`, a regra em `<grupo>_group_valid` (a que envolve mais de um grupo vai para `valid_config`) e a cópia em `publish_<grupo>_group`; um caso novo em `tests/config/compara-config.bash`, se a chave tiver regra ou aviso; não usar atributos NUOPC para repassar configuração |
-| Componentes e conectores | modelo novo: uma chamada a `register_model` em `esm.F90` (posição, nome, rótulo no driver, `SetServices`, atributos) e o caso dele em `chosen_model`; posição nova: uma linha em `POSITIONS` (`src/driver/driver_layout.F90`), que dá a ordem de registro, o bloco próprio de PETs no layout split e quem recebe o resto da divisão automática; conectores pelo mapa (`add_connectors`); cap novo a partir do cap modelo `src/caps/template/template_cap.F90`, comentado passo a passo; no cap, o anúncio dos campos por `cap_advertise` (`src/shared/cap_common.F90`), com a política de anúncio escolhida pelo nome (`ADVERTISE_DEFAULT`, `ADVERTISE_SHARED` ou `ADVERTISE_PROVIDES_GRID`, explicadas no cabeçalho do módulo) |
+| Componentes e conectores | modelo novo numa posição existente: uma linha em `COMPONENTS` (`src/shared/coupler_config.F90`: posição, nome do modelo, que é também o valor da chave `<posição>_model` e a condição do mapa, malha e rótulo no driver), as combinações dele em `COUPLER_MODES` e uma chamada a `register_model` em `esm.F90` (posição, nome, `SetServices`, atributos; o rótulo vem de `COMPONENTS`); posição nova: uma linha em `POSITIONS` (`src/driver/driver_layout.F90`), que dá a ordem de registro, o bloco próprio de PETs no layout split e quem recebe o resto da divisão automática; conectores pelo mapa (`add_connectors`); cap novo a partir do cap modelo `src/caps/template/template_cap.F90`, comentado passo a passo; no cap, o anúncio dos campos por `cap_advertise` (`src/shared/cap_common.F90`), com a política de anúncio escolhida pelo nome (`ADVERTISE_DEFAULT`, `ADVERTISE_SHARED` ou `ADVERTISE_PROVIDES_GRID`, explicadas no cabeçalho do módulo) |
 | Comentários | explicar o que o código faz hoje e por quê, em português com acentos; sem citar etapas da refatoração, investigações ou versões (o histórico vai para `docs/CHANGELOG.md` e o `git log`; scripts de `tools/`: `docs/historico-scripts.md`); sem molduras (`!====`, `!----`); cabeçalho de módulo e de rotina no modelo Doxygen descrito abaixo |
 | Novo fonte | criá-lo num diretório de `SRC_SUBDIRS` (todo `.F90` desses diretórios é compilado) e gerar de novo as dependências (`tools/dev/dependencias.py gera`, que reescreve `src/dependencies.mk` a partir dos `use`); com real de 8 bytes do MOM6, incluí-lo também em `MOM6_SRCS` |
 | Camadas | um fonte só usa módulos do seu diretório ou das camadas de baixo, nesta ordem: `src/shared` (base e serviços comuns), `src/regrid` (interpolação), `src/coupling` (descrição do acoplamento), componentes (`src/mediator` e `src/caps`), `src/driver` e `src/main`; um componente não usa módulo de outro (o cap do MOM6 e o DOCN são componentes diferentes, embora no mesmo diretório), e o que dois componentes usam vai para `src/shared`; `src/regrid` e `src/coupling` não leem as variáveis `cfg_*` de `coupler_config`: a configuração chega por argumento (no mapa, um `cpl_config_t`; a da rodada é `cpl_current_config`). A conferência `camadas` (`tools/dev/confere-camadas.py`) acusa o que foge disso; um diretório novo ganha uma linha na tabela `CAMADAS` do script |

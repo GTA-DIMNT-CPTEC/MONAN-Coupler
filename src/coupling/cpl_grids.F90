@@ -95,7 +95,7 @@ module cpl_grids_mod
   character(len=*), parameter :: ORIGIN_WEST180 = 'oeste180'
   !> Como ORIGIN_EAST0, mas com a longitude do centro igual à do canto
   !! oeste da célula, (i-1)*360/nx, sem a meia célula: é como o mediador
-  !! descreve a grade do DOCN (ocn_med com use_docn). A latitude do centro e
+  !! descreve a grade do DOCN (ocn_med com ocn_model=docn). A latitude do centro e
   !! os cantos são os de ORIGIN_EAST0.
   character(len=*), parameter :: ORIGIN_EAST0_CORNER = 'leste0_canto'
 

@@ -12,8 +12,8 @@ module med_init_mod
   use ESMF
   use coupler_utils_mod, only: ChkErr
   use coupler_log_mod, only: COMP_MED, log_info, log_warning
-  use coupler_config_mod, only: cfg_use_docn, cfg_mom6_mesh_ocn, &
-                                cfg_use_sis2_dynamic, cpl_current_config
+  use coupler_config_mod, only: cfg_ocn_model, cfg_mom6_mesh_ocn, &
+                                cfg_ice_model, cpl_current_config
   use NUOPC, only: NUOPC_Realize
   use med_cap_types_mod, only: MED_InternalState, MED_KEYS, MED_FIELDS, med_field_index
   use cpl_fields_mod, only: CPL_NAME_LEN
@@ -70,7 +70,7 @@ contains
     integer(ESMF_KIND_I4), pointer :: maskptr(:,:)
     nullify(coordX, coordY)
 
-    if (cfg_use_docn) then
+    if (trim(cfg_ocn_model) == 'docn') then
       ! DOCN/OISST: grade lat/lon regular de verdade; fórmula uniforme exata.
       call cpl_latlon_grid('ocn_med', nx_ocn, ny_ocn, ORIGIN_EAST0_CORNER, .true., &
                             petCount, ocn_grid, rc)

@@ -3,7 +3,7 @@
 
 Lê as tabelas de src/coupling/cpl_fields.F90 (FIELDS),
 src/coupling/cpl_map.F90 (GRIDS, EXCHANGES, EXPORTS e ROUTES) e
-src/shared/coupler_config.F90 (COUPLER_MODES) e escreve uma versão legível
+src/shared/coupler_config.F90 (COMPONENTS e COUPLER_MODES) e escreve uma versão legível
 do mapa em Markdown: combinações de componentes aceitas, resumo dos
 conectores por configuração, trocas de cada conector, trocas dentro dos componentes,
 exportações dos modelos, rotas do mediador, malhas e dicionário de campos. O Fortran é a fonte; o Markdown é gerado e
@@ -30,25 +30,22 @@ import os
 import re
 import sys
 
-# Configurações conferidas por tests/unit/test_cpl_map.F90, na mesma ordem.
+# Configurações conferidas por tests/unit/test_cpl_map.F90, na mesma ordem:
+# o modelo de cada posição e o contorno da atmosfera (chaves de &nuopc_mode).
 # Todas precisam ser aceitas pela tabela COUPLER_MODES (conferido em gera).
+CHAVES = ('atm_model', 'ocn_model', 'ice_model', 'atm_boundary')
 CONFIGS = collections.OrderedDict([
-    ('producao',      dict(datm=False, docn=False, med_to_mpas=True,  sis2=True)),
-    ('mom6_sem_sis2', dict(datm=False, docn=False, med_to_mpas=True,  sis2=False)),
-    ('mpas_docn',     dict(datm=False, docn=True,  med_to_mpas=False, sis2=False)),
-    ('datm_mom6',     dict(datm=True,  docn=False, med_to_mpas=True,  sis2=False)),
-    ('datm_docn',     dict(datm=True,  docn=True,  med_to_mpas=False, sis2=False)),
+    ('producao',      dict(atm_model='mpas', ocn_model='mom6', ice_model='sis2', atm_boundary='med')),
+    ('mom6_sem_sis2', dict(atm_model='mpas', ocn_model='mom6', ice_model='none', atm_boundary='med')),
+    ('mpas_docn',     dict(atm_model='mpas', ocn_model='docn', ice_model='none', atm_boundary='ocn')),
+    ('datm_mom6',     dict(atm_model='datm', ocn_model='mom6', ice_model='none', atm_boundary='med')),
+    ('datm_docn',     dict(atm_model='datm', ocn_model='docn', ice_model='none', atm_boundary='ocn')),
 ])
 
-CONDITIONS = {
-    'mpas':        lambda c: not c['datm'],
-    'datm':        lambda c: c['datm'],
-    'mom6':        lambda c: not c['docn'],
-    'docn':        lambda c: c['docn'],
-    'med_to_mpas': lambda c: c['med_to_mpas'],
-    'ocn_to_mpas': lambda c: not c['med_to_mpas'],
-    'sis2':        lambda c: c['sis2'],
-}
+# Condições de contorno da coluna when e o valor de atm_boundary de cada uma;
+# as demais condições são os nomes dos modelos de COMPONENTS (lidos do fonte).
+CONTORNOS = collections.OrderedDict([('med_to_mpas', 'med'), ('ocn_to_mpas', 'ocn')])
+MODELOS = set()   # preenchido por le_mapa, a partir de COMPONENTS
 
 PARES = [('ATM', 'MED'), ('OCN', 'MED'), ('ICE', 'MED'),
          ('MED', 'OCN'), ('MED', 'ICE'), ('MED', 'ATM'), ('OCN', 'ATM')]
@@ -220,10 +217,10 @@ def componentes(instrs, tipo, params):
 
 
 def parametros_inteiros(instrs):
-    """Parâmetros inteiros declarados (NOME = número)."""
+    """Parâmetros inteiros declarados (NOME = número), públicos ou não."""
     p = {}
     for s in instrs:
-        m = re.match(r'integer\s*,\s*parameter\s*::\s*(.*)$', s, re.I)
+        m = re.match(r'integer\s*,\s*parameter\s*(?:,\s*public\s*)?::\s*(.*)$', s, re.I)
         if m:
             for parte in divide(m.group(1)):
                 m2 = re.match(r'(\w+)\s*=\s*(\d+)$', parte)
@@ -293,7 +290,8 @@ def tabela_fortran(instrs, tipo, nome, params, arquivo, consts=None):
 def le_mapa(raiz):
     """Lê FIELDS, GRIDS, EXCHANGES, EXPORTS, GAPS, ROUTES e COUPLER_MODES dos fontes."""
     tabelas = {}
-    for arquivo, itens in (('src/shared/coupler_config.F90', [('coupler_mode_t', 'COUPLER_MODES')]),
+    for arquivo, itens in (('src/shared/coupler_config.F90', [('component_t', 'COMPONENTS'),
+                                                              ('coupler_mode_t', 'COUPLER_MODES')]),
                            ('src/coupling/cpl_fields.F90', [('cpl_field_t', 'FIELDS')]),
                            ('src/coupling/cpl_map.F90', [('cpl_grid_ref_t', 'GRIDS'),
                                                           ('cpl_exchange_t', 'EXCHANGES'),
@@ -318,15 +316,25 @@ def le_mapa(raiz):
         for tipo, nome in itens:
             tabelas[nome] = tabela_fortran(instrs, tipo, nome, params, arquivo,
                                            constantes_texto(instrs))
+    MODELOS.clear()
+    MODELOS.update(c['model'] for c in tabelas['COMPONENTS'] if c['model'] != 'none')
     return tabelas
+
+
+def condicao(c, cfg):
+    """Uma condição da coluna when na configuração cfg, com a regra de
+    condition_holds (cpl_map): um modelo vale se ocupa uma posição; uma
+    condição de contorno, com o atm_boundary correspondente."""
+    if c in CONTORNOS:
+        return cfg['atm_boundary'] == CONTORNOS[c]
+    if c in MODELOS:
+        return c in (cfg['atm_model'], cfg['ocn_model'], cfg['ice_model'])
+    raise ErroMapa('condição desconhecida: ' + c)
 
 
 def vale(troca, cfg):
     conds = [c.strip() for c in troca['when'].split(',') if c.strip()]
-    for c in conds:
-        if c not in CONDITIONS:
-            raise ErroMapa('condição desconhecida: ' + c)
-    return all(CONDITIONS[c](cfg) for c in conds)
+    return all([condicao(c, cfg) for c in conds])
 
 
 def comp(ponto):
@@ -402,43 +410,58 @@ def gera(t):
         '',
         '## 1. Configurações',
         '',
-        'Cada troca vale numa lista de condições (coluna `when`), escolhidas',
-        'pelas chaves do grupo `&nuopc_mode` do `nuopc.input`:',
+        'O grupo `&nuopc_mode` do `nuopc.input` escolhe o modelo de cada posição',
+        '(`atm_model`, `ocn_model`, `ice_model`) e o contorno oceânico da',
+        'atmosfera (`atm_boundary`). Os modelos possíveis estão na tabela',
+        '`COMPONENTS` (`src/shared/coupler_config.F90`); `none` deixa a posição',
+        'vazia:',
+        '',
+    ]
+    comps = t['COMPONENTS']
+    out += md_tabela(['Posição', 'Modelo', 'Malha', 'Rótulo no driver'],
+                     [[c['position'], codigo(c['model']), codigo(c['grid']), c['label']]
+                      for c in comps])
+    out += [
+        '',
+        'As chaves antigas (`use_datm`, `use_docn`, `use_med_to_mpas` e',
+        '`use_sis2_dynamic`) continuam aceitas e são traduzidas para estas.',
+        'Cada troca vale numa lista de condições (coluna `when`):',
         '',
     ]
     out += md_tabela(['Condição', 'Vale quando'], [
-        ['`mpas` / `datm`', 'componente atmosférico é o MONAN-A / o DATM (`use_datm`)'],
-        ['`mom6` / `docn`', 'componente oceânico é o MOM6 / o DOCN (`use_docn`)'],
+        ['nome de um modelo ({})'.format(', '.join(codigo(c['model']) for c in comps
+                                                  if c['model'] != 'none')),
+         'o modelo ocupa a posição dele (`mom6`: `ocn_model = mom6`)'],
         ['`med_to_mpas` / `ocn_to_mpas`',
-         'contorno oceânico da atmosfera pelo mediador / direto do oceano (`use_med_to_mpas`)'],
-        ['`sis2`', 'gelo dinâmico (`use_sis2_dynamic`)'],
+         'contorno oceânico da atmosfera pelo mediador / direto do oceano '
+         '(`atm_boundary = med` / `ocn`)'],
     ])
     modos = t['COUPLER_MODES']
-    chaves = ('datm', 'docn', 'med_to_mpas', 'sis2')
 
     def situacao(cfg):
         for m in modos:
-            if all((m[k].lower() == '.true.') == cfg[k] for k in chaves):
+            if all(m[k] == cfg[k] for k in CHAVES):
                 return m['status']
         raise ErroMapa('combinação ausente de COUPLER_MODES: {}'.format(cfg))
 
     for n, cfg in CONFIGS.items():
         if situacao(cfg) == 'recusada':
             raise ErroMapa('configuração {} recusada em COUPLER_MODES'.format(n))
-    sim = {'.true.': 'T', '.false.': 'F'}
     out += [
         '',
-        'As quatro chaves formam 16 combinações. A tabela `COUPLER_MODES`',
-        '(`src/shared/coupler_config.F90`) diz o que acontece com cada uma, e é',
-        'consultada pela leitura do `nuopc.input` e pelo mapa: `suportada` é a',
-        'produção, com ou sem o SIS2; `nao_validada` é aceita com aviso no início',
-        'da rodada; `recusada` para a rodada na leitura, e a nota é a mensagem.',
-        'Os valores padrão das chaves formam a configuração de produção.',
+        'Os modelos de cada posição e os dois contornos formam {} combinações. A'.format(
+            len(modos)),
+        'tabela `COUPLER_MODES` (`src/shared/coupler_config.F90`) diz o que',
+        'acontece com cada uma, e é consultada pela leitura do `nuopc.input` e',
+        'pelo mapa: `suportada` é a produção, com ou sem o SIS2; `nao_validada` é',
+        'aceita com aviso no início da rodada; `recusada` para a rodada na',
+        'leitura, e a nota é a mensagem. Os valores padrão das chaves formam a',
+        'configuração de produção.',
         '',
     ]
-    out += md_tabela(['`use_datm`', '`use_docn`', '`use_med_to_mpas`', '`use_sis2_dynamic`',
+    out += md_tabela(['`atm_model`', '`ocn_model`', '`ice_model`', '`atm_boundary`',
                       'Situação', 'Nota'],
-                     [[sim[m[k].lower()] for k in chaves] + [codigo(m['status']), m['note']]
+                     [[codigo(m[k]) for k in CHAVES] + [codigo(m['status']), m['note']]
                       for m in modos])
     out += ['', 'Campos por conector em cada configuração conferida pelo teste:', '']
     nomes = list(CONFIGS)
@@ -453,7 +476,7 @@ def gera(t):
         '`producao` é a configuração de validação (MONAN-A, MOM6 e SIS2, contorno',
         'pelo mediador). O driver não registra o DATM: as trocas com `datm`',
         'descrevem o que o cap do DATM anuncia, e a conferência do mapa',
-        'interrompe uma rodada com `use_datm`.',
+        'interrompe uma rodada com `atm_model = datm`.',
         '',
         'Lacunas conhecidas (tabela `GAPS`): campos que um componente anuncia',
         'na importação e que, na configuração indicada, não têm origem. A',
