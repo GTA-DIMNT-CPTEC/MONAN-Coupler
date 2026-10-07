@@ -69,8 +69,8 @@ _nuopc_get() {
 # chave por linha.
 _nuopc_uses() {
   local v
-  v="$(_nuopc_get "$1" | tr '[:upper:]' '[:lower:]')"
-  if [[ -z "${v}" ]]; then _nuopc_get "$3"
+  v="$(_nuopc_get "$1" | tr '[:upper:]' '[:lower:]' || true)"
+  if [[ -z "${v}" ]]; then _nuopc_get "$3" || true   # ausente: vazio, sem parar o set -e
   elif [[ "${v}" == "$2" ]]; then echo ".true."
   else echo ".false."
   fi
@@ -884,7 +884,7 @@ PET_LAYOUT=$(printf '%s' "${PET_LAYOUT}" | tr '[:upper:]' '[:lower:]')
 ATM_PET=$(_nuopc_pet atm_pet_count || true); [[ "${ATM_PET}" =~ ^[0-9]+$ ]] || ATM_PET=0
 OCN_PET=$(_nuopc_pet ocn_pet_count || true); [[ "${OCN_PET}" =~ ^[0-9]+$ ]] || OCN_PET=0
 ICE_PET=$(_nuopc_pet ice_pet_count || true); [[ "${ICE_PET}" =~ ^[0-9]+$ ]] || ICE_PET=0
-USE_SIS2=$(_nuopc_get ice_model | tr '[:upper:]' '[:lower:]')
+USE_SIS2=$(_nuopc_get ice_model | tr '[:upper:]' '[:lower:]' || true)   # ausente: grep devolve 1 (set -e)
 case "${USE_SIS2}" in
   "")   USE_SIS2=$(_nuopc_pet use_sis2_dynamic || true) ;;   # chave antiga
   sis2) USE_SIS2=".true." ;;
