@@ -1,6 +1,6 @@
 # Estado do projeto: refatoração do MONAN-Coupler
 
-Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-36 (07/10/2026), depois da integração ao `develop`. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
+Documento de passagem, para retomar o trabalho em outra sessão ou com outra pessoa. Atualizado na R-FASE13-38 (08/10/2026), depois da rodada de confirmação do `nuopc.input` da raiz. A versão longa anterior, com o andamento etapa por etapa, está em [`historico/estado-do-projeto-ate-fase12.md`](historico/estado-do-projeto-ate-fase12.md).
 
 ## 1. O projeto
 
@@ -44,7 +44,7 @@ O que cada etapa mudou está no [`CHANGELOG.md`](CHANGELOG.md) (resumo) e em [`h
 | R-NOFMA-01 | `ea10fb6` | desligada | referência das fases 2A a 3 |
 | **R-NOFMA-02** | `fase3-03-validada` | desligada | **referência atual** (73 arquivos) |
 
-O MANIFEST da R-NOFMA-02 só se altera com `tools/dev/anota-linha-base.bash`. Detalhes em [`validacao-refatoracao.md`](validacao-refatoracao.md) e [`uso-linha-base.md`](uso-linha-base.md).
+O MANIFEST da R-NOFMA-02 só se altera com `tools/dev/anota-linha-base.bash`. O `nuopc.input` da raiz (chaves por modelo) reproduz a R-NOFMA-02 bit a bit, conferido na rodada R-NUOPC-RAIZ (08/10/2026); a validação continua usando o `nuopc.input` da linha de base, com as chaves antigas. Detalhes em [`validacao-refatoracao.md`](validacao-refatoracao.md) e [`uso-linha-base.md`](uso-linha-base.md).
 
 ## 5. Como validar e entregar uma etapa
 
