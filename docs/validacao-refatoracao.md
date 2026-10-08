@@ -39,11 +39,13 @@ bash $COUPLER_ROOT/tools/dev/valida_rodada.bash compara teste_01
 
 | Comando | O que faz |
 | --- | --- |
-| `prepara NOME` | confere que `bin/esmApp` existe, não contém código de outra instalação e foi compilado depois do último commit que mudou `src/` ou o `Makefile`, e que esses fontes não têm mudanças fora de commit; mostra a data do executável e o commit dos fontes; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da linha de base |
+| `prepara NOME` | confere que `bin/esmApp` existe, não contém código de outra instalação e foi compilado depois do último commit que mudou `src/` ou o `Makefile`, e que esses fontes e o `nuopc.input` da raiz não têm mudanças fora de commit; mostra a data do executável, o commit dos fontes e o `nuopc.input` usado; cria `$REF/exp/NOME` a partir do experimento modelo, sem as saídas antigas, com o `nuopc.input` da raiz do repositório (ou o da linha de base, com `NUOPC=base`) |
 | `submete NOME` | recusa um diretório que já tenha `logs/PET*.esmApp.log` (o ESMF acrescenta ao fim desses logs, e uma segunda execução no mesmo diretório juntaria as duas no relatório de acoplamento; para repetir, `prepara` com outro nome); roda o `--check` e submete com 152 PETs; espera o job terminar |
 | `compara NOME` | confere que a rodada terminou, mostra executável e revisão usados; extrai o relatório de acoplamento (seção 2.1) e o compara com o da rodada aprovada mais recente; compara com a linha de base, conferindo também as entradas (`-e`); em caso de FAIL, mostra as primeiras diferenças; se a comparação nem começou (por exemplo, linha de base que não confere com o seu `SHA256SUMS`), diz isso e sai com código 2; sai com o código do `compara-linha-base.bash` (0 PASS, 1 FAIL, 2 comparação não feita) |
 
-Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`), `NPES` (padrão: 152) e `REL_REF` (rodada cujo relatório de acoplamento serve de referência; padrão: a aprovada mais recente). Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
+Variáveis opcionais: `REF` (padrão: a pasta que contém `Coupler-Install/`), `MODELO` (padrão: `$REF/exp_monan2xmom6`), `BASE` (padrão: `R-NOFMA-02`), `NPES` (padrão: 152) `REL_REF` (rodada cujo relatório de acoplamento serve de referência; padrão: a aprovada mais recente) e `NUOPC` (`raiz`, o padrão, ou `base`).
+
+O `nuopc.input` da raiz usa as chaves por modelo, e o da R-NOFMA-02, as antigas; os dois dão os mesmos valores à leitura, conferido localmente pelo `test_config` e na Jaci pela rodada R-NUOPC-RAIZ (08/10/2026). Por isso o `compara.txt` traz o aviso "o nuopc.input ATUAL difere do congelado na base", com as linhas das chaves: é esperado. Uma mudança no `nuopc.input` da raiz que altere um valor lido aparece antes, na conferência local `config`, que compara a leitura do arquivo com a da versão anterior. Para usar outro executável, `ESMAPP_BIN=<caminho>` antes do `submete`.
 
 Não altere o repositório (`git switch`, `git am`, `make`) enquanto o job estiver na fila ou rodando.
 

@@ -22,6 +22,9 @@
 #   NPES     número de processos (152)
 #   REL_REF  rodada cujo relatório de acoplamento serve de referência
 #            (a aprovada mais recente)
+#   NUOPC    nuopc.input da rodada: 'raiz' (o da raiz do repositório, em
+#            HEAD) ou 'base' (o da linha de base, com as chaves antigas)
+#            (raiz)
 # Os diretórios de rodada ficam em $REF/exp/NOME.
 set -u
 COUPLER_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -30,10 +33,11 @@ MODELO=${MODELO:-${REF}/exp_monan2xmom6}
 BASE=${BASE:-R-NOFMA-02}
 BASEL=${REF}/baseline/${BASE}
 NPES=${NPES:-152}
+NUOPC=${NUOPC:-raiz}
 export COUPLER_ROOT
 
 acao=${1:-}; nome=${2:-}
-[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,25p' "$0"; exit 2; }
+[[ -n "${acao}" && -n "${nome}" ]] || { sed -n '2,28p' "$0"; exit 2; }
 DIR=${REF}/exp/${nome}
 
 falha() { echo "ERRO: $*" >&2; exit 1; }
@@ -115,9 +119,16 @@ prepara)
   # O executável tem de ser o da revisão em HEAD: sem mudanças fora de commit
   # nos fontes e compilado depois do último commit que mudou src/ ou o
   # Makefile. Um git am sem make deixaria a rodada validar o binário anterior.
-  pendentes=$(git -C "${COUPLER_ROOT}" status --porcelain -- src Makefile)
+  # O nuopc.input da raiz, que a rodada usa, também tem de ser o de HEAD.
+  case "${NUOPC}" in
+    raiz) origem_nuopc=${COUPLER_ROOT}/nuopc.input ;;
+    base) origem_nuopc=${BASEL}/config/nuopc.input ;;
+    *)    falha "NUOPC='${NUOPC}' inválido; use 'raiz' ou 'base'" ;;
+  esac
+  [[ -f "${origem_nuopc}" ]] || falha "${origem_nuopc} não existe"
+  pendentes=$(git -C "${COUPLER_ROOT}" status --porcelain -- src Makefile nuopc.input)
   if [[ -n "${pendentes}" ]]; then
-    echo "ERRO: há mudanças fora de commit nos fontes; a rodada não seria a de HEAD:" >&2
+    echo "ERRO: há mudanças fora de commit nos fontes ou no nuopc.input; a rodada não seria a de HEAD:" >&2
     echo "${pendentes}" | sed 's/^/       /' >&2
     exit 1
   fi
@@ -133,6 +144,7 @@ prepara)
   echo "Executável: ${COUPLER_ROOT}/bin/esmApp ($(date -r "${COUPLER_ROOT}/bin/esmApp" '+%Y-%m-%d %H:%M'))"
   echo "Fontes    : $(git -C "${COUPLER_ROOT}" log -1 --format='%h, %cd' --date=format:'%Y-%m-%d %H:%M' -- src Makefile) (último commit em src/ ou no Makefile)"
   echo "Revisão   : $(git -C "${COUPLER_ROOT}" log --oneline -1 | cat)"
+  echo "nuopc.input: ${origem_nuopc} (NUOPC=${NUOPC})"
   mkdir -p "${DIR}" || falha "não foi possível criar ${DIR}"
   rsync -a \
     --exclude='diag_export/' --exclude='diag_import/' --exclude='diag_import-original/' \
@@ -144,7 +156,7 @@ prepara)
     --exclude='MOM_input_*' --exclude='diag_table_orig' --exclude='streams.atmosphere.original' \
     --exclude='compara*.txt' \
     "${MODELO}/" "${DIR}/" || falha "rsync falhou"
-  cp "${BASEL}/config/nuopc.input" "${DIR}/" || falha "cópia do nuopc.input falhou"
+  cp "${origem_nuopc}" "${DIR}/nuopc.input" || falha "cópia do nuopc.input falhou"
   echo "Diretório pronto: ${DIR}"
   echo "Próximo passo   : bash $0 submete ${nome}"
   ;;
