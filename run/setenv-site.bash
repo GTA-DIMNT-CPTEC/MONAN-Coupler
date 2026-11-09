@@ -14,7 +14,7 @@
 #   - Mudar um valor pontualmente, sem editar o arquivo: exporte a variável
 #     antes de rodar o instalador. Ex.:
 #         export MAKE_JOBS=16
-#         export ESMF_ROOT=/meu/caminho/esmf-8.9.1
+#         export ESMFMKFILE=/meu/caminho/esmf-8.9.1/lib/libO/<config>/esmf.mk
 #         bash build.bash
 #   - Outra máquina: copie este arquivo para install/site-<host>.bash, ajuste
 #     os valores e aponte os scripts para ele:
@@ -27,18 +27,32 @@
 # =============================================================================
 
 # ── ESMF 8.9.1 ───────────────────────────────────────────────────────────────
-# Raiz da instalação do ESMF e o esmf.mk dela derivado. O esmf.mk é o ponto de
-# verdade do ESMF (compilador, flags de compile/link); o Makefile o inclui.
-# O subcaminho codifica a configuração de build do ESMF
-# (gfortran / mpich2 / otimizado). Para outra instalação, basta trocar ESMF_ROOT;
-# se o layout interno do ESMF for diferente, ajuste também ESMFMKFILE.
+# Na Jaci, o ESMF vem do módulo do sítio esmf/8.9.1-gcc13, carregado junto com
+# as listas MODULES_MONAN e MODULES_MOM6 abaixo. O esmf.mk é o ponto de verdade
+# do ESMF (compilador, flags de compile/link); o Makefile o inclui. O subcaminho
+# codifica a configuração de build (Unicos / gfortran / MPI do Cray / otimizado).
 #
-# Atenção: o sítio (módulos /p/app) oferece apenas esmf/8.8.0. Este projeto usa,
-# de propósito, o build LOCAL 8.9.1 apontado abaixo — portanto NÃO faça
-# 'module load esmf', para não misturar versões/ABI.
-: "${ESMF_ROOT:=/p/projetos/monan_adm/daniel.massaru/Acopladores/esmf-8.9.1}"
-: "${ESMFMKFILE:=${ESMF_ROOT}/lib/libO/Linux.gfortran.64.mpich2.default/esmf.mk}"
+# Os caminhos são definidos aqui também, e não apenas pelo módulo, porque este
+# arquivo é lido ANTES do 'module load' e deriva ESMF_MOD/ESMF_LIBDIR logo adiante.
+#
+# Para usar outra instalação (ex.: um build local), exporte ESMFMKFILE antes de
+# rodar o instalador. O módulo é então deixado de fora automaticamente: ao ser
+# carregado, ele redefiniria ESMFMKFILE e misturaria duas instalações do ESMF.
+# Para não carregar o módulo em caso algum: export ESMF_MODULE=
+_esmf_mod_root="/p/app/esmf/8.9.1/gcc13"
+_esmf_mod_mk="${_esmf_mod_root}/lib/libO/Unicos.gfortran.64.mpi.default/esmf.mk"
+_esmf_module="${ESMF_MODULE-esmf/8.9.1-gcc13}"
+
+: "${ESMF_ROOT:=${_esmf_mod_root}}"
+: "${ESMFMKFILE:=${ESMF_ROOT}/lib/libO/Unicos.gfortran.64.mpi.default/esmf.mk}"
 export ESMF_ROOT ESMFMKFILE
+
+if [[ -n "${_esmf_module}" && "${ESMFMKFILE}" != "${_esmf_mod_mk}" ]]; then
+  echo "AVISO: ESMFMKFILE definido fora do módulo ${_esmf_module}; o módulo NÃO será carregado." >&2
+  echo "       ESMFMKFILE=${ESMFMKFILE}" >&2
+  echo "       Se isso não foi intencional, abra uma sessão nova ou faça: unset ESMF_ROOT ESMFMKFILE ESMF_MOD ESMF_LIBDIR" >&2
+  _esmf_module=""
+fi
 
 # ── ESMF: diretórios de módulos e bibliotecas (derivados do esmf.mk) ──────────
 # ESMFMKFILE é a fonte única de verdade do ESMF. Os builds do acoplador — em
@@ -104,14 +118,19 @@ MONAN2_LIBS=(libframework.a libdycore.a libphys.a libops.a libsmiolf.a libsmiol.
 
 # ── Módulos para compilar o MONAN-A (instalador 1) ───────────────────────────
 # Lista MÍNIMA de compilação. O MPAS/MONAN-A usa DOIS NetCDFs:
-#   • cray-parallel-netcdf (PNETCDF) → I/O paralelo do modelo (via SMIOL);
-#   • cray-netcdf (NetCDF SERIAL)    → o link do MPAS referencia -lnetcdf
+#   • cray-parallel-netcdf (PNETCDF)   → I/O paralelo do modelo (via SMIOL);
+#   • cray-netcdf-hdf5parallel (NetCDF) → o link do MPAS referencia -lnetcdf
 #     -lnetcdff em utilitários (ex.: build_tables) e no executável. SEM ele:
-#     "ld: cannot find -lnetcdf". O cray-netcdf exige o cray-hdf5 (NetCDF-4
-#     é construído sobre HDF5), por isso ambos entram aqui.
+#     "ld: cannot find -lnetcdf". Ele exige o cray-hdf5-parallel (NetCDF-4 é
+#     construído sobre HDF5), por isso ambos entram aqui.
+#
+# A variante PARALELA é obrigatória com o módulo esmf/8.9.1-gcc13: a libesmf.so
+# foi ligada a ela, e o próprio módulo tenta carregá-la. Com cray-netcdf e
+# cray-hdf5 seriais, o módulo acusa conflito e o bin/esmApp acaba carregando
+# duas HDF5 no mesmo processo. Não volte às variantes seriais sem trocar o ESMF.
 # O PrgEnv-gnu já traz, nos defaults corretos, o toolchain GNU, o
 # cray-mpich/8.1.31, o xpmem e a pilha de rede (libfabric); listá-los seria
-# redundante.
+# redundante. O módulo do ESMF entra por último, depois do PrgEnv-gnu.
 #
 # Removidos desta lista (não são necessários para COMPILAR):
 #   • grads, cdo, ncview, cray-python → pós-processamento. As listas de módulos
@@ -121,15 +140,18 @@ MONAN2_LIBS=(libframework.a libdycore.a libphys.a libops.a libsmiolf.a libsmiol.
 MODULES_MONAN=(
   "${CPU_TARGET}"
   PrgEnv-gnu/8.6.0
-  cray-hdf5/1.14.3.3
-  cray-netcdf/4.9.0.15
+  cray-hdf5-parallel/1.14.3.3
+  cray-netcdf-hdf5parallel/4.9.0.15
   cray-parallel-netcdf/1.12.3.15
   METIS/5.1.0
+  ${_esmf_module:+"${_esmf_module}"}
 )
 
 # ── Módulos para compilar o MOM6+SIS2+FMS (instalador 2) ─────────────────────
-# MOM6/FMS usa NetCDF SERIAL (cray-netcdf), que é construído sobre HDF5 —
-# por isso cray-hdf5 É necessário aqui. NÃO usar o parallel-netcdf neste build.
+# MOM6/FMS usa o NetCDF da variante paralela (cray-netcdf-hdf5parallel), a mesma
+# do ESMF (ver a nota nos módulos do MONAN-A). Ele é construído sobre HDF5, por
+# isso cray-hdf5-parallel É necessário aqui. O cray-parallel-netcdf não é listado,
+# mas chega pelo módulo do ESMF; o FMS não o utiliza.
 # O PrgEnv-gnu já fornece o cray-mpich/8.1.31 e a pilha de rede (libfabric) nos
 # defaults corretos; listá-los seria redundante.
 #
@@ -139,6 +161,9 @@ MODULES_MONAN=(
 MODULES_MOM6=(
   "${CPU_TARGET}"
   PrgEnv-gnu/8.6.0
-  cray-hdf5/1.14.3.3
-  cray-netcdf/4.9.0.15
+  cray-hdf5-parallel/1.14.3.3
+  cray-netcdf-hdf5parallel/4.9.0.15
+  ${_esmf_module:+"${_esmf_module}"}
 )
+
+unset _esmf_mod_root _esmf_mod_mk _esmf_module
